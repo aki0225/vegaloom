@@ -746,14 +746,24 @@ def _confirm_owned_process_terminated(
     return ProcessTerminationResult(True, "owned process tree 已确认退出。")
 
 
-def _is_posix_process_group_alive(process_group_id: int) -> bool:
-    try:
-        os.killpg(process_group_id, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+def _is_posix_process_group_alive(
+    process_group_id: int,
+    *,
+    settle_seconds: float = 1.0,
+) -> bool:
+    # 后代进程被终止后可能短暂处于 zombie 状态等待 init 收割，此时 killpg(0) 仍会成功，
+    # 把"已死待收割"误判为存活；在有限窗口内重试探测，窗口耗尽仍存活则维持 fail-closed。
+    deadline = time.monotonic() + settle_seconds
+    while True:
+        try:
+            os.killpg(process_group_id, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        if time.monotonic() >= deadline:
+            return True
+        time.sleep(0.05)
 
 
 def _run_windows_taskkill(pid: int, *, force: bool, timeout: float) -> str | None:
