@@ -1,0 +1,46 @@
+name: 持续集成
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: 编译检查
+        run: python -m compileall -q src
+
+      - name: 静态检查
+        run: ruff check src tests
+
+      - name: 运行测试
+        env:
+          VEGA_PROVIDER_ALIAS: ci-test-provider
+        run: pytest
+
+      - name: 空白字符检查
+        run: git diff --check

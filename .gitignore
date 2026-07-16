@@ -1,0 +1,32 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.tmp/
+.tmp-pytest*/
+.pytest-tmp-*/
+.local-validation/
+pytest-cache-files-*/
+.mypy_cache/
+.ruff_cache/
+.coverage
+dist/
+build/
+*.egg-info/
+
+# Runtime artifacts are generated locally. Keep only .gitkeep files.
+runs/*
+!runs/.gitkeep
+memory/*
+!memory/.gitkeep
+
+# Local secrets and environment files.
+.env
+.env.*
+!.env.example
+
+# Local AI tool configs (not part of the project)
+.agents/
+.claude/
+.codex/
+.trellis/
