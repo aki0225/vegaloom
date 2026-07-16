@@ -1,9 +1,10 @@
-# Vega ｜织女星
+# Vega
 
 **One writes. One reviews. Never the same context.**
 
-Vega 是一个本地优先的 AI 编码工作流 Harness。它将 worker 与 reviewer 隔离，并用项目自己的
-验证命令、风险门禁和运行证据，把一次编码任务收口成可审查、可恢复、可人工接管的闭环。
+写代码的 AI 不该自己审自己写的东西。Vega 是一个本地优先的 AI 编码工作流 harness：worker 负责改代码，
+reviewer 在隔离的上下文里只看 diff、测试证据和项目规则；每次任务用项目自己的验证命令和风险门禁收口，
+失败、中断或证据不足时留好现场，交还给人。
 
 ```text
 task → context → worker → verification → risk gate → isolated review → report
