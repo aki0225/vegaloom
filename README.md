@@ -22,12 +22,10 @@
 
 </div>
 
-> [!IMPORTANT]
-> 确定性验证高于模型结论：测试失败时，reviewer 的 `approve` 不能把运行变成成功；证据缺失、过期或相互不一致时 fail-closed，交还人工。
-
 写代码的 AI 不该自己审自己写的东西。Vega 是一个本地优先的 AI 编码工作流 harness：worker 负责改代码，
 reviewer 在隔离的上下文里只看 diff、测试证据和项目规则；每次任务用项目自己的验证命令和风险门禁收口，
-失败、中断或证据不足时留好现场，交还给人。
+失败、中断或证据不足时留好现场，交还给人。Vega 的重点不是增加更多 Agent，而是让写、验、审和交付
+之间的边界更清楚。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，验证与隔离审查之间上下文隔离，失败 fail-closed 交还人工">
@@ -121,5 +119,3 @@ python -m pytest
 ruff check src tests
 git diff --check
 ```
-
-Vega 的重点不是增加更多 Agent，而是让写、验、审和交付之间的边界更清楚。
