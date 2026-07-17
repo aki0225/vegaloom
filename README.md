@@ -1,14 +1,39 @@
+<div align="center">
+
+<img src="docs/assets/vega-hero.jpg" width="100%" alt="Vega：一个写，一个审，永不共享上下文">
+
 # Vega
 
-**One writes. One reviews. Never the same context.**
+<h3>One writes. One reviews. Never the same context.</h3>
+
+<p>
+  <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/Baseline-v0.1.0-4fb8d8?style=for-the-badge" alt="v0.1.0">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
+</p>
+
+**[核心能力](#核心能力)** ·
+**[安装](#安装)** ·
+**[快速开始](#快速开始)** ·
+**[关键行为](#关键行为)** ·
+**[文档](#文档)** ·
+**[定位与边界](#定位与边界)**
+
+</div>
+
+> [!IMPORTANT]
+> 确定性验证高于模型结论：测试失败时，reviewer 的 `approve` 不能把运行变成成功；证据缺失、过期或相互不一致时 fail-closed，交还人工。
 
 写代码的 AI 不该自己审自己写的东西。Vega 是一个本地优先的 AI 编码工作流 harness：worker 负责改代码，
 reviewer 在隔离的上下文里只看 diff、测试证据和项目规则；每次任务用项目自己的验证命令和风险门禁收口，
 失败、中断或证据不足时留好现场，交还给人。
 
-```text
-task → context → worker → verification → risk gate → isolated review → report
-```
+<p align="center">
+  <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，验证与隔离审查之间上下文隔离，失败 fail-closed 交还人工">
+</p>
+
+<p align="center"><sub>一次任务的完整闭环：写与审上下文隔离，任何一环证据不足都 fail-closed 交还人工。</sub></p>
 
 ## 核心能力
 
