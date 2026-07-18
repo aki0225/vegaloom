@@ -100,6 +100,7 @@ vega finish --run <run_id>
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | 长任务 Goal 与 checkpoint | [LONG-RUNNING-GOALS](docs/LONG-RUNNING-GOALS.md) |
 | v0.1 范围与取舍 | [MVP-SCOPE](docs/MVP-SCOPE.md) |
+| 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |
 | 工作区与验证规范 | [WORKSPACE-HYGIENE](docs/WORKSPACE-HYGIENE.md) |
 
 ## 定位与边界
