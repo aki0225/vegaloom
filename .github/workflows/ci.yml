@@ -12,6 +12,7 @@ permissions:
 
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
   PYTHONUNBUFFERED: "1"
 
 jobs:
