@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vegaloom"
 version = "0.1.1"
-description = "One writes, one reviews — an isolated-context runner for coding agents."
+description = "A local-first coding workflow harness with independent write and review sessions."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

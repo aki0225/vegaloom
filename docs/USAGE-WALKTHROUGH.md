@@ -376,8 +376,10 @@ vega gate --repo . --run <reflect_run> --scope refactor
 
 ### 8.5 审查 Harness
 
-- reviewer 不读取 worker 的完整聊天记录。
-- reviewer 只看 review pack、diff、验证日志、项目规则和可选的 accepted memory。
+- reviewer 使用独立、短生命周期会话，不继承 worker 的完整聊天记录。
+- reviewer 在同一目标仓库的只读视图中读取明确编译的 review pack、diff、验证日志、
+  项目规则、风险门禁和可选 accepted memory。
+- 这里是角色、会话和输入边界隔离，不是容器或操作系统级安全隔离。
 - Reflect 固化 `full-diff.patch` 和 `review-evidence.json`；Review 校验 HEAD、tracked diff、
   untracked 内容清单和 artifact 哈希，证据过期时不启动 reviewer。
 - `fix-prompt.md` 只要求修复 reviewer 指出的 findings，避免扩大范围。

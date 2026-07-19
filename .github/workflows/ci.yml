@@ -1,46 +1,372 @@
 name: 持续集成
 
-on:
+"on":
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
     branches: [main]
 
 permissions:
   contents: read
 
-jobs:
-  test:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
 
+jobs:
+  static:
+    name: 静态检查与节点收集
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: 配置 Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: 安装依赖
+      - name: 安装开发依赖
+        run: python -m pip install -e ".[dev]"
+
+      - name: 编译与静态检查
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m compileall src
+          ruff check src tests
 
-      - name: 编译检查
-        run: python -m compileall -q src
+      - name: 检查本次提交范围的空白错误
+        shell: bash
+        run: |
+          event_name="${{ github.event_name }}"
+          before_sha="${{ github.event.before }}"
+          base_sha=""
+          if [[ "$event_name" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          elif [[ "$event_name" == "push" && -n "$before_sha" && ! "$before_sha" =~ ^0+$ ]]; then
+            base_sha="$before_sha"
+          fi
 
-      - name: 静态检查
-        run: ruff check src tests
+          if [[ -n "$base_sha" ]]; then
+            git diff --check "${base_sha}..HEAD"
+          else
+            git show --check --format= HEAD
+          fi
 
-      - name: 运行测试
-        env:
-          VEGA_PROVIDER_ALIAS: ci-test-provider
-        run: pytest
+      - name: 核对完整测试节点
+        shell: bash
+        run: |
+          mkdir -p .tmp/pytest
+          set +e
+          python -m pytest --collect-only -q > .tmp/pytest/linux-collected.txt 2>&1
+          collect_status="$?"
+          set -e
+          if [[ "$collect_status" != "0" ]]; then
+            cat .tmp/pytest/linux-collected.txt
+            echo "pytest 收集失败，退出码 ${collect_status}" >&2
+            exit "$collect_status"
+          fi
+          node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
+          if [[ "$node_count" != "502" ]]; then
+            cat .tmp/pytest/linux-collected.txt
+            echo "期望收集 502 个节点，实际为 ${node_count}" >&2
+            exit 1
+          fi
+          echo "已收集并核对 ${node_count} 个测试节点"
 
-      - name: 空白字符检查
-        run: git diff --check
+      - name: 核对 Python 3.12 分片覆盖全部测试文件
+        shell: bash
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          from pathlib import Path
+
+          import yaml
+
+          workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text(encoding="utf-8"))
+          shards = workflow["jobs"]["tests-py312"]["strategy"]["matrix"]["include"]
+          listed = [
+              file_name
+              for shard in shards
+              for file_name in str(shard["files"]).split()
+          ]
+          actual = sorted(path.as_posix() for path in Path("tests").glob("test_*.py"))
+          counts = Counter(listed)
+          duplicates = sorted(path for path, count in counts.items() if count > 1)
+          missing = sorted(set(actual) - set(listed))
+          unexpected = sorted(set(listed) - set(actual))
+          if duplicates or missing or unexpected:
+              raise SystemExit(
+                  "Python 3.12 分片文件集合不完整："
+                  f"duplicates={duplicates}, missing={missing}, unexpected={unexpected}"
+              )
+          print(f"Python 3.12 分片完整覆盖 {len(actual)} 个测试文件")
+          PY
+
+  tests-py311:
+    name: Python 3.11 全量测试
+    needs: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装测试依赖
+        run: python -m pip install -e ".[dev]" pytest-timeout
+
+      - name: 运行全量测试
+        run: |
+          mkdir -p .tmp/pytest/runs
+          python -m pytest -q \
+            --timeout=58 \
+            --timeout-method=signal \
+            --basetemp=.tmp/pytest/runs/linux-py311
+
+  tests-py312:
+    name: Python 3.12 分片 ${{ matrix.name }}
+    needs: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: smoke
+            test_timeout: 58
+            files: tests/test_smoke.py
+          - name: p0-cli-lock
+            test_timeout: 58
+            files: >-
+              tests/test_p0_regressions.py
+              tests/test_cli_recovery_hardening.py
+              tests/test_run_mutation_lock.py
+              tests/test_execution_control_safety.py
+          - name: artifacts-runtime-security
+            test_timeout: 58
+            files: >-
+              tests/test_finish_artifact_integrity.py
+              tests/test_runtime_safety_integration.py
+              tests/test_security_evidence.py
+          - name: semantics-evidence-review
+            test_timeout: 58
+            files: >-
+              tests/test_success_semantics.py
+              tests/test_evidence_freshness.py
+              tests/test_review_artifact_integrity.py
+          - name: remaining
+            test_timeout: 58
+            files: >-
+              tests/test_gate_path_matching.py
+              tests/test_recovery_chaos.py
+              tests/test_project_config_hardening.py
+              tests/test_path_and_eval_contract.py
+              tests/test_redaction.py
+              tests/test_workspace_snapshot_budget.py
+              tests/test_context_boundaries.py
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装测试依赖
+        run: python -m pip install -e ".[dev]" pytest-timeout
+
+      - name: 运行测试分片
+        shell: bash
+        run: |
+          mkdir -p .tmp/pytest/runs
+          python -m pytest -q \
+            --timeout="${{ matrix.test_timeout }}" \
+            --timeout-method=signal \
+            --basetemp=".tmp/pytest/runs/linux-${{ matrix.name }}" \
+            ${{ matrix.files }}
+
+  windows:
+    name: Windows 专项与 wheel smoke
+    needs: static
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装测试与构建依赖
+        run: python -m pip install -e ".[dev]" pytest-timeout build
+
+      - name: 运行 Windows 专项测试
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .tmp/pytest/runs | Out-Null
+          python -m pytest -q `
+            --timeout=58 `
+            --timeout-method=thread `
+            --basetemp=.tmp/pytest/runs/windows `
+            tests/test_runtime_safety_integration.py::test_windows_verification_preserves_nested_python_quotes `
+            tests/test_execution_control_safety.py `
+            tests/test_run_mutation_lock.py
+
+      - name: 构建并安装 Windows wheel
+        shell: pwsh
+        run: |
+          python -m build --wheel --outdir dist
+          python -m venv .tmp/release-validation/windows-venv
+          $venvPython = Resolve-Path .tmp/release-validation/windows-venv/Scripts/python.exe
+          & $venvPython -m pip install dist/vegaloom-0.1.1-py3-none-any.whl
+          $vegaCli = Resolve-Path .tmp/release-validation/windows-venv/Scripts/vega.exe
+          & $venvPython -m pip check
+          $version = & $venvPython -I -c "import vega; print(vega.__version__)"
+          if ($version.Trim() -ne "0.1.1") {
+            throw "Windows wheel 版本不一致：$version"
+          }
+          Push-Location $env:RUNNER_TEMP
+          try {
+            $loops = & $vegaCli list-loops
+            if (($loops -join "`n") -notmatch "engineering-change") {
+              throw "Windows wheel 未包含 engineering-change loop"
+            }
+          }
+          finally {
+            Pop-Location
+          }
+
+  posix:
+    name: POSIX 临时目录专项
+    needs: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装测试依赖
+        run: python -m pip install -e ".[dev]" pytest-timeout
+
+      - name: 要求 POSIX 专项真实通过
+        shell: bash
+        run: |
+          mkdir -p .tmp/pytest/runs .tmp/pytest/logs
+          set +e
+          python -m pytest -q -rs \
+            --timeout=58 \
+            --timeout-method=signal \
+            --basetemp=.tmp/pytest/runs/linux-posix \
+            tests/test_runtime_safety_integration.py::test_posix_verification_temp_env_does_not_re_evaluate_path \
+            | tee .tmp/pytest/logs/linux-posix.log
+          test_status="${PIPESTATUS[0]}"
+          set -e
+          test "$test_status" = "0"
+          grep -q "1 passed" .tmp/pytest/logs/linux-posix.log
+          if grep -q "skipped" .tmp/pytest/logs/linux-posix.log; then
+            echo "POSIX 专项测试被跳过，不能作为 Linux 验证证据" >&2
+            exit 1
+          fi
+
+  package:
+    name: 构建并安装 wheel
+    needs: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 构建 wheel 与 sdist
+        run: |
+          python -m pip install build twine
+          python -m build --outdir dist
+          test -f dist/vegaloom-0.1.1-py3-none-any.whl
+          test -f dist/vegaloom-0.1.1.tar.gz
+          python -m twine check dist/*
+
+      - name: 在干净环境安装并验证 wheel
+        shell: bash
+        run: |
+          python -m venv .tmp/release-validation/venv
+          .tmp/release-validation/venv/bin/python -m pip install dist/vegaloom-0.1.1-py3-none-any.whl
+          .tmp/release-validation/venv/bin/python -m pip check
+          test "$(
+            .tmp/release-validation/venv/bin/python -I -c \
+              "from importlib.metadata import version; print(version('vegaloom'))"
+          )" = "0.1.1"
+          test "$(
+            .tmp/release-validation/venv/bin/python -I -c \
+              "import vega; print(vega.__version__)"
+          )" = "0.1.1"
+          test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.1.1"
+          .tmp/release-validation/venv/bin/vega --help >/dev/null
+
+          empty_workspace="$(mktemp -d)"
+          pushd "$empty_workspace"
+          vega_cli="${GITHUB_WORKSPACE}/.tmp/release-validation/venv/bin/vega"
+          "$vega_cli" list-loops | tee loops.txt
+          grep -q "engineering-change" loops.txt
+          popd
+
+      - name: 从已安装 wheel 验证 POSIX run lock
+        shell: bash
+        run: |
+          .tmp/release-validation/venv/bin/python -I - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+
+          from vega.run_lock import RunMutationLock
+
+          with TemporaryDirectory() as temp_dir:
+              run_dir = Path(temp_dir) / "run"
+              run_dir.mkdir()
+              with RunMutationLock.acquire(run_dir, "loop.start"):
+                  pass
+          PY
+
+      - name: 在第二个干净环境安装 sdist
+        shell: bash
+        run: |
+          python -m venv .tmp/release-validation/sdist-venv
+          .tmp/release-validation/sdist-venv/bin/python -m pip install \
+            dist/vegaloom-0.1.1.tar.gz
+          .tmp/release-validation/sdist-venv/bin/python -m pip check
+          test "$(
+            .tmp/release-validation/sdist-venv/bin/python -I -c \
+              "import vega; print(vega.__version__)"
+          )" = "0.1.1"

@@ -7,6 +7,7 @@ from .project_config import load_project_config, render_project_config_summary
 from .project_knowledge import load_project_knowledge
 from .project_profile import build_project_profile
 from .redaction import redact_text
+from .repository_identity import resolve_git_revision
 
 
 def build_project_context(
@@ -22,15 +23,27 @@ def build_project_context(
     这里故意只合并“项目规则、画像、accepted memory”，不包含 worker 聊天记录，
     这样主会话、worker 和隔离 reviewer 能共享稳定项目知识，但仍保持审查上下文隔离。
     """
-    profile = build_project_profile(workspace, repo_path, tracked_only=tracked_only)
+    repo = repo_path.resolve()
+    tracked_revision = resolve_git_revision(repo) if tracked_only else None
+    profile = build_project_profile(
+        workspace,
+        repo,
+        tracked_only=tracked_only,
+        tracked_revision=tracked_revision,
+    )
     knowledge = load_project_knowledge(
         workspace,
-        repo_path,
+        repo,
         input_text,
         related_paths or [],
         tracked_only=tracked_only,
+        tracked_revision=tracked_revision,
     )
-    config = load_project_config(repo_path, tracked_only=tracked_only)
+    config = load_project_config(
+        repo,
+        tracked_only=tracked_only,
+        tracked_revision=tracked_revision,
+    )
     return render_project_context(profile, knowledge, render_project_config_summary(config))
 
 
@@ -115,6 +128,7 @@ def render_project_context(
                     f"### {hit.title}",
                     "",
                     f"- ID：`{hit.proposal_id}`",
+                    f"- 来源仓库：`{hit.repo or '通用'}`",
                     f"- 标签：{tags}",
                     f"- 路径：{paths}",
                     f"- 内容：{hit.content}",

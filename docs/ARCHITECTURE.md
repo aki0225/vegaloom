@@ -2,25 +2,42 @@
 
 ## 总览
 
-Vega v0.1 是一个本地文件系统优先的 AI Coding Harness，内部核心执行引擎是线性的
-Agent Loop Runtime。它不追求复杂编排，而是把研发任务拆成一条可检查的链路：
+Vega v0.1 是一个本地文件系统优先的 AI Coding Harness。它不追求复杂编排，而是通过两条
+顶层执行路径覆盖只读检查和日常编码闭环。
 
 ```text
-CLI
+vega run engineering-change
   -> Task Intake
   -> LoopSpec(YAML)
-  -> Runtime
+  -> EngineeringChangeRuntime
   -> Context Loader
   -> Tool Broker
   -> Report
-  -> Reviewer
+  -> 内置线性 Reviewer
   -> Eval
   -> State / Trace / Replay
 ```
 
-当前主线 loop 是 `engineering-change`。解析顺序为 workspace 的
+```text
+vega do / vega loop
+  -> Brief / Project Context
+  -> LoopAutomationRuntime
+  -> Worker
+  -> Workspace / Scope Gate
+  -> Verification
+  -> Reflect / Risk Gate
+  -> 独立 ReviewRuntime
+  -> Recover / Finish
+```
+
+`vega do/loop` 是当前日常 Coding Harness 主线。`vega run engineering-change` 保留为
+可安装的只读 Inspection Loop baseline：其解析顺序为 workspace 的
 `loops/engineering-change.loop.yaml` 优先，包内只读 baseline 回退；因此源码仓可显式覆盖，
-wheel 安装后也能在任意 workspace 使用主线 loop。
+wheel 安装后也能在任意 workspace 使用该检查入口。
+
+两条路径共享本地 state、trace 和 fail-closed 原则，但入口、配置源、artifact 与 reviewer
+语义不同。`BriefRuntime`、`ReviewPackRuntime` 和 `ReviewRuntime` 是阶段组件或可单独调用阶段，
+不是额外的长期 Agent。
 
 长任务 P0 已提供人工驱动状态层：`goal start/status/step/attach/checkpoint-done/pause/resume/stop/recover`。它只写 goal contract、状态、trace、progress、checkpoint plan 和人工证据报告，不调用 worker。有限自动 checkpoint 推进仍处于设计阶段，详见 `docs/LONG-RUNNING-GOALS.md`。
 
@@ -98,7 +115,8 @@ agents-md-proposals.md
 
 ## Bug / Feature Brief Runtime
 
-Brief Runtime 是一个轻量横向能力，不替代 `engineering-change`。它面向开发者最常见的两类工作：修 bug 和拆需求。
+Brief Runtime 是 `LoopAutomationRuntime` 使用的轻量阶段能力，也可以独立调用。它面向开发者
+最常见的两类工作：修 bug 和拆需求。
 
 ```text
 vega brief bug --repo <repo> (--input <file> | --text <text>)
@@ -541,7 +559,14 @@ runs/<run_id>/
 
 ## Reviewer 与 Eval
 
-Reviewer 有两层：`engineering-change` 内置 reviewer 是线性检查步骤；`vega review` 是可选隔离 reviewer runner。两者都不是长期多 Agent 编排。
+Reviewer 有两层：`engineering-change` 内置 reviewer 是线性检查步骤；`vega review` 是可选的
+独立 reviewer runner。两者都不是长期多 Agent 编排。
+
+“独立 reviewer”表示 Vega 启动独立、短生命周期的 reviewer 会话，使用独立编译的 prompt；
+启用 `codex-exec` 时 sandbox 固定为 `read-only`，且 reviewer 不继承 worker 的完整聊天记录。
+reviewer 仍会在同一目标仓库的只读视图中读取明确编译的 review pack，包括任务或 brief、
+当前 diff、验证结果、项目规则、风险门禁和可选 accepted memory。因此这里是角色、会话和输入
+边界隔离，不是完全信息隔离，也不是操作系统级安全沙箱。
 
 当前 reviewer 检查：
 
@@ -585,7 +610,8 @@ memory/ledger.jsonl
 ```
 
 proposal 数量允许为 0。存在 proposal 时仍必须显式接受或拒绝，这保证了 memory 沉淀是人工
-确认结果，而不是 runtime 自动扩权。
+确认结果，而不是 runtime 自动扩权。仓库级 memory 使用不暴露绝对路径的本地仓库 scope
+精确匹配；同名目录不会互相回填，未绑定仓库的通用经验必须显式保持 `repo=null`。
 
 ## 为什么仍然不做数据库
 

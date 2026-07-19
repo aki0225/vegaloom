@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -7,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from .memory import MemoryLedgerStore
 from .models import AgentsInstruction, MemoryHit, ProjectKnowledge
 from .redaction import filter_sensitive_memory_entries, redact_text
+from .repository_identity import repository_scope, resolve_git_revision
 
 IGNORED_DIRS = {
     ".git",
@@ -17,7 +19,21 @@ IGNORED_DIRS = {
     "coverage",
     "target",
     "__pycache__",
+    ".tmp",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".local-validation",
 }
+ROOT_IGNORED_DIRS = {"runs", "memory"}
+IGNORED_DIR_PREFIXES = (
+    "pytest-",
+    ".tmp-pytest",
+    ".pytest-tmp-",
+    "pytest-cache-files-",
+    "test-output-",
+    "validation-",
+)
 MAX_AGENTS_FILES = 20
 MAX_AGENTS_CHARS = 8000
 MAX_MEMORY_HITS = 10
@@ -33,11 +49,16 @@ def load_project_knowledge(
     tracked_revision: str | None = None,
 ) -> ProjectKnowledge:
     repo = repo_path.resolve()
+    revision = (
+        resolve_git_revision(repo, tracked_revision or "HEAD")
+        if tracked_only
+        else None
+    )
     instructions = load_agents_instructions(
         repo,
         related_paths or [],
         tracked_only=tracked_only,
-        tracked_revision=tracked_revision,
+        tracked_revision=revision,
     )
     memory_hits = search_related_memory(workspace, repo, input_text, related_paths or [])
     return ProjectKnowledge(
@@ -59,22 +80,29 @@ def load_agents_instructions(
     repo = repo_path.resolve()
     if tracked_only:
         try:
-            revision = _resolve_tracked_revision(repo, tracked_revision or "HEAD")
+            revision = resolve_git_revision(repo, tracked_revision or "HEAD")
         except RuntimeError:
             # 隔离 reviewer 的规则视图必须 fail-closed。非 Git 仓库或无法解析 revision
             # 时不能退回可变工作树内容，否则 worker 可在本轮修改规则后影响 reviewer。
+            return []
+        if revision is None:
             return []
         return _load_tracked_agents_instructions(repo, related_paths or [], revision)
 
     discovered: list[Path] = []
 
     root_agents = repo / "AGENTS.md"
-    if root_agents.exists():
+    if _is_safe_worktree_agents_file(repo, root_agents):
         discovered.append(root_agents)
 
     # 相关路径的父目录 AGENTS.md 优先，避免在大仓库里盲目读取无关规则。
     for relative in related_paths or []:
-        candidate = (repo / relative).resolve()
+        normalized = _normalize_repo_relative_path(relative)
+        if normalized is None or _is_ignored_repo_path(PurePosixPath(normalized)):
+            continue
+        candidate = (repo / normalized).resolve()
+        if not _path_stays_within_repo(repo, candidate):
+            continue
         if candidate.is_file():
             parents = list(candidate.parents)
         else:
@@ -82,7 +110,7 @@ def load_agents_instructions(
         for parent in parents:
             if parent == repo or repo in parent.parents:
                 agents = parent / "AGENTS.md"
-                if agents.exists():
+                if _is_safe_worktree_agents_file(repo, agents):
                     discovered.append(agents)
             if parent == repo:
                 break
@@ -92,6 +120,8 @@ def load_agents_instructions(
 
     results: list[AgentsInstruction] = []
     for path in _dedupe_paths(discovered)[:MAX_AGENTS_FILES]:
+        if not _is_safe_worktree_agents_file(repo, path):
+            continue
         try:
             content = path.read_text(encoding="utf-8", errors="replace")[:MAX_AGENTS_CHARS]
         except OSError:
@@ -113,12 +143,13 @@ def search_related_memory(
     related_paths: list[str] | None = None,
 ) -> list[MemoryHit]:
     store = MemoryLedgerStore(workspace)
+    repo_scope = repository_scope(repo_path)
     queries = _memory_queries(repo_path.name, input_text, related_paths or [])
     hits = []
     seen: set[str] = set()
 
     for query in queries:
-        entries = store.search(query=query, accepted_only=True, repo=repo_path.name)
+        entries = store.search(query=query, accepted_only=True, repo=repo_scope)
         for entry in filter_sensitive_memory_entries(entries):
             if entry.proposal_id not in seen:
                 hits.append(_to_memory_hit(entry))
@@ -128,7 +159,11 @@ def search_related_memory(
 
     # repo 为空的通用经验也可能有价值，按关键词再补一次。
     for query in queries[1:]:
-        entries = store.search(query=query, accepted_only=True)
+        entries = store.search(
+            query=query,
+            accepted_only=True,
+            repo_unscoped_only=True,
+        )
         for entry in filter_sensitive_memory_entries(entries):
             if entry.proposal_id not in seen:
                 hits.append(_to_memory_hit(entry))
@@ -176,6 +211,7 @@ def render_knowledge_context(knowledge: ProjectKnowledge) -> str:
                     f"### {hit.title}",
                     "",
                     f"- ID：`{hit.proposal_id}`",
+                    f"- 来源仓库：`{hit.repo or '通用'}`",
                     f"- 标签：{tag_text}",
                     f"- 内容：{hit.content}",
                     "",
@@ -186,11 +222,30 @@ def render_knowledge_context(knowledge: ProjectKnowledge) -> str:
 
 def _iter_agents_files(repo_path: Path) -> list[Path]:
     results: list[Path] = []
-    for path in repo_path.rglob("AGENTS.md"):
-        if any(part in IGNORED_DIRS for part in path.parts):
-            continue
-        results.append(path)
-    return sorted(results, key=lambda item: len(item.parts))
+    repo = repo_path.resolve()
+    for current_root, dir_names, file_names in os.walk(repo, topdown=True, followlinks=False):
+        current = Path(current_root)
+        current_relative = current.resolve().relative_to(repo)
+        dir_names[:] = sorted(
+            name
+            for name in dir_names
+            if not _is_ignored_directory_name(
+                name,
+                root_level=current_relative == Path("."),
+            )
+            and _path_stays_within_repo(repo, current / name)
+        )
+        if "AGENTS.md" in file_names:
+            candidate = current / "AGENTS.md"
+            if _is_safe_worktree_agents_file(repo, candidate):
+                results.append(candidate)
+    return sorted(
+        results,
+        key=lambda item: (
+            len(item.resolve().relative_to(repo).parts),
+            item.resolve().relative_to(repo).as_posix().casefold(),
+        ),
+    )
 
 
 def _load_tracked_agents_instructions(
@@ -205,7 +260,7 @@ def _load_tracked_agents_instructions(
 
     for related_path in related_paths:
         normalized = _normalize_repo_relative_path(related_path)
-        if normalized is None:
+        if normalized is None or _is_ignored_repo_path(PurePosixPath(normalized)):
             continue
         related_parts = PurePosixPath(normalized).parts
         applicable = [
@@ -242,19 +297,23 @@ def _load_tracked_agents_instructions(
 def _tracked_agents_paths(repo_path: Path, revision: str) -> list[str]:
     payload = _run_git(
         repo_path,
-        ["git", "ls-tree", "-r", "--name-only", "-z", revision, "--"],
+        ["git", "ls-tree", "-r", "-z", revision, "--"],
     )
-    paths = [
-        item.decode("utf-8", errors="replace")
-        for item in payload.split(b"\0")
-        if item
-    ]
+    paths: list[str] = []
+    for item in payload.split(b"\0"):
+        if not item or b"\t" not in item:
+            continue
+        metadata, raw_path = item.split(b"\t", 1)
+        mode = metadata.split(b" ", 1)[0]
+        if mode not in {b"100644", b"100755"}:
+            continue
+        paths.append(raw_path.decode("utf-8", errors="replace"))
     return sorted(
         [
             path
             for path in paths
             if PurePosixPath(path).name == "AGENTS.md"
-            and not any(part in IGNORED_DIRS for part in PurePosixPath(path).parts)
+            and not _is_ignored_repo_path(PurePosixPath(path))
         ],
         key=lambda item: len(PurePosixPath(item).parts),
     )
@@ -274,11 +333,43 @@ def _normalize_repo_relative_path(path: str) -> str | None:
     return normalized.as_posix()
 
 
-def _resolve_tracked_revision(repo_path: Path, revision: str) -> str:
-    return _run_git(
-        repo_path,
-        ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"],
-    ).decode("utf-8", errors="replace").strip()
+def _is_ignored_directory_name(name: str, *, root_level: bool = False) -> bool:
+    normalized = name.casefold()
+    return (
+        normalized in {item.casefold() for item in IGNORED_DIRS}
+        or (root_level and normalized in {item.casefold() for item in ROOT_IGNORED_DIRS})
+        or (
+            root_level
+            and any(
+                normalized.startswith(prefix.casefold())
+                for prefix in IGNORED_DIR_PREFIXES
+            )
+        )
+    )
+
+
+def _is_ignored_repo_path(path: PurePosixPath) -> bool:
+    return any(
+        _is_ignored_directory_name(part, root_level=index == 0)
+        for index, part in enumerate(path.parts)
+    )
+
+
+def _path_stays_within_repo(repo_path: Path, candidate: Path) -> bool:
+    try:
+        candidate.resolve().relative_to(repo_path.resolve())
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _is_safe_worktree_agents_file(repo_path: Path, candidate: Path) -> bool:
+    if candidate.is_symlink() or not candidate.is_file():
+        return False
+    if not _path_stays_within_repo(repo_path, candidate):
+        return False
+    relative_path = PurePosixPath(_repo_relative(repo_path, candidate))
+    return not _is_ignored_repo_path(relative_path)
 
 
 def _read_git_blob(repo_path: Path, revision: str, relative_path: str) -> str:

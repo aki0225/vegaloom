@@ -89,16 +89,21 @@ class MemoryLedgerStore:
         query: str = "",
         accepted_only: bool = True,
         repo: str | None = None,
+        repo_unscoped_only: bool = False,
         tags: list[str] | None = None,
         path: str | None = None,
     ) -> list[MemoryLedgerEntry]:
+        if repo is not None and repo_unscoped_only:
+            raise ValueError("repo 与 repo_unscoped_only 不能同时使用")
         needle = query.lower().strip()
         tag_set = {tag.lower() for tag in tags or []}
         results: list[MemoryLedgerEntry] = []
         for entry in self.list_entries():
             if accepted_only and entry.status != "accepted":
                 continue
-            if repo and not _entry_matches_repo(entry, repo):
+            if repo is not None and not _entry_matches_repo(entry, repo):
+                continue
+            if repo_unscoped_only and entry.repo is not None:
                 continue
             if tag_set and not tag_set.intersection({tag.lower() for tag in entry.tags}):
                 continue
@@ -111,11 +116,9 @@ class MemoryLedgerStore:
 
 
 def _entry_matches_repo(entry: MemoryLedgerEntry, repo: str) -> bool:
-    needle = repo.lower()
-    if entry.repo and entry.repo.lower() == needle:
-        return True
-    haystack = _entry_search_text(entry)
-    return needle in haystack
+    if entry.repo is None:
+        return False
+    return entry.repo.strip().casefold() == repo.strip().casefold()
 
 
 def _entry_matches_path(entry: MemoryLedgerEntry, path: str) -> bool:

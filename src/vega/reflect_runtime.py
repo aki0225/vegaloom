@@ -15,6 +15,7 @@ from .project_config import load_project_config
 from .project_context import write_project_context
 from .project_knowledge import load_project_knowledge
 from .redaction import assert_not_sensitive_path, redact_text, redact_value
+from .repository_identity import repository_scope
 from .run_utils import create_run_dir, resolve_run_dir
 from .trace import TraceWriter
 from .workspace_check import (
@@ -236,7 +237,7 @@ class ReflectRuntime:
             confidence=0.75,
             sensitivity="internal",
             tags=tags,
-            repo=repo_path.name,
+            repo=repository_scope(repo_path),
             paths=changed_files,
         )
 

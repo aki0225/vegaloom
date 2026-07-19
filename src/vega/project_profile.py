@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tomllib
 from datetime import datetime
 from pathlib import Path
 
+from .memory import MemoryLedgerStore
 from .models import ProfileState, ProjectProfile
 from .project_config import (
     ProjectConfigCheckResult,
@@ -15,7 +17,7 @@ from .project_config import (
 )
 from .project_knowledge import load_agents_instructions
 from .redaction import filter_sensitive_memory_entries, redact_text, redact_value
-from .memory import MemoryLedgerStore
+from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
 from .trace import TraceWriter
 
@@ -112,8 +114,13 @@ def build_project_profile(
     tracked_revision: str | None = None,
 ) -> ProjectProfile:
     repo = repo_path.resolve()
+    resolved_revision = (
+        resolve_git_revision(repo, tracked_revision or "HEAD")
+        if tracked_only
+        else None
+    )
     tracked_files = (
-        _tracked_files(repo, tracked_revision or "HEAD")
+        _tracked_files(repo, resolved_revision)
         if tracked_only
         else None
     )
@@ -121,18 +128,19 @@ def build_project_profile(
     project_config = load_project_config(
         repo,
         tracked_only=tracked_only,
-        tracked_revision=tracked_revision,
+        tracked_revision=resolved_revision,
     )
     agents = load_agents_instructions(
         repo,
         tracked_only=tracked_only,
-        tracked_revision=tracked_revision,
+        tracked_revision=resolved_revision,
     )
+    repo_scope = repository_scope(repo)
     memory_hits = filter_sensitive_memory_entries(
         MemoryLedgerStore(workspace).search(
             query=repo.name,
             accepted_only=True,
-            repo=repo.name,
+            repo=repo_scope,
         )
     )
     test_commands = _detect_test_commands(repo, config_files, tracked_files=tracked_files)
@@ -148,6 +156,11 @@ def build_project_profile(
         test_commands=test_commands,
         lint_commands=lint_commands,
         entrypoints=_existing_files(repo, ENTRYPOINT_CANDIDATES, tracked_files=tracked_files),
+        script_entrypoints=_detect_script_entrypoints(
+            repo,
+            config_files,
+            tracked_revision=resolved_revision,
+        ),
         key_directories=_existing_dirs(repo, KEY_DIRS, tracked_files=tracked_files),
         config_files=config_files,
         agents_files=[item.path for item in agents],
@@ -180,6 +193,10 @@ def render_project_profile(profile: ProjectProfile) -> str:
         "## 入口文件",
         "",
         *_list_or_none(profile.entrypoints),
+        "",
+        "## CLI / Script 入口",
+        "",
+        *_list_or_none(profile.script_entrypoints),
         "",
         "## 关键目录",
         "",
@@ -250,6 +267,86 @@ def _detect_package_managers(config_files: list[str]) -> list[str]:
     if "Cargo.toml" in config_files:
         managers.append("cargo")
     return managers
+
+
+def _detect_script_entrypoints(
+    repo: Path,
+    config_files: list[str],
+    *,
+    tracked_revision: str | None,
+) -> list[str]:
+    if "pyproject.toml" not in config_files:
+        return []
+    content = _read_project_file(
+        repo,
+        "pyproject.toml",
+        tracked_revision=tracked_revision,
+    )
+    if content is None:
+        return []
+    try:
+        document = tomllib.loads(content)
+    except tomllib.TOMLDecodeError:
+        return []
+    project = document.get("project")
+    if not isinstance(project, dict):
+        return []
+    scripts = project.get("scripts")
+    if not isinstance(scripts, dict):
+        return []
+    return sorted(
+        [
+            f"{name.strip()} = {target.strip()}"
+            for name, target in scripts.items()
+            if isinstance(name, str)
+            and isinstance(target, str)
+            and name.strip()
+            and target.strip()
+        ],
+        key=str.casefold,
+    )
+
+
+def _read_project_file(
+    repo: Path,
+    relative_path: str,
+    *,
+    tracked_revision: str | None,
+) -> str | None:
+    if tracked_revision is None:
+        try:
+            return repo.joinpath(relative_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return None
+
+    git_env = {
+        **os.environ,
+        "GIT_CEILING_DIRECTORIES": str(repo.parent.resolve()),
+    }
+    try:
+        result = subprocess.run(
+            ["git", "show", f"{tracked_revision}:{relative_path}"],
+            cwd=repo,
+            capture_output=True,
+            timeout=30,
+            check=False,
+            env=git_env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(
+            f"无法读取 tracked project profile 文件 `{redact_text(relative_path)}`。"
+        ) from exc
+    if result.returncode != 0:
+        diagnostic = (result.stderr or b"").decode(
+            "utf-8",
+            errors="replace",
+        ).strip()
+        suffix = f" Git 诊断：{redact_text(diagnostic)}" if diagnostic else ""
+        raise RuntimeError(
+            "无法读取 tracked project profile 文件 "
+            f"`{redact_text(relative_path)}`。{suffix}"
+        )
+    return (result.stdout or b"").decode("utf-8", errors="replace")
 
 
 def _detect_test_commands(
@@ -332,32 +429,9 @@ def _directory_exists(
     )
 
 
-def _tracked_files(repo: Path, revision: str) -> set[str]:
-    git_env = {
-        **os.environ,
-        "GIT_CEILING_DIRECTORIES": str(repo.parent.resolve()),
-    }
-    try:
-        probe = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=repo,
-            capture_output=True,
-            timeout=30,
-            check=False,
-            env=git_env,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError("无法确认目标目录是否为 Git 仓库。") from exc
-    if probe.returncode != 0:
-        diagnostic = (probe.stderr or b"").decode(
-            "utf-8",
-            errors="replace",
-        ).strip()
-        if "not a git repository" in diagnostic.lower():
-            return set()
-        suffix = f" Git 诊断：{redact_text(diagnostic)}" if diagnostic else ""
-        raise RuntimeError(f"无法确认目标目录的 Git 身份。{suffix}")
-
+def _tracked_files(repo: Path, revision: str | None) -> set[str]:
+    if revision is None:
+        return set()
     command = ["git", "ls-tree", "-r", "--name-only", "-z", revision, "--"]
     try:
         result = subprocess.run(
@@ -366,7 +440,6 @@ def _tracked_files(repo: Path, revision: str) -> set[str]:
             capture_output=True,
             timeout=30,
             check=False,
-            env=git_env,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(

@@ -29,6 +29,11 @@ def test_execution_model_temp_path_preserves_windows_path_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(execution_control.os, "getpid", lambda: 0x7FFFFFFF)
+    monkeypatch.setattr(
+        execution_control,
+        "uuid4",
+        lambda: SimpleNamespace(hex="a" * 32),
+    )
 
     initial_path = tmp_path / "r" / "execution.json"
     padding = 250 - len(str(initial_path))
@@ -39,8 +44,24 @@ def test_execution_model_temp_path_preserves_windows_path_budget(
 
     assert len(str(execution_path)) == 250
     assert temp_path.parent == execution_path.parent
-    assert temp_path.name == ".e.7fffffff"
+    assert temp_path.name == ".e.7fffffff.aaaaaaaa"
     assert len(str(temp_path)) < 260
+
+
+def test_execution_model_temp_paths_are_unique_within_one_process(
+    tmp_path: Path,
+) -> None:
+    execution_dir = tmp_path / "executions" / "worker"
+
+    execution_temp = execution_control._execution_model_temp_path(
+        execution_dir / "execution.json"
+    )
+    stop_temp = execution_control._execution_model_temp_path(
+        execution_dir / "stop-request.json"
+    )
+
+    assert execution_temp.parent == stop_temp.parent
+    assert execution_temp != stop_temp
 
 
 def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> None:

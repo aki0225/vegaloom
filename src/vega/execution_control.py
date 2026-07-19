@@ -1005,8 +1005,8 @@ def _write_model_atomic(
 
 
 def _execution_model_temp_path(path: Path) -> Path:
-    # 保持原有进程级临时文件语义，但避免重复携带目标文件名。
-    return path.with_name(f".e.{os.getpid():x}")
+    # 同一进程会并发写 execution 与 stop request，短随机后缀避免临时文件互相覆盖。
+    return path.with_name(f".e.{os.getpid():x}.{uuid4().hex[:8]}")
 
 
 def _parse_datetime(value: str) -> datetime:

@@ -257,6 +257,7 @@ class ProjectProfile(BaseModel):
     test_commands: list[str] = Field(default_factory=list)
     lint_commands: list[str] = Field(default_factory=list)
     entrypoints: list[str] = Field(default_factory=list)
+    script_entrypoints: list[str] = Field(default_factory=list)
     key_directories: list[str] = Field(default_factory=list)
     config_files: list[str] = Field(default_factory=list)
     agents_files: list[str] = Field(default_factory=list)

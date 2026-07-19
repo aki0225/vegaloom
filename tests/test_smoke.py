@@ -36,6 +36,7 @@ from vega.project_profile import build_project_profile
 from vega.reflect_runtime import ReflectRuntime
 from vega.recovery_runtime import RecoveryRuntime
 from vega.review_runtime import ReviewPackRuntime, ReviewRuntime, parse_review_verdict
+from vega.repository_identity import repository_scope
 from vega.runner import CodexExecRunner, RunnerResult
 from vega.run_status import run_status_payload
 from vega.run_lock import RunMutationLock
@@ -889,12 +890,12 @@ def test_repo_run_check_rejects_non_allowlisted_check(tmp_path, monkeypatch) -> 
 def test_brief_bug_generates_agent_context_with_agents_and_memory(tmp_path, monkeypatch) -> None:
     _clear_vega_env(monkeypatch)
     repo_dir = tmp_path / "target-repo"
-    repo_dir.mkdir()
+    _init_clean_git_repo(repo_dir)
     repo_dir.joinpath("AGENTS.md").write_text(
         "# AGENTS.md\n\n- 修复 bug 后必须补回归验证。\n- 不要自动提交。\n",
         encoding="utf-8",
     )
-    repo_dir.joinpath("README.md").write_text("# Demo\n", encoding="utf-8")
+    _commit_repo_paths(repo_dir, "AGENTS.md", message="update project rules")
     proposal = MemoryProposal(
         id="mp-export-bug",
         type="pitfall",
@@ -902,7 +903,7 @@ def test_brief_bug_generates_agent_context_with_agents_and_memory(tmp_path, monk
         content="导出按钮问题优先检查前端 disabled 状态和接口错误分支。",
         source_run_id="manual",
         tags=["bug", "导出"],
-        repo=repo_dir.name,
+        repo=repository_scope(repo_dir),
         paths=["README.md"],
     )
     MemoryLedgerStore(tmp_path).append_decision(proposal, "accepted", "测试准备")

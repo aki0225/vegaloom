@@ -38,12 +38,15 @@ vega recover
 `brief`、`reflect`、`gate`、`review-pack`、`review` 和 `loop continue`
 是可单独调用的流水线阶段，主要用于排障、人工接管和解释运行过程，不要求用户每天手工编排。
 
+兼容的 `vega run engineering-change` 是 YAML 驱动的只读 Inspection Loop，用于生成计划、
+报告和 eval；它不等同于会启动 worker 的日常 Coding Harness。
+
 ## 能力分层
 
 ### 核心能力
 
 - `AGENTS.md`、项目画像和任务输入的上下文编译。
-- worker/reviewer 角色隔离和固定 sandbox。
+- worker/reviewer 使用独立会话和固定 sandbox；reviewer 不继承 worker 的完整聊天记录。
 - 验证命令、精确路径范围、变更预算、Prompt 预算与工作区污染门禁。
 - auto 首轮拒绝已有 tracked diff；同一 run 的后续轮次保留上一轮 diff 作为基线。
 - scope gate 在 worker/人工 continue 后先检查 staged 和 unstaged tracked diff；verification 结束后再次检查，Reflect 固化 review 输入后再检查一次。`forbidden_paths` 优先于 `allowed_paths`；最后一次与 reviewer 的工作区快照校验共同防止异步进程把越界 diff 带入隔离审查。任一阶段越界时保留 result、report、state 和 trace 证据并停止，不回滚或自动清理现场。
@@ -55,6 +58,10 @@ vega recover
 - 独立 reviewer 也必须带上同一份风险门禁；`human-review` 下的 AI 审查只能提供辅助发现，不能成为 Goal checkpoint 的自动完成证据。
 - reviewer 不能覆盖确定性验证失败。
 - state、trace、execution、status、finish、stop 和 recover。
+
+独立 reviewer 仍在同一目标仓库的只读视图中读取 Vega 明确编译的任务、diff、验证结果、
+项目规则、风险门禁和可选 accepted memory。这里承诺的是角色、会话和输入边界隔离，
+不是容器、独立文件系统或操作系统级安全隔离。
 
 ### 高级能力
 
@@ -104,6 +111,7 @@ Memory 是可选经验账本，不是每轮必须生成的流水线产物：
 - 只有用户在 reflect 阶段明确提供经验候选时才生成 proposal。
 - 长期 ledger 仍必须由用户显式 accept/reject。
 - accepted memory 可以参与后续上下文编译，但不能覆盖代码、测试、`AGENTS.md` 或当前任务事实。
+- 仓库级 accepted memory 按本地仓库 scope 精确匹配；同名目录之间不允许自动回填。
 
 当前不引入向量数据库、embedding、自动学习、自动冲突合并或自动长期写入。
 

@@ -2,12 +2,14 @@
 
 ## 产品名
 
-`Vega`
+- `Vega`：产品与品牌名。
+- `vegaloom`：公开仓库、Python distribution 和发布制品名。
+- `vega`：Python 导入包与 CLI 命令。
 
 ## 定位
 
-Vega 是一个本地优先的轻量 AI Coding Harness，内部使用 Agent Loop Runtime，把真实
-研发任务变成可运行、可复盘、可评估的闭环。
+Vega 是一个本地优先的轻量 AI Coding Harness。`vega do/loop` 提供日常编码闭环，
+`vega run engineering-change` 保留为 YAML 驱动的只读检查 baseline。
 
 它要证明的是这些基础能力：
 
@@ -21,7 +23,7 @@ Vega 是一个本地优先的轻量 AI Coding Harness，内部使用 Agent Loop 
 
 ## v0.1 目标
 
-跑通一个真实可用的研发任务审查 loop：
+冻结一个可安装、可复盘的只读研发任务检查 baseline：
 
 ```text
 engineering-change
@@ -58,7 +60,9 @@ engineering-change
 
 ## v0.1.x extensions 已落地能力
 
-这些能力已经在主线中出现，用来把 baseline 扩展成日常研发 harness。它们需要继续维护，但不应反向改写 v0.1 baseline 的最小验收定义。
+这些能力已经构成当前日常 Coding Harness 主线，用来把 baseline 扩展成受控 worker、
+确定性验证、独立 reviewer 和恢复交付闭环。它们需要继续维护，但不应反向改写
+v0.1 baseline 的最小验收定义。
 
 - CLI：`vega brief bug --repo <repo> (--input <file> | --text <text>)`
 - CLI：`vega brief feature --repo <repo> (--input <file> | --text <text>)`
@@ -190,8 +194,8 @@ v0.1 不包括：
 ## 版本口径
 
 ```text
-v0.1 baseline: YAML 驱动的本地 engineering-change loop
-v0.1.x extensions: brief/profile/reflect/gate/review/loop/finish/decision/recover 等本地 harness
+v0.1 baseline: YAML 驱动的只读 engineering-change Inspection Loop
+v0.1.x daily mainline: brief/profile/reflect/gate/review/loop/finish/decision/recover Coding Harness
 experimental extensions: Goal、Memory、adapters
 future P1: 有限自动 checkpoint 推进
 future optional: SQLite + FTS5 memory ledger、replay UI
@@ -199,3 +203,5 @@ future optional: SQLite + FTS5 memory ledger、replay UI
 
 当前产品收口以 `docs/PRODUCT-CONTRACT.md` 为准：核心是上下文编译、受控执行、确定性验证、
 隔离审查和证据化恢复；Memory、Goal P0 与 adapter 保持实验状态。
+
+当前稳定版本为 `v0.1.1`，只整合安全和恢复维护修复，不扩大上述范围。

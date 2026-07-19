@@ -99,9 +99,18 @@ class EngineeringChangeRuntime:
     ) -> None:
         self.workspace = workspace
         self.loop_spec = loop_spec or default_engineering_change_spec()
-        self.llm_client = llm_client or LLMClient.from_env()
+        self._llm_client = llm_client
+
+    @property
+    def llm_client(self) -> RuntimeLLMClient:
+        if self._llm_client is None:
+            self._llm_client = LLMClient.from_env()
+        return self._llm_client
 
     def run(self, task_file: Path, repo_path: Path) -> Path:
+        assert_not_sensitive_path(task_file)
+        task_path = task_file.resolve(strict=True)
+        assert_not_sensitive_path(task_path)
         base_run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{self.loop_spec.name}"
         run_id, run_dir = create_run_dir(self.workspace, base_run_id)
 
@@ -110,7 +119,7 @@ class EngineeringChangeRuntime:
             run_id=run_id,
             loop_name=self.loop_spec.name,
             repo_path=str(repo_path),
-            task_file=str(task_file),
+            task_file=str(task_path),
         )
         store = StateStore(run_dir)
         broker = ToolBroker(repo_path)
@@ -133,14 +142,13 @@ class EngineeringChangeRuntime:
         if not budget.begin_step("task_loaded"):
             return self._finish_budget_exceeded(run_dir, state, store, trace, budget)
         state.current_step = "task_loaded"
-        assert_not_sensitive_path(task_file)
-        raw_task_text = task_file.read_text(encoding="utf-8")
+        raw_task_text = task_path.read_text(encoding="utf-8")
         target_files = parse_target_files(
             raw_task_text,
             self.loop_spec.inspect.target_section_names,
         )
         task_text = redact_text(raw_task_text)
-        trace.write("task_loaded", task_file=str(task_file))
+        trace.write("task_loaded", task_file=str(task_path))
         trace.write(
             "target_files_parsed",
             count=len(target_files),

@@ -72,11 +72,17 @@ def test_engineering_runtime_rejects_sensitive_task_before_reading(
         return original_read_text(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", guarded_read_text)
+    monkeypatch.setattr(
+        "vega.runtime.LLMClient.from_env",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("sensitive task must be rejected before LLM initialization")
+        ),
+    )
 
     with pytest.raises(ValueError, match="environment_file"):
         EngineeringChangeRuntime(workspace).run(task, repo)
 
-    assert next(workspace.joinpath("runs").iterdir()).joinpath("trace.jsonl").exists()
+    assert not workspace.joinpath("runs").exists()
 
 
 def test_runtime_state_and_artifacts_do_not_persist_package_credentials(tmp_path: Path) -> None:

@@ -14,6 +14,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from .redaction import redact_text
+from .repository_identity import resolve_git_revision
 
 
 CONFIG_FILENAMES = [".vega.yaml", ".vega.yml"]
@@ -411,7 +412,7 @@ def load_project_config(
 ) -> ProjectConfig:
     repo = repo_path.resolve()
     if tracked_only:
-        revision = _resolve_tracked_revision(repo, tracked_revision or "HEAD")
+        revision = resolve_git_revision(repo, tracked_revision or "HEAD")
         if revision is None:
             return ProjectConfig()
         for name in CONFIG_FILENAMES:
@@ -432,22 +433,6 @@ def load_project_config(
             config.source_path = str(path)
             return config
     return ProjectConfig()
-
-
-def _resolve_tracked_revision(repo: Path, revision: str) -> str | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{revision}^{{commit}}"],
-        cwd=repo,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
 
 
 def _read_tracked_config(repo: Path, revision: str, name: str) -> str | None:

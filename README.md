@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="docs/assets/vega-hero.jpg" width="100%" alt="Vega：一个写，一个审，永不共享上下文">
+<img src="docs/assets/vega-hero.jpg" width="100%" alt="Vega：一个写，一个审，独立会话共享证据">
 
 # Vega
 
-<h3>One writes. One reviews. Never the same context.</h3>
+<h3>One writes. One reviews. Separate sessions, shared evidence.</h3>
 
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Baseline-v0.1.0-4fb8d8?style=for-the-badge" alt="v0.1.0">
+  <img src="https://img.shields.io/badge/Baseline-v0.1.1-4fb8d8?style=for-the-badge" alt="v0.1.1">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -23,22 +23,22 @@
 </div>
 
 写代码的 AI 不该自己审自己写的东西。Vega 是一个本地优先的 AI 编码工作流 harness：worker 负责改代码，
-reviewer 在隔离的上下文里只看 diff、测试证据和项目规则；每次任务用项目自己的验证命令和风险门禁收口，
-失败、中断或证据不足时留好现场，交还给人。Vega 的重点不是增加更多 Agent，而是让写、验、审和交付
-之间的边界更清楚。
+reviewer 使用独立会话，不继承 worker 的完整聊天记录，并在同一目标仓库的只读视图中结合项目规则、diff
+和验证证据进行审查；每次任务用项目自己的验证命令和风险门禁收口，失败、中断或证据不足时留好现场，
+交还给人。Vega 的重点不是增加更多 Agent，而是让写、验、审和交付之间的边界更清楚。
 
 <p align="center">
-  <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，验证与隔离审查之间上下文隔离，失败 fail-closed 交还人工">
+  <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，worker 与 reviewer 使用独立会话，失败 fail-closed 交还人工">
 </p>
 
-<p align="center"><sub>一次任务的完整闭环：写与审上下文隔离，任何一环证据不足都 fail-closed 交还人工。</sub></p>
+<p align="center"><sub>一次任务的完整闭环：写与审会话分离，任何一环证据不足都 fail-closed 交还人工。</sub></p>
 
 ## 核心能力
 
 - 从任务、`AGENTS.md`、项目画像和 `.vega.yaml` 编译执行上下文。
 - 支持 bug、feature 的人工协作 `assist` 与显式自动化 `auto` 流程。
 - 运行项目自己的测试、静态检查和其他确定性验证。
-- 使用独立只读 reviewer 审查 diff、测试证据和项目规则。
+- 使用独立只读 reviewer 会话审查 diff、测试证据和项目规则，不传递 worker 完整对话。
 - 根据变更路径、diff 规模和预算输出风险等级与审查建议。
 - 在失败、中断或证据不足时保存 state、trace、报告和人工接管入口。
 - 不自动 commit、push、release，也不自动接受长期 Memory。
@@ -47,6 +47,9 @@ reviewer 在隔离的上下文里只看 diff、测试证据和项目规则；每
 
 要求 Python `>=3.11` 和 Git。只有使用自动 worker 或隔离 reviewer 时才需要已安装并登录
 Codex CLI。
+
+命名约定：`Vega` 是产品名，`vegaloom` 是公开仓库、Python distribution 和发布制品名，
+`vega` 是 Python 导入包与 CLI 命令。
 
 ```powershell
 git clone https://github.com/aki0225/vegaloom.git
@@ -82,6 +85,15 @@ vega status --run <run_id>
 vega finish --run <run_id>
 ```
 
+只需要只读检查和报告时，可以使用兼容的 Inspection Loop：
+
+```powershell
+vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --repo .
+```
+
+`vega do/loop` 使用 `LoopAutomationRuntime`，是当前日常 Coding Harness 主线；
+`vega run engineering-change` 使用 `EngineeringChangeRuntime`，保留为 YAML 驱动的只读基线。
+
 ## 关键行为
 
 - 确定性验证高于模型结论；测试失败时 reviewer 的 `approve` 不能把运行变成成功。
@@ -102,6 +114,7 @@ vega finish --run <run_id>
 | v0.1 范围与取舍 | [MVP-SCOPE](docs/MVP-SCOPE.md) |
 | 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |
 | 工作区与验证规范 | [WORKSPACE-HYGIENE](docs/WORKSPACE-HYGIENE.md) |
+| v0.1.1 安全维护更新与迁移 | [RELEASE-NOTES-0.1.1](docs/RELEASE-NOTES-0.1.1.md) |
 
 ## 定位与边界
 
@@ -110,7 +123,8 @@ vega finish --run <run_id>
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal 和 adapters 是可选能力，不扩大核心 loop 的成功条件。
-- 当前稳定基线为 `v0.1.0`。
+- 当前稳定基线为 `v0.1.1`。该版本只整合路径范围、验证隔离、恢复和并发安全修复，
+  不扩大 v0.1 产品范围。
 
 ## 开发验证
 
