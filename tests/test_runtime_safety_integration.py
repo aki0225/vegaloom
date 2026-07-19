@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -216,9 +217,268 @@ def test_verification_redacts_secret_from_command_and_output(tmp_path: Path) -> 
 
     assert result.command_count == 1
     assert not result.has_failures
+    payload = json.loads(result.result_path.read_text(encoding="utf-8"))
+    command_result = payload["results"][0]
+    assert command_result["command"] == command_result["configured_command"]
+    assert command_result["command"] == command_result["executed_command"]
+    assert not repo.joinpath(".tmp", "vega-verification").exists()
     artifacts = _read_tree(output_dir)
     assert FAKE_SECRET not in artifacts
     assert "[REDACTED]" in artifacts
+
+
+def test_verification_temp_placeholder_isolates_iterations_and_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                "    - echo first {{vega_verification_temp}}",
+                "    - echo second {{vega_verification_temp}}",
+                "  max_commands: 2",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    calls: list[tuple[int, int, Path, str]] = []
+
+    def fake_run_owned_process(
+        command,
+        input_text,
+        cwd,
+        timeout_seconds,
+        context,
+        *,
+        environment,
+    ):
+        del input_text, cwd, timeout_seconds
+        assert context.iteration is not None
+        command_index = int(context.execution_dir.name.rsplit("-", 1)[1])
+        expected_temp = (
+            repo.resolve()
+            / ".tmp"
+            / "vega-verification"
+            / "isolation-run"
+            / f"iteration-{context.iteration}"
+            / f"command-{command_index}"
+        )
+        assert expected_temp.is_dir()
+        assert environment == {"VEGA_VERIFICATION_TEMP": str(expected_temp)}
+        shell_text = command if isinstance(command, str) else " ".join(command)
+        assert "VEGA_VERIFICATION_TEMP" in shell_text
+        assert str(expected_temp) not in shell_text
+        calls.append((context.iteration, command_index, expected_temp, shell_text))
+        return OwnedProcessResult(
+            status="success",
+            output="ok\n",
+            error=None,
+            returncode=0,
+        )
+
+    monkeypatch.setattr(
+        "vega.verification.run_owned_process",
+        fake_run_owned_process,
+    )
+
+    first = run_project_verification(
+        workspace,
+        repo,
+        workspace / "runs" / "isolation-run" / "iterations" / "01",
+        iteration=1,
+    )
+    second = run_project_verification(
+        workspace,
+        repo,
+        workspace / "runs" / "isolation-run" / "iterations" / "02",
+        iteration=2,
+    )
+
+    assert [(iteration, command) for iteration, command, _, _ in calls] == [
+        (1, 1),
+        (1, 2),
+        (2, 1),
+        (2, 2),
+    ]
+    assert len({path for _, _, path, _ in calls}) == 4
+    for result in (first, second):
+        payload = json.loads(result.result_path.read_text(encoding="utf-8"))
+        for command_result in payload["results"]:
+            assert "{{vega_verification_temp}}" in command_result["command"]
+            assert command_result["command"] == command_result["configured_command"]
+            assert "{{vega_verification_temp}}" not in command_result["executed_command"]
+            assert "VEGA_VERIFICATION_TEMP" in command_result["executed_command"]
+            assert command_result["verification_temp"] in {
+                path.relative_to(repo.resolve()).as_posix()
+                for _, _, path, _ in calls
+            }
+
+
+def test_verification_temp_artifacts_redact_sensitive_repo_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / f"repo-{FAKE_SECRET}"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                "    - echo {{vega_verification_temp}}",
+                "  max_commands: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    def fake_run_owned_process(
+        command,
+        input_text,
+        cwd,
+        timeout_seconds,
+        context,
+        *,
+        environment,
+    ):
+        del command, input_text, cwd, timeout_seconds, context
+        assert FAKE_SECRET in environment["VEGA_VERIFICATION_TEMP"]
+        return OwnedProcessResult(
+            status="success",
+            output="ok\n",
+            error=None,
+            returncode=0,
+        )
+
+    monkeypatch.setattr(
+        "vega.verification.run_owned_process",
+        fake_run_owned_process,
+    )
+    result = run_project_verification(
+        workspace,
+        repo,
+        workspace / "runs" / "redaction-run" / "iterations" / "01",
+    )
+
+    artifacts = _read_tree(result.result_path.parent)
+    assert FAKE_SECRET not in artifacts
+    assert "[REDACTED]" in artifacts
+    payload = json.loads(result.result_path.read_text(encoding="utf-8"))
+    assert payload["results"][0]["verification_temp"] == (
+        Path(".tmp")
+        / "vega-verification"
+        / "redaction-run"
+        / "iteration-1"
+        / "command-1"
+    ).as_posix()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="仅覆盖 Windows cmd.exe 引号语义")
+def test_windows_verification_preserves_nested_python_quotes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo with spaces & %VEGA_INJECT%"
+    monkeypatch.setenv("VEGA_INJECT", "unexpected-expansion")
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                (
+                    "    - python -c \"import sys; from pathlib import Path; "
+                    "path=Path(sys.argv[1]); "
+                    "assert path.is_dir(); print('quoted verification ok')\" "
+                    "{{vega_verification_temp}}"
+                ),
+                "  max_commands: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    output_dir = workspace / "runs" / "windows-run" / "iterations" / "04"
+    result = run_project_verification(
+        workspace,
+        repo,
+        output_dir,
+        iteration=4,
+    )
+    payload = json.loads(result.result_path.read_text(encoding="utf-8"))
+    expected_temp = (
+        repo.resolve()
+        / ".tmp"
+        / "vega-verification"
+        / "windows-run"
+        / "iteration-4"
+        / "command-1"
+    )
+    execution = json.loads(
+        output_dir.joinpath(
+            "executions",
+            "verification-01",
+            "execution.json",
+        ).read_text(encoding="utf-8")
+    )
+
+    assert not result.has_failures
+    assert payload["results"][0]["returncode"] == 0
+    assert "quoted verification ok" in payload["results"][0]["output"]
+    assert payload["results"][0]["command"].count("{{vega_verification_temp}}") == 1
+    assert "VEGA_VERIFICATION_TEMP" in payload["results"][0]["executed_command"]
+    assert str(expected_temp) not in payload["results"][0]["executed_command"]
+    assert payload["results"][0]["verification_temp"] == expected_temp.relative_to(
+        repo.resolve()
+    ).as_posix()
+    assert execution["iteration"] == 4
+
+
+@pytest.mark.skipif(os.name == "nt", reason="仅覆盖 POSIX shell 变量展开语义")
+def test_posix_verification_temp_env_does_not_re_evaluate_path(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo $(touch injected) `touch injected-two`"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                (
+                    "    - python -c \"import sys; from pathlib import Path; "
+                    "path=Path(sys.argv[1]); assert path.is_dir(); print('safe')\" "
+                    "{{vega_verification_temp}}"
+                ),
+                "  max_commands: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_project_verification(
+        workspace,
+        repo,
+        workspace / "runs" / "posix-run" / "iterations" / "01",
+    )
+
+    assert not result.has_failures
+    assert not tmp_path.joinpath("injected").exists()
+    assert not tmp_path.joinpath("injected-two").exists()
 
 
 @pytest.mark.parametrize(
@@ -346,7 +606,17 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
         _init_changed_git_repo(repo)
     reviewer = QueueRunner([_review_json("approve")])
 
-    def fake_verification(workspace_path: Path, repo_path: Path, output_dir: Path):
+    seen_iterations: list[int] = []
+
+    def fake_verification(
+        workspace_path: Path,
+        repo_path: Path,
+        output_dir: Path,
+        *,
+        iteration: int,
+    ):
+        del workspace_path
+        seen_iterations.append(iteration)
         output_dir.mkdir(parents=True, exist_ok=True)
         result_status = "timeout" if interruption_status == "timed_out" else "failed"
         result_path = output_dir / "verification-result.json"
@@ -440,6 +710,7 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
     assert state["iterations"][0]["worker_status"] == worker_status
     assert state["iterations"][0]["verification_status"] == "failed"
     assert state["iterations"][0]["verification_failed_count"] == 1
+    assert seen_iterations == [1]
     assert iteration_dir.joinpath(report_name).exists()
     assert iteration_dir.joinpath("verification-result.json").exists()
     assert iteration_dir.joinpath("verification-summary.md").exists()

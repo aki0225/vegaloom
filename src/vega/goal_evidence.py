@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from .execution_control import ExecutionLease
 from .models import (
     GateResult,
     GateState,
@@ -20,10 +21,20 @@ from .models import (
     ReviewState,
     ReviewVerdict,
 )
+from .project_config import (
+    VERIFICATION_TEMP_PLACEHOLDER,
+    VERIFICATION_TEMP_ROOT,
+    build_verification_shell_command,
+    load_project_config,
+    project_policy_snapshot,
+    render_verification_command,
+    scope_policy_sha256,
+)
 from .redaction import sensitive_path_reason
 from .risk_gate_evidence import validate_iteration_risk_gate_artifacts
 from .run_status import run_status_payload
 from .run_utils import resolve_run_dir
+from .scope_gate import validate_iteration_scope_gate_artifacts
 from .workspace_check import capture_review_workspace
 
 
@@ -343,6 +354,16 @@ def validate_loop_artifact_integrity(
         issues.append("loop_repo_mismatch")
     if state.run_id != loop_dir.name:
         issues.append("loop_run_id_mismatch")
+    if state.status == "success" and state.iterations and not state.scope_gate_required:
+        # 旧 run 仍可查看和复盘，但缺少三阶段 scope 证据时不能自动升级为 ready_to_commit。
+        issues.append("legacy_scope_gate_unverified")
+    if (
+        state.status == "success"
+        and state.iterations
+        and state.iterations[-1].lifecycle != "completed"
+    ):
+        issues.append("loop_success_latest_iteration_interrupted")
+    _validate_project_policy_snapshot(loop_dir, repo_path, state, issues)
 
     verdicts: list[ReviewVerdict] = []
     verification_results: list[dict[str, Any]] = []
@@ -363,10 +384,61 @@ def validate_loop_artifact_integrity(
         if not iteration_dir.is_dir():
             issues.append(f"{prefix}_directory_missing")
             continue
+        if iteration.lifecycle == "interrupted":
+            issues.extend(
+                _validate_interrupted_iteration(
+                    iteration_dir,
+                    iteration,
+                )
+            )
+            continue
+        if iteration.interrupted_step is not None or iteration.interrupted_at is not None:
+            issues.append(f"{prefix}_completed_with_interruption_metadata")
         # 前序 iteration 的 Reflect 会被后续 worker 的合法改动自然淘汰，不能拿终态
         # 工作区重算其历史风险；否则多轮 loop 会产生错误的 fail-closed。最终 iteration
         # 仍必须以当前可信工作区重算，防止影响终态结论的风险结果被同步降级。
         recompute_from_current_workspace = iteration.iteration == latest_iteration
+        scope_gate_integrity = validate_iteration_scope_gate_artifacts(
+            iteration_dir,
+            iteration,
+            phase="pre_verification",
+            # verification 可能在 pre gate 之后修改工作区；只对 post gate 使用终态
+            # 工作区重算，pre gate 保持 result/report/state/trace 的绑定校验。
+            repo_path=None,
+            trace_path=loop_dir / "trace.jsonl",
+            required=state.scope_gate_required,
+            expected_head_sha=state.initial_head_sha,
+            expected_policy_sha256=state.scope_policy_sha256,
+        )
+        issues.extend(f"{prefix}_{issue}" for issue in scope_gate_integrity.issues)
+        post_scope_gate_integrity = validate_iteration_scope_gate_artifacts(
+            iteration_dir,
+            iteration,
+            phase="post_verification",
+            # 最终工作区只用于重算真正紧邻 reviewer 的 pre-review gate。
+            repo_path=None,
+            trace_path=loop_dir / "trace.jsonl",
+            required=state.scope_gate_required,
+            expected_head_sha=state.initial_head_sha,
+            expected_policy_sha256=state.scope_policy_sha256,
+        )
+        issues.extend(
+            f"{prefix}_post_verification_{issue}"
+            for issue in post_scope_gate_integrity.issues
+        )
+        review_scope_gate_integrity = validate_iteration_scope_gate_artifacts(
+            iteration_dir,
+            iteration,
+            phase="pre_review",
+            repo_path=repo_path if recompute_from_current_workspace else None,
+            trace_path=loop_dir / "trace.jsonl",
+            required=state.scope_gate_required,
+            expected_head_sha=state.initial_head_sha,
+            expected_policy_sha256=state.scope_policy_sha256,
+        )
+        issues.extend(
+            f"{prefix}_pre_review_{issue}" for issue in review_scope_gate_integrity.issues
+        )
         gate_integrity = validate_iteration_risk_gate_artifacts(
             iteration_dir,
             iteration,
@@ -391,6 +463,7 @@ def validate_loop_artifact_integrity(
             iteration,
             issues,
             verification_results,
+            expected_artifact_version=state.verification_artifact_version,
         )
 
     if state.iterations:
@@ -400,6 +473,18 @@ def validate_loop_artifact_integrity(
         issues.append("loop_current_iteration_unexpected")
 
     for artifact_name, issue_name in (
+        ("scope-gate-result.json", "unbound_scope_gate_result"),
+        ("scope-gate-report.md", "unbound_scope_gate_report"),
+        (
+            "scope-gate-post-verification-result.json",
+            "unbound_post_verification_scope_gate_result",
+        ),
+        (
+            "scope-gate-post-verification-report.md",
+            "unbound_post_verification_scope_gate_report",
+        ),
+        ("scope-gate-pre-review-result.json", "unbound_pre_review_scope_gate_result"),
+        ("scope-gate-pre-review-report.md", "unbound_pre_review_scope_gate_report"),
         ("risk-gate-result.json", "unbound_risk_gate_result"),
         ("risk-gate-report.md", "unbound_risk_gate_report"),
         ("review-verdict.json", "unbound_review_verdict"),
@@ -415,6 +500,48 @@ def validate_loop_artifact_integrity(
         verification_results=verification_results,
         risk_gate_results=risk_gate_results,
     )
+
+
+def _validate_project_policy_snapshot(
+    loop_dir: Path,
+    repo_path: Path,
+    state: LoopAutomationState,
+    issues: list[str],
+) -> None:
+    """绑定启动策略 artifact，并在 Finish/Goal 校验时复查当前策略。"""
+    expected_hash = state.project_policy_snapshot_sha256
+    if expected_hash is not None:
+        path = loop_dir / "project-policy-snapshot.json"
+        if not path.is_file():
+            issues.append("project_policy_snapshot_missing")
+        else:
+            try:
+                text = path.read_text(encoding="utf-8")
+                payload = json.loads(text)
+            except OSError:
+                issues.append("project_policy_snapshot_unreadable")
+            except json.JSONDecodeError:
+                issues.append("project_policy_snapshot_invalid_json")
+            else:
+                if hashlib.sha256(text.encode("utf-8")).hexdigest() != expected_hash:
+                    issues.append("project_policy_snapshot_hash_mismatch")
+                if payload != state.project_policy_snapshot:
+                    issues.append("project_policy_snapshot_state_mismatch")
+    if state.project_policy_snapshot:
+        try:
+            current_snapshot = project_policy_snapshot(repo_path)
+            current_config = load_project_config(repo_path)
+        except Exception:  # noqa: BLE001 - 当前策略无法解析时不能信任旧的完成结论
+            issues.append("project_policy_snapshot_current_unreadable")
+        else:
+            if current_snapshot != state.project_policy_snapshot:
+                issues.append("project_policy_changed_since_loop_start")
+            if (
+                state.scope_policy_sha256 is not None
+                and scope_policy_sha256(current_config.scope)
+                != state.scope_policy_sha256
+            ):
+                issues.append("scope_policy_changed_since_loop_start")
 
 
 def validate_loop_evidence_freshness(
@@ -1010,12 +1137,46 @@ def _validate_iteration_review(
         verdicts.append(local_verdict)
 
 
+def _validate_interrupted_iteration(
+    iteration_dir: Path,
+    iteration: LoopIterationState,
+) -> list[str]:
+    prefix = f"iteration_{iteration.iteration:02d}"
+    issues: list[str] = []
+    if not iteration.interrupted_step:
+        issues.append(f"{prefix}_interrupted_step_missing")
+    if not iteration.interrupted_at:
+        issues.append(f"{prefix}_interrupted_at_missing")
+
+    report_path = iteration_dir / "interruption-report.md"
+    if not report_path.is_file():
+        issues.append(f"{prefix}_interruption_report_missing")
+        return issues
+    try:
+        report = report_path.read_text(encoding="utf-8")
+    except OSError:
+        issues.append(f"{prefix}_interruption_report_unreadable")
+        return issues
+    if f"- 迭代：`{iteration.iteration}`" not in report:
+        issues.append(f"{prefix}_interruption_report_iteration_mismatch")
+    if (
+        iteration.interrupted_step
+        and f"- 原步骤：`{iteration.interrupted_step}`" not in report
+    ):
+        issues.append(f"{prefix}_interruption_report_step_mismatch")
+    if iteration.interrupted_at and iteration.interrupted_at not in report:
+        issues.append(f"{prefix}_interruption_report_time_mismatch")
+    return issues
+
+
 def _validate_iteration_verification(
     repo_path: Path,
     iteration_dir: Path,
     iteration: LoopIterationState,
     issues: list[str],
     results: list[dict[str, Any]],
+    *,
+    expected_artifact_version: int | None,
 ) -> None:
     prefix = f"iteration_{iteration.iteration:02d}"
     result_path = iteration_dir / "verification-result.json"
@@ -1034,6 +1195,23 @@ def _validate_iteration_verification(
     command_results = payload.get("results")
     command_count = payload.get("command_count")
     failed_count = payload.get("failed_count")
+    artifact_version = payload.get("artifact_version")
+    expected_run_id = iteration_dir.parent.parent.name
+    recorded_run_id = payload.get("run_id")
+    recorded_iteration = payload.get("iteration")
+    shell_kind = payload.get("shell_kind")
+    if expected_artifact_version is not None:
+        if artifact_version != expected_artifact_version:
+            issues.append(f"{prefix}_verification_artifact_version_invalid")
+    elif artifact_version is not None and artifact_version != 2:
+        issues.append(f"{prefix}_verification_artifact_version_invalid")
+    if artifact_version == 2:
+        if recorded_run_id != expected_run_id:
+            issues.append(f"{prefix}_verification_run_id_mismatch")
+        if recorded_iteration != iteration.iteration:
+            issues.append(f"{prefix}_verification_iteration_binding_mismatch")
+        if shell_kind not in {"cmd", "posix-sh"}:
+            issues.append(f"{prefix}_verification_shell_kind_invalid")
     if not isinstance(payload.get("repo_path"), str):
         issues.append(f"{prefix}_verification_repo_missing")
     elif _normalized_path(payload["repo_path"]) != _normalized_path(repo_path):
@@ -1065,6 +1243,17 @@ def _validate_iteration_verification(
             if item.get("status") not in {"passed", "failed", "timeout"}:
                 issues.append(f"{prefix}_verification_result_status_invalid")
                 break
+            if artifact_version == 2:
+                _validate_versioned_verification_result(
+                    iteration_dir,
+                    iteration,
+                    index,
+                    commands[index],
+                    item,
+                    expected_run_id,
+                    shell_kind if isinstance(shell_kind, str) else "",
+                    issues,
+                )
     if isinstance(command_results, list) and _is_non_negative_int(failed_count):
         actual_failed_count = sum(
             1
@@ -1089,6 +1278,93 @@ def _validate_iteration_verification(
         trusted_payload = dict(payload)
         trusted_payload["path"] = str(result_path.resolve())
         results.append(trusted_payload)
+
+
+def _validate_versioned_verification_result(
+    iteration_dir: Path,
+    iteration: LoopIterationState,
+    index: int,
+    configured_command: str,
+    item: dict[str, Any],
+    run_id: str,
+    shell_kind: str,
+    issues: list[str],
+) -> None:
+    prefix = f"iteration_{iteration.iteration:02d}"
+    command_index = index + 1
+    if item.get("command_index") != command_index:
+        issues.append(f"{prefix}_verification_command_index_mismatch")
+    if item.get("configured_command") != configured_command:
+        issues.append(f"{prefix}_verification_configured_command_binding_mismatch")
+
+    expected_executed_command = ""
+    if shell_kind in {"cmd", "posix-sh"}:
+        try:
+            expected_executed_command = render_verification_command(
+                configured_command,
+                shell_kind,
+            )
+        except ValueError:
+            issues.append(f"{prefix}_verification_executed_command_unrenderable")
+        else:
+            if item.get("executed_command") != expected_executed_command:
+                issues.append(f"{prefix}_verification_executed_command_binding_mismatch")
+
+    expected_temp = None
+    if VERIFICATION_TEMP_PLACEHOLDER in configured_command:
+        expected_temp = (
+            VERIFICATION_TEMP_ROOT
+            / run_id
+            / f"iteration-{iteration.iteration}"
+            / f"command-{command_index}"
+        ).as_posix()
+    if item.get("verification_temp") != expected_temp:
+        issues.append(f"{prefix}_verification_temp_path_mismatch")
+
+    execution_path = (
+        iteration_dir
+        / "executions"
+        / f"verification-{command_index:02d}"
+        / "execution.json"
+    )
+    execution_payload, execution_issue = _load_json_object(execution_path)
+    if execution_issue:
+        issues.append(f"{prefix}_verification_execution_{execution_issue}")
+        return
+    assert execution_payload is not None
+    try:
+        execution = ExecutionLease.model_validate(execution_payload)
+    except ValidationError:
+        issues.append(f"{prefix}_verification_execution_schema_invalid")
+        return
+
+    if execution.run_id != run_id:
+        issues.append(f"{prefix}_verification_execution_run_id_mismatch")
+    if execution.step != "verification":
+        issues.append(f"{prefix}_verification_execution_step_mismatch")
+    if execution.iteration != iteration.iteration:
+        issues.append(f"{prefix}_verification_execution_iteration_mismatch")
+    if execution.returncode != item.get("returncode"):
+        issues.append(f"{prefix}_verification_execution_returncode_mismatch")
+    expected_statuses = {
+        "passed": {"completed"},
+        "failed": {"failed", "stopped"},
+        "timeout": {"timed_out"},
+    }.get(item.get("status"), set())
+    if execution.status not in expected_statuses:
+        issues.append(f"{prefix}_verification_execution_status_mismatch")
+    if expected_executed_command:
+        expected_process_command = build_verification_shell_command(
+            expected_executed_command,
+            shell_kind,
+        )
+        expected_command_parts = (
+            [expected_process_command]
+            if isinstance(expected_process_command, str)
+            else expected_process_command
+        )
+        if execution.command != expected_command_parts:
+            issues.append(f"{prefix}_verification_execution_command_mismatch")
 
 
 def _load_loop_state(path: Path) -> tuple[LoopAutomationState | None, str | None]:

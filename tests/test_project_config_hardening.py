@@ -4,10 +4,153 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from vega import project_config
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
 from vega.project_config import check_project_config, render_project_config_check
 from vega.project_profile import ProjectProfileRuntime
 from vega.reflect_runtime import ReflectRuntime
+
+
+@pytest.mark.parametrize(
+    "placeholder",
+    [
+        "{{vega_other_temp}}",
+        "{{vega_verification_temp_extra}}",
+        "{{vega_}}",
+    ],
+)
+def test_config_check_rejects_unknown_vega_verification_placeholder(
+    tmp_path: Path,
+    placeholder: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                f"    - echo '{placeholder}'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = check_project_config(repo)
+
+    assert result.status == "failed"
+    issues = [
+        issue
+        for issue in result.issues
+        if issue.code == "unknown_verification_placeholder"
+    ]
+    assert len(issues) == 1
+    assert placeholder in issues[0].evidence
+    assert "{{vega_verification_temp}}" in issues[0].message
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo {{vega_verification_temp}}",
+        (
+            "python -c \"print('ok')\" "
+            "{{vega_verification_temp}}/runs"
+        ),
+        (
+            "python -m pytest "
+            "--basetemp={{vega_verification_temp}}/runs "
+            "-o cache_dir={{vega_verification_temp}}/cache"
+        ),
+        r"echo ^%VEGA_Q^% {{vega_verification_temp}}",
+    ],
+)
+def test_config_check_allows_exact_verification_temp_placeholder(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                f"    - {json.dumps(command)}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = check_project_config(repo)
+
+    assert not any(
+        issue.code == "unknown_verification_placeholder"
+        for issue in result.issues
+    )
+    assert not any(
+        issue.code == "unsafe_verification_temp_placeholder_context"
+        for issue in result.issues
+    )
+
+
+@pytest.mark.parametrize(
+    ("command", "shell_kind"),
+    [
+        ('echo "{{vega_verification_temp}}"', None),
+        ("echo '{{vega_verification_temp}}'", None),
+        ('echo "prefix {{vega_verification_temp}} suffix"', None),
+        ("echo prefix{{vega_verification_temp}}", None),
+        ("echo {{vega_verification_temp}}suffix", None),
+        (r'echo \" {{vega_verification_temp}} \"', None),
+        (r'echo ^"prefix" {{vega_verification_temp}}', None),
+        pytest.param(
+            r"echo %VEGA_Q% {{vega_verification_temp}} %VEGA_Q%",
+            "cmd",
+            id="cmd-dynamic-percent-expansion",
+        ),
+    ],
+)
+def test_config_check_rejects_unsafe_verification_temp_placeholder_context(
+    tmp_path: Path,
+    command: str,
+    shell_kind: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shell_kind is not None:
+        monkeypatch.setattr(
+            project_config,
+            "current_verification_shell_kind",
+            lambda: shell_kind,
+        )
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                f"    - {json.dumps(command)}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = check_project_config(repo)
+
+    assert result.status == "failed"
+    assert any(
+        issue.code == "unsafe_verification_temp_placeholder_context"
+        for issue in result.issues
+    )
 
 
 def test_config_check_redacts_sensitive_command_and_evidence(tmp_path: Path) -> None:
@@ -41,6 +184,41 @@ def test_config_check_redacts_sensitive_command_and_evidence(tmp_path: Path) -> 
     assert all(fake_secret not in command for command in result.verification_commands)
     assert "[REDACTED]" in rendered
     assert "[REDACTED]" in dumped
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "../outside.py",
+        "/absolute.py",
+        "C:/outside.py",
+        r"src\windows-style.py",
+        "tests//double-slash.py",
+        "safe\u202e.py",
+        "src/sk-abcdefghijkl.py",
+    ],
+)
+def test_config_check_rejects_unsafe_scope_patterns(tmp_path: Path, pattern: str) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "scope:",
+                "  allowed_paths:",
+                f"    - '{pattern}'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = check_project_config(repo)
+
+    assert result.status == "failed"
+    assert [issue.code for issue in result.issues] == ["invalid_project_config"]
+    assert "allowed_paths" in result.issues[0].evidence
 
 
 def test_project_profile_invalid_config_writes_failed_terminal_run(tmp_path: Path) -> None:

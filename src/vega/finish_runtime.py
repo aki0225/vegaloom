@@ -17,6 +17,7 @@ from .goal_evidence import (
 from .memory import MemoryProposalStore
 from .models import LoopAutomationState, ReviewVerdict
 from .redaction import redact_text, redact_value, write_redacted_json, write_redacted_text
+from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 
 
@@ -26,6 +27,10 @@ class FinishRuntime:
 
     def run(self, run: str) -> Path:
         run_dir = resolve_run_dir(self.workspace, run)
+        with RunMutationLock.acquire(run_dir, "loop.finish"):
+            return self._run_locked(run_dir)
+
+    def _run_locked(self, run_dir: Path) -> Path:
         try:
             state = _load_finish_state(run_dir)
         except ValueError as exc:
@@ -166,10 +171,17 @@ def render_finish_report(summary: dict[str, Any]) -> str:
     lines.extend(["", "## 迭代记录", ""])
     if summary["iterations"]:
         for item in summary["iterations"]:
+            interruption = (
+                f"，interrupted_step=`{item.get('interrupted_step')}`"
+                if item.get("lifecycle") == "interrupted"
+                else ""
+            )
             lines.append(
-                f"- 第 {item['iteration']} 轮：worker=`{item['worker_status']}`，"
+                f"- 第 {item['iteration']} 轮：lifecycle=`{item.get('lifecycle', 'completed')}`，"
+                f"worker=`{item['worker_status']}`，"
                 f"verification=`{item.get('verification_status', 'skipped')}`，"
-                f"verdict=`{item.get('verdict') or '无'}`，findings={item.get('findings_count', 0)}"
+                f"verdict=`{item.get('verdict') or '无'}`，"
+                f"findings={item.get('findings_count', 0)}{interruption}"
             )
     else:
         lines.append("- 尚未产生迭代记录。")

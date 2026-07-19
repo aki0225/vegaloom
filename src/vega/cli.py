@@ -28,7 +28,6 @@ from .review_runtime import ReviewPackRuntime, ReviewRuntime
 from .run_status import latest_run_dir, render_run_status, run_status_payload
 from .run_utils import resolve_run_dir
 from .runtime import EngineeringChangeRuntime
-from .trace import TraceWriter
 from .tools.git_tools import run_git
 
 app = typer.Typer(help="Vega 本地 Agent Loop Runtime。", invoke_without_command=True)
@@ -304,15 +303,6 @@ def stop(
         record = request_stop_for_run(run_dir, reason)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    trace_path = run_dir / "trace.jsonl"
-    if trace_path.exists():
-        TraceWriter(trace_path).write(
-            "execution_stop_requested",
-            step=record.lease.step,
-            iteration=record.lease.iteration,
-            child_pid=record.lease.child_pid,
-            reason=reason,
-        )
     typer.echo(f"stop request 已写入：{record.path.parent / 'stop-request.json'}")
     typer.echo(f"- 步骤：{record.lease.step}")
     typer.echo(f"- owned child PID：{record.lease.child_pid or '尚未启动'}")

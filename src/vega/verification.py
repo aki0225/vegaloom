@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from .execution_control import RunnerExecutionContext, run_owned_process
-from .project_config import check_project_config, load_project_config, render_project_config_check
+from .project_config import (
+    VERIFICATION_TEMP_ENV,
+    VERIFICATION_TEMP_PLACEHOLDER,
+    VERIFICATION_TEMP_ROOT,
+    build_verification_shell_command,
+    check_project_config,
+    current_verification_shell_kind,
+    load_project_config,
+    render_verification_command,
+    render_project_config_check,
+)
 from .project_profile import build_project_profile
 from .redaction import redact_text, redact_value
 
@@ -44,6 +53,7 @@ def run_project_verification(
     repo_path: Path,
     output_dir: Path,
     *,
+    iteration: int = 1,
     max_commands: int | None = None,
     timeout_seconds: int | None = None,
 ) -> VerificationRunResult:
@@ -68,17 +78,35 @@ def run_project_verification(
         max_commands=command_limit,
     )
     run_id = _find_parent_run_id(output_dir)
+    shell_kind = current_verification_shell_kind()
     results: list[dict[str, Any]] = []
-    for index, command in enumerate(commands, start=1):
+    for index, configured_command in enumerate(commands, start=1):
+        verification_temp = None
+        if VERIFICATION_TEMP_PLACEHOLDER in configured_command:
+            verification_temp = _verification_temp_dir(
+                repo_path,
+                run_id,
+                iteration,
+                index,
+            )
+        executed_command = render_verification_command(
+            configured_command,
+            shell_kind,
+        )
+        if verification_temp is not None:
+            verification_temp.mkdir(parents=True, exist_ok=True)
         result = _run_command(
             repo_path,
-            command,
+            configured_command,
+            executed_command,
+            verification_temp,
+            index,
             command_timeout,
             RunnerExecutionContext(
                 execution_dir=output_dir / "executions" / f"verification-{index:02d}",
                 run_id=run_id,
                 step="verification",
-                iteration=index,
+                iteration=iteration,
                 heartbeat_interval_seconds=0.2,
                 lease_timeout_seconds=2.0,
                 terminate_grace_seconds=0.25,
@@ -88,16 +116,20 @@ def run_project_verification(
         if result["interruption_status"] is not None:
             break
 
-    executed_commands = commands[: len(results)]
+    completed_commands = commands[: len(results)]
     interruption_result = next(
         (item for item in results if item["interruption_status"] is not None),
         None,
     )
     payload = redact_value({
+        "artifact_version": 2,
+        "run_id": run_id,
+        "iteration": iteration,
+        "shell_kind": shell_kind,
         "repo_path": str(repo_path.resolve()),
         "config_path": config.source_path,
         "config_check": config_check.model_dump(),
-        "commands": executed_commands,
+        "commands": completed_commands,
         "results": results,
         "command_count": len(results),
         "failed_count": sum(1 for item in results if item["status"] != "passed"),
@@ -244,10 +276,22 @@ def render_verification_summary(payload: dict[str, Any]) -> str:
             "stopped": "STOPPED",
             "termination-unconfirmed": "TERMINATION-UNCONFIRMED",
         }.get(interruption_status, "PASS" if item["status"] == "passed" else "FAIL")
+        configured_command = item.get("configured_command", item["command"])
+        executed_command = item.get("executed_command", item["command"])
         lines.extend(
             [
-                f"### {index}. `{item['command']}`",
+                f"### {index}. `{configured_command}`",
                 "",
+                *(
+                    [f"- 实际执行：`{executed_command}`"]
+                    if executed_command != configured_command
+                    else []
+                ),
+                *(
+                    [f"- 临时目录：`{item['verification_temp']}`"]
+                    if item.get("verification_temp")
+                    else []
+                ),
                 f"- 结果：`{badge}`",
                 f"- 退出码：`{item['returncode']}`",
                 f"- 耗时：`{item['duration_seconds']:.2f}s`",
@@ -268,17 +312,26 @@ def render_verification_summary(payload: dict[str, Any]) -> str:
 
 def _run_command(
     repo_path: Path,
-    command: str,
+    configured_command: str,
+    executed_command: str,
+    verification_temp: Path | None,
+    command_index: int,
     timeout_seconds: int,
     execution_context: RunnerExecutionContext,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    process_options: dict[str, Any] = {}
+    if verification_temp is not None:
+        process_options["environment"] = {
+            VERIFICATION_TEMP_ENV: str(verification_temp)
+        }
     result = run_owned_process(
-        _shell_command(command),
+        _shell_command(executed_command),
         "",
         repo_path,
         timeout_seconds,
         execution_context,
+        **process_options,
     )
     interruption_status: VerificationInterruptionStatus | None = None
     if result.termination_unconfirmed:
@@ -297,7 +350,15 @@ def _run_command(
     if not output and result.status == "timed_out":
         output = redact_text(f"命令超时：{timeout_seconds}s")
     return {
-        "command": redact_text(command),
+        "command": redact_text(configured_command),
+        "configured_command": redact_text(configured_command),
+        "executed_command": redact_text(executed_command),
+        "command_index": command_index,
+        "verification_temp": (
+            _verification_temp_artifact_path(repo_path, verification_temp)
+            if verification_temp is not None
+            else None
+        ),
         "status": status,
         "returncode": result.returncode,
         "duration_seconds": time.perf_counter() - started,
@@ -309,10 +370,10 @@ def _run_command(
     }
 
 
-def _shell_command(command: str) -> list[str]:
-    if os.name == "nt":
-        return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command]
-    return ["/bin/sh", "-c", command]
+def _shell_command(command: str) -> list[str] | str:
+    # Windows 使用原生命令行以保留 python -c 等嵌套引号；/v:off 禁止延迟展开
+    # 在占位符注入后改变 cmd 解析状态。
+    return build_verification_shell_command(command)
 
 
 def _find_parent_run_id(output_dir: Path) -> str:
@@ -321,6 +382,41 @@ def _find_parent_run_id(output_dir: Path) -> str:
         if candidate.parent.name == "runs":
             return candidate.name
     return resolved.name
+
+
+def _verification_temp_dir(
+    repo_path: Path,
+    run_id: str,
+    iteration: int,
+    command_index: int,
+) -> Path:
+    if not run_id or run_id in {".", ".."} or "/" in run_id or "\\" in run_id:
+        raise ValueError("verification run_id 必须是单个安全路径段")
+    if iteration < 1 or command_index < 1:
+        raise ValueError("verification iteration 和 command index 必须从 1 开始")
+
+    repo = repo_path.resolve()
+    root = (repo / VERIFICATION_TEMP_ROOT).resolve()
+    if not root.is_relative_to(repo):
+        raise ValueError("verification 临时目录根路径逃出目标仓库")
+
+    command_dir = (
+        root
+        / run_id
+        / f"iteration-{iteration}"
+        / f"command-{command_index}"
+    ).resolve()
+    if not command_dir.is_relative_to(root):
+        raise ValueError("verification 临时目录逃出受控根路径")
+    return command_dir
+
+
+def _verification_temp_artifact_path(repo_path: Path, verification_temp: Path) -> str:
+    repo = repo_path.resolve()
+    resolved = verification_temp.resolve()
+    if not resolved.is_relative_to(repo):
+        raise ValueError("verification 临时目录无法记录为仓库相对路径")
+    return resolved.relative_to(repo).as_posix()
 
 
 def _redact_process_output(

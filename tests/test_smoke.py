@@ -1,11 +1,13 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import threading
 import time
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,9 +24,10 @@ from vega.execution_control import (
     run_owned_process,
 )
 from vega.finish_runtime import FinishRuntime
+from vega.goal_evidence import validate_loop_artifact_integrity
 from vega.goal_runtime import GoalRuntime
 from vega.llm_client import LLMClient
-from vega.loop_spec import load_loop_spec, load_loop_spec_file
+from vega.loop_spec import list_loop_specs, load_loop_spec, load_loop_spec_file
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.memory import MemoryLedgerStore
 from vega.models import BriefInput, MemoryProposal, RunState, ToolResult
@@ -35,6 +38,7 @@ from vega.recovery_runtime import RecoveryRuntime
 from vega.review_runtime import ReviewPackRuntime, ReviewRuntime, parse_review_verdict
 from vega.runner import CodexExecRunner, RunnerResult
 from vega.run_status import run_status_payload
+from vega.run_lock import RunMutationLock
 from vega.runtime import EngineeringChangeRuntime
 from vega.run_utils import create_run_dir
 from vega.tool_broker import ToolBroker
@@ -42,6 +46,11 @@ from vega.tools import git_tools
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
+
+
+def _strip_ansi(value: str) -> str:
+    return _ANSI_ESCAPE_PATTERN.sub("", value)
 
 
 def test_project_skeleton_exists() -> None:
@@ -52,11 +61,41 @@ def test_project_skeleton_exists() -> None:
     assert PROJECT_ROOT.joinpath("examples", "tasks", "check-atg-mcp-docs.md").exists()
 
 
-def _clear_vega_env(
+def test_packaged_baseline_loop_matches_workspace_mirror() -> None:
+    workspace_text = PROJECT_ROOT.joinpath(
+        "loops",
+        "engineering-change.loop.yaml",
+    ).read_text(encoding="utf-8")
+    packaged_text = files("vega").joinpath(
+        "resources",
+        "loops",
+        "engineering-change.loop.yaml",
+    ).read_text(encoding="utf-8")
+
+    assert packaged_text == workspace_text
+
+
+def test_packaged_baseline_loop_is_available_without_workspace_config(tmp_path: Path) -> None:
+    specs = list_loop_specs(tmp_path)
+
+    assert [spec.name for spec in specs] == ["engineering-change"]
+    assert load_loop_spec(tmp_path, "engineering-change").name == "engineering-change"
+
+
+def test_list_loops_cli_uses_packaged_baseline_in_empty_workspace(
+    tmp_path: Path,
     monkeypatch,
-    *,
-    provider_alias: str | None = "test-provider",
 ) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(app, ["list-loops"])
+
+    assert result.exit_code == 0
+    assert "engineering-change" in result.output
+    assert "未找到 loop 配置" not in result.output
+
+
+def _clear_vega_env(monkeypatch) -> None:
     for name in [
         "VEGA_API_KEY",
         "VEGA_BASE_URL",
@@ -66,8 +105,6 @@ def _clear_vega_env(
         "VEGA_TIMEOUT_SECONDS",
     ]:
         monkeypatch.delenv(name, raising=False)
-    if provider_alias is not None:
-        monkeypatch.setenv("VEGA_PROVIDER_ALIAS", provider_alias)
 
 
 def _copy_loop_spec(tmp_path: Path) -> None:
@@ -77,6 +114,22 @@ def _copy_loop_spec(tmp_path: Path) -> None:
         PROJECT_ROOT / "loops" / "engineering-change.loop.yaml",
         loop_dir / "engineering-change.loop.yaml",
     )
+
+
+def test_workspace_loop_overrides_packaged_baseline(tmp_path: Path) -> None:
+    _copy_loop_spec(tmp_path)
+    loop_path = tmp_path / "loops" / "engineering-change.loop.yaml"
+    loop_path.write_text(
+        loop_path.read_text(encoding="utf-8").replace(
+            "本地研发变更审查 loop：读取任务和仓库，受控收集上下文，生成报告、复核和评估。",
+            "workspace override",
+        ),
+        encoding="utf-8",
+    )
+
+    spec = load_loop_spec(tmp_path, "engineering-change")
+
+    assert spec.description == "workspace override"
 
 
 def _write_task_and_repo(tmp_path: Path) -> tuple[Path, Path]:
@@ -377,6 +430,40 @@ def _commit_repo_paths(repo_dir: Path, *paths: str, message: str = "test update"
     )
 
 
+def _write_isolated_verification_config(repo_dir: Path) -> None:
+    repo_dir.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                (
+                    "    - python -c \"import sys; from pathlib import Path; "
+                    "path=Path(sys.argv[1]); "
+                    "assert path.is_dir(); print('verification one')\" "
+                    "{{vega_verification_temp}}"
+                ),
+                (
+                    "    - python -c \"import sys; from pathlib import Path; "
+                    "path=Path(sys.argv[1]); "
+                    "assert path.is_dir(); print('verification two')\" "
+                    "{{vega_verification_temp}}"
+                ),
+                "  max_commands: 2",
+                "  timeout_seconds: 60",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _commit_repo_paths(
+        repo_dir,
+        ".vega.yaml",
+        message="add isolated verification config",
+    )
+
+
 def test_loop_spec_loads_yaml_and_rejects_unknown_git_check(tmp_path) -> None:
     spec = load_loop_spec(PROJECT_ROOT, "engineering-change")
     assert spec.name == "engineering-change"
@@ -504,15 +591,8 @@ def test_llm_client_from_env_uses_safe_defaults(monkeypatch) -> None:
     assert not client.available()
     assert client.model == "gpt-5.5"
     assert client.reasoning_effort == "xhigh"
-    assert client.provider_alias == "test-provider"
+    assert client.provider_alias == "ciii"
     assert client.timeout_seconds == 180.0
-
-
-def test_llm_client_from_env_requires_provider_alias(monkeypatch) -> None:
-    _clear_vega_env(monkeypatch, provider_alias=None)
-
-    with pytest.raises(ValueError, match="VEGA_PROVIDER_ALIAS"):
-        LLMClient.from_env()
 
 
 def test_cli_run_creates_core_artifacts_without_memory_proposal(tmp_path, monkeypatch) -> None:
@@ -557,7 +637,7 @@ def test_runtime_uses_mock_llm_for_plan_and_report(tmp_path, monkeypatch) -> Non
 
     class MockLLMClient:
         model = "gpt-5.5"
-        provider_alias = "test-provider"
+        provider_alias = "ciii"
 
         def available(self) -> bool:
             return True
@@ -589,7 +669,7 @@ def test_runtime_uses_mock_llm_for_plan_and_report(tmp_path, monkeypatch) -> Non
     )
     trace_text = run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8")
     assert '"llm_available": true' in trace_text
-    assert '"provider_alias": "test-provider"' in trace_text
+    assert '"provider_alias": "ciii"' in trace_text
 
 
 def test_eval_failure_marks_run_failed_after_artifacts_are_written(tmp_path, monkeypatch) -> None:
@@ -599,7 +679,7 @@ def test_eval_failure_marks_run_failed_after_artifacts_are_written(tmp_path, mon
 
     class BadReportLLMClient:
         model = "gpt-5.5"
-        provider_alias = "test-provider"
+        provider_alias = "ciii"
 
         def available(self) -> bool:
             return True
@@ -672,7 +752,7 @@ def test_llm_exception_falls_back_and_marks_unanswered_run_failed(
 
     class FailingLLMClient:
         model = "gpt-5.5"
-        provider_alias = "test-provider"
+        provider_alias = "ciii"
 
         def available(self) -> bool:
             return True
@@ -910,11 +990,11 @@ def test_brief_cli_requires_exactly_one_input_source(tmp_path, monkeypatch) -> N
         ],
     )
     assert both.exit_code != 0
-    assert "只能二选一" in both.output
+    assert "只能二选一" in _strip_ansi(both.output)
 
     none = CliRunner().invoke(app, ["brief", "bug", "--repo", str(repo_dir)])
     assert none.exit_code != 0
-    assert "必须提供 --input 或 --text" in none.output
+    assert "必须提供 --input 或 --text" in _strip_ansi(none.output)
 
 
 def test_memory_search_filters_by_repo_tag_and_path(tmp_path) -> None:
@@ -1415,8 +1495,14 @@ def test_loop_writes_project_context_into_worker_prompt(tmp_path) -> None:
     worker_prompt = run_dir.joinpath("worker-prompt.md").read_text(encoding="utf-8")
     assert "项目上下文" in project_context
     assert "测试必须说明结果" in project_context
+    assert "## 验证职责边界" in project_context
+    assert "不是对 worker 命令执行能力的确定性拦截" in project_context
+    assert "必须保持未加引号" in project_context
     assert "## 项目上下文" in worker_prompt
     assert "测试必须说明结果" in worker_prompt
+    assert "Vega 会在 worker 返回后独立执行" in worker_prompt
+    assert "不要运行带 `{{vega_verification_temp}}` 的 harness-owned 命令" in worker_prompt
+    assert "不共享 harness 临时目录的最小检查" in worker_prompt
 
 
 def test_loop_auto_runs_detected_verification_commands(tmp_path) -> None:
@@ -1509,8 +1595,17 @@ def test_loop_uses_vega_yaml_verification_commands(tmp_path) -> None:
     )
 
     summary = (run_dir / "iterations" / "01" / "verification-summary.md").read_text(encoding="utf-8")
+    payload = json.loads(
+        run_dir.joinpath(
+            "iterations",
+            "01",
+            "verification-result.json",
+        ).read_text(encoding="utf-8")
+    )
     assert "configured verification" in summary
     assert "python -c" in summary
+    assert payload["results"][0]["command"] == payload["results"][0]["configured_command"]
+    assert payload["results"][0]["command"] == payload["results"][0]["executed_command"]
 
 
 def test_loop_uses_separate_worker_and_reviewer_codex_options(tmp_path, monkeypatch) -> None:
@@ -2613,7 +2708,7 @@ def test_goal_attach_cli_rejects_unknown_evidence_type(tmp_path, monkeypatch) ->
     )
 
     assert result.exit_code != 0
-    assert "--type 只能是" in result.output
+    assert "--type 只能是" in _strip_ansi(result.output)
 
 
 def test_goal_recover_turns_running_goal_into_needs_human(tmp_path) -> None:
@@ -2762,6 +2857,7 @@ def test_decision_cli_records_run_decisions_and_status_shows_them(tmp_path, monk
 def test_loop_auto_stops_after_max_iterations(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
     _init_clean_git_repo(repo_dir)
+    _write_isolated_verification_config(repo_dir)
     worker = TrackedChangeRunner(["worker done", "worker done"])
     reviewer = StaticRunner([_review_json("request_changes"), _review_json("request_changes")])
     runtime = LoopAutomationRuntime(tmp_path, worker_runner=worker, reviewer_runner=reviewer)
@@ -2781,6 +2877,243 @@ def test_loop_auto_stops_after_max_iterations(tmp_path) -> None:
     assert worker.calls[0]["sandbox"] == "workspace-write"
     assert all(call["sandbox"] == "read-only" for call in reviewer.calls)
     assert run_dir.joinpath("final-report.md").exists()
+    verification_temp_root = (
+        repo_dir.resolve()
+        / ".tmp"
+        / "vega-verification"
+        / run_dir.name
+    )
+    executed_commands: set[str] = set()
+    verification_temp_paths: set[str] = set()
+    for iteration in (1, 2):
+        iteration_dir = run_dir / "iterations" / f"{iteration:02d}"
+        payload = json.loads(
+            iteration_dir.joinpath("verification-result.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert payload["command_count"] == 2
+        for command_index, command_result in enumerate(payload["results"], start=1):
+            expected_temp = (
+                verification_temp_root
+                / f"iteration-{iteration}"
+                / f"command-{command_index}"
+            )
+            assert expected_temp.is_dir()
+            assert "{{vega_verification_temp}}" in command_result["configured_command"]
+            assert command_result["command"] == command_result["configured_command"]
+            assert "VEGA_VERIFICATION_TEMP" in command_result["executed_command"]
+            assert str(expected_temp) not in command_result["executed_command"]
+            assert command_result["verification_temp"] == expected_temp.relative_to(
+                repo_dir.resolve()
+            ).as_posix()
+            verification_temp_paths.add(command_result["verification_temp"])
+            assert "{{vega_verification_temp}}" not in command_result["executed_command"]
+            executed_commands.add(command_result["executed_command"])
+            execution = json.loads(
+                iteration_dir.joinpath(
+                    "executions",
+                    f"verification-{command_index:02d}",
+                    "execution.json",
+                ).read_text(encoding="utf-8")
+            )
+            assert execution["iteration"] == iteration
+    assert len(executed_commands) == 2
+    assert len(verification_temp_paths) == 4
+    integrity = validate_loop_artifact_integrity(tmp_path, repo_dir, run_dir)
+    assert integrity.valid, integrity.issues
+    assert len(integrity.verification_results) == 2
+    assert all(
+        result["results"][0]["configured_command"]
+        and result["results"][0]["executed_command"]
+        for result in integrity.verification_results
+    )
+
+
+def test_loop_two_iteration_success_finishes_with_isolated_verification(
+    tmp_path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    _write_isolated_verification_config(repo_dir)
+    runtime = LoopAutomationRuntime(
+        tmp_path,
+        worker_runner=TrackedChangeRunner(["first worker pass", "second worker pass"]),
+        reviewer_runner=StaticRunner(
+            [_review_json("request_changes"), _review_json("approve")]
+        ),
+    )
+
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="两轮修复后通过隔离验证",
+            source="inline-text",
+            repo_path=str(repo_dir),
+        ),
+        "auto",
+        max_iterations=2,
+    )
+    FinishRuntime(tmp_path).run(run_dir.name)
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    summary = json.loads(
+        run_dir.joinpath("finish-summary.json").read_text(encoding="utf-8")
+    )
+    assert state["status"] == "success"
+    assert [item["verdict"] for item in state["iterations"]] == [
+        "request_changes",
+        "approve",
+    ]
+    verification_temp_paths: set[str] = set()
+    for iteration in (1, 2):
+        payload = json.loads(
+            run_dir.joinpath(
+                "iterations",
+                f"{iteration:02d}",
+                "verification-result.json",
+            ).read_text(encoding="utf-8")
+        )
+        assert payload["command_count"] == 2
+        assert payload["failed_count"] == 0
+        for command_index, command_result in enumerate(payload["results"], start=1):
+            expected_temp = (
+                repo_dir.resolve()
+                / ".tmp"
+                / "vega-verification"
+                / run_dir.name
+                / f"iteration-{iteration}"
+                / f"command-{command_index}"
+            )
+            assert expected_temp.is_dir()
+            assert command_result["verification_temp"] == expected_temp.relative_to(
+                repo_dir.resolve()
+            ).as_posix()
+            verification_temp_paths.add(command_result["verification_temp"])
+    assert len(verification_temp_paths) == 4
+    assert summary["finish_status"] == "ready_to_commit"
+    assert summary["evidence_freshness"]["fresh"] is True
+    assert summary["artifact_integrity"]["valid"] is True
+
+    result_path = run_dir / "iterations" / "02" / "verification-result.json"
+    original_result = json.loads(result_path.read_text(encoding="utf-8"))
+    mutations = [
+        (
+            ("results", 0, "configured_command"),
+            "tampered configured command",
+            "iteration_02_verification_configured_command_binding_mismatch",
+        ),
+        (
+            ("results", 0, "executed_command"),
+            "tampered executed command",
+            "iteration_02_verification_executed_command_binding_mismatch",
+        ),
+        (
+            ("results", 0, "verification_temp"),
+            ".tmp/vega-verification/other-run/iteration-2/command-1",
+            "iteration_02_verification_temp_path_mismatch",
+        ),
+        (
+            ("iteration",),
+            1,
+            "iteration_02_verification_iteration_binding_mismatch",
+        ),
+    ]
+    for path_parts, value, expected_issue in mutations:
+        tampered = json.loads(json.dumps(original_result))
+        target = tampered
+        for part in path_parts[:-1]:
+            target = target[part]
+        target[path_parts[-1]] = value
+        result_path.write_text(
+            json.dumps(tampered, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        integrity = validate_loop_artifact_integrity(
+            tmp_path,
+            repo_dir,
+            run_dir,
+        )
+        assert not integrity.valid
+        assert expected_issue in integrity.issues
+
+    tampered = json.loads(json.dumps(original_result))
+    del tampered["artifact_version"]
+    result_path.write_text(
+        json.dumps(tampered, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    integrity = validate_loop_artifact_integrity(
+        tmp_path,
+        repo_dir,
+        run_dir,
+    )
+    assert not integrity.valid
+    assert "iteration_02_verification_artifact_version_invalid" in integrity.issues
+
+    result_path.write_text(
+        json.dumps(original_result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    execution_path = (
+        run_dir
+        / "iterations"
+        / "02"
+        / "executions"
+        / "verification-01"
+        / "execution.json"
+    )
+    original_execution = json.loads(execution_path.read_text(encoding="utf-8"))
+    tampered_execution = dict(original_execution)
+    tampered_execution["run_id"] = "other-run"
+    execution_path.write_text(
+        json.dumps(tampered_execution, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    integrity = validate_loop_artifact_integrity(tmp_path, repo_dir, run_dir)
+    assert not integrity.valid
+    assert "iteration_02_verification_execution_run_id_mismatch" in integrity.issues
+
+    tampered_execution = dict(original_execution)
+    tampered_execution["command"] = [
+        f"{original_execution['command'][0]} & echo forged"
+    ]
+    execution_path.write_text(
+        json.dumps(tampered_execution, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    integrity = validate_loop_artifact_integrity(tmp_path, repo_dir, run_dir)
+    assert not integrity.valid
+    assert "iteration_02_verification_execution_command_mismatch" in integrity.issues
+
+    tampered_execution = dict(original_execution)
+    tampered_execution["command"] = [
+        f"echo forged & {original_execution['command'][0]}"
+    ]
+    execution_path.write_text(
+        json.dumps(tampered_execution, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    integrity = validate_loop_artifact_integrity(tmp_path, repo_dir, run_dir)
+    assert not integrity.valid
+    assert "iteration_02_verification_execution_command_mismatch" in integrity.issues
+
+    tampered_execution = dict(original_execution)
+    tampered_execution["status"] = "failed"
+    execution_path.write_text(
+        json.dumps(tampered_execution, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    integrity = validate_loop_artifact_integrity(tmp_path, repo_dir, run_dir)
+    assert not integrity.valid
+    assert "iteration_02_verification_execution_status_mismatch" in integrity.issues
+
+    execution_path.write_text(
+        json.dumps(original_execution, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    restored = validate_loop_artifact_integrity(tmp_path, repo_dir, run_dir)
+    assert restored.valid, restored.issues
 
 
 def test_loop_continue_can_resume_auto_loop_after_manual_fix(tmp_path) -> None:
@@ -2933,34 +3266,35 @@ def test_stop_cli_only_stops_recorded_owned_process(tmp_path, monkeypatch) -> No
         )
 
     thread = threading.Thread(target=run_controlled_process)
-    thread.start()
     try:
-        _wait_for_execution_child(context.execution_dir / "execution.json")
-        active_payload = run_status_payload(tmp_path, run_dir.name)
-        assert active_payload["execution"]["status"] == "running"
-        assert active_payload["execution"]["child_pid"] != unrelated.pid
-        monkeypatch.chdir(tmp_path)
-        cli_result = CliRunner().invoke(
-            app,
-            ["stop", "--run", run_dir.name, "--reason", "测试请求停止"],
-        )
-        thread.join(timeout=10)
+        with RunMutationLock.acquire(run_dir, "loop.start"):
+            thread.start()
+            _wait_for_execution_child(context.execution_dir / "execution.json")
+            active_payload = run_status_payload(tmp_path, run_dir.name)
+            assert active_payload["execution"]["status"] == "running"
+            assert active_payload["execution"]["child_pid"] != unrelated.pid
+            monkeypatch.chdir(tmp_path)
+            cli_result = CliRunner().invoke(
+                app,
+                ["stop", "--run", run_dir.name, "--reason", "测试请求停止"],
+            )
+            thread.join(timeout=10)
 
-        assert cli_result.exit_code == 0, cli_result.output
-        assert not thread.is_alive()
-        result = holder["result"]
-        assert getattr(result, "status") == "stopped"
-        assert unrelated.poll() is None
-        lease = ExecutionLease.model_validate_json(
-            context.execution_dir.joinpath("execution.json").read_text(encoding="utf-8")
-        )
-        assert lease.status == "stopped"
-        stopped_payload = run_status_payload(tmp_path, run_dir.name)
-        assert stopped_payload["execution"]["status"] == "stopped"
-        assert context.execution_dir.joinpath("stop-request.json").exists()
-        assert "execution_stop_requested" in run_dir.joinpath("trace.jsonl").read_text(
-            encoding="utf-8"
-        )
+            assert cli_result.exit_code == 0, cli_result.output
+            assert not thread.is_alive()
+            result = holder["result"]
+            assert getattr(result, "status") == "stopped"
+            assert unrelated.poll() is None
+            lease = ExecutionLease.model_validate_json(
+                context.execution_dir.joinpath("execution.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            assert lease.status == "stopped"
+            stopped_payload = run_status_payload(tmp_path, run_dir.name)
+            assert stopped_payload["execution"]["status"] == "stopped"
+            assert context.execution_dir.joinpath("stop-request.json").exists()
+            assert run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8") == ""
     finally:
         if unrelated.poll() is None:
             unrelated.terminate()
@@ -3179,7 +3513,10 @@ def test_goal_status_highlights_latest_checkpoint_plan(tmp_path) -> None:
     )
 
 
-def test_dogfood_eval_covers_core_loop_memory_boundary_and_goal_p0(tmp_path) -> None:
+def test_dogfood_eval_covers_core_loop_memory_boundary_and_goal_p0(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    workspace = tmp_path_factory.mktemp("d")
     result = subprocess.run(
         [
             sys.executable,
@@ -3187,7 +3524,7 @@ def test_dogfood_eval_covers_core_loop_memory_boundary_and_goal_p0(tmp_path) -> 
             "--runner",
             "none",
             "--workspace",
-            str(tmp_path),
+            str(workspace),
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -3197,7 +3534,7 @@ def test_dogfood_eval_covers_core_loop_memory_boundary_and_goal_p0(tmp_path) -> 
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "成功：8/8" in result.stdout
-    summary_path = next(tmp_path.joinpath("runs").glob("dogfood-eval-*/summary.json"))
+    summary_path = next(workspace.joinpath("runs").glob("dogfood-eval-*/summary.json"))
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     assert summary["success_count"] == 8
     assert {case["name"] for case in summary["cases"]} >= {

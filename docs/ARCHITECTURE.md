@@ -18,7 +18,9 @@ CLI
   -> State / Trace / Replay
 ```
 
-当前主线 loop 是 `engineering-change`，配置来自 `loops/engineering-change.loop.yaml`。
+当前主线 loop 是 `engineering-change`。解析顺序为 workspace 的
+`loops/engineering-change.loop.yaml` 优先，包内只读 baseline 回退；因此源码仓可显式覆盖，
+wheel 安装后也能在任意 workspace 使用主线 loop。
 
 长任务 P0 已提供人工驱动状态层：`goal start/status/step/attach/checkpoint-done/pause/resume/stop/recover`。它只写 goal contract、状态、trace、progress、checkpoint plan 和人工证据报告，不调用 worker。有限自动 checkpoint 推进仍处于设计阶段，详见 `docs/LONG-RUNNING-GOALS.md`。
 
@@ -131,7 +133,7 @@ vega profile --repo <repo>
 `.vega.yaml` 是给 runtime 读取的项目级机器策略，和面向 AI 的 `AGENTS.md` 分工不同：
 
 - `AGENTS.md`：自然语言规则、编码规范、踩坑说明。
-- `.vega.yaml`：验证命令、超时、风险路径、变更预算、默认 runner 等可执行策略。
+- `.vega.yaml`：验证命令、超时、精确路径范围、风险路径、变更预算、默认 runner 等可执行策略。
 
 示例：
 
@@ -154,6 +156,12 @@ budget:
   max_new_files: 3
   forbid_new_dependencies: true
   forbid_large_generated_files: true
+scope:
+  allowed_paths:
+    - src/auth/**/*.py
+  forbidden_paths:
+    - tests/**
+    - .vega.yaml
 budget_profiles:
   refactor:
     max_changed_files: 25
@@ -175,7 +183,12 @@ runner:
       ephemeral: true
 ```
 
-如果配置不存在，Vega 使用 project profile 自动识别。配置存在时，verification、change budget、workspace check 和 risk gate 优先使用显式策略。`vega config check --repo <repo>` 是只读预检：它只检查 YAML/schema、验证命令形态和 runner 名称，不执行命令，用来在 auto loop 前提前发现“命令被截断”这类问题。
+如果配置不存在，Vega 使用 project profile 自动识别。配置存在时，verification、精确路径范围、change budget、workspace check 和 risk gate 优先使用显式策略。`scope.allowed_paths` 非空时，所有 staged 与 unstaged tracked diff 都必须命中 allowlist；`forbidden_paths` 优先于 allowlist。`vega config check --repo <repo>` 是只读预检：它会拒绝路径逃逸、绝对路径和歧义 Windows 路径，不执行命令，用来在 auto loop 前提前发现不安全配置。
+
+loop 创建前会前后复核 HEAD 与策略文件 bytes 摘要，并把解析后的 scope 摘要写入根状态。
+每次 scope gate 使用 `git status --porcelain=v2 --branch -z` 的稳定快照区分 index 与工作区
+事实，同时读取 `git ls-files -v`；存在 `assume-unchanged` 或 `skip-worktree` 时直接拒绝，
+避免 Git 视图把真实修改隐藏在 allowlist 之外。
 
 Codex runner 采用“角色策略 + 固定安全边界”：
 
@@ -270,6 +283,11 @@ state、报告和哈希就把高风险结论降级。
 `human-review`，仍可保留 reviewer 的辅助发现，但 review run 必须停在 `needs_human`；
 Goal 不会把它当成可完成 checkpoint 的自动证据。
 
+风险门禁完成后，ReviewRuntime 会再次捕获授权快照并复查项目策略、工作区指纹和 index
+标记；与最初 review pack 快照不一致时不调用外部 reviewer。该设计关闭的是目标仓库在
+单用户工作流中的可观测阶段漂移，不为目标仓库提供操作系统级事务锁。loop run 自身的
+生命周期 artifact 另由下述 per-run mutation lock 保护。
+
 这些检查提供的是本地证据链的一致性与重算保证，不是抵抗拥有完整本地文件系统写权限者的签名
 系统。若攻击者同时修改源码、Git 状态、所有 run artifacts 与 trace，应使用外部不可变存储或
 签名 provenance；这不属于当前单用户轻量 runtime 的范围。
@@ -303,10 +321,17 @@ brief -> project-context -> worker -> workspace-check -> verification -> reflect
 - `auto`：通过 `loop --mode auto` 或命令级自动入口 `do` 显式选择，用 `codex exec` 作为
   worker。首次启动必须没有 staged 或 unstaged tracked diff；否则不启动 worker，避免把历史
   改动归因给本轮。后续自动迭代保留同一 run 前一轮的 diff 作为基线。worker 后先做工作区污染
-  检查，再自动执行 `.vega.yaml` 或 project profile 识别出的最多两个验证命令，Reflect 成功后
-  执行 iteration-local risk gate，最后才用只读 `codex exec` reviewer 审查，默认最多 2 轮。
+  检查，再执行 verification 前的 iteration-local scope gate。scope 越界会 fail-closed；通过后才自动
+  执行 `.vega.yaml` 或 project profile 识别出的最多两个验证命令。验证结束后会再次执行 scope gate，
+  防止验证脚本写出越界 tracked diff；Reflect 固化 review 输入后还会进行一次 scope recheck。三次
+  检查与 reviewer 的工作区快照校验共同防止异步进程把越界 diff 带入隔离审查，默认最多 2 轮。
 
 验证门禁优先于 LLM 结论：如果自动验证失败，即使隔离 reviewer 返回 `approve`，loop 也会进入 `needs_human` 并生成 `fix-prompt.md`，不会进入 `success/ready_to_commit`。
+
+Loop 内的 Risk Gate 结果由 Runtime 在启动 reviewer 前确定性生成，并直接传给同一同步调用链中的
+ReviewRuntime，避免相邻阶段重复执行整套 Git 快照。独立执行 `vega review` 时仍会自行计算
+Risk Gate；无论哪条路径，reviewer 启动前都会重新捕获授权快照，终态 Eval/Finish 也会独立重算
+风险语义。因此这里复用的是 Runtime 自己刚生成的结果，不是信任 worker 或 LLM 提供的结论。
 
 工作区污染门禁早于验证和 review：如果 auto worker 新增的未跟踪文件数量超过 `budget.max_new_files`，Vega 会写入 `workspace-check.md/json`，停止在 `needs_human`。它不会自动删除文件，因为这里的核心价值是保留现场、阻止继续扩大影响，而不是替用户判断哪些文件可删。
 
@@ -314,8 +339,8 @@ brief -> project-context -> worker -> workspace-check -> verification -> reflect
 
 `loop continue` 只允许继续同一仓库中处于 `needs_human` 的 run。Reflect 会固化
 `review-evidence.json`、`full-diff.patch` 和工作区指纹；指纹覆盖 HEAD、staged/unstaged
-tracked diff 以及 untracked 文件内容清单，其中 staged/unstaged 各有独立哈希。Review 会校验
-artifact 哈希和当前工作区指纹，不一致时不启动外部 reviewer，并进入
+tracked diff、untracked 文件内容清单和 index 标记摘要，其中 staged/unstaged 各有独立哈希。
+Review 会校验 artifact 哈希、当前工作区指纹和 reviewer 授权快照，不一致时不启动外部 reviewer，并进入
 `needs_human/evidence_stale`。
 
 每次 loop 写入：
@@ -326,6 +351,7 @@ runs/<run_id>-loop/
   trace.jsonl
   agent-brief.md
   project-context.md
+  project-policy-snapshot.json
   loop-plan.md
   worker-prompt.md
   iterations/
@@ -361,10 +387,19 @@ worker `stopped/timed_out` 后立即停止 verification/review，并把 loop 交
 
 外部 runner 返回非零退出码时同样采用保守语义：worker 会先记录 workspace check 和 `runner-error-report.md`，然后进入 `needs_human`，因为 provider/网络错误发生前可能已经修改工作区；reviewer runner 错误也进入 `needs_human`，不能被当作有效 verdict。这里不自动重试，避免在未知部分改动上叠加第二个 worker。
 
-如果 CLI 被关闭或状态半完成，可以运行 `vega recover --run <loop_run_id> --reason "..."`。recover 会检查 run 下的全部 execution 记录，而不是只看最新记录；任一 active execution 的 owned/child PID 仍存活时都会拒绝接管，较旧 active execution 不能被较新的 terminal execution 掩盖。只有没有存活执行主体时，缺失、终态或 stale execution 才允许把 `running` 状态交还为 `needs_human` 并写入 `recovery-report.md`。recover 不清理工作区、不杀进程、不继续执行。
+如果 CLI 被关闭或状态半完成，可以运行 `vega recover --run <loop_run_id> --reason "..."`。recover 会检查 run 下的全部 execution 记录，而不是只看最新记录；任一 active execution 的 owned/child PID 仍存活时都会拒绝接管，较旧 active execution 不能被较新的 terminal execution 掩盖。只有没有存活执行主体时，缺失、终态或 stale execution 才允许把 `running` 状态交还为 `needs_human` 并写入 `recovery-report.md`。如果中断发生在某轮 iteration 内，recover 会把该轮显式冻结为 `lifecycle=interrupted`，写入 `iterations/<n>/interruption-report.md`，并保留已有 execution、输出和工作区 diff。中断轮不参与可信 verification/reviewer 或 success 判定；人工确认现场后，`loop continue` 必须使用下一连续编号，不能复用或覆盖原 iteration 目录。recover 不清理工作区、不杀进程、不继续执行。
 
-v0.1.0 假设同一个 run 同一时间只有一个 CLI 写入者，不支持并发执行多个 `loop continue`。
-需要并发调度和跨进程 run lock 时，应作为后续真实需求单独设计，不在当前本地单用户范围内扩建。
+同一个 loop run 的生命周期写入口使用
+`runs/<run_id>/.control/run-mutation.lock` 做本地非阻塞 OS 文件锁。`loop start`、
+`loop continue`、`recover`、`finish` 和 decision append 共用该锁；第二个写者 busy
+时在修改可信业务 artifact 前 fail closed。锁文件长期保留，owner JSON 只用于诊断，
+不能代替内核锁判断所有权。
+
+`vega stop` 不获取该锁，否则 owner 执行 worker/reviewer/verification 时用户无法请求停止。
+stop 只写 active execution 的 `stop-request.json`，不由第二个 CLI 追加根 trace。
+
+该锁不是数据库事务、目标仓库全局锁、网络文件系统锁或跨机器协调。v0.1.1 仍是本地单用户
+CLI，不提供等待队列、自动重试、分布式调度或持续恶意写者隔离。
 
 ## Finish / Handoff
 
@@ -382,6 +417,10 @@ finish-summary.json
 ```
 
 Finish 的作用是把“能不能交付、提交前还要检查什么、哪些经验需要人工沉淀”整理清楚。它不会自动 commit、push、release，也不会自动接受 memory。
+
+Finish 会重新读取当前 `.vega.yaml/.vega.yml`，核对启动时文件摘要、scope 摘要和
+`project-policy-snapshot.json` 的根状态绑定。升级前缺少三阶段 scope 证据的旧 run 只允许
+复盘，不会被提升为 `ready_to_commit`。
 
 ## Decision Ledger
 
@@ -472,11 +511,10 @@ Tool Broker 的 Git allowlist 只声明：
 
 ## OpenAI-compatible Provider 边界
 
-Vega 不内置 provider alias。使用 OpenAI-compatible endpoint 前，必须通过环境变量
-`VEGA_PROVIDER_ALIAS` 显式设置一个不包含内部基础设施信息的公开别名。请求会把 API key
-放在认证头中，并发送脱敏后的 task 文本与 tool evidence。使用者必须先确认第三方服务可信，
-并确认数据出站、留存和合规政策允许发送这些内容。本地代理可能继续转发到上游服务，因此
-同样需要核对完整请求路径。文档、测试、trace 和仓库中不得出现真实 key。
+配置 `ciii-direct` 或任何非本地 OpenAI-compatible endpoint 时，请求会把 API key 放在认证
+头中，并发送脱敏后的 task 文本与 tool evidence。使用者必须先确认第三方服务可信，并确认
+数据出站、留存和合规政策允许发送这些内容。本地代理可能继续转发到上游服务，因此同样需要
+核对完整请求路径。文档、测试、trace 和仓库中不得出现真实 key。
 
 ## Runtime Artifacts
 

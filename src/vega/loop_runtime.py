@@ -6,41 +6,66 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from pydantic import ValidationError
+
 from .brief_runtime import BriefRuntime
 from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk, render_gate_report
 from .models import (
     BriefInput,
+    BriefState,
     GateResult,
     LoopAutomationState,
     LoopIterationState,
     ReviewVerdict,
+    SupersededTerminalRecord,
 )
-from .project_config import ProjectConfig, load_project_config, project_policy_snapshot
-from .prompt_metrics import measure_prompt, write_context_budget_report, write_prompt_metrics
+from .project_config import (
+    ProjectConfig,
+    load_project_config,
+    project_policy_snapshot,
+    scope_policy_sha256,
+)
+from .prompt_metrics import (
+    PromptMetrics,
+    measure_prompt,
+    write_context_budget_report,
+    write_prompt_metrics,
+)
 from .redaction import redact_text, redact_value
 from .reflect_runtime import ReflectRuntime
-from .review_runtime import ReviewRuntime
+from .review_runtime import PrecomputedReviewRiskGate, ReviewRuntime
 from .risk_gate_evidence import (
     render_risk_gate_report_binding,
     sha256_text,
     validate_iteration_risk_gate_artifacts,
 )
+from .run_lock import RunMutationLock
 from .run_utils import create_run_dir, resolve_run_dir, run_name
 from .runner import Runner, RunnerStatus, make_runner
-from .trace import TraceWriter
+from .scope_gate import (
+    LoopScopeGateEvidence,
+    scope_gate_state_fields,
+    validate_iteration_scope_gate_artifacts,
+    write_loop_scope_gate_evidence,
+)
+from .trace import TraceWriter, active_run_finished_indices, read_trace_items
 from .verification import VerificationRunResult, run_project_verification
-from .workspace_check import run_workspace_check, snapshot_workspace
+from .workspace_check import read_head_sha, run_workspace_check, snapshot_workspace
 
-LOOP_ARTIFACTS = [
-    "state.json",
-    "trace.jsonl",
+LOOP_INITIALIZATION_ARTIFACTS = [
     "agent-brief.md",
     "project-context.md",
+    "project-policy-snapshot.json",
     "loop-plan.md",
     "worker-prompt.md",
     "worker-prompt-metrics.json",
     "worker-prompt-metrics.md",
+]
+LOOP_ARTIFACTS = [
+    "state.json",
+    "trace.jsonl",
+    *LOOP_INITIALIZATION_ARTIFACTS,
     "eval.md",
 ]
 FINAL_LOOP_ARTIFACTS = [*LOOP_ARTIFACTS, "final-report.md"]
@@ -83,7 +108,10 @@ class LoopAutomationRuntime:
         max_iterations: int = 2,
         verify: bool = True,
     ) -> Path:
-        config = load_project_config(Path(brief_input.repo_path))
+        repo_path = Path(brief_input.repo_path).resolve()
+        config, policy_snapshot, initial_head_sha = _load_stable_start_policy(
+            repo_path
+        )
         worker_name, reviewer_name = _apply_runner_defaults(
             config,
             worker_name,
@@ -93,6 +121,35 @@ class LoopAutomationRuntime:
             self.workspace,
             _new_loop_run_id(brief_input.mode),
         )
+        with RunMutationLock.acquire(run_dir, "loop.start"):
+            return self._start_locked(
+                brief_input,
+                automation_mode,
+                worker_name,
+                reviewer_name,
+                max_iterations,
+                verify,
+                run_id,
+                run_dir,
+                config,
+                policy_snapshot,
+                initial_head_sha,
+            )
+
+    def _start_locked(
+        self,
+        brief_input: BriefInput,
+        automation_mode: Literal["assist", "auto"],
+        worker_name: str,
+        reviewer_name: str,
+        max_iterations: int,
+        verify: bool,
+        run_id: str,
+        run_dir: Path,
+        config: ProjectConfig,
+        policy_snapshot: dict[str, str | None],
+        initial_head_sha: str,
+    ) -> Path:
         trace = TraceWriter(run_dir / "trace.jsonl")
         state = LoopAutomationState(
             run_id=run_id,
@@ -102,7 +159,14 @@ class LoopAutomationRuntime:
             input_source=brief_input.source,
             status="running",
             max_iterations=max_iterations,
-            project_policy_snapshot=project_policy_snapshot(Path(brief_input.repo_path)),
+            initial_head_sha=initial_head_sha,
+            project_policy_snapshot=policy_snapshot,
+            project_policy_snapshot_sha256=sha256_text(
+                _project_policy_snapshot_text(policy_snapshot)
+            ),
+            scope_gate_required=True,
+            scope_policy_sha256=scope_policy_sha256(config.scope),
+            verification_artifact_version=2,
         )
         state.current_step = "brief"
         state.save(run_dir / "state.json")
@@ -116,6 +180,9 @@ class LoopAutomationRuntime:
 
         brief_run = BriefRuntime(self.workspace).run(brief_input)
         state.brief_run = run_name(brief_run)
+        # brief 子 run 已形成后立即绑定根状态。若随后崩溃，recovery 至少能判断
+        # 原始任务身份；若在此保存前崩溃，continue 会因缺少绑定而 fail closed。
+        state.save(run_dir / "state.json")
         _copy_if_exists(brief_run / "agent-brief.md", run_dir / "agent-brief.md")
         _copy_if_exists(brief_run / "project-context.md", run_dir / "project-context.md")
         trace.write("brief_finished", brief_run=state.brief_run)
@@ -138,6 +205,11 @@ class LoopAutomationRuntime:
         )
         write_prompt_metrics(run_dir, "worker-prompt", worker_metrics)
         trace.write("worker_prompt_measured", metrics=worker_metrics.model_dump())
+        trace.write(
+            "loop_initialized",
+            brief_run=state.brief_run,
+            artifacts=LOOP_INITIALIZATION_ARTIFACTS,
+        )
         if automation_mode == "assist":
             root_budget_artifact: str | None = None
             if worker_metrics.exceeded:
@@ -183,6 +255,25 @@ class LoopAutomationRuntime:
         verify: bool = True,
     ) -> Path:
         run_dir = resolve_run_dir(self.workspace, run)
+        with RunMutationLock.acquire(run_dir, "loop.continue"):
+            return self._continue_assist_locked(
+                run_dir,
+                repo_path,
+                reviewer_name=reviewer_name,
+                test_log=test_log,
+                note=note,
+                verify=verify,
+            )
+
+    def _continue_assist_locked(
+        self,
+        run_dir: Path,
+        repo_path: Path,
+        reviewer_name: str = "codex-exec",
+        test_log: Path | None = None,
+        note: str | None = None,
+        verify: bool = True,
+    ) -> Path:
         state = LoopAutomationState.model_validate_json(
             run_dir.joinpath("state.json").read_text(encoding="utf-8")
         )
@@ -203,9 +294,11 @@ class LoopAutomationRuntime:
             raise ValueError(
                 f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}"
             )
+        _require_recovery_trace_binding(run_dir, state)
+        _require_loop_initialization(self.workspace, run_dir, state, repo)
         if _project_policy_changed(repo, state.project_policy_snapshot):
             trace = TraceWriter(run_dir / "trace.jsonl")
-            iteration_number = len(state.iterations) + 1
+            iteration_number = _next_iteration_number(run_dir, state)
             iteration_dir = _iteration_dir(run_dir, iteration_number)
             _write_project_policy_change_report(
                 iteration_dir,
@@ -237,10 +330,11 @@ class LoopAutomationRuntime:
         config = load_project_config(repo)
         _, reviewer_name = _apply_runner_defaults(config, "codex-exec", reviewer_name)
         trace = TraceWriter(run_dir / "trace.jsonl")
+        iteration_number = _next_iteration_number(run_dir, state)
         state.status = "running"
+        state.current_iteration = iteration_number
         state.current_step = "workspace_check"
         state.save(run_dir / "state.json")
-        iteration_number = len(state.iterations) + 1
         iteration_dir = _iteration_dir(run_dir, iteration_number)
         trace.write("assist_continue_started", iteration=iteration_number)
         _write_text_artifact(
@@ -305,11 +399,58 @@ class LoopAutomationRuntime:
             )
             return run_dir
 
+        state.current_step = "scope_gate"
+        state.save(run_dir / "state.json")
+        scope_evidence = write_loop_scope_gate_evidence(
+            repo,
+            config.scope,
+            iteration_dir,
+            trace,
+            iteration=iteration_number,
+            phase="pre_verification",
+            expected_head_sha=state.initial_head_sha,
+            expected_policy_sha256=state.scope_policy_sha256,
+        )
+        if not scope_evidence.passed:
+            state.iterations.append(
+                LoopIterationState(
+                    iteration=iteration_number,
+                    worker_status="skipped",
+                    workspace_status=workspace_check.status,
+                    workspace_new_files_count=workspace_check.new_untracked_count,
+                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                )
+            )
+            state.current_iteration = iteration_number
+            _write_text_artifact(
+                iteration_dir / "fix-prompt.md",
+                render_scope_gate_fix_prompt(iteration_number + 1, scope_evidence),
+            )
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "精确路径范围门禁拒绝当前 tracked diff，未继续 verification、Reflect 或 reviewer。",
+            )
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="scope_gate_failed",
+            )
+            return run_dir
+
         auto_test_log = test_log
         if verify and auto_test_log is None:
             state.current_step = "verify"
             state.save(run_dir / "state.json")
-            verification = run_project_verification(self.workspace, repo, iteration_dir)
+            verification = run_project_verification(
+                self.workspace,
+                repo,
+                iteration_dir,
+                iteration=iteration_number,
+            )
             verification_status = _verification_status(verification.command_count, verification.failed_count)
             verification_failed_count = verification.failed_count
             trace.write(
@@ -329,11 +470,99 @@ class LoopAutomationRuntime:
                     verification,
                     trace,
                     worker_status="skipped",
+                    scope_evidence=scope_evidence,
                 )
                 return run_dir
         else:
             verification_status = "skipped"
             verification_failed_count = 0
+
+        current_policy = project_policy_snapshot(repo)
+        if _project_policy_changed(repo, state.project_policy_snapshot):
+            if verification_status != "skipped" and auto_test_log is not None:
+                _copy_if_exists(auto_test_log, iteration_dir / "test-summary.md")
+            _write_project_policy_change_report(
+                iteration_dir,
+                state.project_policy_snapshot,
+                current_policy,
+            )
+            trace.write("project_policy_changed", iteration=iteration_number)
+            state.iterations.append(
+                LoopIterationState(
+                    iteration=iteration_number,
+                    worker_status="skipped",
+                    workspace_status=workspace_check.status,
+                    workspace_new_files_count=workspace_check.new_untracked_count,
+                    verification_status=verification_status,
+                    verification_failed_count=verification_failed_count,
+                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                )
+            )
+            state.current_iteration = iteration_number
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "verification 修改了项目策略文件，已停止 Reflect 和隔离审查。",
+            )
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="project_policy_changed",
+            )
+            return run_dir
+
+        state.current_step = "scope_gate_post_verification"
+        state.save(run_dir / "state.json")
+        post_scope_evidence = write_loop_scope_gate_evidence(
+            repo,
+            config.scope,
+            iteration_dir,
+            trace,
+            iteration=iteration_number,
+            phase="post_verification",
+            expected_head_sha=state.initial_head_sha,
+            expected_policy_sha256=state.scope_policy_sha256,
+        )
+        if not post_scope_evidence.passed:
+            if verification_status != "skipped" and auto_test_log is not None:
+                _copy_if_exists(auto_test_log, iteration_dir / "test-summary.md")
+            state.iterations.append(
+                LoopIterationState(
+                    iteration=iteration_number,
+                    worker_status="skipped",
+                    workspace_status=workspace_check.status,
+                    workspace_new_files_count=workspace_check.new_untracked_count,
+                    verification_status=verification_status,
+                    verification_failed_count=verification_failed_count,
+                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                    **scope_gate_state_fields(
+                        post_scope_evidence,
+                        phase="post_verification",
+                    ),
+                )
+            )
+            state.current_iteration = iteration_number
+            _write_text_artifact(
+                iteration_dir / "fix-prompt.md",
+                render_scope_gate_fix_prompt(iteration_number + 1, post_scope_evidence),
+            )
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "verification 后的精确路径范围门禁拒绝当前 tracked diff，未继续 Reflect 或 reviewer。",
+            )
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="scope_gate_post_verification_failed",
+            )
+            return run_dir
 
         state.current_step = "reflect"
         state.save(run_dir / "state.json")
@@ -354,6 +583,11 @@ class LoopAutomationRuntime:
                     verification_status=verification_status,
                     verification_failed_count=verification_failed_count,
                     reflect_run=run_name(reflect_run),
+                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                    **scope_gate_state_fields(
+                        post_scope_evidence,
+                        phase="post_verification",
+                    ),
                 )
             )
             state.current_iteration = iteration_number
@@ -378,6 +612,83 @@ class LoopAutomationRuntime:
                 current_step="reflect_failed",
             )
             return run_dir
+        trace.write(
+            "reflect_finished",
+            iteration=iteration_number,
+            reflect_run=run_name(reflect_run),
+            status="success",
+        )
+        current_policy = project_policy_snapshot(repo)
+        if current_policy != state.project_policy_snapshot:
+            self._pause_for_project_policy_change_after_reflect(
+                run_dir,
+                state,
+                iteration_dir,
+                iteration_number,
+                reflect_run,
+                trace,
+                worker_status="skipped",
+                workspace_status=workspace_check.status,
+                workspace_new_files_count=workspace_check.new_untracked_count,
+                verification_status=verification_status,
+                verification_failed_count=verification_failed_count,
+                scope_evidence=scope_evidence,
+                post_scope_evidence=post_scope_evidence,
+                current_policy=current_policy,
+            )
+            return run_dir
+        state.current_step = "scope_gate_pre_review"
+        state.save(run_dir / "state.json")
+        review_scope_evidence = write_loop_scope_gate_evidence(
+            repo,
+            config.scope,
+            iteration_dir,
+            trace,
+            iteration=iteration_number,
+            phase="pre_review",
+            expected_head_sha=state.initial_head_sha,
+            expected_policy_sha256=state.scope_policy_sha256,
+        )
+        if not review_scope_evidence.passed:
+            state.iterations.append(
+                LoopIterationState(
+                    iteration=iteration_number,
+                    worker_status="skipped",
+                    workspace_status=workspace_check.status,
+                    workspace_new_files_count=workspace_check.new_untracked_count,
+                    verification_status=verification_status,
+                    verification_failed_count=verification_failed_count,
+                    reflect_run=run_name(reflect_run),
+                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                    **scope_gate_state_fields(
+                        post_scope_evidence,
+                        phase="post_verification",
+                    ),
+                    **scope_gate_state_fields(
+                        review_scope_evidence,
+                        phase="pre_review",
+                    ),
+                )
+            )
+            state.current_iteration = iteration_number
+            _write_text_artifact(
+                iteration_dir / "fix-prompt.md",
+                render_scope_gate_fix_prompt(iteration_number + 1, review_scope_evidence),
+            )
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "Reflect 后的精确路径范围门禁拒绝当前 tracked diff，未继续风险门禁或 reviewer。",
+            )
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="scope_gate_pre_review_failed",
+            )
+            return run_dir
         if not _reflect_has_tracked_diff(reflect_run):
             state.iterations.append(
                 LoopIterationState(
@@ -388,6 +699,15 @@ class LoopAutomationRuntime:
                     verification_status=verification_status,
                     verification_failed_count=verification_failed_count,
                     reflect_run=run_name(reflect_run),
+                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                    **scope_gate_state_fields(
+                        post_scope_evidence,
+                        phase="post_verification",
+                    ),
+                    **scope_gate_state_fields(
+                        review_scope_evidence,
+                        phase="pre_review",
+                    ),
                 )
             )
             state.current_iteration = iteration_number
@@ -433,6 +753,15 @@ class LoopAutomationRuntime:
                     verification_status=verification_status,
                     verification_failed_count=verification_failed_count,
                     reflect_run=run_name(reflect_run),
+                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                    **scope_gate_state_fields(
+                        post_scope_evidence,
+                        phase="post_verification",
+                    ),
+                    **scope_gate_state_fields(
+                        review_scope_evidence,
+                        phase="pre_review",
+                    ),
                     **_risk_gate_state_fields(gate_evidence),
                 )
             )
@@ -465,6 +794,7 @@ class LoopAutomationRuntime:
             return run_dir
         state.current_step = "review"
         state.save(run_dir / "state.json")
+        trace.write("review_started", iteration=iteration_number)
         review_run = self._run_review(
             repo,
             reflect_run,
@@ -472,11 +802,19 @@ class LoopAutomationRuntime:
             run_dir,
             iteration_number,
             config,
+            gate_result,
+            state.project_policy_snapshot,
         )
         verdict = _read_verdict(review_run)
         reviewer_status = _read_review_runner_status(review_run)
         review_run_status = _read_review_run_status(review_run)
         _record_review(iteration_dir, review_run)
+        trace.write(
+            "review_finished",
+            iteration=iteration_number,
+            status=review_run_status,
+            verdict=verdict.verdict,
+        )
         iteration = LoopIterationState(
             iteration=iteration_number,
             worker_status="skipped",
@@ -484,6 +822,15 @@ class LoopAutomationRuntime:
             verification_status=verification_status,
             verification_failed_count=verification_failed_count,
             reflect_run=run_name(reflect_run),
+            **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+            **scope_gate_state_fields(
+                post_scope_evidence,
+                phase="post_verification",
+            ),
+            **scope_gate_state_fields(
+                review_scope_evidence,
+                phase="pre_review",
+            ),
             **_risk_gate_state_fields(gate_evidence),
             review_run=run_name(review_run),
             verdict=verdict.verdict,
@@ -579,13 +926,19 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
             workspace_baseline = snapshot_workspace(repo_path)
+            head_changed_before_worker = bool(
+                state.initial_head_sha
+                and workspace_baseline.head_sha
+                and workspace_baseline.head_sha != state.initial_head_sha
+            )
             if not workspace_baseline.capture_complete or (
                 iteration_number == 1 and workspace_baseline.has_tracked_changes
-            ):
+            ) or head_changed_before_worker:
                 workspace_check = run_workspace_check(
                     repo_path,
                     iteration_dir,
                     baseline=workspace_baseline,
+                    expected_head_sha=state.initial_head_sha,
                     allow_existing_tracked_diff=iteration_number > 1,
                 )
                 state.iterations.append(
@@ -596,7 +949,17 @@ class LoopAutomationRuntime:
                         workspace_new_files_count=workspace_check.new_untracked_count,
                     )
                 )
-                if workspace_baseline.has_tracked_changes:
+                if head_changed_before_worker:
+                    _write_text_artifact(
+                        iteration_dir / "fix-prompt.md",
+                        render_workspace_fix_prompt(iteration_number + 1),
+                    )
+                    conclusion = (
+                        "loop 启动后、worker 启动前 Git HEAD 已发生变化；"
+                        "为避免在错误提交上执行，未启动自动 worker。"
+                    )
+                    current_step = "workspace_head_changed"
+                elif workspace_baseline.has_tracked_changes:
                     _write_text_artifact(
                         iteration_dir / "fix-prompt.md",
                         render_tracked_baseline_fix_prompt(iteration_number + 1),
@@ -823,13 +1186,59 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
 
+            state.current_step = "scope_gate"
+            state.save(run_dir / "state.json")
+            scope_evidence = write_loop_scope_gate_evidence(
+                repo_path,
+                config.scope,
+                iteration_dir,
+                trace,
+                iteration=iteration_number,
+                phase="pre_verification",
+                expected_head_sha=state.initial_head_sha,
+                expected_policy_sha256=state.scope_policy_sha256,
+            )
+            if not scope_evidence.passed:
+                state.iterations.append(
+                    LoopIterationState(
+                        iteration=iteration_number,
+                        worker_status="success",
+                        workspace_status=workspace_check.status,
+                        workspace_new_files_count=workspace_check.new_untracked_count,
+                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                    )
+                )
+                _write_text_artifact(
+                    iteration_dir / "fix-prompt.md",
+                    render_scope_gate_fix_prompt(iteration_number + 1, scope_evidence),
+                )
+                _write_final_report(
+                    run_dir,
+                    state,
+                    None,
+                    "精确路径范围门禁拒绝当前 tracked diff，未继续 verification、Reflect 或 reviewer。",
+                )
+                self._save_loop_done(
+                    run_dir,
+                    state,
+                    "needs_human",
+                    trace,
+                    current_step="scope_gate_failed",
+                )
+                return run_dir
+
             verification_log: Path | None = None
             verification_status = "skipped"
             verification_failed_count = 0
             if verify:
                 state.current_step = "verify"
                 state.save(run_dir / "state.json")
-                verification = run_project_verification(self.workspace, repo_path, iteration_dir)
+                verification = run_project_verification(
+                    self.workspace,
+                    repo_path,
+                    iteration_dir,
+                    iteration=iteration_number,
+                )
                 verification_log = verification.summary_path
                 verification_status = _verification_status(verification.command_count, verification.failed_count)
                 verification_failed_count = verification.failed_count
@@ -851,8 +1260,94 @@ class LoopAutomationRuntime:
                         worker_status="success",
                         workspace_status=workspace_check.status,
                         workspace_new_files_count=workspace_check.new_untracked_count,
+                        scope_evidence=scope_evidence,
                     )
                     return run_dir
+
+            current_policy = project_policy_snapshot(repo_path)
+            if _project_policy_changed(repo_path, state.project_policy_snapshot):
+                if verification_status != "skipped" and verification_log is not None:
+                    _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
+                _write_project_policy_change_report(
+                    iteration_dir,
+                    state.project_policy_snapshot,
+                    current_policy,
+                )
+                trace.write("project_policy_changed", iteration=iteration_number)
+                state.iterations.append(
+                    LoopIterationState(
+                        iteration=iteration_number,
+                        worker_status="success",
+                        workspace_status=workspace_check.status,
+                        workspace_new_files_count=workspace_check.new_untracked_count,
+                        verification_status=verification_status,
+                        verification_failed_count=verification_failed_count,
+                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                    )
+                )
+                _write_final_report(
+                    run_dir,
+                    state,
+                    None,
+                    "verification 修改了项目策略文件，已停止 Reflect 和隔离审查。",
+                )
+                self._save_loop_done(
+                    run_dir,
+                    state,
+                    "needs_human",
+                    trace,
+                    current_step="project_policy_changed",
+                )
+                return run_dir
+
+            state.current_step = "scope_gate_post_verification"
+            state.save(run_dir / "state.json")
+            post_scope_evidence = write_loop_scope_gate_evidence(
+                repo_path,
+                config.scope,
+                iteration_dir,
+                trace,
+                iteration=iteration_number,
+                phase="post_verification",
+                expected_head_sha=state.initial_head_sha,
+                expected_policy_sha256=state.scope_policy_sha256,
+            )
+            if not post_scope_evidence.passed:
+                if verification_status != "skipped" and verification_log is not None:
+                    _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
+                state.iterations.append(
+                    LoopIterationState(
+                        iteration=iteration_number,
+                        worker_status="success",
+                        workspace_status=workspace_check.status,
+                        workspace_new_files_count=workspace_check.new_untracked_count,
+                        verification_status=verification_status,
+                        verification_failed_count=verification_failed_count,
+                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                        **scope_gate_state_fields(
+                            post_scope_evidence,
+                            phase="post_verification",
+                        ),
+                    )
+                )
+                _write_text_artifact(
+                    iteration_dir / "fix-prompt.md",
+                    render_scope_gate_fix_prompt(iteration_number + 1, post_scope_evidence),
+                )
+                _write_final_report(
+                    run_dir,
+                    state,
+                    None,
+                    "verification 后的精确路径范围门禁拒绝当前 tracked diff，未继续 Reflect 或 reviewer。",
+                )
+                self._save_loop_done(
+                    run_dir,
+                    state,
+                    "needs_human",
+                    trace,
+                    current_step="scope_gate_post_verification_failed",
+                )
+                return run_dir
 
             state.current_step = "reflect"
             state.save(run_dir / "state.json")
@@ -873,6 +1368,11 @@ class LoopAutomationRuntime:
                         verification_status=verification_status,
                         verification_failed_count=verification_failed_count,
                         reflect_run=run_name(reflect_run),
+                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                        **scope_gate_state_fields(
+                            post_scope_evidence,
+                            phase="post_verification",
+                        ),
                     )
                 )
                 _write_reflect_failure_report(iteration_dir, reflect_run)
@@ -896,6 +1396,82 @@ class LoopAutomationRuntime:
                     current_step="reflect_failed",
                 )
                 return run_dir
+            trace.write(
+                "reflect_finished",
+                iteration=iteration_number,
+                reflect_run=run_name(reflect_run),
+                status="success",
+            )
+            current_policy = project_policy_snapshot(repo_path)
+            if current_policy != state.project_policy_snapshot:
+                self._pause_for_project_policy_change_after_reflect(
+                    run_dir,
+                    state,
+                    iteration_dir,
+                    iteration_number,
+                    reflect_run,
+                    trace,
+                    worker_status="success",
+                    workspace_status=workspace_check.status,
+                    workspace_new_files_count=workspace_check.new_untracked_count,
+                    verification_status=verification_status,
+                    verification_failed_count=verification_failed_count,
+                    scope_evidence=scope_evidence,
+                    post_scope_evidence=post_scope_evidence,
+                    current_policy=current_policy,
+                )
+                return run_dir
+            state.current_step = "scope_gate_pre_review"
+            state.save(run_dir / "state.json")
+            review_scope_evidence = write_loop_scope_gate_evidence(
+                repo_path,
+                config.scope,
+                iteration_dir,
+                trace,
+                iteration=iteration_number,
+                phase="pre_review",
+                expected_head_sha=state.initial_head_sha,
+                expected_policy_sha256=state.scope_policy_sha256,
+            )
+            if not review_scope_evidence.passed:
+                state.iterations.append(
+                    LoopIterationState(
+                        iteration=iteration_number,
+                        worker_status="success",
+                        workspace_status=workspace_check.status,
+                        workspace_new_files_count=workspace_check.new_untracked_count,
+                        verification_status=verification_status,
+                        verification_failed_count=verification_failed_count,
+                        reflect_run=run_name(reflect_run),
+                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                        **scope_gate_state_fields(
+                            post_scope_evidence,
+                            phase="post_verification",
+                        ),
+                        **scope_gate_state_fields(
+                            review_scope_evidence,
+                            phase="pre_review",
+                        ),
+                    )
+                )
+                _write_text_artifact(
+                    iteration_dir / "fix-prompt.md",
+                    render_scope_gate_fix_prompt(iteration_number + 1, review_scope_evidence),
+                )
+                _write_final_report(
+                    run_dir,
+                    state,
+                    None,
+                    "Reflect 后的精确路径范围门禁拒绝当前 tracked diff，未继续风险门禁或 reviewer。",
+                )
+                self._save_loop_done(
+                    run_dir,
+                    state,
+                    "needs_human",
+                    trace,
+                    current_step="scope_gate_pre_review_failed",
+                )
+                return run_dir
             if not _reflect_has_tracked_diff(reflect_run):
                 state.iterations.append(
                     LoopIterationState(
@@ -906,6 +1482,15 @@ class LoopAutomationRuntime:
                         verification_status=verification_status,
                         verification_failed_count=verification_failed_count,
                         reflect_run=run_name(reflect_run),
+                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                        **scope_gate_state_fields(
+                            post_scope_evidence,
+                            phase="post_verification",
+                        ),
+                        **scope_gate_state_fields(
+                            review_scope_evidence,
+                            phase="pre_review",
+                        ),
                     )
                 )
                 _write_text_artifact(
@@ -946,6 +1531,15 @@ class LoopAutomationRuntime:
                         verification_status=verification_status,
                         verification_failed_count=verification_failed_count,
                         reflect_run=run_name(reflect_run),
+                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                        **scope_gate_state_fields(
+                            post_scope_evidence,
+                            phase="post_verification",
+                        ),
+                        **scope_gate_state_fields(
+                            review_scope_evidence,
+                            phase="pre_review",
+                        ),
                         **_risk_gate_state_fields(gate_evidence),
                     )
                 )
@@ -977,6 +1571,15 @@ class LoopAutomationRuntime:
                         verification_status=verification_status,
                         verification_failed_count=verification_failed_count,
                         reflect_run=run_name(reflect_run),
+                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                        **scope_gate_state_fields(
+                            post_scope_evidence,
+                            phase="post_verification",
+                        ),
+                        **scope_gate_state_fields(
+                            review_scope_evidence,
+                            phase="pre_review",
+                        ),
                         **_risk_gate_state_fields(gate_evidence),
                     )
                 )
@@ -1000,6 +1603,7 @@ class LoopAutomationRuntime:
                 return run_dir
             state.current_step = "review"
             state.save(run_dir / "state.json")
+            trace.write("review_started", iteration=iteration_number)
             review_run = self._run_review(
                 repo_path,
                 reflect_run,
@@ -1007,11 +1611,19 @@ class LoopAutomationRuntime:
                 run_dir,
                 iteration_number,
                 config,
+                gate_result,
+                state.project_policy_snapshot,
             )
             verdict = _read_verdict(review_run)
             reviewer_status = _read_review_runner_status(review_run)
             review_run_status = _read_review_run_status(review_run)
             _record_review(iteration_dir, review_run)
+            trace.write(
+                "review_finished",
+                iteration=iteration_number,
+                status=review_run_status,
+                verdict=verdict.verdict,
+            )
             iteration = LoopIterationState(
                 iteration=iteration_number,
                 worker_status="success",
@@ -1021,6 +1633,15 @@ class LoopAutomationRuntime:
                 verification_status=verification_status,
                 verification_failed_count=verification_failed_count,
                 reflect_run=run_name(reflect_run),
+                **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                **scope_gate_state_fields(
+                    post_scope_evidence,
+                    phase="post_verification",
+                ),
+                **scope_gate_state_fields(
+                    review_scope_evidence,
+                    phase="pre_review",
+                ),
                 **_risk_gate_state_fields(gate_evidence),
                 review_run=run_name(review_run),
                 verdict=verdict.verdict,
@@ -1064,6 +1685,66 @@ class LoopAutomationRuntime:
         self._save_loop_done(run_dir, state, "needs_human", trace)
         return run_dir
 
+    def _pause_for_project_policy_change_after_reflect(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        iteration_dir: Path,
+        iteration_number: int,
+        reflect_run: Path,
+        trace: TraceWriter,
+        *,
+        worker_status: Literal["skipped", "success"],
+        workspace_status: Literal["skipped", "passed", "failed"],
+        workspace_new_files_count: int,
+        verification_status: Literal["skipped", "passed", "failed"],
+        verification_failed_count: int,
+        scope_evidence: LoopScopeGateEvidence,
+        post_scope_evidence: LoopScopeGateEvidence,
+        current_policy: dict[str, str | None],
+    ) -> None:
+        """Reflect 返回后再次锁定完整项目策略，关闭 post-check 到审查之间的窗口。"""
+        _write_project_policy_change_report(
+            iteration_dir,
+            state.project_policy_snapshot,
+            current_policy,
+        )
+        state.current_iteration = iteration_number
+        state.iterations.append(
+            LoopIterationState(
+                iteration=iteration_number,
+                worker_status=worker_status,
+                workspace_status=workspace_status,
+                workspace_new_files_count=workspace_new_files_count,
+                verification_status=verification_status,
+                verification_failed_count=verification_failed_count,
+                reflect_run=run_name(reflect_run),
+                **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+                **scope_gate_state_fields(
+                    post_scope_evidence,
+                    phase="post_verification",
+                ),
+            )
+        )
+        trace.write(
+            "project_policy_changed",
+            iteration=iteration_number,
+            detected_after="reflect",
+        )
+        _write_final_report(
+            run_dir,
+            state,
+            None,
+            "Reflect 期间项目策略文件发生变化，已停止 pre-review gate 和隔离 reviewer。",
+        )
+        self._save_loop_done(
+            run_dir,
+            state,
+            "needs_human",
+            trace,
+            current_step="project_policy_changed",
+        )
+
     def _pause_for_verification_interruption(
         self,
         run_dir: Path,
@@ -1076,6 +1757,7 @@ class LoopAutomationRuntime:
         worker_status: Literal["skipped", "success"],
         workspace_status: Literal["skipped", "passed", "failed"] = "skipped",
         workspace_new_files_count: int = 0,
+        scope_evidence: LoopScopeGateEvidence | None = None,
     ) -> None:
         interruption_status = verification.interruption_status
         if interruption_status is None:
@@ -1091,6 +1773,11 @@ class LoopAutomationRuntime:
                 workspace_new_files_count=workspace_new_files_count,
                 verification_status="failed",
                 verification_failed_count=verification.failed_count,
+                **(
+                    scope_gate_state_fields(scope_evidence, phase="pre_verification")
+                    if scope_evidence is not None
+                    else {}
+                ),
             )
         )
         trace.write(
@@ -1130,6 +1817,8 @@ class LoopAutomationRuntime:
         loop_run_dir: Path,
         iteration: int,
         config: ProjectConfig,
+        risk_gate_result: GateResult,
+        expected_project_policy_snapshot: dict[str, str | None],
     ) -> Path:
         return ReviewRuntime(
             self.workspace,
@@ -1148,6 +1837,11 @@ class LoopAutomationRuntime:
                 iteration=iteration,
             ),
             project_config=config,
+            precomputed_risk_gate=PrecomputedReviewRiskGate(
+                source_run=run_name(reflect_run),
+                result=risk_gate_result,
+                project_policy_snapshot=dict(expected_project_policy_snapshot),
+            ),
         )
 
     def _finish_or_prepare_next(
@@ -1210,7 +1904,10 @@ class LoopAutomationRuntime:
         trace: TraceWriter,
         current_step: str = "done",
     ) -> None:
-        artifacts = FINAL_LOOP_ARTIFACTS if (run_dir / "final-report.md").exists() else LOOP_ARTIFACTS
+        required_artifacts = (
+            FINAL_LOOP_ARTIFACTS if (run_dir / "final-report.md").exists() else LOOP_ARTIFACTS
+        )
+        artifacts = list(dict.fromkeys([*state.artifacts, *required_artifacts]))
         state.current_step = current_step
         state.status = status
         state.artifacts = artifacts
@@ -1236,11 +1933,14 @@ def render_loop_plan(
             "2. 生成 project-context.md，稳定注入项目画像、验证命令、AGENTS.md 和 accepted memory。",
             "3. auto 模式先确认启动前不存在 tracked diff，再启动 worker。",
             "4. worker 结束后检查工作区污染，超过预算则停止并交给人工判断。",
-            "5. 自动执行项目画像识别出的最小验证命令。",
-            "6. Reflect 收集当前 diff、验证日志和复盘材料；其确定性检查失败时停止。",
-            "7. 运行风险/变更预算门禁；需要人工确认时不启动自动 reviewer。",
-            "8. 隔离 reviewer 使用只读 runner 审查 review-pack。",
-            "9. approve 则生成 final-report；request_changes 则生成 fix-prompt。",
+            "5. 执行 verification 前的精确路径范围门禁；越界 diff 不进入后续流程。",
+            "6. 自动执行项目画像识别出的最小验证命令。",
+            "7. 验证后再次执行精确路径范围门禁；验证脚本造成越界也不进入 Reflect。",
+            "8. Reflect 收集当前 diff、验证日志和复盘材料；其确定性检查失败时停止。",
+            "9. Reflect 后再次执行精确路径范围门禁，绑定即将进入 review 的工作区状态。",
+            "10. 运行风险/变更预算门禁；需要人工确认时不启动自动 reviewer。",
+            "11. 隔离 reviewer 使用只读 runner 审查 review-pack。",
+            "12. approve 则生成 final-report；request_changes 则生成 fix-prompt。",
             "",
             "## 禁止动作",
             "",
@@ -1269,7 +1969,10 @@ def build_worker_prompt(
         "硬性约束：",
         "- 只修改满足需求所需的文件。",
         "- 不要 git commit、git push、发布或改长期 memory。",
-        "- 修改后尽量运行项目画像建议的最小验证命令，并在输出里总结结果。",
+        "- Vega 会在 worker 返回后独立执行 Runtime 策略中的固定验证命令。",
+        "- 不要运行带 `{{vega_verification_temp}}` 的 harness-owned 命令，"
+        "也不要清理 harness 临时目录。",
+        "- 如需自检，只运行不共享 harness 临时目录的最小检查，并在输出里总结结果。",
         "- 如果需求或环境阻塞，停止并明确说明。",
         "",
         "## 项目上下文",
@@ -1397,6 +2100,42 @@ def render_untracked_files_fix_prompt(next_iteration: int, paths: list[str]) -> 
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_scope_gate_fix_prompt(
+    next_iteration: int,
+    evidence: LoopScopeGateEvidence,
+) -> str:
+    result = evidence.result
+    report_artifact, result_artifact = {
+        "pre_verification": ("scope-gate-report.md", "scope-gate-result.json"),
+        "post_verification": (
+            "scope-gate-post-verification-report.md",
+            "scope-gate-post-verification-result.json",
+        ),
+        "pre_review": (
+            "scope-gate-pre-review-report.md",
+            "scope-gate-pre-review-result.json",
+        ),
+    }[result.phase]
+    lines = [
+        "# Fix Prompt",
+        "",
+        f"- 下一轮：`{next_iteration}`",
+        f"- 门禁阶段：`{result.phase}`",
+        "- 阻塞原因：当前 tracked diff 超出 `.vega.yaml` 的精确路径范围。",
+        "",
+        f"请先阅读本轮 `{report_artifact}` 与 `{result_artifact}`：",
+        "- 撤回、拆分或人工确认越界路径；不要通过修改 `.vega.yaml` 绕过本轮门禁。",
+        "- 仅保留命中 allowed_paths 且未命中 forbidden_paths 的必要修改。",
+        "- Vega 不会自动回滚、暂存、删除或提交 worker 已产生的改动。",
+    ]
+    if result.violations:
+        lines.extend(["", "## 越界路径", ""])
+        lines.extend(f"- `{violation.code}`：`{violation.path}`" for violation in result.violations)
+    elif result.failure_code:
+        lines.extend(["", f"- 门禁异常：`{result.failure_code}`"])
+    return redact_text("\n".join(lines).rstrip() + "\n")
+
+
 def render_risk_gate_fix_prompt(next_iteration: int, result: GateResult | None) -> str:
     lines = [
         "# Fix Prompt",
@@ -1465,10 +2204,17 @@ def run_loop_eval(
         )
     else:
         results.append("PASS: state.artifacts 与必需 artifact 一致")
+    results.extend(_project_policy_snapshot_eval_results(run_dir, state))
 
     effective_status = status_for_eval or state.status
     if require_terminal:
-        results.extend(_loop_terminal_eval_results(run_dir, state.status))
+        results.extend(
+            _loop_terminal_eval_results(
+                run_dir,
+                state.status,
+                state.superseded_terminal_events,
+            )
+        )
 
     if effective_status == "success" and not state.iterations:
         results.append("FAIL: success loop 至少需要一轮 iteration")
@@ -1489,6 +2235,19 @@ def run_loop_eval(
                 f"期望 {expected_iteration:02d}，实际 {iteration.iteration:02d}"
             )
         iteration_dir = run_dir / "iterations" / f"{iteration.iteration:02d}"
+        if iteration.lifecycle == "interrupted":
+            results.extend(
+                _interrupted_iteration_evidence_checks(
+                    iteration_dir,
+                    iteration,
+                )
+            )
+            continue
+        if iteration.interrupted_step is not None or iteration.interrupted_at is not None:
+            results.append(
+                "FAIL: completed iteration 不得携带 interruption metadata："
+                f"{iteration.iteration:02d}"
+            )
         results.extend(
             _loop_iteration_evidence_checks(
                 iteration_dir,
@@ -1499,6 +2258,9 @@ def run_loop_eval(
                 workspace=workspace if iteration.iteration == latest_iteration else None,
                 repo_path=repo_path if iteration.iteration == latest_iteration else None,
                 trace_path=run_dir / "trace.jsonl",
+                scope_gate_required=state.scope_gate_required,
+                expected_head_sha=state.initial_head_sha,
+                expected_policy_sha256=state.scope_policy_sha256,
             )
         )
     if state.current_iteration != state.iterations[-1].iteration:
@@ -1507,6 +2269,10 @@ def run_loop_eval(
     if effective_status == "success":
         latest = state.iterations[-1]
         iteration_dir = run_dir / "iterations" / f"{latest.iteration:02d}"
+        if latest.lifecycle != "completed":
+            results.append("FAIL: success loop 的最新 iteration 必须为 completed")
+        else:
+            results.append("PASS: success loop 的最新 iteration 已 completed")
         if latest.verdict != "approve":
             results.append("FAIL: success loop 的最新 verdict 必须为 approve")
         else:
@@ -1530,29 +2296,35 @@ def run_loop_eval(
     return results
 
 
-def _loop_trace_checks(run_dir: Path) -> tuple[list[str], str | None]:
+def _loop_trace_checks(
+    run_dir: Path,
+    expected_superseded: list[SupersededTerminalRecord],
+) -> tuple[list[str], str | None]:
     trace_path = run_dir / "trace.jsonl"
     if not trace_path.exists():
         return ["FAIL: trace.jsonl 不存在"], None
     try:
-        items = [
-            json.loads(line)
-            for line in trace_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-    except json.JSONDecodeError as exc:
-        return [f"FAIL: trace.jsonl 不是合法 JSONL：{exc.msg}"], None
+        items = read_trace_items(trace_path)
+    except (OSError, ValueError) as exc:
+        return [f"FAIL: trace.jsonl 不是合法 JSONL：{exc}"], None
     if not items:
         return ["FAIL: trace.jsonl 为空"], None
-    terminal_indices = [
-        index
-        for index, item in enumerate(items)
-        if isinstance(item, dict) and item.get("event") == "run_finished"
-    ]
+    terminal_indices, supersede_issues = active_run_finished_indices(
+        items,
+        expected_superseded=[
+            record.model_dump() for record in expected_superseded
+        ],
+    )
+    if supersede_issues:
+        return [
+            "FAIL: run_terminal_superseded 证据无效：" + ", ".join(supersede_issues)
+        ], None
     if not terminal_indices:
-        return ["FAIL: trace.jsonl 缺少 run_finished 终态事件"], None
+        return ["FAIL: trace.jsonl 缺少未被 supersede 的 run_finished 终态事件"], None
     if len(terminal_indices) != 1:
-        return ["FAIL: trace.jsonl 必须且只能包含一个 run_finished 终态事件"], None
+        return [
+            "FAIL: trace.jsonl 必须且只能包含一个未被 supersede 的 run_finished 终态事件"
+        ], None
     terminal_index = terminal_indices[0]
     if terminal_index != len(items) - 1:
         return ["FAIL: run_finished 必须是 trace.jsonl 最后一条事件"], None
@@ -1562,8 +2334,37 @@ def _loop_trace_checks(run_dir: Path) -> tuple[list[str], str | None]:
     return ["PASS: trace.jsonl 非空且包含 run_finished 终态事件"], status
 
 
-def _loop_terminal_eval_results(run_dir: Path, state_status: str) -> list[str]:
-    results, terminal_status = _loop_trace_checks(run_dir)
+def _project_policy_snapshot_eval_results(
+    run_dir: Path,
+    state: LoopAutomationState,
+) -> list[str]:
+    expected_hash = state.project_policy_snapshot_sha256
+    if expected_hash is None:
+        return []
+    path = run_dir / "project-policy-snapshot.json"
+    if not path.is_file():
+        return ["FAIL: project-policy-snapshot.json 不存在"]
+    try:
+        text = path.read_text(encoding="utf-8")
+        payload = json.loads(text)
+    except (OSError, json.JSONDecodeError):
+        return ["FAIL: project-policy-snapshot.json 不合法"]
+    results: list[str] = []
+    if sha256_text(text) != expected_hash:
+        results.append("FAIL: project policy snapshot hash mismatch")
+    if payload != state.project_policy_snapshot:
+        results.append("FAIL: project policy snapshot 与 state 不一致")
+    if not results:
+        results.append("PASS: project policy snapshot 与根状态绑定")
+    return results
+
+
+def _loop_terminal_eval_results(
+    run_dir: Path,
+    state_status: str,
+    expected_superseded: list[SupersededTerminalRecord],
+) -> list[str]:
+    results, terminal_status = _loop_trace_checks(run_dir, expected_superseded)
     if terminal_status and terminal_status != state_status:
         results.append(
             f"FAIL: trace 终态与 state.status 不一致：{terminal_status} != {state_status}"
@@ -1580,6 +2381,9 @@ def _loop_iteration_evidence_checks(
     workspace: Path | None = None,
     repo_path: Path | None = None,
     trace_path: Path | None = None,
+    scope_gate_required: bool = False,
+    expected_head_sha: str | None = None,
+    expected_policy_sha256: str | None = None,
 ) -> list[str]:
     results: list[str] = []
     if not iteration_dir.exists():
@@ -1599,6 +2403,57 @@ def _loop_iteration_evidence_checks(
             results.append("FAIL: verification 状态已记录但缺少 verification-summary.md")
         if not (iteration_dir / "test-summary.md").exists():
             results.append("FAIL: verification 状态已记录但缺少 test-summary.md")
+
+    scope_gate_integrity = validate_iteration_scope_gate_artifacts(
+        iteration_dir,
+        iteration,
+        phase="pre_verification",
+        # verification 本身可以合法修改工作区；pre-verification 只校验落盘绑定，
+        # 不能拿最终 diff 重算，否则会把后续证据误判成 pre gate 被篡改。
+        repo_path=None,
+        trace_path=trace_path,
+        required=scope_gate_required,
+        expected_head_sha=expected_head_sha,
+        expected_policy_sha256=expected_policy_sha256,
+    )
+    if scope_gate_integrity.valid and scope_gate_integrity.evaluated:
+        results.append("PASS: pre-verification scope gate artifact 与 iteration 一致")
+    else:
+        results.extend(f"FAIL: {issue}" for issue in scope_gate_integrity.issues)
+
+    post_scope_gate_integrity = validate_iteration_scope_gate_artifacts(
+        iteration_dir,
+        iteration,
+        phase="post_verification",
+        # Reflect 之后还会有 pre-review gate；post-verification 只校验其历史绑定，
+        # 不能用后续工作区重算。
+        repo_path=None,
+        trace_path=trace_path,
+        required=scope_gate_required,
+        expected_head_sha=expected_head_sha,
+        expected_policy_sha256=expected_policy_sha256,
+    )
+    if post_scope_gate_integrity.valid and post_scope_gate_integrity.evaluated:
+        results.append("PASS: post-verification scope gate artifact 与 iteration 一致")
+    else:
+        results.extend(
+            f"FAIL: post_verification_{issue}" for issue in post_scope_gate_integrity.issues
+        )
+
+    review_scope_gate_integrity = validate_iteration_scope_gate_artifacts(
+        iteration_dir,
+        iteration,
+        phase="pre_review",
+        repo_path=repo_path,
+        trace_path=trace_path,
+        required=scope_gate_required,
+        expected_head_sha=expected_head_sha,
+        expected_policy_sha256=expected_policy_sha256,
+    )
+    if review_scope_gate_integrity.valid and review_scope_gate_integrity.evaluated:
+        results.append("PASS: pre-review scope gate artifact 与 iteration 一致")
+    else:
+        results.extend(f"FAIL: pre_review_{issue}" for issue in review_scope_gate_integrity.issues)
 
     gate_integrity = validate_iteration_risk_gate_artifacts(
         iteration_dir,
@@ -1646,6 +2501,275 @@ def _loop_iteration_evidence_checks(
 
 def render_eval(results: list[str]) -> str:
     return redact_text("# Eval\n\n" + "\n".join(f"- {item}" for item in results) + "\n")
+
+
+def _next_iteration_number(
+    run_dir: Path,
+    state: LoopAutomationState,
+) -> int:
+    expected = list(range(1, len(state.iterations) + 1))
+    actual = [item.iteration for item in state.iterations]
+    if actual != expected:
+        raise ValueError(
+            f"loop iteration 序列不连续：期望 {expected or '[]'}，实际 {actual or '[]'}"
+        )
+    last_iteration = state.iterations[-1].iteration if state.iterations else 0
+    if state.current_iteration != last_iteration:
+        raise ValueError(
+            "loop current_iteration 与最后已登记 iteration 不一致，"
+            "已拒绝继续以避免覆盖证据。"
+        )
+    next_iteration = last_iteration + 1
+    next_dir = run_dir / "iterations" / f"{next_iteration:02d}"
+    if next_dir.exists():
+        raise ValueError(
+            f"下一 iteration 目录已存在：{next_dir.relative_to(run_dir)}；"
+            "已拒绝复用或覆盖旧证据。"
+        )
+    return next_iteration
+
+
+def loop_initialization_issues(
+    workspace: Path,
+    run_dir: Path,
+    state: LoopAutomationState,
+    repo_path: Path,
+) -> list[str]:
+    """返回 loop 初始化证据问题，供 recovery 与 continue 使用同一判断。"""
+
+    issues: list[str] = []
+    if not state.brief_run:
+        return ["brief_run_missing"]
+    try:
+        brief_dir = resolve_run_dir(workspace, state.brief_run)
+    except (FileNotFoundError, ValueError):
+        return ["brief_run_unresolvable"]
+    state_path = brief_dir / "state.json"
+    try:
+        brief_state = BriefState.model_validate_json(
+            state_path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError, ValidationError):
+        return ["brief_state_invalid"]
+
+    if brief_state.run_id != brief_dir.name:
+        issues.append("brief_run_id_mismatch")
+    try:
+        if Path(brief_state.repo_path).resolve() != repo_path.resolve():
+            issues.append("brief_repo_mismatch")
+    except OSError:
+        issues.append("brief_repo_unresolvable")
+    if brief_state.mode != state.task_mode:
+        issues.append("brief_task_mode_mismatch")
+    if brief_state.status != "success":
+        issues.append("brief_status_not_success")
+
+    for name in ("agent-brief.md", "project-context.md"):
+        try:
+            source_bytes = brief_dir.joinpath(name).read_bytes()
+            loop_bytes = run_dir.joinpath(name).read_bytes()
+        except OSError:
+            issues.append(f"{name}_missing_or_unreadable")
+            continue
+        if source_bytes != loop_bytes:
+            issues.append(f"{name}_source_mismatch")
+
+    for name in LOOP_INITIALIZATION_ARTIFACTS:
+        path = run_dir / name
+        try:
+            if not path.is_file() or not path.read_bytes():
+                issues.append(f"{name}_missing_or_empty")
+        except OSError:
+            issues.append(f"{name}_missing_or_unreadable")
+
+    prompt_path = run_dir / "worker-prompt.md"
+    metrics_path = run_dir / "worker-prompt-metrics.json"
+    try:
+        prompt = prompt_path.read_text(encoding="utf-8")
+        metrics = PromptMetrics.model_validate_json(
+            metrics_path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError, ValidationError):
+        issues.append("worker_prompt_metrics_invalid")
+    else:
+        if (
+            metrics.role != "worker"
+            or metrics.chars != len(prompt)
+            or metrics.utf8_bytes != len(prompt.encode("utf-8"))
+            or metrics.lines != len(prompt.splitlines())
+        ):
+            issues.append("worker_prompt_metrics_mismatch")
+
+    if any(
+        result.startswith("FAIL:")
+        for result in _project_policy_snapshot_eval_results(run_dir, state)
+    ):
+        issues.append("project_policy_snapshot_invalid")
+
+    try:
+        trace_items = read_trace_items(run_dir / "trace.jsonl")
+    except (OSError, ValueError):
+        issues.append("initialization_trace_invalid")
+    else:
+        initialized_events = [
+            item for item in trace_items if item.get("event") == "loop_initialized"
+        ]
+        if initialized_events:
+            if len(initialized_events) != 1:
+                issues.append("loop_initialized_event_count_invalid")
+            else:
+                initialized = initialized_events[0]
+                if initialized.get("brief_run") != state.brief_run:
+                    issues.append("loop_initialized_brief_mismatch")
+                if initialized.get("artifacts") != LOOP_INITIALIZATION_ARTIFACTS:
+                    issues.append("loop_initialized_artifacts_mismatch")
+        else:
+            # 兼容旧 run：根级 worker_prompt_measured 发生在全部初始化文件写完之后。
+            legacy_markers = [
+                item
+                for item in trace_items
+                if item.get("event") == "worker_prompt_measured"
+                and "iteration" not in item
+            ]
+            if len(legacy_markers) != 1:
+                issues.append("loop_initialization_marker_missing")
+    return list(dict.fromkeys(issues))
+
+
+def _require_loop_initialization(
+    workspace: Path,
+    run_dir: Path,
+    state: LoopAutomationState,
+    repo_path: Path,
+) -> None:
+    issues = loop_initialization_issues(
+        workspace,
+        run_dir,
+        state,
+        repo_path,
+    )
+    if issues:
+        raise ValueError(
+            "loop 初始化未完成或证据不完整，已拒绝 continue："
+            + ", ".join(issues)
+        )
+
+
+def _require_recovery_trace_binding(
+    run_dir: Path,
+    state: LoopAutomationState,
+) -> None:
+    pending_path = run_dir / ".control" / "recovery-transaction.json"
+    if pending_path.exists():
+        raise ValueError(
+            "loop recovery transaction 尚未提交完成；"
+            "请先重新执行 recover，再运行 continue。"
+        )
+    try:
+        items = read_trace_items(run_dir / "trace.jsonl")
+    except (OSError, ValueError) as exc:
+        raise ValueError("loop trace 无法验证，已拒绝 continue。") from exc
+    _, issues = active_run_finished_indices(
+        items,
+        expected_superseded=[
+            record.model_dump()
+            for record in state.superseded_terminal_events
+        ],
+    )
+    if issues:
+        raise ValueError(
+            "loop recovery 终态绑定不完整，已拒绝 continue："
+            + ", ".join(issues)
+        )
+    if state.current_step not in {
+        "recovered",
+        "recovered_initialization_incomplete",
+    }:
+        return
+
+    recovery_id = state.last_recovery_id
+    if recovery_id is None:
+        # 兼容旧 run：旧版没有 last_recovery_id，但必须保留真实 recovery 事件。
+        legacy_recovered = [
+            item for item in items if item.get("event") == "loop_recovered"
+        ]
+        if not legacy_recovered:
+            raise ValueError("loop 缺少 recovery trace，已拒绝 continue。")
+        return
+
+    recovered_matches = [
+        item
+        for item in items
+        if item.get("event") == "loop_recovered"
+        and item.get("recovery_id") == recovery_id
+    ]
+    if len(recovered_matches) != 1:
+        raise ValueError("loop_recovered 与 state.last_recovery_id 不一致。")
+    recovered = recovered_matches[0]
+    continuation_allowed = (
+        state.current_step != "recovered_initialization_incomplete"
+    )
+    if recovered.get("continuation_allowed") != continuation_allowed:
+        raise ValueError("loop_recovered 的 continuation_allowed 与 state 不一致。")
+    expected_superseded = next(
+        (
+            record.terminal_event_index
+            for record in state.superseded_terminal_events
+            if record.recovery_id == recovery_id
+        ),
+        None,
+    )
+    if recovered.get("superseded_terminal_event") != expected_superseded:
+        raise ValueError("loop_recovered 的 superseded terminal 与 state 不一致。")
+
+    if state.iterations and state.iterations[-1].lifecycle == "interrupted":
+        latest = state.iterations[-1]
+        interruption_matches = [
+            item
+            for item in items
+            if item.get("event") == "loop_iteration_interrupted"
+            and item.get("recovery_id") == recovery_id
+        ]
+        if len(interruption_matches) != 1:
+            raise ValueError(
+                "loop_iteration_interrupted 与 state.last_recovery_id 不一致。"
+            )
+        interruption = interruption_matches[0]
+        if (
+            interruption.get("iteration") != latest.iteration
+            or interruption.get("previous_step") != latest.interrupted_step
+        ):
+            raise ValueError("loop interruption trace 与最新 interrupted state 不一致。")
+
+
+def _interrupted_iteration_evidence_checks(
+    iteration_dir: Path,
+    iteration: LoopIterationState,
+) -> list[str]:
+    results: list[str] = []
+    if not iteration_dir.is_dir():
+        return [f"FAIL: interrupted iteration 目录不存在：{iteration.iteration:02d}"]
+    if not iteration.interrupted_step:
+        results.append("FAIL: interrupted iteration 缺少 interrupted_step")
+    if not iteration.interrupted_at:
+        results.append("FAIL: interrupted iteration 缺少 interrupted_at")
+    report_path = iteration_dir / "interruption-report.md"
+    if not report_path.is_file():
+        results.append("FAIL: interrupted iteration 缺少 interruption-report.md")
+        return results
+    report = _read_optional_text(report_path)
+    if f"- 迭代：`{iteration.iteration}`" not in report:
+        results.append("FAIL: interruption-report.md 与 iteration 编号不一致")
+    if (
+        iteration.interrupted_step
+        and f"- 原步骤：`{iteration.interrupted_step}`" not in report
+    ):
+        results.append("FAIL: interruption-report.md 与 interrupted_step 不一致")
+    if iteration.interrupted_at and iteration.interrupted_at not in report:
+        results.append("FAIL: interruption-report.md 与 interrupted_at 不一致")
+    if not results:
+        results.append("PASS: interrupted iteration 证据已保留且不参与成功判定")
+    return results
 
 
 def _iteration_dir(run_dir: Path, iteration: int) -> Path:
@@ -2149,7 +3273,11 @@ def _finalize_loop_eval(
         return
 
     trace.write("run_finished", status=final_status)
-    terminal_results = _loop_terminal_eval_results(run_dir, final_status)
+    terminal_results = _loop_terminal_eval_results(
+        run_dir,
+        final_status,
+        state.superseded_terminal_events,
+    )
     if any(result.startswith("FAIL:") for result in terminal_results):
         raise RuntimeError("loop 终态 trace 审计失败，state 保持 running 以阻止误判成功")
     state.status = final_status
@@ -2186,6 +3314,20 @@ def _latest_verification_failed(state: LoopAutomationState) -> bool:
     return latest.verification_status == "failed" or latest.verification_failed_count > 0
 
 
+def _load_stable_start_policy(
+    repo_path: Path,
+) -> tuple[ProjectConfig, dict[str, str | None], str]:
+    """在创建 run 前稳定绑定 HEAD、策略文件 bytes 与解析后的配置。"""
+    policy_before = project_policy_snapshot(repo_path)
+    head_before = read_head_sha(repo_path)
+    config = load_project_config(repo_path)
+    policy_after = project_policy_snapshot(repo_path)
+    head_after = read_head_sha(repo_path)
+    if policy_before != policy_after or head_before != head_after:
+        raise RuntimeError("loop 启动时 HEAD 或项目策略发生变化，请在工作区稳定后重试")
+    return config, policy_after, head_after
+
+
 def _project_policy_changed(
     repo_path: Path,
     initial_snapshot: dict[str, str | None],
@@ -2198,9 +3340,13 @@ def _write_project_policy_snapshot(
     snapshot: dict[str, str | None],
 ) -> None:
     run_dir.joinpath("project-policy-snapshot.json").write_text(
-        json.dumps(redact_value(snapshot), ensure_ascii=False, indent=2) + "\n",
+        _project_policy_snapshot_text(snapshot),
         encoding="utf-8",
     )
+
+
+def _project_policy_snapshot_text(snapshot: dict[str, str | None]) -> str:
+    return json.dumps(redact_value(snapshot), ensure_ascii=False, indent=2) + "\n"
 
 
 def _write_project_policy_change_report(

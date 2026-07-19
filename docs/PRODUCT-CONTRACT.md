@@ -44,8 +44,13 @@ vega recover
 
 - `AGENTS.md`、项目画像和任务输入的上下文编译。
 - worker/reviewer 角色隔离和固定 sandbox。
-- 验证命令、变更预算、Prompt 预算与工作区污染门禁。
+- 验证命令、精确路径范围、变更预算、Prompt 预算与工作区污染门禁。
 - auto 首轮拒绝已有 tracked diff；同一 run 的后续轮次保留上一轮 diff 作为基线。
+- scope gate 在 worker/人工 continue 后先检查 staged 和 unstaged tracked diff；verification 结束后再次检查，Reflect 固化 review 输入后再检查一次。`forbidden_paths` 优先于 `allowed_paths`；最后一次与 reviewer 的工作区快照校验共同防止异步进程把越界 diff 带入隔离审查。任一阶段越界时保留 result、report、state 和 trace 证据并停止，不回滚或自动清理现场。
+- loop 启动时绑定稳定的 HEAD、项目策略文件摘要和 scope 规则摘要；worker commit/checkout、
+  `assume-unchanged`、`skip-worktree`、运行中策略变化或 reviewer 授权快照变化都会 fail-closed。
+  `project-policy-snapshot.json` 与根状态哈希绑定，Finish 会复查当前策略；缺少三阶段 scope
+  证据的旧 run 仍可查看，但不能自动进入 `ready_to_commit`。
 - iteration-local risk gate 的结果与报告绑定 source reflect、iteration、结果哈希、风险和建议；Finish 会结合 trace、连续 iteration 与 Reflect 重算复核。缺失、篡改、语义不一致或绕过 `human-review` 时，不得给出 `ready_to_commit`。
 - 独立 reviewer 也必须带上同一份风险门禁；`human-review` 下的 AI 审查只能提供辅助发现，不能成为 Goal checkpoint 的自动完成证据。
 - reviewer 不能覆盖确定性验证失败。
@@ -73,7 +78,7 @@ vega recover
 | 层级 | 内容 | 特性 |
 |---|---|---|
 | `AGENTS.md` | 稳定规范、架构边界、长期踩坑 | Git 版本化，面向人和 AI |
-| `.vega.yaml` | 验证命令、预算、风险路径、runner 策略 | 机器可执行 |
+| `.vega.yaml` | 验证命令、精确路径范围、预算、风险路径、runner 策略 | 机器可执行 |
 | run artifacts | 本次任务、diff、验证、review 和恢复证据 | 单次运行事实 |
 | accepted memory | 已人工确认、跨任务可复用的局部经验 | 可选，不是规范来源 |
 
@@ -126,5 +131,15 @@ v0.1.0 完成核心证据一致性和口径收口后进入功能冻结：
 - 不实现 Goal P1、多 Agent、数据库、Web UI、向量 Memory、后台 daemon 或自动提交发布。
 - 新能力只有在多次真实 dogfood 暴露同一问题，并能改善增长指标时才重新评估。
 
-当前是本地单用户 CLI，不支持多个进程并发写同一个 run。该限制作为明确边界保留，不为假设性
-并发场景引入锁服务或数据库。
+## v0.1.1 维护发布边界
+
+v0.1.1 只吸收已经通过真实 Dogfood 和完整回归的路径范围、验证隔离、恢复与并发安全
+修复，不改变产品定位或扩大功能范围。
+
+当前仍是本地单用户 CLI。同一个 loop run 的 start、continue、recover、finish 和 decision
+append 使用本地非阻塞 OS 文件锁互斥；busy 命令在修改可信业务 artifact 前 fail closed。
+`vega stop` 保持旁路，只写 active execution 的 stop request。
+
+该能力不承诺外部进程持续并发改写目标仓库时的操作系统级原子隔离。runtime 会用前后快照、
+HEAD、策略摘要、index 标记和 reviewer 授权快照发现关键阶段变化，但不会引入目标仓库全局
+锁、网络锁、分布式锁服务或数据库事务。

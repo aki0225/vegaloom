@@ -396,12 +396,20 @@ def test_reflect_lists_untracked_paths_without_copying_content(tmp_path: Path) -
     ("mutation", "expected"),
     [
         ("empty_trace", "FAIL: trace.jsonl 为空"),
-        ("missing_terminal", "FAIL: trace.jsonl 缺少 run_finished 终态事件"),
+        (
+            "missing_terminal",
+            "FAIL: trace.jsonl 缺少未被 supersede 的 run_finished 终态事件",
+        ),
         (
             "duplicate_terminal",
-            "FAIL: trace.jsonl 必须且只能包含一个 run_finished 终态事件",
+            "FAIL: trace.jsonl 必须且只能包含一个未被 supersede 的 run_finished 终态事件",
         ),
         ("trailing_event", "FAIL: run_finished 必须是 trace.jsonl 最后一条事件"),
+        (
+            "invalid_supersede",
+            "FAIL: run_terminal_superseded 证据无效："
+            "run_terminal_superseded_target_invalid",
+        ),
         ("zero_iterations", "FAIL: success loop 至少需要一轮 iteration"),
         ("tampered_verdict", "FAIL: review-verdict.json 与 iteration.verdict 不一致"),
         (
@@ -436,6 +444,16 @@ def test_loop_eval_rejects_broken_success_evidence(
         items = _read_jsonl(run_dir / "trace.jsonl")
         items.append({"event": "unexpected_after_finish"})
         _write_jsonl(run_dir / "trace.jsonl", items)
+    elif mutation == "invalid_supersede":
+        items = _read_jsonl(run_dir / "trace.jsonl")
+        items.append(
+            {
+                "event": "run_terminal_superseded",
+                "terminal_event_index": len(items) + 10,
+                "terminal_status": "success",
+            }
+        )
+        _write_jsonl(run_dir / "trace.jsonl", items)
     elif mutation == "zero_iterations":
         state["iterations"] = []
         state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
@@ -460,6 +478,43 @@ def test_loop_eval_accepts_consistent_success_evidence(tmp_path: Path) -> None:
     results = run_loop_eval(run_dir, state["artifacts"])
 
     assert not [result for result in results if result.startswith("FAIL:")]
+
+
+def test_loop_eval_rejects_superseded_terminal_without_state_binding(
+    tmp_path: Path,
+) -> None:
+    run_dir = _create_successful_loop(tmp_path)
+    state = _read_json(run_dir / "state.json")
+    items = _read_jsonl(run_dir / "trace.jsonl")
+    old_terminal_index = len(items) - 1
+    old_terminal = dict(items[-1])
+    recovery_id = "synthetic-unbound-recovery"
+    items.append(
+        {
+            "event": "run_terminal_superseded",
+            "ts": "2026-07-17T00:00:00+00:00",
+            "terminal_event_index": old_terminal_index,
+            "terminal_status": old_terminal["status"],
+            "recovery_id": recovery_id,
+        }
+    )
+    items.append(
+        {
+            "event": "loop_recovered",
+            "ts": "2026-07-17T00:00:01+00:00",
+            "recovery_id": recovery_id,
+            "superseded_terminal_event": old_terminal_index,
+        }
+    )
+    items.append(old_terminal)
+    _write_jsonl(run_dir / "trace.jsonl", items)
+
+    results = run_loop_eval(run_dir, state["artifacts"])
+
+    assert (
+        "FAIL: run_terminal_superseded 证据无效："
+        "run_terminal_superseded_state_binding_missing"
+    ) in results
 
 
 def test_loop_eval_rejects_missing_risk_gate_artifact(tmp_path: Path) -> None:

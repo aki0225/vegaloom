@@ -42,7 +42,8 @@ engineering-change
 
 - CLI：`vega run engineering-change --task <task.md> --repo <repo>`
 - CLI：`vega list-loops`
-- `loops/engineering-change.loop.yaml` 作为真实配置源
+- 包内 `engineering-change` YAML 作为可安装 baseline；workspace 的
+  `loops/engineering-change.loop.yaml` 可显式覆盖并保持源码仓镜像
 - run 目录：`runs/<run_id>/`
 - `state.json`
 - `trace.jsonl`
@@ -115,6 +116,8 @@ engineering-change
   reviewer 不启动并进入 `needs_human`
 - Recovery report：检查全部 execution；任一 active execution 仍有 owned/child PID 存活时
   拒绝接管，避免较旧 active execution 被较新的 terminal execution 掩盖
+- Recovery iteration：安全接管后冻结半完成轮，保留 execution 和部分 diff；后续 continue
+  使用下一连续编号，中断轮不参与 success、verification 或 reviewer 判定
 - 验证失败不能被 reviewer approve 覆盖，必须进入修复或人工判断
 - `loop continue` 只允许同一仓库中处于 `needs_human` 的 run
 - `--max-iterations` 只限制 auto worker 自动重试，不阻止人工修复后的 `loop continue`

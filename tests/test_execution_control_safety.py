@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import _thread
 import io
+import json
 import os
 import subprocess
 import sys
@@ -21,6 +22,25 @@ from vega.execution_control import (
     request_stop_for_run,
     run_owned_process,
 )
+
+
+def test_execution_model_temp_path_preserves_windows_path_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(execution_control.os, "getpid", lambda: 0x7FFFFFFF)
+
+    initial_path = tmp_path / "r" / "execution.json"
+    padding = 250 - len(str(initial_path))
+    assert padding >= 0
+    execution_dir = tmp_path / ("r" * (padding + 1))
+    execution_path = execution_dir / "execution.json"
+    temp_path = execution_control._execution_model_temp_path(execution_path)
+
+    assert len(str(execution_path)) == 250
+    assert temp_path.parent == execution_path.parent
+    assert temp_path.name == ".e.7fffffff"
+    assert len(str(temp_path)) < 260
 
 
 def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> None:
@@ -231,6 +251,11 @@ def test_stop_request_reason_is_redacted_before_persisting(tmp_path: Path) -> No
     )
     assert fake_secret not in request_payload
     assert "[REDACTED]" in request_payload
+    assert set(json.loads(request_payload)) == {
+        "reason",
+        "requested_at",
+        "requester_pid",
+    }
 
 
 def test_stop_prefers_latest_live_active_execution_over_newer_stale_record(
@@ -423,6 +448,38 @@ def test_posix_termination_requires_owned_process_group_to_exit(
     assert execution_control.signal.SIGTERM in signals
     assert execution_control.signal.SIGKILL in signals
     assert f"process group {process.pid} 仍存活" in result.detail
+
+
+def test_posix_process_group_ignores_terminal_linux_members(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proc_root = tmp_path / "proc"
+    for pid, state in [(101, "Z"), (102, "X"), (103, "S")]:
+        process_dir = proc_root / str(pid)
+        process_dir.mkdir(parents=True)
+        process_dir.joinpath("stat").write_text(
+            f"{pid} (child process) {state} 1 5353 5353 0",
+            encoding="utf-8",
+        )
+
+    states = execution_control._linux_process_group_states(5353, proc_root)
+
+    assert sorted(states) == ["S", "X", "Z"]
+    monkeypatch.setattr(execution_control.os, "killpg", lambda *_: None, raising=False)
+    monkeypatch.setattr(
+        execution_control,
+        "_linux_process_group_states",
+        lambda _: ["Z", "X"],
+    )
+    assert not execution_control._is_posix_process_group_alive(5353)
+
+    monkeypatch.setattr(
+        execution_control,
+        "_linux_process_group_states",
+        lambda _: ["Z", "S"],
+    )
+    assert execution_control._is_posix_process_group_alive(5353)
 
 
 def test_windows_final_wait_timeout_keeps_timeout_execution_active(

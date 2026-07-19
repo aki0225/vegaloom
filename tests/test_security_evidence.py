@@ -411,6 +411,23 @@ def test_workspace_check_reports_dubious_ownership_without_modifying_git_config(
     assert all(command[:2] != ["git", "config"] for command in commands)
 
 
+def test_workspace_check_accepts_string_git_output_from_test_double(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        if command[1:3] == ["rev-parse", "--verify"]:
+            return SimpleNamespace(returncode=0, stdout="a" * 40, stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(workspace_check_module.subprocess, "run", fake_run)
+
+    assert workspace_check_module.read_head_sha(repo) == "a" * 40
+
+
 def _init_repo(repo: Path, files: dict[str, str]) -> None:
     repo.mkdir(parents=True)
     _git(repo, "init")

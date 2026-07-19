@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -24,20 +25,70 @@ from .workspace_check import collect_tracked_diff_parts, render_tracked_diff_sec
 GATE_ARTIFACTS = ["state.json", "trace.jsonl", "gate-report.md", "gate-result.json", "eval.md"]
 HIGH_RISK_PATH_KEYWORDS = [
     "auth",
+    "authentication",
+    "authorization",
+    "authn",
+    "authz",
+    "oauth",
     "security",
     "permission",
+    "permissions",
     "role",
+    "roles",
+    "rbac",
     "payment",
+    "payments",
     "billing",
     "migration",
     "migrations",
     "schema",
+    "schemas",
     "database",
+    "databases",
     "secret",
+    "secrets",
     "token",
+    "tokens",
     "credential",
+    "credentials",
 ]
-MEDIUM_RISK_PATH_KEYWORDS = ["admin", "config", "deploy", "docker", "ci", ".github"]
+MEDIUM_RISK_PATH_KEYWORDS = [
+    "admin",
+    "administrator",
+    "administrators",
+    "administration",
+    "config",
+    "configs",
+    "configuration",
+    "deploy",
+    "deployment",
+    "docker",
+    "dockerfile",
+    "ci",
+    ".github",
+]
+_RISK_COMPOUND_SUFFIXES = (
+    "api",
+    "backup",
+    "cache",
+    "client",
+    "controller",
+    "filter",
+    "gateway",
+    "guard",
+    "handler",
+    "manager",
+    "middleware",
+    "model",
+    "policy",
+    "provider",
+    "repository",
+    "server",
+    "service",
+    "store",
+    "storage",
+    "vault",
+)
 DEPENDENCY_FILES = {
     "package.json",
     "package-lock.json",
@@ -566,12 +617,53 @@ def _git(repo_path: Path, command: list[str]) -> str:
 
 def _matched_paths(paths: list[str], keywords: list[str]) -> list[str]:
     matched = []
-    lowered_keywords = [keyword.lower() for keyword in keywords]
+    lowered_keywords = {keyword.lower() for keyword in keywords}
     for path in paths:
-        normalized = path.replace("\\", "/").lower()
-        if any(keyword in normalized for keyword in lowered_keywords):
+        if any(
+            _risk_token_matches_keyword(token, keyword)
+            for token in _risk_path_tokens(path)
+            for keyword in lowered_keywords
+        ):
             matched.append(path)
     return matched
+
+
+def _risk_token_matches_keyword(token: str, keyword: str) -> bool:
+    """只接受精确、纯数字后缀或有限技术复合边界，不做任意子串匹配。"""
+
+    if token == keyword:
+        return True
+    if not token.startswith(keyword):
+        return False
+
+    remainder = token[len(keyword) :]
+    without_leading_digits = remainder.lstrip("0123456789")
+    if remainder and not without_leading_digits:
+        return True
+
+    compound = without_leading_digits.rstrip("0123456789")
+    return compound in _RISK_COMPOUND_SUFFIXES
+
+
+def _risk_path_tokens(path: str) -> set[str]:
+    """按路径组件和文件名 token 提取风险词，避免普通子串造成误报。
+
+    例如 `pricing.py` 不应因为包含 `ci` 被视为 CI 文件，`author.py` 也不应因为
+    包含 `auth` 被视为鉴权代码；但精确 token、CamelCase、数字后缀和有限技术复合词
+    仍可由 `_risk_token_matches_keyword` 识别。
+    """
+
+    components = [component for component in path.replace("\\", "/").split("/") if component]
+    tokens = {component.lower() for component in components}
+    for component in components:
+        separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", component)
+        separated = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", separated)
+        tokens.update(
+            token.lower()
+            for token in re.split(r"[^A-Za-z0-9]+", separated)
+            if token
+        )
+    return tokens
 
 
 def _matched_config_paths(paths: list[str], patterns: list[str]) -> list[str]:

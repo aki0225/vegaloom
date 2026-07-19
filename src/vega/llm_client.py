@@ -13,6 +13,7 @@ from .redaction import redact_text, redact_value
 
 DEFAULT_MODEL = "gpt-5.5"
 DEFAULT_REASONING_EFFORT = "xhigh"
+DEFAULT_PROVIDER_ALIAS = "ciii"
 DEFAULT_TIMEOUT_SECONDS = 180.0
 
 
@@ -27,24 +28,21 @@ class LLMRequestError(RuntimeError):
 class LLMClient:
     api_key: str | None
     base_url: str | None
-    provider_alias: str
     model: str = DEFAULT_MODEL
     reasoning_effort: str = DEFAULT_REASONING_EFFORT
+    provider_alias: str = DEFAULT_PROVIDER_ALIAS
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "LLMClient":
         source = os.environ if env is None else env
-        provider_alias = (source.get("VEGA_PROVIDER_ALIAS") or "").strip()
-        if not provider_alias:
-            raise ValueError("必须通过环境变量 VEGA_PROVIDER_ALIAS 显式设置 provider alias")
         return cls(
             api_key=source.get("VEGA_API_KEY") or None,
             base_url=source.get("VEGA_BASE_URL") or None,
-            provider_alias=provider_alias,
             model=source.get("VEGA_MODEL") or DEFAULT_MODEL,
             reasoning_effort=source.get("VEGA_REASONING_EFFORT")
             or DEFAULT_REASONING_EFFORT,
+            provider_alias=source.get("VEGA_PROVIDER_ALIAS") or DEFAULT_PROVIDER_ALIAS,
             timeout_seconds=_parse_timeout(source.get("VEGA_TIMEOUT_SECONDS")),
         )
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vegaloom"
-version = "0.1.0"
+version = "0.1.1"
 description = "One writes, one reviews — an isolated-context runner for coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,9 @@ vega = "vega.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+vega = ["resources/loops/*.yaml"]
 
 [tool.ruff]
 line-length = 100

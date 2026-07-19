@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
 import shutil
 import subprocess
+import unicodedata
 from pathlib import Path
 from typing import Literal
 
@@ -15,6 +18,158 @@ from .redaction import redact_text
 
 CONFIG_FILENAMES = [".vega.yaml", ".vega.yml"]
 CODEX_PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+VERIFICATION_TEMP_PLACEHOLDER = "{{vega_verification_temp}}"
+VERIFICATION_TEMP_ENV = "VEGA_VERIFICATION_TEMP"
+VERIFICATION_TEMP_ROOT = Path(".tmp") / "vega-verification"
+VEGA_VERIFICATION_PLACEHOLDER_PATTERN = re.compile(r"\{\{vega_[^{}\r\n]*\}\}")
+VerificationShellKind = Literal["cmd", "posix-sh"]
+
+
+def find_unknown_verification_placeholders(command: str) -> list[str]:
+    return sorted(
+        {
+            placeholder
+            for placeholder in VEGA_VERIFICATION_PLACEHOLDER_PATTERN.findall(command)
+            if placeholder != VERIFICATION_TEMP_PLACEHOLDER
+        }
+    )
+
+
+def verification_temp_placeholder_has_unsafe_context(
+    command: str,
+    shell_kind: VerificationShellKind | None = None,
+) -> bool:
+    """占位符必须作为未加引号的独立路径 token，避免路径进入 shell 源码。"""
+
+    selected_shell = shell_kind or current_verification_shell_kind()
+    search_from = 0
+    while True:
+        index = command.find(VERIFICATION_TEMP_PLACEHOLDER, search_from)
+        if index < 0:
+            return False
+        end = index + len(VERIFICATION_TEMP_PLACEHOLDER)
+        if _posix_quote_before(command, index) is not None:
+            return True
+        if _cmd_quote_before(command, index):
+            return True
+        if selected_shell == "cmd" and _cmd_dynamic_expansion_before(command, index):
+            return True
+        if index > 0 and not (
+            command[index - 1].isspace() or command[index - 1] == "="
+        ):
+            return True
+        if end < len(command) and not (
+            command[end].isspace() or command[end] in {"/", "\\"}
+        ):
+            return True
+        search_from = end
+
+
+def current_verification_shell_kind() -> VerificationShellKind:
+    return "cmd" if os.name == "nt" else "posix-sh"
+
+
+def render_verification_command(
+    command: str,
+    shell_kind: VerificationShellKind | None = None,
+) -> str:
+    unknown_placeholders = find_unknown_verification_placeholders(command)
+    if unknown_placeholders:
+        raise ValueError(
+            "verification 命令包含不受支持的 Vega 占位符："
+            + ", ".join(unknown_placeholders)
+        )
+    if VERIFICATION_TEMP_PLACEHOLDER not in command:
+        return command
+    selected_shell = shell_kind or current_verification_shell_kind()
+    if verification_temp_placeholder_has_unsafe_context(command, selected_shell):
+        raise ValueError("verification 临时目录占位符必须作为未加引号的独立路径 token")
+    variable_reference = (
+        f"%{VERIFICATION_TEMP_ENV}%"
+        if selected_shell == "cmd"
+        else f"${{{VERIFICATION_TEMP_ENV}}}"
+    )
+    return command.replace(
+        VERIFICATION_TEMP_PLACEHOLDER,
+        f'"{variable_reference}"',
+    )
+
+
+def build_verification_shell_command(
+    command: str,
+    shell_kind: VerificationShellKind | None = None,
+) -> list[str] | str:
+    selected_shell = shell_kind or current_verification_shell_kind()
+    if selected_shell == "cmd":
+        prefix = subprocess.list2cmdline(
+            [
+                os.environ.get("COMSPEC", "cmd.exe"),
+                "/d",
+                "/v:off",
+                "/s",
+                "/c",
+            ]
+        )
+        return f'{prefix} "{command}"'
+    return ["/bin/sh", "-c", command]
+
+
+def _posix_quote_before(command: str, index: int) -> str | None:
+    quote: str | None = None
+    position = 0
+    while position < index:
+        character = command[position]
+        if quote == "'":
+            if character == "'":
+                quote = None
+            position += 1
+            continue
+        if character == "\\":
+            position += 2
+            continue
+        if quote == '"':
+            if character == '"':
+                quote = None
+            position += 1
+            continue
+        if character in {"'", '"'}:
+            quote = character
+        position += 1
+    return quote
+
+
+def _cmd_quote_before(command: str, index: int) -> bool:
+    """保守按 cmd.exe 语义跟踪双引号；反斜杠不能转义双引号。"""
+
+    quoted = False
+    position = 0
+    while position < index:
+        character = command[position]
+        if not quoted and character == "^":
+            position += 2
+            continue
+        if character == '"':
+            quoted = not quoted
+        position += 1
+    return quoted
+
+
+def _cmd_dynamic_expansion_before(command: str, index: int) -> bool:
+    """拒绝占位符前可在运行时改变引号状态的 cmd 百分号展开。"""
+
+    quoted = False
+    position = 0
+    while position < index:
+        character = command[position]
+        if not quoted and character == "^":
+            position += 2
+            continue
+        if character == "%":
+            return True
+        if character == '"':
+            quoted = not quoted
+        position += 1
+    return False
 
 
 def project_policy_snapshot(repo_path: Path) -> dict[str, str | None]:
@@ -28,6 +183,17 @@ def project_policy_snapshot(repo_path: Path) -> dict[str, str | None]:
                 "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             }
     return {"path": None, "sha256": None}
+
+
+def scope_policy_sha256(scope: ScopeConfig) -> str:
+    """计算 scope 规则的规范化摘要，供 run 根状态与各阶段证据绑定。"""
+    payload = json.dumps(
+        scope.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 class VerificationConfig(BaseModel):
@@ -55,6 +221,61 @@ class BudgetConfig(BaseModel):
     max_file_bytes: int = Field(default=200_000, ge=1)
     forbid_new_dependencies: bool = False
     forbid_large_generated_files: bool = False
+
+
+class ScopeConfig(BaseModel):
+    """声明本轮 tracked diff 的精确路径范围。
+
+    `allowed_paths` 非空时，所有变更必须命中其中至少一条规则；`forbidden_paths`
+    始终优先，用于把测试、CI、依赖或项目策略等路径从小任务中排除。这里仅保存
+    机器可判定的相对 POSIX glob，不把自然语言约束误当成 runtime 强制边界。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_paths: list[str] = Field(default_factory=list, max_length=128)
+    forbidden_paths: list[str] = Field(default_factory=list, max_length=128)
+
+    @field_validator("allowed_paths", "forbidden_paths")
+    @classmethod
+    def validate_scope_patterns(
+        cls,
+        values: list[str],
+        info: ValidationInfo,
+    ) -> list[str]:
+        return [_validate_scope_pattern(value, info.field_name) for value in values]
+
+
+def _validate_scope_pattern(value: str, field_name: str) -> str:
+    """拒绝会把仓库相对 glob 解释成外部路径或含糊路径的配置值。"""
+    if value != value.strip():
+        raise ValueError(f"{field_name} 中的路径规则不能包含首尾空白")
+    if not value:
+        raise ValueError(f"{field_name} 中的路径规则不能为空")
+    if len(value) > 512:
+        raise ValueError(f"{field_name} 中的路径规则长度不能超过 512")
+    if any(character in value for character in ("\r", "\n", "\0")):
+        raise ValueError(f"{field_name} 中的路径规则不能包含换行或 NUL")
+    if any(unicodedata.category(character) in {"Cc", "Cf"} for character in value):
+        raise ValueError(f"{field_name} 中的路径规则不能包含控制字符或双向格式字符")
+    if value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", value):
+        raise ValueError(f"{field_name} 只能使用仓库相对路径，不能使用绝对路径或盘符")
+    if "\\" in value:
+        raise ValueError(f"{field_name} 必须使用 POSIX 分隔符 '/'，不能使用反斜杠")
+    if ":" in value:
+        raise ValueError(f"{field_name} 不能包含 ':'，避免 Windows 路径歧义")
+    segments = value.split("/")
+    if any(segment in {"", ".", ".."} for segment in segments):
+        raise ValueError(
+            f"{field_name} 不能包含空路径段、'.' 或 '..'，请使用明确的仓库相对 glob"
+        )
+    if segments.count("**") > 16:
+        raise ValueError(f"{field_name} 中的 '**' 不能超过 16 个，避免规则匹配失控")
+    if redact_text(value) != value:
+        raise ValueError(
+            f"{field_name} 中的路径规则会触发脱敏，无法作为稳定的机器判定身份"
+        )
+    return value
 
 
 class PromptBudgetConfig(BaseModel):
@@ -174,6 +395,7 @@ class ProjectConfig(BaseModel):
     verification: VerificationConfig = Field(default_factory=VerificationConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    scope: ScopeConfig = Field(default_factory=ScopeConfig)
     budget_profiles: dict[str, BudgetConfig] = Field(default_factory=dict)
     prompt_budget: PromptBudgetConfig = Field(default_factory=PromptBudgetConfig)
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
@@ -344,6 +566,34 @@ def validate_verification_commands(commands: list[str]) -> list[ProjectConfigIss
                     evidence=stripped[:300],
                 )
             )
+        unknown_placeholders = find_unknown_verification_placeholders(command)
+        if unknown_placeholders:
+            issues.append(
+                ProjectConfigIssue(
+                    code="unknown_verification_placeholder",
+                    severity="error",
+                    message=(
+                        f"{location} 包含不受支持的 Vega 占位符；"
+                        f"只允许精确字面量 {VERIFICATION_TEMP_PLACEHOLDER}。"
+                    ),
+                    evidence=", ".join(unknown_placeholders),
+                )
+            )
+        if (
+            VERIFICATION_TEMP_PLACEHOLDER in command
+            and verification_temp_placeholder_has_unsafe_context(command)
+        ):
+            issues.append(
+                ProjectConfigIssue(
+                    code="unsafe_verification_temp_placeholder_context",
+                    severity="error",
+                    message=(
+                        f"{location} 中的 {VERIFICATION_TEMP_PLACEHOLDER} 必须作为未加引号的"
+                        "独立路径 token；Runtime 会负责安全引用。"
+                    ),
+                    evidence=VERIFICATION_TEMP_PLACEHOLDER,
+                )
+            )
         if len(stripped) > 500:
             issues.append(
                 ProjectConfigIssue(
@@ -472,6 +722,21 @@ def render_project_config_summary(config: ProjectConfig) -> str:
             f"- 最大新增文件数：`{config.budget.max_new_files if config.budget.max_new_files is not None else '未限制'}`",
             f"- 禁止新增依赖：`{config.budget.forbid_new_dependencies}`",
             f"- 禁止大体量生成/新增文件：`{config.budget.forbid_large_generated_files}`",
+            "",
+            "## 精确路径范围",
+            "",
+            "- allowed_paths："
+            + (
+                "、".join(f"`{item}`" for item in config.scope.allowed_paths)
+                if config.scope.allowed_paths
+                else "未配置"
+            ),
+            "- forbidden_paths："
+            + (
+                "、".join(f"`{item}`" for item in config.scope.forbidden_paths)
+                if config.scope.forbidden_paths
+                else "未配置"
+            ),
             "",
             "## 显式验证命令",
             "",

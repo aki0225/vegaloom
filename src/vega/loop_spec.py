@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
@@ -41,13 +43,18 @@ def default_engineering_change_spec() -> LoopSpec:
 
 
 def list_loop_specs(workspace: Path) -> list[LoopSpec]:
+    specs_by_name: dict[str, LoopSpec] = {}
     loop_dir = workspace / "loops"
-    if not loop_dir.exists():
-        return []
-    specs: list[LoopSpec] = []
-    for path in sorted(loop_dir.glob("*.loop.yaml")):
-        specs.append(load_loop_spec_file(path))
-    return specs
+    if loop_dir.exists():
+        for path in sorted(loop_dir.glob("*.loop.yaml")):
+            spec = load_loop_spec_file(path)
+            specs_by_name[spec.name] = spec
+
+    # workspace 中的同名配置用于显式覆盖；wheel 安装后仍可回退到包内 baseline。
+    for path in _packaged_loop_spec_paths():
+        spec = load_loop_spec_file(path)
+        specs_by_name.setdefault(spec.name, spec)
+    return [specs_by_name[name] for name in sorted(specs_by_name)]
 
 
 def load_loop_spec(workspace: Path, loop_name: str) -> LoopSpec:
@@ -57,7 +64,7 @@ def load_loop_spec(workspace: Path, loop_name: str) -> LoopSpec:
     raise ValueError(f"未找到 loop 配置：{loop_name}")
 
 
-def load_loop_spec_file(path: Path) -> LoopSpec:
+def load_loop_spec_file(path: Path | Traversable) -> LoopSpec:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"loop 配置必须是 YAML 对象：{path}")
@@ -67,7 +74,7 @@ def load_loop_spec_file(path: Path) -> LoopSpec:
     return spec
 
 
-def _validate_tool_policy(spec: LoopSpec, path: Path) -> None:
+def _validate_tool_policy(spec: LoopSpec, path: Path | Traversable) -> None:
     allowed = set(spec.tools.allowed)
     disabled = set(spec.tools.disabled)
     unknown = sorted(allowed - SUPPORTED_TOOLS)
@@ -78,7 +85,7 @@ def _validate_tool_policy(spec: LoopSpec, path: Path) -> None:
         raise ValueError(f"工具不能同时 allowed 和 disabled {overlap}：{path}")
 
 
-def _validate_git_checks(spec: LoopSpec, path: Path) -> None:
+def _validate_git_checks(spec: LoopSpec, path: Path | Traversable) -> None:
     unknown = sorted(set(spec.inspect.git_checks) - set(ALLOWED_CHECKS))
     if unknown:
         raise ValueError(f"loop 配置包含未授权 git check {unknown}：{path}")
@@ -92,3 +99,17 @@ def loop_spec_to_public_dict(spec: LoopSpec) -> dict[str, Any]:
         "git_checks": spec.inspect.git_checks,
         "search_queries": spec.inspect.search_queries,
     }
+
+
+def _packaged_loop_spec_paths() -> list[Traversable]:
+    loop_dir = files("vega").joinpath("resources", "loops")
+    if not loop_dir.is_dir():
+        return []
+    return sorted(
+        (
+            path
+            for path in loop_dir.iterdir()
+            if path.is_file() and path.name.endswith(".loop.yaml")
+        ),
+        key=lambda path: path.name,
+    )

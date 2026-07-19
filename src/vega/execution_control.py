@@ -7,11 +7,12 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +37,7 @@ class ExecutionLease(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: str
+    execution_id: str | None = None
     step: str
     iteration: int | None = None
     owner_pid: int = Field(ge=1)
@@ -58,6 +60,8 @@ class StopRequest(BaseModel):
     reason: str
     requested_at: str
     requester_pid: int = Field(ge=1)
+    execution_id: str | None = None
+    execution_started_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,17 +123,19 @@ class ExecutionController:
         self.output_path = context.execution_dir / "process-output.txt"
         self.lease: ExecutionLease | None = None
 
-    def prepare(self, command: list[str], timeout_seconds: int) -> ExecutionLease:
+    def prepare(self, command: list[str] | str, timeout_seconds: int) -> ExecutionLease:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds 必须大于 0")
         self.context.execution_dir.mkdir(parents=True, exist_ok=True)
         now = _now()
+        command_parts = [command] if isinstance(command, str) else command
         self.lease = ExecutionLease(
             run_id=self.context.run_id,
+            execution_id=uuid4().hex,
             step=self.context.step,
             iteration=self.context.iteration,
             owner_pid=os.getpid(),
-            command=[_redact_process_output(item) for item in command],
+            command=[_redact_process_output(item) for item in command_parts],
             started_at=now.isoformat(),
             last_heartbeat=now.isoformat(),
             lease_expires_at=(now + timedelta(seconds=self.context.lease_timeout_seconds)).isoformat(),
@@ -158,12 +164,16 @@ class ExecutionController:
         if not self.stop_request_path.exists():
             return None
         try:
-            return StopRequest.model_validate_json(
+            request = StopRequest.model_validate_json(
                 self.stop_request_path.read_text(encoding="utf-8")
             )
         except (OSError, ValueError):
             # stop request 可能正由另一个 CLI 原子替换；下一轮 polling 再读取即可。
             return None
+        if not _stop_request_matches_lease(request, self._require_lease()):
+            # execution 目录原则上不复用；仍显式绑定 identity，防止旧请求误停新执行。
+            return None
+        return request
 
     def mark_stop_requested(self, request: StopRequest) -> None:
         lease = self._require_lease()
@@ -217,11 +227,13 @@ class ExecutionController:
 
 
 def run_owned_process(
-    command: list[str],
+    command: list[str] | str,
     input_text: str,
     cwd: Path,
     timeout_seconds: int,
     context: RunnerExecutionContext,
+    *,
+    environment: Mapping[str, str] | None = None,
 ) -> OwnedProcessResult:
     """运行一个可停止、可超时、可恢复判断的外部进程。
 
@@ -240,6 +252,11 @@ def run_owned_process(
     output = ""
     termination_unconfirmed = False
 
+    process_environment = None
+    if environment is not None:
+        process_environment = os.environ.copy()
+        process_environment.update(environment)
+
     with tempfile.TemporaryFile("w+b") as output_file:
         try:
             process = subprocess.Popen(
@@ -248,6 +265,7 @@ def run_owned_process(
                 stdin=subprocess.PIPE,
                 stdout=output_file,
                 stderr=subprocess.STDOUT,
+                env=process_environment,
                 **_process_group_options(),
             )
             controller.child_started(process.pid)
@@ -412,9 +430,104 @@ def request_stop_for_run(run_dir: Path, reason: str) -> ExecutionRecord:
         reason=normalized_reason,
         requested_at=_now().isoformat(),
         requester_pid=os.getpid(),
+        execution_id=record.lease.execution_id,
+        execution_started_at=(
+            record.lease.started_at
+            if record.lease.execution_id is not None
+            else None
+        ),
     )
-    _write_model_atomic(record.path.parent / "stop-request.json", request)
-    return record
+    # 旧版 owner 的 StopRequest 使用 extra=forbid。目标 execution 没有 execution_id
+    # 时必须写旧三字段形态，否则升级后的 CLI 会让仍在运行的旧 owner 永久忽略请求。
+    _write_model_atomic(
+        record.path.parent / "stop-request.json",
+        request,
+        exclude_none=True,
+    )
+    return _confirm_stop_target_still_active(run_dir, record)
+
+
+def _confirm_stop_target_still_active(
+    run_dir: Path,
+    requested_record: ExecutionRecord,
+) -> ExecutionRecord:
+    """写入后确认 execution 未切换；已消费为 stopped 也属于成功。"""
+
+    records = find_execution_records(run_dir)
+    matching = [
+        record
+        for record in records
+        if record.path.resolve() == requested_record.path.resolve()
+        and _same_execution_identity(record.lease, requested_record.lease)
+    ]
+    live_active_records = [
+        record
+        for record in records
+        if record.lease.status in ACTIVE_EXECUTION_STATUSES
+        and not record.lease.termination_unconfirmed
+        and _active_execution_stale_reason(record.lease) is None
+    ]
+    competing = [
+        record
+        for record in live_active_records
+        if not (
+            record.path.resolve() == requested_record.path.resolve()
+            and _same_execution_identity(record.lease, requested_record.lease)
+        )
+    ]
+    if competing:
+        raise ValueError(
+            "active execution 在 stop request 写入期间发生切换或并发；"
+            "旧请求未绑定新 execution，请重新执行 stop。"
+        )
+    if len(matching) != 1:
+        raise ValueError(
+            "目标 execution 在 stop request 写入期间已结束或身份变化；"
+            "无法确认请求已被消费，请检查 status 后按需重试。"
+        )
+    confirmed = matching[0]
+    if confirmed.lease.status == "stopped":
+        return confirmed
+    if (
+        confirmed.lease.status in ACTIVE_EXECUTION_STATUSES
+        and not confirmed.lease.termination_unconfirmed
+        and _active_execution_stale_reason(confirmed.lease) is None
+    ):
+        return confirmed
+    raise ValueError(
+        "目标 execution 在 stop request 写入期间已结束，但不是 stopped；"
+        "无法确认请求是否生效，请检查 status 后按需重试。"
+    )
+
+
+def _same_execution_identity(left: ExecutionLease, right: ExecutionLease) -> bool:
+    if left.execution_id is not None or right.execution_id is not None:
+        return (
+            left.execution_id is not None
+            and left.execution_id == right.execution_id
+        )
+    return (
+        left.started_at == right.started_at
+        and left.step == right.step
+        and left.iteration == right.iteration
+        and left.owner_pid == right.owner_pid
+    )
+
+
+def _stop_request_matches_lease(
+    request: StopRequest,
+    lease: ExecutionLease,
+) -> bool:
+    if request.execution_id is not None:
+        return (
+            lease.execution_id is not None
+            and request.execution_id == lease.execution_id
+        )
+    if request.execution_started_at is not None:
+        return request.execution_started_at == lease.started_at
+    # 旧三字段请求只能由同样没有 execution_id 的旧 lease 消费；升级后的新 execution
+    # 必须忽略它，避免 CLI 在身份切换窗口拒绝后，旧请求反而误停新进程。
+    return lease.execution_id is None
 
 
 def find_execution_records(run_dir: Path) -> list[ExecutionRecord]:
@@ -746,24 +859,53 @@ def _confirm_owned_process_terminated(
     return ProcessTerminationResult(True, "owned process tree 已确认退出。")
 
 
-def _is_posix_process_group_alive(
+def _is_posix_process_group_alive(process_group_id: int) -> bool:
+    try:
+        os.killpg(process_group_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    linux_states = _linux_process_group_states(process_group_id)
+    if linux_states:
+        # Zombie/dead 进程已不能继续执行或写文件，不应把已终止的进程树误报为存活。
+        return any(state not in {"Z", "X", "x"} for state in linux_states)
+    return True
+
+
+def _linux_process_group_states(
     process_group_id: int,
-    *,
-    settle_seconds: float = 1.0,
-) -> bool:
-    # 后代进程被终止后可能短暂处于 zombie 状态等待 init 收割，此时 killpg(0) 仍会成功，
-    # 把"已死待收割"误判为存活；在有限窗口内重试探测，窗口耗尽仍存活则维持 fail-closed。
-    deadline = time.monotonic() + settle_seconds
-    while True:
+    proc_root: Path = Path("/proc"),
+) -> list[str] | None:
+    if not proc_root.is_dir():
+        return None
+    states: list[str] = []
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
         try:
-            os.killpg(process_group_id, 0)
-        except ProcessLookupError:
-            return False
-        except PermissionError:
-            return True
-        if time.monotonic() >= deadline:
-            return True
-        time.sleep(0.05)
+            stat = entry.joinpath("stat").read_text(encoding="utf-8")
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        except OSError:
+            continue
+        command_end = stat.rfind(")")
+        if command_end < 0:
+            continue
+        fields = stat[command_end + 1 :].split()
+        if len(fields) < 3:
+            continue
+        try:
+            member_group_id = int(fields[2])
+        except ValueError:
+            continue
+        if member_group_id == process_group_id:
+            states.append(fields[0])
+    return states
 
 
 def _run_windows_taskkill(pid: int, *, force: bool, timeout: float) -> str | None:
@@ -831,11 +973,21 @@ def _read_execution_lease(path: Path, attempts: int = 5) -> ExecutionLease:
     raise last_error
 
 
-def _write_model_atomic(path: Path, model: BaseModel) -> None:
+def _write_model_atomic(
+    path: Path,
+    model: BaseModel,
+    *,
+    exclude_none: bool = False,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temp_path = _execution_model_temp_path(path)
     temp_path.write_text(
-        json.dumps(model.model_dump(), ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            model.model_dump(exclude_none=exclude_none),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -850,6 +1002,11 @@ def _write_model_atomic(path: Path, model: BaseModel) -> None:
             time.sleep(0.02)
     assert last_error is not None
     raise last_error
+
+
+def _execution_model_temp_path(path: Path) -> Path:
+    # 保持原有进程级临时文件语义，但避免重复携带目标文件名。
+    return path.with_name(f".e.{os.getpid():x}")
 
 
 def _parse_datetime(value: str) -> datetime:

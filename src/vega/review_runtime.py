@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,7 +13,12 @@ from pydantic import ValidationError
 from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk
 from .models import BriefState, GateResult, ReviewFinding, ReviewState, ReviewVerdict
-from .project_config import ProjectConfig, load_project_config, render_project_config_summary
+from .project_config import (
+    ProjectConfig,
+    load_project_config,
+    project_policy_snapshot,
+    render_project_config_summary,
+)
 from .project_context import render_project_context
 from .project_knowledge import load_project_knowledge
 from .project_profile import build_project_profile
@@ -49,6 +55,15 @@ REVIEW_ARTIFACTS = [
 MAX_TEXT_CHARS = 20000
 
 
+@dataclass(frozen=True)
+class PrecomputedReviewRiskGate:
+    """Loop 传给内嵌 reviewer 的已绑定确定性风险门禁。"""
+
+    source_run: str
+    result: GateResult
+    project_policy_snapshot: dict[str, str | None]
+
+
 def _evaluate_review_risk_gate(
     workspace: Path,
     repo_path: Path,
@@ -67,6 +82,33 @@ def _evaluate_review_risk_gate(
         "status": "success",
         "source_run": source_run,
         "result": result.model_dump(mode="json"),
+    }
+
+
+def _review_risk_gate_payload(
+    workspace: Path,
+    repo_path: Path,
+    source_run: str,
+    precomputed: PrecomputedReviewRiskGate | None,
+) -> dict[str, Any]:
+    """复用 Loop 刚生成的确定性门禁；独立 Review 仍自行评估。
+
+    Loop 路径中的结果不是 worker 输入，而是 Runtime 在同一同步调用链里、针对当前
+    Reflect 生成的确定性结果。Review 仍会重新捕获工作区授权快照，终态 Eval 也会
+    独立重算风险语义，因此这里仅消除相邻阶段的重复 Git 扫描，不削弱防篡改检查。
+    """
+    if precomputed is None:
+        return _evaluate_review_risk_gate(workspace, repo_path, source_run)
+    if precomputed.source_run != source_run:
+        return {
+            "status": "failed",
+            "source_run": source_run,
+            "diagnostic": "预计算风险门禁与当前 Reflect 来源不一致。",
+        }
+    return {
+        "status": "success",
+        "source_run": source_run,
+        "result": precomputed.result.model_dump(mode="json"),
     }
 
 
@@ -151,8 +193,26 @@ class ReviewRuntime:
         runner_name: str = "codex-exec",
         execution_context: RunnerExecutionContext | None = None,
         project_config: ProjectConfig | None = None,
+        precomputed_risk_gate: PrecomputedReviewRiskGate | None = None,
     ) -> Path:
         execution_config = project_config or load_project_config(repo_path)
+        review_policy_snapshot = project_policy_snapshot(repo_path)
+        initial_authorization_issues: list[str] = []
+        if (
+            precomputed_risk_gate is not None
+            and precomputed_risk_gate.source_run != source_run
+        ):
+            initial_authorization_issues.append(
+                "precomputed_risk_gate_source_mismatch"
+            )
+        if (
+            precomputed_risk_gate is not None
+            and review_policy_snapshot
+            != precomputed_risk_gate.project_policy_snapshot
+        ):
+            initial_authorization_issues.append(
+                "project_policy_changed_before_review_start"
+            )
         if self.runner is None and runner_name == "codex-exec" and execution_config.runner.reviewer:
             runner_name = execution_config.runner.reviewer
         run_id, run_dir = create_run_dir(self.workspace, _new_run_id("review"))
@@ -173,11 +233,33 @@ class ReviewRuntime:
             repo_path,
             source_run,
         )
-        inputs["risk_gate"] = _evaluate_review_risk_gate(
+        inputs["risk_gate"] = _review_risk_gate_payload(
             self.workspace,
             repo_path,
             source_run,
+            precomputed_risk_gate,
         )
+        authorization_issues = list(initial_authorization_issues)
+        try:
+            current_policy_snapshot = project_policy_snapshot(repo_path)
+            authorization_snapshot = capture_review_workspace(repo_path)
+        except Exception:  # noqa: BLE001 - reviewer 授权快照失败时不得启动外部 runner
+            authorization_issues.append("review_authorization_snapshot_failed")
+        else:
+            if current_policy_snapshot != review_policy_snapshot:
+                authorization_issues.append("project_policy_changed_before_reviewer")
+            if (
+                authorization_snapshot.fingerprint
+                != inputs["current_workspace_fingerprint"]
+            ):
+                authorization_issues.append("review_authorization_workspace_changed")
+            if authorization_snapshot.unsafe_index_paths:
+                authorization_issues.append("current_unsafe_index_flags_present")
+        if authorization_issues:
+            inputs["evidence_issues"] = list(
+                dict.fromkeys([*inputs["evidence_issues"], *authorization_issues])
+            )
+            inputs["evidence_consistent"] = False
         pre_review_evidence_issues = list(inputs["evidence_issues"])
         state.changed_files = inputs["changed_files"]
         metrics = _write_review_pack_artifacts(run_dir, inputs)
@@ -512,6 +594,10 @@ def collect_review_inputs(
             source_evidence.get("workspace_fingerprint") or ""
         ),
         "current_workspace_fingerprint": current_snapshot.fingerprint,
+        "current_index_flags_sha256": current_snapshot.index_flags_sha256,
+        "current_unsafe_index_paths": [
+            redact_text(path) for path in current_snapshot.unsafe_index_paths
+        ],
         "source_untracked_content_complete": bool(
             source_evidence.get("untracked_content_complete", False)
         ),
@@ -669,6 +755,8 @@ def render_review_context(inputs: dict[str, Any]) -> dict[str, Any]:
         "source_snapshot_id": inputs["source_snapshot_id"],
         "source_workspace_fingerprint": inputs["source_workspace_fingerprint"],
         "current_workspace_fingerprint": inputs["current_workspace_fingerprint"],
+        "current_index_flags_sha256": inputs["current_index_flags_sha256"],
+        "current_unsafe_index_paths": inputs["current_unsafe_index_paths"],
         "source_untracked_content_complete": inputs[
             "source_untracked_content_complete"
         ],
@@ -1032,6 +1120,8 @@ def _review_evidence_issues(
         issues.append("source_untracked_files_present")
     if current_snapshot.untracked_files:
         issues.append("current_untracked_files_present")
+    if current_snapshot.unsafe_index_paths:
+        issues.append("current_unsafe_index_flags_present")
     issues.extend(
         _string_list(source_evidence.get("source_brief_evidence_issues"))
     )

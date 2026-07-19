@@ -171,6 +171,98 @@ def test_sensitive_untracked_file_is_not_opened_and_is_not_content_complete(
     assert len(snapshot.untracked_manifest_sha256) == 64
 
 
+def test_review_snapshot_reuses_status_paths_and_preserves_rename_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    source = repo / "old-name.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    _git(repo, "add", "--", source.name)
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "add rename source",
+    )
+    _git(repo, "mv", "--", source.name, "new-name.py")
+    repo.joinpath("notes.txt").write_text("untracked\n", encoding="utf-8")
+
+    commands: list[tuple[str, ...]] = []
+    original_run_git_bytes = workspace_check_module._run_git_bytes
+
+    def recording_run_git_bytes(
+        repo_path: Path,
+        command: list[str],
+        *,
+        allowed_returncodes: tuple[int, ...] = (0,),
+    ) -> bytes:
+        commands.append(tuple(command))
+        return original_run_git_bytes(
+            repo_path,
+            command,
+            allowed_returncodes=allowed_returncodes,
+        )
+
+    monkeypatch.setattr(
+        workspace_check_module,
+        "_run_git_bytes",
+        recording_run_git_bytes,
+    )
+
+    snapshot = capture_review_workspace(repo)
+
+    assert snapshot.changed_files == (
+        "old-name.py",
+        "new-name.py",
+        "notes.txt",
+    )
+    assert snapshot.untracked_files == ("notes.txt",)
+    assert len(commands) == 6
+    assert not any("--name-only" in command for command in commands)
+    assert not any(
+        command[:4] == ("git", "ls-files", "--others", "--exclude-standard")
+        for command in commands
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_tracked", "expected_untracked"),
+    [
+        (
+            b"MM module.py\0?? notes with spaces.txt\0",
+            ["module.py"],
+            ["notes with spaces.txt"],
+        ),
+        (
+            b"R  new name.py\0old -> name.py\0"
+            b"C  copied.py\0source.py\0"
+            b"UU conflict.py\0",
+            ["old -> name.py", "new name.py", "copied.py", "conflict.py"],
+            [],
+        ),
+        (
+            " M quote\"and\nnewline.py\0?? untracked\nfile.txt\0".encode(),
+            ["quote\"and\nnewline.py"],
+            ["untracked\nfile.txt"],
+        ),
+    ],
+)
+def test_porcelain_v1_path_parser_covers_mm_copy_conflict_and_special_names(
+    payload: bytes,
+    expected_tracked: list[str],
+    expected_untracked: list[str],
+) -> None:
+    tracked, untracked = workspace_check_module._parse_porcelain_v1_paths(payload)
+
+    assert tracked == expected_tracked
+    assert untracked == expected_untracked
+
+
 def test_target_file_excerpt_uses_bounded_streaming_read(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

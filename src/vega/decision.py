@@ -5,6 +5,7 @@ from typing import Literal
 
 from .models import DecisionEntry
 from .redaction import append_redacted_jsonl, redact_value
+from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 
 DECISION_TYPES = {"gate", "review", "finish", "memory", "custom"}
@@ -23,6 +24,24 @@ class DecisionStore:
         reason: str,
         actor: str = "human",
         references: list[str] | None = None,
+    ) -> DecisionEntry:
+        with RunMutationLock.acquire(self.run_dir, "decision.append"):
+            return self._append_locked(
+                decision_type=decision_type,
+                decision=decision,
+                reason=reason,
+                actor=actor,
+                references=references,
+            )
+
+    def _append_locked(
+        self,
+        *,
+        decision_type: str,
+        decision: Literal["approved", "rejected"],
+        reason: str,
+        actor: str,
+        references: list[str] | None,
     ) -> DecisionEntry:
         normalized_type = decision_type.strip().lower()
         if normalized_type not in DECISION_TYPES:

@@ -391,7 +391,16 @@ vega gate --repo . --run <reflect_run> --scope refactor
 - `vega stop --run <run> --reason "..."` 通过 `stop-request.json` 请求当前 owned process 安全停止。
 - `timeout-report.md` / `stop-report.md` 记录中断原因，并阻止本轮继续 verification/review。
 - `recovery-report.md` 只接管 lease 过期、PID 消失、execution 终态或记录缺失的 `running` loop。
+- recover 会把半完成轮冻结为 `lifecycle=interrupted`，并写
+  `iterations/<n>/interruption-report.md`；该轮只保留现场，不作为成功证据。
+- recover 后的 `loop continue` 使用下一连续 iteration；如目标目录已存在或 state 编号有缺口，
+  Runtime 会拒绝继续，不覆盖旧证据。
 - `loop continue` 只允许同一仓库中处于 `needs_human` 的 run。
+- `.control/run-mutation.lock` 保护同一 loop run 的 start、continue、recover、finish 和
+  decision append；busy 时命令立即失败，不等待或自动抢锁。
+- `.control/run-mutation-owner.json` 只提供受限诊断信息，是否持锁以内核文件锁为准。
+- `vega stop` 不获取 mutation lock，只写 active execution 的 `stop-request.json`，不由
+  第二个 CLI 追加根 `trace.jsonl`。
 - `finish-report.md` 汇总结论和提交前 checklist。
 - `decisions.jsonl` 记录人工批准或拒绝原因。
 
@@ -432,7 +441,7 @@ Goal P0 case 会验证：
 - 目标仓库 `git status` 不被 goal step 改动。
 - `vega status` / `latest --kind goal` 能识别 goal run。
 
-以下方向只记录为观察项，不在 v0.1.0 继续实现：
+以下方向只记录为观察项，不在 v0.1.x 继续实现：
 
 - architecture gate：新增框架、跨层调用、目录结构变化必须人工确认。
 - delete reason gate：删除文件时必须说明业务理由和回滚方式。

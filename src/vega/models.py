@@ -16,7 +16,7 @@ from .redaction import redact_value
 def _save_model(path: Path, model: BaseModel) -> None:
     payload = redact_value(model.model_dump(mode="json"))
     path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+    temp_path = _model_temp_path(path)
     temp_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -34,6 +34,11 @@ def _save_model(path: Path, model: BaseModel) -> None:
         temp_path.unlink()
     assert last_error is not None
     raise last_error
+
+
+def _model_temp_path(path: Path) -> Path:
+    # 64 位随机后缀足以隔离同目录写入，同时控制深层 Windows 路径长度。
+    return path.with_name(f".m.{uuid4().hex[:16]}")
 
 
 class ToolResult(BaseModel):
@@ -329,8 +334,21 @@ class ReviewState(BaseModel):
         _save_model(path, self)
 
 
+class ScopeGateViolation(BaseModel):
+    """精确路径范围门禁命中的单条越界事实。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["forbidden_path", "outside_allowed_paths", "unsafe_changed_path"]
+    path: str
+    matched_patterns: list[str] = Field(default_factory=list)
+
+
 class LoopIterationState(BaseModel):
     iteration: int
+    lifecycle: Literal["completed", "interrupted"] = "completed"
+    interrupted_step: str | None = None
+    interrupted_at: str | None = None
     worker_status: Literal["skipped", "success", "failed", "timed_out", "stopped"] = "skipped"
     reviewer_status: Literal[
         "skipped",
@@ -341,6 +359,23 @@ class LoopIterationState(BaseModel):
     ] = "skipped"
     workspace_status: Literal["skipped", "passed", "failed"] = "skipped"
     workspace_new_files_count: int = 0
+    scope_gate_status: Literal["skipped", "success", "failed"] = "skipped"
+    scope_gate_changed_files: list[str] = Field(default_factory=list)
+    scope_gate_violations: list[ScopeGateViolation] = Field(default_factory=list)
+    scope_gate_result_sha256: str | None = None
+    scope_gate_report_sha256: str | None = None
+    scope_gate_post_verification_status: Literal["skipped", "success", "failed"] = "skipped"
+    scope_gate_post_verification_changed_files: list[str] = Field(default_factory=list)
+    scope_gate_post_verification_violations: list[ScopeGateViolation] = Field(
+        default_factory=list
+    )
+    scope_gate_post_verification_result_sha256: str | None = None
+    scope_gate_post_verification_report_sha256: str | None = None
+    scope_gate_pre_review_status: Literal["skipped", "success", "failed"] = "skipped"
+    scope_gate_pre_review_changed_files: list[str] = Field(default_factory=list)
+    scope_gate_pre_review_violations: list[ScopeGateViolation] = Field(default_factory=list)
+    scope_gate_pre_review_result_sha256: str | None = None
+    scope_gate_pre_review_report_sha256: str | None = None
     verification_status: Literal["skipped", "passed", "failed"] = "skipped"
     verification_failed_count: int = 0
     reflect_run: str | None = None
@@ -357,6 +392,16 @@ class LoopIterationState(BaseModel):
     findings_count: int = 0
 
 
+class SupersededTerminalRecord(BaseModel):
+    """记录 recovery 明确作废的旧终态，并与根状态绑定。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    terminal_event_index: int = Field(ge=0)
+    terminal_status: Literal["success", "failed"]
+    recovery_id: str = Field(min_length=1)
+
+
 class LoopAutomationState(BaseModel):
     run_id: str
     status: Literal["created", "running", "success", "failed", "needs_human"] = "created"
@@ -367,10 +412,19 @@ class LoopAutomationState(BaseModel):
     current_step: str = "created"
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     brief_run: str | None = None
+    initial_head_sha: str | None = None
     project_policy_snapshot: dict[str, str | None] = Field(default_factory=dict)
+    project_policy_snapshot_sha256: str | None = None
+    scope_gate_required: bool = False
+    scope_policy_sha256: str | None = None
+    verification_artifact_version: Literal[2] | None = None
     current_iteration: int = 0
     max_iterations: int = 2
     iterations: list[LoopIterationState] = Field(default_factory=list)
+    last_recovery_id: str | None = None
+    superseded_terminal_events: list[SupersededTerminalRecord] = Field(
+        default_factory=list
+    )
     artifacts: list[str] = Field(default_factory=list)
     eval_results: list[str] = Field(default_factory=list)
     memory_proposals: list[MemoryProposal] = Field(default_factory=list)

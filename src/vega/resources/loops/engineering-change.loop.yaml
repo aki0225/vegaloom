@@ -1,0 +1,90 @@
+name: engineering-change
+description: "本地研发变更审查 loop：读取任务和仓库，受控收集上下文，生成报告、复核和评估。"
+
+input:
+  task_file: required
+  repo_path: required
+
+tools:
+  allowed:
+    - file.search
+    - file.read
+    - repo.run_check
+    - report.write
+    - review.write
+  disabled:
+    - patch.apply
+    - shell.run
+    - memory.write
+
+budget:
+  max_steps: 8
+  max_tool_calls: 16
+  max_minutes: 10
+
+inspect:
+  target_section_names:
+    - Target files
+    - Target files to search
+    - 目标文件
+    - 目标文件：
+  search_queries:
+    - TODO
+    - FIXME
+    - risk
+    - 风险
+    - breaking change
+    - 兼容性
+  git_checks:
+    - git.status
+    - git.diff
+    - git.diff_check
+
+report:
+  title: 工程变更报告
+  required_sections:
+    - 摘要
+    - 上下文
+    - 证据
+    - 发现
+    - 风险
+    - 建议修改
+    - 验证
+
+review:
+  enabled: true
+  checks:
+    - report_answers_task
+    - no_unsupported_file_changes
+    - no_forbidden_actions
+    - tool_policy_respected
+  forbidden_phrases:
+    - git commit
+    - git push
+    - 自动提交
+    - 自动发布
+    - 自动应用补丁
+    - 已经修改文件
+    - 已修改文件
+    - applied patch
+    - committed changes
+    - pushed changes
+
+eval:
+  artifact_checks:
+    - state.json
+    - trace.jsonl
+    - plan.md
+    - report.md
+    - review.md
+    - eval.md
+  trace_events:
+    - task_loaded
+    - plan_written
+    - tool_call
+    - report_written
+    - review_written
+  require_report_sections: true
+  require_tool_policy: true
+  require_no_automatic_memory_write: true
+  require_review_pass: true

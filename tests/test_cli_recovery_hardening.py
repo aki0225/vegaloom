@@ -104,7 +104,29 @@ def test_model_save_uses_atomic_replace_without_truncating_existing_state(
         _loop_state(tmp_path, "atomic-run").save(state_path)
 
     assert json.loads(state_path.read_text(encoding="utf-8")) == {"sentinel": True}
-    assert list(tmp_path.glob(".state.json.*.tmp")) == []
+    assert list(tmp_path.glob(".m.*")) == []
+
+
+def test_model_temp_path_preserves_windows_path_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FixedUuid:
+        hex = "f" * 32
+
+    monkeypatch.setattr(models, "uuid4", lambda: FixedUuid())
+
+    initial_path = tmp_path / "r" / "state.json"
+    padding = 240 - len(str(initial_path))
+    assert padding >= 0
+    run_dir = tmp_path / ("r" * (padding + 1))
+    state_path = run_dir / "state.json"
+    temp_path = models._model_temp_path(state_path)
+
+    assert len(str(state_path)) == 240
+    assert temp_path.parent == state_path.parent
+    assert temp_path.name == f".m.{'f' * 16}"
+    assert len(str(temp_path)) < 260
 
 
 def test_recovery_writes_diagnostic_for_corrupt_state(tmp_path: Path) -> None:
@@ -376,7 +398,12 @@ def test_cli_path_error_redacts_secret_value(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert secret not in result.output
-    assert "[REDACTED]" in result.output
+    normalized_output = "".join(
+        character
+        for character in result.output
+        if not character.isspace() and character != "│"
+    )
+    assert "[REDACTED]" in normalized_output
 
 
 @pytest.mark.parametrize(
@@ -834,7 +861,7 @@ def test_status_sorts_active_execution_heartbeat_as_utc(tmp_path: Path) -> None:
 def test_cli_exposes_version_and_validates_latest_kind(tmp_path: Path, monkeypatch) -> None:
     version = CliRunner().invoke(app, ["--version"])
     assert version.exit_code == 0
-    assert version.output.strip() == "0.1.0"
+    assert version.output.strip() == "0.1.1"
 
     monkeypatch.chdir(tmp_path)
     invalid = CliRunner().invoke(app, ["latest", "--kind", "looop"])

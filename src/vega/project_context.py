@@ -69,6 +69,22 @@ def render_project_context(
     else:
         lines.append("- 未识别自动验证命令；修改后需要人工补充最小验证。")
 
+    lines.extend(
+        [
+            "",
+            "## 验证职责边界",
+            "",
+            "- 上述项目画像命令仅供 worker 选择性自检，不等同于 Vega 固定 verification。",
+            "- Runtime 策略中的显式 verification 由 harness 在 worker 返回后独立执行。",
+            "- worker 不应执行带 `{{vega_verification_temp}}` 的 harness-owned 命令，"
+            "也不应清理 harness 临时目录。",
+            "- 配置中的 `{{vega_verification_temp}}` 必须保持未加引号，"
+            "Runtime 会负责安全引用。",
+            "- worker 如需自检，应使用不共享 harness 临时目录的最小检查。",
+            "- 这是职责约定，不是对 worker 命令执行能力的确定性拦截。",
+        ]
+    )
+
     lines.extend(["", "## Runtime 策略", "", project_policy or "- 使用默认 Vega 策略。"])
 
     lines.extend(["", "## AGENTS.md 规则", ""])

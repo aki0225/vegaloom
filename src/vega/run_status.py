@@ -267,12 +267,29 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
             f"读取 `{run_dir / 'worker-prompt.md'}`，让主会话/人工完成实现。",
             f"实现后运行：`vega loop continue --repo <repo> --run {run_dir.name}`；如已有外部日志再加 `--test-log <log>`。",
         ]
-    if status == "needs_human" and current_step == "recovered":
+    if (
+        status == "needs_human"
+        and current_step == "recovered_initialization_incomplete"
+    ):
         return [
-            f"读取 `{run_dir / 'recovery-report.md'}`，确认中断原因和现场。",
-            "先人工检查目标仓库 `git status`，不要直接覆盖或清理未知文件。",
-            f"如果工作区已有合理修复，再运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
+            f"读取 `{run_dir / 'recovery-report.md'}`，确认初始化中断位置。",
+            "原始 brief 尚未绑定到 loop state，不能安全 continue。",
+            "保留当前 run 作为中断证据，并从新的 run 重新开始任务。",
         ]
+    if status == "needs_human" and current_step == "recovered":
+        interruption = _latest_iteration_file(run_dir, "interruption-report.md")
+        steps = [
+            f"读取 `{run_dir / 'recovery-report.md'}`，确认中断原因和现场。",
+        ]
+        if interruption.is_file():
+            steps.append(f"读取 `{interruption}`，确认被冻结的 iteration 与原执行步骤。")
+        steps.extend(
+            [
+                "先人工检查目标仓库 `git status`，不要直接覆盖或清理未知文件。",
+                f"如果工作区已有合理修复，再运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
+            ]
+        )
+        return steps
     if status == "needs_human" and current_step in {"timed_out", "stopped"}:
         report_name = "timeout-report.md" if current_step == "timed_out" else "stop-report.md"
         report = _latest_iteration_file(run_dir, report_name)
@@ -544,6 +561,7 @@ def _latest_iteration_artifacts(run_dir: Path, state: dict[str, Any]) -> list[st
         iteration_dir = run_dir / "iterations" / f"{iteration_number:02d}"
         candidates = [
             run_dir / "recovery-report.md",
+            iteration_dir / "interruption-report.md",
             iteration_dir / "fix-prompt.md",
             iteration_dir / "timeout-report.md",
             iteration_dir / "stop-report.md",
@@ -572,6 +590,7 @@ def _latest_iteration_artifacts(run_dir: Path, state: dict[str, Any]) -> list[st
     # 兼容旧 run：没有 iteration 字段时退回到每类文件的最后一个。
     result: list[str] = []
     for filename in [
+        "interruption-report.md",
         "fix-prompt.md",
         "timeout-report.md",
         "stop-report.md",

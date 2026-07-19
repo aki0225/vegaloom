@@ -29,6 +29,7 @@ class WorkspaceSnapshot:
     raw_status: str
     tracked_files: frozenset[str]
     untracked_files: frozenset[str]
+    head_sha: str = ""
     untracked_manifest_sha256: str = ""
     capture_complete: bool = True
 
@@ -48,12 +49,27 @@ class ReviewWorkspaceSnapshot:
     unstaged_diff_sha256: str
     untracked_manifest_sha256: str
     ignored_manifest_sha256: str
+    index_flags_sha256: str
     full_diff: str
     staged_diff: str
     unstaged_diff: str
     changed_files: tuple[str, ...]
     untracked_files: tuple[str, ...]
+    unsafe_index_paths: tuple[str, ...] = ()
     untracked_content_complete: bool = False
+
+
+@dataclass(frozen=True)
+class TrackedScopeSnapshot:
+    """scope gate 读取到的一致 HEAD、tracked status 与双 diff 路径快照。"""
+
+    head_sha: str
+    status_sha256: str
+    index_flags_sha256: str
+    staged_files: tuple[str, ...]
+    unstaged_files: tuple[str, ...]
+    untracked_files: tuple[str, ...] = ()
+    unsafe_index_paths: tuple[str, ...] = ()
 
 
 class WorkspaceCheckResult(BaseModel):
@@ -67,6 +83,9 @@ class WorkspaceCheckResult(BaseModel):
     baseline_tracked_changes_present: bool = False
     baseline_tracked_files: list[str] = Field(default_factory=list)
     baseline_untracked_changed: bool = False
+    baseline_head_sha: str | None = None
+    current_head_sha: str | None = None
+    baseline_head_changed: bool = False
     reasons: list[str] = Field(default_factory=list)
     raw_status: str = ""
 
@@ -78,8 +97,10 @@ class WorkspaceCheckResult(BaseModel):
 def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
     repo = repo_path.resolve()
     try:
-        status = _git_status(repo)
-        tracked_files = _tracked_changed_files(repo)
+        tracked_snapshot = capture_tracked_scope_snapshot(
+            repo,
+            include_untracked=True,
+        )
     except RuntimeError as exc:
         return WorkspaceSnapshot(
             raw_status=f"<git status failed before worker: {exc}>",
@@ -87,11 +108,16 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
             untracked_files=frozenset(),
             capture_complete=False,
         )
-    untracked_files = _untracked_paths(status)
+    tracked_files = [
+        *tracked_snapshot.staged_files,
+        *tracked_snapshot.unstaged_files,
+    ]
+    untracked_files = list(tracked_snapshot.untracked_files)
     return WorkspaceSnapshot(
-        raw_status=_safe_git_status(status),
-        tracked_files=frozenset(tracked_files),
+        raw_status="",
+        tracked_files=frozenset(dict.fromkeys(tracked_files)),
         untracked_files=frozenset(untracked_files),
+        head_sha=tracked_snapshot.head_sha,
         untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
     )
 
@@ -111,16 +137,15 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         repo,
         ["--binary", "--full-index"],
     )
-    tracked_files = _tracked_changed_files(repo)
-    untracked_files = _decode_nul_paths(
-        _run_git_bytes(repo, ["git", "ls-files", "--others", "--exclude-standard", "-z"])
-    )
+    tracked_files, untracked_files = _parse_porcelain_v1_paths(status)
     ignored_files = _decode_nul_paths(
         _run_git_bytes(
             repo,
             ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
         )
     )
+    index_flags = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
+    unsafe_index_paths = _unsafe_index_paths(index_flags)
     # 未跟踪文件只参与工作区指纹，不把其内容带入 reflect/reviewer 输入。
     # ignored 普通小文件使用有界内容指纹；敏感文件只记录增强元数据，绝不读取内容。
     full_diff = render_tracked_diff_sections(staged_diff, unstaged_diff)
@@ -143,6 +168,7 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
             f"untracked={untracked_manifest_sha256}",
             f"untracked_content_complete={untracked_content_complete}",
             f"ignored={ignored_manifest_sha256}",
+            f"index_flags={_sha256(index_flags)}",
         ]
     ).encode("utf-8")
     return ReviewWorkspaceSnapshot(
@@ -154,11 +180,13 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         unstaged_diff_sha256=unstaged_diff_sha256,
         untracked_manifest_sha256=untracked_manifest_sha256,
         ignored_manifest_sha256=ignored_manifest_sha256,
+        index_flags_sha256=_sha256(index_flags),
         full_diff=full_diff,
         staged_diff=staged_diff,
         unstaged_diff=unstaged_diff,
         changed_files=tuple(dict.fromkeys([*tracked_files, *untracked_files])),
         untracked_files=tuple(untracked_files),
+        unsafe_index_paths=tuple(unsafe_index_paths),
         untracked_content_complete=untracked_content_complete,
     )
 
@@ -168,6 +196,7 @@ def run_workspace_check(
     output_dir: Path,
     *,
     baseline: WorkspaceSnapshot | None = None,
+    expected_head_sha: str | None = None,
     require_clean_untracked: bool = False,
     allow_existing_tracked_diff: bool = False,
 ) -> WorkspaceCheckResult:
@@ -182,6 +211,7 @@ def run_workspace_check(
             evaluate_workspace(
                 repo_path,
                 baseline=baseline,
+                expected_head_sha=expected_head_sha,
                 require_clean_untracked=require_clean_untracked,
                 allow_existing_tracked_diff=allow_existing_tracked_diff,
             ).model_dump(mode="json")
@@ -202,11 +232,13 @@ def evaluate_workspace(
     repo_path: Path,
     *,
     baseline: WorkspaceSnapshot | None = None,
+    expected_head_sha: str | None = None,
     require_clean_untracked: bool = False,
     allow_existing_tracked_diff: bool = False,
 ) -> WorkspaceCheckResult:
     repo = repo_path.resolve()
     try:
+        current_head_sha = read_head_sha(repo)
         raw_status = _git_status(repo)
     except RuntimeError as exc:
         return WorkspaceCheckResult(
@@ -236,11 +268,22 @@ def evaluate_workspace(
     )
     baseline_tracked_changes_present = bool(baseline and baseline.has_tracked_changes)
     baseline_untracked_changed = False
+    baseline_head_sha = expected_head_sha or (
+        baseline.head_sha if baseline and baseline.head_sha else None
+    )
+    baseline_head_changed = bool(
+        baseline_head_sha and baseline_head_sha != current_head_sha
+    )
     reasons: list[str] = []
     status: Literal["passed", "failed", "skipped"] = "passed"
     if baseline and not baseline.capture_complete:
         status = "failed"
         reasons.append("worker 启动前未能完整捕获工作区基线。")
+    elif baseline_head_changed:
+        status = "failed"
+        reasons.append(
+            "worker 执行期间 Git HEAD 发生变化；自动流程禁止 worker commit、checkout 或 rebase。"
+        )
     elif baseline and baseline.has_tracked_changes:
         if allow_existing_tracked_diff:
             reasons.append(
@@ -286,6 +329,9 @@ def evaluate_workspace(
             _safe_path_for_report(path) for path in baseline_tracked_files
         ],
         baseline_untracked_changed=baseline_untracked_changed,
+        baseline_head_sha=baseline_head_sha,
+        current_head_sha=current_head_sha,
+        baseline_head_changed=baseline_head_changed,
         reasons=reasons,
         raw_status=_safe_git_status(raw_status),
     )
@@ -300,6 +346,7 @@ def render_workspace_check(result: WorkspaceCheckResult) -> str:
         f"- 新增未跟踪文件：`{result.new_untracked_count}`",
         f"- 启动前已有 tracked diff：`{str(result.baseline_tracked_changes_present).lower()}`",
         f"- 启动前未跟踪文件发生变化：`{str(result.baseline_untracked_changed).lower()}`",
+        f"- 执行期间 HEAD 发生变化：`{str(result.baseline_head_changed).lower()}`",
         f"- 预算上限：`{result.max_new_files if result.max_new_files is not None else '未配置'}`",
         "",
         "## 结论",
@@ -397,14 +444,23 @@ def _run_git_bytes(
         timeout=30,
         check=False,
     )
+    stdout = _coerce_git_output_bytes(result.stdout)
+    stderr = _coerce_git_output_bytes(result.stderr)
     if result.returncode not in allowed_returncodes:
-        stdout = (result.stdout or b"").decode("utf-8", errors="replace")
-        stderr = (result.stderr or b"").decode("utf-8", errors="replace")
-        output = stdout + format_git_error(repo_path, stderr)
+        output = stdout.decode("utf-8", errors="replace") + format_git_error(
+            repo_path,
+            stderr.decode("utf-8", errors="replace"),
+        )
         raise RuntimeError(output.strip())
     if result.returncode:
-        return (result.stdout or b"") + (result.stderr or b"")
-    return result.stdout or b""
+        return stdout + stderr
+    return stdout
+
+
+def _coerce_git_output_bytes(value: bytes | str | None) -> bytes:
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    return value or b""
 
 
 def collect_tracked_diff_parts(
@@ -446,20 +502,215 @@ def render_tracked_diff_sections(staged_diff: str, unstaged_diff: str) -> str:
     return "\n\n".join(sections).rstrip() + ("\n" if sections else "")
 
 
-def _tracked_changed_files(repo_path: Path) -> list[str]:
-    staged = _decode_nul_paths(
-        _run_git_bytes(
-            repo_path,
-            ["git", "diff", "--cached", "--name-only", "-z", "HEAD", "--"],
-        )
+def capture_tracked_scope_snapshot(
+    repo_path: Path,
+    *,
+    include_untracked: bool = False,
+) -> TrackedScopeSnapshot:
+    """在两次 HEAD/status 读取之间采集 staged 与 unstaged 路径。
+
+    porcelain v2 的单次输出同时包含 HEAD、index 与工作区状态；前后两次字节完全一致才
+    采信。这样既避免 staged/unstaged 独立进程之间的混合时刻，也只需前后各读取一次
+    status 与 index flags，共 4 个只读 Git 进程，仍符合轻量 runtime 的约束。
+    """
+    repo = repo_path.resolve()
+    command = [
+        "git",
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        "-z",
+        f"--untracked-files={'all' if include_untracked else 'no'}",
+    ]
+    index_flags_before = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
+    status_before = _run_git_bytes(repo, command)
+    status_after = _run_git_bytes(repo, command)
+    index_flags_after = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
+    if status_before != status_after or index_flags_before != index_flags_after:
+        raise RuntimeError("scope gate 采集期间 HEAD、tracked status 或 index 标记发生变化")
+    head_sha, staged, unstaged, untracked = _parse_porcelain_v2_status(
+        status_after
     )
-    unstaged = _decode_nul_paths(
-        _run_git_bytes(
-            repo_path,
-            ["git", "diff", "--name-only", "-z", "--"],
-        )
+    return TrackedScopeSnapshot(
+        head_sha=head_sha,
+        status_sha256=_sha256(status_after),
+        index_flags_sha256=_sha256(index_flags_after),
+        staged_files=tuple(staged),
+        unstaged_files=tuple(unstaged),
+        untracked_files=tuple(untracked),
+        unsafe_index_paths=tuple(_unsafe_index_paths(index_flags_after)),
     )
-    return list(dict.fromkeys([*staged, *unstaged]))
+
+
+def _unsafe_index_paths(payload: bytes) -> list[str]:
+    """找出会让 Git 工作区视图忽略真实文件变化的 index 标记。"""
+    paths: list[str] = []
+    for item in payload.split(b"\0"):
+        if not item:
+            continue
+        record = item.decode("utf-8", errors="replace")
+        if len(record) < 3 or record[1] != " ":
+            raise RuntimeError("git ls-files -v 输出格式不完整")
+        tag = record[0]
+        if tag == "S" or tag.islower():
+            paths.append(record[2:])
+    return list(dict.fromkeys(paths))
+
+
+def _parse_porcelain_v1_paths(payload: bytes) -> tuple[list[str], list[str]]:
+    """从已采集的 porcelain v1 状态中提取 tracked 与 untracked 路径。
+
+    reviewer 快照已经需要读取这份稳定机器格式，无需再启动三次 Git 进程分别枚举
+    staged、unstaged 和 untracked 路径。rename 的 NUL 格式先给目标路径、再给源路径；
+    两者都属于实际变更范围。copy 只记录新增目标路径，源路径内容没有发生变化。
+    """
+    tokens = [item for item in payload.split(b"\0") if item]
+    tracked: list[str] = []
+    untracked: list[str] = []
+    index = 0
+    while index < len(tokens):
+        raw_record = tokens[index]
+        index += 1
+        if len(raw_record) < 4 or raw_record[2:3] != b" ":
+            raise RuntimeError("porcelain v1 路径记录不完整")
+        xy = raw_record[:2].decode("ascii", errors="replace")
+        path = raw_record[3:].decode("utf-8", errors="replace")
+        if xy == "??":
+            untracked.append(path)
+            continue
+        if xy == "!!":
+            continue
+
+        change_kind = next(
+            (status for status in xy if status in {"R", "C"}),
+            None,
+        )
+        if change_kind is not None:
+            if index >= len(tokens):
+                raise RuntimeError("porcelain v1 rename/copy 记录缺少源路径")
+            original_path = tokens[index].decode("utf-8", errors="replace")
+            index += 1
+            if change_kind == "R":
+                tracked.extend([original_path, path])
+            else:
+                tracked.append(path)
+            continue
+        tracked.append(path)
+    return (
+        list(dict.fromkeys(tracked)),
+        list(dict.fromkeys(untracked)),
+    )
+
+
+def _parse_porcelain_v2_status(
+    payload: bytes,
+) -> tuple[str, list[str], list[str], list[str]]:
+    """解析 `git status --porcelain=v2 -z --branch` 的稳定机器格式。"""
+    tokens = [item for item in payload.split(b"\0") if item]
+    head_sha = ""
+    staged: list[str] = []
+    unstaged: list[str] = []
+    untracked: list[str] = []
+    index = 0
+    while index < len(tokens):
+        record = tokens[index].decode("utf-8", errors="replace")
+        index += 1
+        if record.startswith("# branch.oid "):
+            head_sha = record.removeprefix("# branch.oid ").strip()
+            continue
+        if record.startswith("# "):
+            continue
+        if record.startswith("1 "):
+            parts = record.split(" ", 8)
+            if len(parts) != 9 or len(parts[1]) != 2:
+                raise RuntimeError("porcelain v2 普通路径记录不完整")
+            _append_status_paths(staged, unstaged, parts[1], parts[8])
+            continue
+        if record.startswith("2 "):
+            parts = record.split(" ", 9)
+            if len(parts) != 10 or len(parts[1]) != 2 or index >= len(tokens):
+                raise RuntimeError("porcelain v2 rename/copy 记录不完整")
+            original_path = tokens[index].decode("utf-8", errors="replace")
+            index += 1
+            change_kind = parts[8][:1]
+            _append_status_paths(
+                staged,
+                unstaged,
+                parts[1],
+                parts[9],
+                original_path=original_path,
+                change_kind=change_kind,
+            )
+            continue
+        if record.startswith("u "):
+            parts = record.split(" ", 10)
+            if len(parts) != 11:
+                raise RuntimeError("porcelain v2 unmerged 记录不完整")
+            staged.append(parts[10])
+            unstaged.append(parts[10])
+            continue
+        if record.startswith("? "):
+            untracked.append(record[2:])
+            continue
+        if record.startswith("! "):
+            continue
+        raise RuntimeError("porcelain v2 包含未知记录类型")
+    if not head_sha or head_sha == "(initial)":
+        raise RuntimeError("git HEAD 不可用")
+    return (
+        head_sha,
+        list(dict.fromkeys(staged)),
+        list(dict.fromkeys(unstaged)),
+        list(dict.fromkeys(untracked)),
+    )
+
+
+def _append_status_paths(
+    staged: list[str],
+    unstaged: list[str],
+    xy: str,
+    path: str,
+    *,
+    original_path: str | None = None,
+    change_kind: str | None = None,
+) -> None:
+    staged_status, unstaged_status = xy
+    if staged_status != ".":
+        _append_changed_path(staged, staged_status, path, original_path, change_kind)
+    if unstaged_status != ".":
+        _append_changed_path(
+            unstaged,
+            unstaged_status,
+            path,
+            original_path,
+            change_kind,
+        )
+
+
+def _append_changed_path(
+    target: list[str],
+    status: str,
+    path: str,
+    original_path: str | None,
+    change_kind: str | None,
+) -> None:
+    effective_kind = status if status in {"R", "C"} else change_kind
+    if effective_kind == "R" and original_path is not None:
+        target.extend([original_path, path])
+    else:
+        # Copy 的源路径没有发生修改；普通增删改也只记录当前路径。
+        target.append(path)
+
+
+def read_head_sha(repo_path: Path) -> str:
+    """读取当前提交身份；没有可解析 HEAD 时由调用方 fail-closed。"""
+    head_sha = _run_git_bytes(
+        repo_path.resolve(),
+        ["git", "rev-parse", "--verify", "HEAD"],
+    ).decode("utf-8", errors="replace").strip()
+    if not head_sha:
+        raise RuntimeError("git HEAD 为空")
+    return head_sha
 
 
 def _decode_nul_paths(payload: bytes) -> list[str]:
