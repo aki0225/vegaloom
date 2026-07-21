@@ -1,8 +1,8 @@
 # Assurance 阶段 0-B 接力说明
 
 > 更新时间：2026-07-21
-> 当前结论：成功语义修复已完成本地定向验证，完整跨平台 CI 尚待 PR 触发。
-> 在 CI 全绿和人工复核前，不合并 `main`、不打标签、不发布。
+> 当前结论：成功语义修复已完成本地验证和跨平台 PR CI，等待人工 diff 复核与合并决策。
+> 在人工复核和明确合并决策前，不合并 `main`、不打标签、不发布。
 
 ## 1. 阶段目标
 
@@ -26,6 +26,10 @@ adapter 或新 Agent 角色：
 - 远端基线：`origin/main@176ac381`
 - 基线标签：`v0.1.1`
 - 首个修复提交：`1a2c715`
+- 成功语义收口提交：`497513c`
+- fixture 收口提交：`313503e`
+- PR：`#1`
+- 最终 CI：`29837944440`，`10/10 success`
 - 当前分支尚未合并 `main`、打标签或发布。
 - LangGraph 实验位于独立分支和工作树，不属于本阶段 diff。
 
@@ -80,23 +84,32 @@ adapter 或新 Agent 角色：
 
 本地没有把单个超时命令冒充完整全量测试。516 个节点的跨平台完整结论由 PR CI 提供。
 
-## 5. 下一步
+## 5. PR CI
 
-1. 显式暂存本阶段代码、测试、CI 和必要文档。
-2. 提交并推送 `fix/verification-success-semantics`。
-3. 创建指向 `main` 的 PR，触发：
-   - 静态检查与 516 节点收集合同；
-   - Python 3.11 全量测试；
-   - Python 3.12 全部分片；
-   - Windows 专项与 wheel smoke；
-   - POSIX 专项；
-   - wheel/sdist 构建和安装验证。
-4. CI 全绿后，只向 `eval/assurance-validation.md` 追加
-   `AV-STAGE0B-001 · result`，不得改写已有条目。
-5. 完成人工 diff 复核后再决定是否合并 `main`。
-6. 合并后另行确认 `v0.1.2` 标签和发布，不自动执行。
+首次 CI `29835869528` 的 Python 3.11 全量测试暴露两个正向 fixture 未提供真实结构化验证
+证据；Runtime 没有因此放松。提交 `313503e` 只为 fixture 增加固定 verification 命令并
+启用 `verify=True`。
 
-## 6. 剩余边界
+随后 Workflow `29837944440` 完成：
+
+- 静态检查与 516 节点收集合同：通过。
+- Python 3.11 全量测试：`515 passed, 1 skipped in 115.39s`。
+- Python 3.12 五个分片：全部通过。
+- Windows 专项与 wheel smoke：通过。
+- POSIX 临时目录专项：通过。
+- wheel 构建与安装：通过。
+- 合计：`10/10 success`。
+
+结果已按预注册规则追加到 `eval/assurance-validation.md` 的
+`AV-STAGE0B-001 · result`，没有改写既有实验记录。
+
+## 6. 下一步
+
+1. 人工复核 PR #1 的 Runtime、测试、CI 和文档 diff。
+2. 明确决定是否把 PR #1 合并到 `main`。
+3. 合并后另行确认 `v0.1.2` 标签和发布，不自动执行。
+
+## 7. 剩余边界
 
 - 当前修复证明的是本地代码工作流的验证成功语义，不证明数据库 migration、
   backfill、分布式并发或生产事务安全。

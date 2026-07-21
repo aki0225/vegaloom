@@ -595,3 +595,80 @@ schema 版本迁移和 `interrupted` 的完整建模留给后续独立阶段，�
 ### 下一步
 
 先追踪 Loop、Finish 和 Goal 当前实际重算链路；确认最小共同判定点后再修改代码。
+
+---
+
+## 2026-07-21 · AV-STAGE0B-001 · result
+
+### Baseline
+
+- Git 基线：`main@176ac381`
+- 修复分支：`fix/verification-success-semantics`
+- 最终验证提交：`313503e87323077bbf82dbc63bd5b908ae403dd5`
+- PR：`#1`
+- GitHub Actions：`29837944440`
+- Runtime 方案：复用现有结构化 verification artifact，不新增数据库、schema migration、
+  数据修改、并发 detector 或 Agent 角色。
+
+### 实现结果
+
+- Loop 只有在最新 iteration 存在完整、非空、未中断且全部通过的结构化验证时，才可能
+  进入自动成功链路。
+- `--no-verify`、零条选中命令、缺失或损坏 artifact、部分执行、跳过命令和验证中断均
+  fail-closed。
+- reviewer `approve` 不能覆盖验证缺失或失败。
+- success eval 会在写入最终终态前重新校验 verification artifact 与 workspace freshness；
+  降级失败时 `state.status`、`run_finished.status` 和 completion step 保持一致。
+- Finish 与 Goal 只使用最新 iteration 的可信验证裁决；历史失败仍保留在报告中，但不会
+  覆盖后续已修复且受信的通过结果。
+- worker/reviewer 会话边界、read-only reviewer 约束和既有 artifact integrity 门禁未放松。
+
+### 本地验证
+
+- `tests/test_p0_regressions.py::test_legacy_loop_without_scope_evidence_cannot_be_ready_to_commit`：
+  `1 passed in 12.57s`。
+- dogfood eval 两次都生成机器可读 `summary.json`，8 个 case 全部通过；本机完整脚本在当前
+  资源负载下超过 60 秒外层限制，因此没有把对应 pytest timeout 冒充本地通过。
+- `python -m compileall -q src`：通过。
+- `ruff check src tests scripts`：通过。
+- `git diff --check`：通过。
+- collect-only：`516 tests collected`。
+
+### PR CI
+
+首次 PR CI `29835869528` 暴露两个旧 fixture 与新成功语义不一致：
+
+1. legacy scope 用例没有先生成真实结构化验证成功证据。
+2. dogfood 的 core loop 与 Goal child loop 使用 `verify=False`，却仍期待自动成功。
+
+修复只为这些正向 fixture 增加已提交的固定 verification 命令并启用 `verify=True`，没有修改
+或放松 Runtime。提交 `313503e` 后重新运行：
+
+- Workflow `29837944440`：`completed / success`。
+- Checks：`10/10 success`。
+- Python 3.11 全量测试：`515 passed, 1 skipped in 115.39s`。
+- Python 3.12：全部 5 个分片通过，并保持 516 节点收集合同。
+- Windows 专项与 wheel smoke：通过。
+- POSIX 临时目录专项：通过。
+- wheel 构建、安装与隔离 smoke：通过。
+
+### 裁决
+
+`passed`
+
+阶段 0-B 的注册成功条件全部满足。现有 v0.1 自动成功语义已经从“相信顶层状态或 reviewer
+approve”收紧为“最新轮次必须具备可复核的结构化验证成功证据”，且正常结构化成功路径没有
+被无差别阻塞。
+
+### 限制
+
+- 本结果证明的是本地代码工作流的成功裁决与证据一致性，不证明数据库 migration、
+  backfill、分布式并发或生产事务安全。
+- reviewer 与 worker 是会话上下文隔离；reviewer 仍使用共享仓库的只读视图，不是容器或
+  操作系统级文件系统隔离。
+- 分支尚未合并 `main`，也未打 `v0.1.2` 标签或发布。
+
+### 下一步
+
+人工复核 PR diff 后决定是否合并 `main`。合并、标签与发布必须作为独立决策执行，不由本次
+验证自动触发。
