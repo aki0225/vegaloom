@@ -14,6 +14,7 @@ from .gate_runtime import evaluate_risk, render_gate_report
 from .goal_evidence import (
     trusted_verification_passed,
     validate_loop_artifact_integrity,
+    validate_loop_evidence_freshness,
 )
 from .models import (
     BriefInput,
@@ -1858,6 +1859,12 @@ class LoopAutomationRuntime:
     ) -> None:
         if verdict.verdict == "approve":
             if not _latest_verification_passed(state):
+                latest = state.iterations[-1] if state.iterations else None
+                verification_failed = bool(
+                    latest
+                    and latest.verification_status == "failed"
+                    and latest.verification_failed_count
+                )
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_verification_fix_prompt(state.current_iteration),
@@ -1866,14 +1873,22 @@ class LoopAutomationRuntime:
                     run_dir,
                     state,
                     verdict,
-                    "缺少受信的结构化验证通过证据，不能自动通过。",
+                    (
+                        "验证命令失败，reviewer approve 不能覆盖确定性失败。"
+                        if verification_failed
+                        else "缺少受信的结构化验证通过证据，不能自动通过。"
+                    ),
                 )
                 self._save_loop_done(
                     run_dir,
                     state,
                     "needs_human",
                     trace,
-                    current_step="verification_unverified",
+                    current_step=(
+                        "verification_failed"
+                        if verification_failed
+                        else "verification_unverified"
+                    ),
                 )
                 return
             _write_final_report(run_dir, state, verdict, "隔离 reviewer 已通过。")
@@ -2342,6 +2357,25 @@ def run_loop_eval(
             iteration_dir / "diff-summary.md"
         ):
             results.append("FAIL: success loop 没有可审查的 tracked diff")
+        try:
+            freshness = validate_loop_evidence_freshness(
+                workspace,
+                repo_path,
+                run_dir,
+            )
+        except Exception as exc:  # noqa: BLE001 - eval 必须把新鲜度异常转成 FAIL
+            results.append(
+                "FAIL: success loop reviewer 证据新鲜度重算异常："
+                f"{type(exc).__name__}"
+            )
+        else:
+            if freshness.fresh:
+                results.append("PASS: success loop reviewer 证据仍与当前工作区一致")
+            else:
+                results.append(
+                    "FAIL: success loop reviewer 证据已过期："
+                    + ", ".join(freshness.issues)
+                )
     return results
 
 
@@ -3311,6 +3345,8 @@ def _finalize_loop_eval(
     except Exception as exc:  # noqa: BLE001 - 终态收口必须 fail-closed
         base_results = [f"FAIL: loop eval 执行异常：{type(exc).__name__}"]
     final_status = _status_after_eval(base_results, requested_status)
+    if requested_status == "success" and final_status == "failed":
+        state.current_step = "completion_eval_failed"
     state.eval_results = base_results
     _write_text_artifact(run_dir / "eval.md", render_eval(base_results))
     state.save(run_dir / "state.json")

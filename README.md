@@ -117,6 +117,7 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 | 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |
 | 工作区与验证规范 | [WORKSPACE-HYGIENE](docs/WORKSPACE-HYGIENE.md) |
 | v0.1.1 安全维护更新与迁移 | [RELEASE-NOTES-0.1.1](docs/RELEASE-NOTES-0.1.1.md) |
+| v0.1.2 成功语义安全修复候选 | [RELEASE-NOTES-0.1.2](docs/RELEASE-NOTES-0.1.2.md) |
 
 ## 定位与边界
 

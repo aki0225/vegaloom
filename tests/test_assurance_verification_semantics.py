@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import vega.loop_runtime as loop_runtime_module
 
 from vega.finish_runtime import FinishRuntime
 from vega.goal_evidence import validate_goal_evidence
@@ -297,7 +298,10 @@ def test_latest_skipped_verification_cannot_reuse_previous_pass(
     assert "verification=unverified" in (loop_evidence.validation_summary or "")
 
 
-@pytest.mark.parametrize("mutation", ["missing", "tampered"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing", "tampered", "incomplete", "interrupted"],
+)
 def test_all_completion_layers_reject_broken_structured_verification(
     tmp_path: Path,
     mutation: str,
@@ -315,9 +319,30 @@ def test_all_completion_layers_reject_broken_structured_verification(
     result_path = run_dir / "iterations" / "01" / "verification-result.json"
     if mutation == "missing":
         result_path.unlink()
-    else:
+    elif mutation == "tampered":
         result = _read_json(result_path)
         result["command_count"] = 0
+        result_path.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    elif mutation == "incomplete":
+        result = _read_json(result_path)
+        result["selected_command_count"] = result["command_count"] + 1
+        result["skipped_commands"] = ["python -c \"print('never run')\""]
+        result_path.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    else:
+        result = _read_json(result_path)
+        result["interruption_status"] = "timed_out"
+        result["interruption_command"] = result["commands"][0]
+        result["interruption_reason"] = "forced timeout"
+        result["results"][0]["interruption_status"] = "timed_out"
+        result["results"][0]["interruption_reason"] = "forced timeout"
         result_path.write_text(
             json.dumps(result, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -354,11 +379,126 @@ def test_all_completion_layers_reject_broken_structured_verification(
     assert finish_evidence.completion_eligible is False
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected_eval_fragment"),
+    [
+        ("missing", "iteration_01_verification_result_missing"),
+        ("invalid_json", "iteration_01_verification_result_invalid_json"),
+        ("workspace_changed", "workspace_changed_since_review"),
+    ],
+)
+def test_success_finalization_fails_closed_when_evidence_changes_before_eval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    expected_eval_fragment: str,
+) -> None:
+    workspace, repo = _init_repo(tmp_path, with_verification_config=True)
+    original_finalize = loop_runtime_module._finalize_loop_eval
+    mutation_applied = False
+
+    def mutate_then_finalize(run_dir, state, requested_status, artifacts, trace):
+        nonlocal mutation_applied
+        if requested_status == "success" and not mutation_applied:
+            mutation_applied = True
+            verification_path = (
+                run_dir / "iterations" / "01" / "verification-result.json"
+            )
+            if mutation == "missing":
+                verification_path.unlink()
+            elif mutation == "invalid_json":
+                verification_path.write_text("{", encoding="utf-8", newline="\n")
+            else:
+                readme = repo / "README.md"
+                readme.write_text(
+                    readme.read_text(encoding="utf-8") + "changed after review\n",
+                    encoding="utf-8",
+                    newline="\n",
+                )
+        return original_finalize(
+            run_dir,
+            state,
+            requested_status,
+            artifacts,
+            trace,
+        )
+
+    monkeypatch.setattr(
+        loop_runtime_module,
+        "_finalize_loop_eval",
+        mutate_then_finalize,
+    )
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeWorker(),
+        reviewer_runner=ApprovingReviewer(),
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
+
+    state = _read_json(run_dir / "state.json")
+    trace = [
+        json.loads(line)
+        for line in (run_dir / "trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    terminal_events = [item for item in trace if item.get("event") == "run_finished"]
+
+    assert mutation_applied is True
+    assert state["status"] == "failed"
+    assert state["current_step"] == "completion_eval_failed"
+    assert expected_eval_fragment in (run_dir / "eval.md").read_text(encoding="utf-8")
+    assert [item["status"] for item in terminal_events] == ["failed"]
+    assert trace[-1] == terminal_events[0]
+
+
+def test_latest_passed_verification_supersedes_previous_failure_for_finish_and_goal(
+    tmp_path: Path,
+) -> None:
+    verification_command = (
+        "python -c \"from pathlib import Path; "
+        "raise SystemExit(Path('README.md').read_text(encoding='utf-8')"
+        ".count('implemented') < 2)\""
+    )
+    workspace, repo = _init_repo(
+        tmp_path,
+        with_verification_config=True,
+        verification_command=verification_command,
+    )
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeWorker(),
+        reviewer_runner=SequencedReviewer(["request_changes", "approve"]),
+    ).start(_brief(repo), "auto", max_iterations=2, verify=True)
+    state = _read_json(run_dir / "state.json")
+    finish = _finish(workspace, run_dir)
+    finish_evidence = validate_goal_evidence(
+        workspace,
+        repo,
+        run_dir.name,
+        "finish",
+        "验证最新受信通过可覆盖已修复的历史验证失败",
+    )
+
+    assert [item["verification_status"] for item in state["iterations"]] == [
+        "failed",
+        "passed",
+    ]
+    assert state["status"] == "success"
+    assert finish["has_verification_failures"] is True
+    assert finish["latest_verification_failed"] is False
+    assert finish["verification_passed"] is True
+    assert finish["finish_status"] == "ready_to_commit"
+    assert any("历史 iteration 曾验证失败" in item for item in finish["handoff_notes"])
+    assert finish_evidence.completion_eligible is True
+
+
 def _init_repo(
     tmp_path: Path,
     *,
     with_python_tests: bool = False,
     with_verification_config: bool = False,
+    verification_command: str | None = None,
 ) -> tuple[Path, Path]:
     workspace = tmp_path / "workspace"
     repo = tmp_path / "repo"
@@ -372,13 +512,17 @@ def _init_repo(
     )
     repo.joinpath("README.md").write_text("# Demo\n", encoding="utf-8", newline="\n")
     if with_verification_config:
+        command = (
+            verification_command
+            or "python -c \"print('assurance verification passed')\""
+        )
         repo.joinpath(".vega.yaml").write_text(
             "\n".join(
                 [
                     "version: 1",
                     "verification:",
                     "  commands:",
-                    "    - python -c \"print('assurance verification passed')\"",
+                    f"    - {command}",
                     "  max_commands: 1",
                     "",
                 ]

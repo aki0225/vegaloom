@@ -11,6 +11,7 @@ from .decision import DecisionStore
 from .goal_evidence import (
     EvidenceFreshness,
     LoopArtifactIntegrity,
+    latest_verification_failed,
     trusted_verification_passed,
     validate_loop_artifact_integrity,
     validate_loop_evidence_freshness,
@@ -73,13 +74,19 @@ def build_finish_summary(
     diff_summaries = _collect_iteration_text(run_dir, "diff-summary.md")
     verification_results = list(artifact_integrity.verification_results)
     risk_gate_results = list(artifact_integrity.risk_gate_results)
-    has_verification_failures = any((item.get("failed_count") or 0) > 0 for item in verification_results)
+    has_verification_failures = any(
+        (item.get("failed_count") or 0) > 0 for item in verification_results
+    )
+    latest_verification_has_failed = latest_verification_failed(
+        state,
+        artifact_integrity,
+    )
     verification_passed = trusted_verification_passed(state, artifact_integrity)
     final_report = _read_text(run_dir / "final-report.md")
     finish_status = _finish_status(
         state,
         latest_verdict,
-        has_verification_failures,
+        latest_verification_has_failed,
         verification_passed=verification_passed,
         evidence_fresh=evidence_freshness.fresh,
         artifact_integrity_valid=artifact_integrity.valid,
@@ -101,6 +108,7 @@ def build_finish_summary(
         "verification_results": verification_results,
         "risk_gate_results": [item.model_dump() for item in risk_gate_results],
         "has_verification_failures": has_verification_failures,
+        "latest_verification_failed": latest_verification_has_failed,
         "verification_passed": verification_passed,
         "artifact_integrity": artifact_integrity.as_dict(),
         "evidence_freshness": evidence_freshness.as_dict(),
@@ -111,7 +119,7 @@ def build_finish_summary(
             state,
             latest_verdict,
             test_summaries,
-            has_verification_failures,
+            latest_verification_has_failed,
             verification_passed=verification_passed,
             evidence_fresh=evidence_freshness.fresh,
             artifact_integrity_valid=artifact_integrity.valid,
@@ -120,7 +128,8 @@ def build_finish_summary(
             state,
             latest_verdict,
             final_report,
-            has_verification_failures,
+            latest_verification_has_failed,
+            has_historical_verification_failures=has_verification_failures,
             verification_passed=verification_passed,
             evidence_fresh=evidence_freshness.fresh,
             artifact_integrity_valid=artifact_integrity.valid,
@@ -193,10 +202,17 @@ def render_finish_report(summary: dict[str, Any]) -> str:
         lines.append("- 尚未产生迭代记录。")
     lines.extend(["", "## 验证门禁", ""])
     if summary.get("verification_results"):
-        lines.append(
-            "- 结果："
-            + ("存在失败，不能进入 ready_to_commit。" if summary.get("has_verification_failures") else "未发现失败。")
-        )
+        if summary.get("latest_verification_failed"):
+            lines.append("- 结果：最新 iteration 验证失败，不能进入 ready_to_commit。")
+        elif summary.get("verification_passed"):
+            history_note = (
+                "；历史 iteration 曾失败，已由最新受信通过取代"
+                if summary.get("has_verification_failures")
+                else ""
+            )
+            lines.append(f"- 结果：最新 iteration 验证通过{history_note}。")
+        else:
+            lines.append("- 结果：最新 iteration 缺少受信验证通过证据。")
         for item in summary["verification_results"]:
             lines.append(
                 f"- `{item.get('path')}`：commands={item.get('command_count', 0)}，"
@@ -235,7 +251,7 @@ def render_finish_report(summary: dict[str, Any]) -> str:
 def _finish_status(
     state: LoopAutomationState,
     latest_verdict: ReviewVerdict | None,
-    has_verification_failures: bool = False,
+    latest_verification_failed: bool = False,
     *,
     verification_passed: bool = False,
     evidence_fresh: bool = True,
@@ -245,7 +261,7 @@ def _finish_status(
         return "needs_human"
     if not evidence_fresh:
         return "needs_human"
-    if has_verification_failures:
+    if latest_verification_failed:
         return "needs_fix"
     if not verification_passed:
         return "needs_human"
@@ -262,7 +278,7 @@ def _commit_checklist(
     state: LoopAutomationState,
     latest_verdict: ReviewVerdict | None,
     test_summaries: list[str],
-    has_verification_failures: bool = False,
+    latest_verification_failed: bool = False,
     *,
     verification_passed: bool = False,
     evidence_fresh: bool = True,
@@ -276,7 +292,7 @@ def _commit_checklist(
         checklist.append("隔离 reviewer 已 approve。")
     else:
         checklist.append("隔离 reviewer 未 approve；提交前需要人工确认。")
-    if has_verification_failures:
+    if latest_verification_failed:
         checklist.append("自动验证存在失败；修复并重新验证前不能进入提交。")
     elif verification_passed:
         checklist.append("最新 iteration 存在受信、非空且全部通过的结构化验证。")
@@ -308,8 +324,9 @@ def _handoff_notes(
     state: LoopAutomationState,
     latest_verdict: ReviewVerdict | None,
     final_report: str,
-    has_verification_failures: bool = False,
+    latest_verification_failed: bool = False,
     *,
+    has_historical_verification_failures: bool = False,
     verification_passed: bool = False,
     evidence_fresh: bool = True,
     artifact_integrity_valid: bool = True,
@@ -319,10 +336,12 @@ def _handoff_notes(
         notes.append("迭代 artifact 完整性校验失败，未采用未绑定或损坏的 verdict/verification。")
     if not evidence_fresh:
         notes.append("review 后工作区发生变化或可信快照缺失，现有 approve 已失效。")
-    if has_verification_failures:
+    if latest_verification_failed:
         notes.append("自动验证存在失败，不能仅凭 reviewer approve 进入 ready_to_commit。")
     elif not verification_passed:
         notes.append("自动验证结论未知，不能仅凭 reviewer approve 进入 ready_to_commit。")
+    elif has_historical_verification_failures:
+        notes.append("历史 iteration 曾验证失败，最新 iteration 已取得受信通过。")
     if latest_verdict:
         notes.append(f"最新 reviewer 结论：{latest_verdict.verdict}，{latest_verdict.summary}")
     else:

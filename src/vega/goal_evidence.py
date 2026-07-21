@@ -101,20 +101,45 @@ def trusted_verification_passed(
             continue
         command_count = payload.get("command_count")
         failed_count = payload.get("failed_count")
+        selected_command_count = payload.get("selected_command_count")
+        skipped_commands = payload.get("skipped_commands")
         commands = payload.get("commands")
         results = payload.get("results")
         return (
             _is_positive_int(command_count)
             and failed_count == 0
+            and selected_command_count == command_count
+            and skipped_commands == []
+            and payload.get("interruption_status") is None
+            and payload.get("interruption_command") is None
+            and payload.get("interruption_reason") is None
             and isinstance(commands, list)
             and len(commands) == command_count
             and isinstance(results, list)
             and len(results) == command_count
             and all(
-                isinstance(item, dict) and item.get("status") == "passed"
+                isinstance(item, dict)
+                and item.get("status") == "passed"
+                and item.get("interruption_status") is None
+                and item.get("interruption_reason") is None
                 for item in results
             )
         )
+    return False
+
+
+def latest_verification_failed(
+    state: LoopAutomationState,
+    artifact_integrity: LoopArtifactIntegrity,
+) -> bool:
+    """只根据最新轮次的受信结构化结果判断验证失败。"""
+
+    if not artifact_integrity.valid or not state.iterations:
+        return False
+    latest_iteration = state.iterations[-1].iteration
+    for payload in reversed(artifact_integrity.verification_results):
+        if payload.get("iteration") == latest_iteration:
+            return _is_positive_int(payload.get("failed_count"))
     return False
 
 
@@ -1014,10 +1039,7 @@ def _finish_summary_integrity(
             trusted_integrity.risk_gate_results
         ):
             issues.append("finish_risk_gate_result_count_mismatch")
-    has_verification_failures = any(
-        (item.get("failed_count") or 0) > 0
-        for item in trusted_integrity.verification_results
-    )
+    has_verification_failures = latest_verification_failed(state, trusted_integrity)
     latest_verdict = (
         trusted_integrity.review_verdicts[-1].verdict
         if trusted_integrity.review_verdicts
@@ -1261,6 +1283,9 @@ def _validate_iteration_verification(
     command_results = payload.get("results")
     command_count = payload.get("command_count")
     failed_count = payload.get("failed_count")
+    selected_command_count = payload.get("selected_command_count")
+    skipped_commands = payload.get("skipped_commands")
+    interruption_status = payload.get("interruption_status")
     artifact_version = payload.get("artifact_version")
     expected_run_id = iteration_dir.parent.parent.name
     recorded_run_id = payload.get("run_id")
@@ -1292,6 +1317,20 @@ def _validate_iteration_verification(
         issues.append(f"{prefix}_verification_command_count_invalid")
     if not _is_non_negative_int(failed_count):
         issues.append(f"{prefix}_verification_failed_count_invalid")
+    if artifact_version == 2:
+        if not _is_non_negative_int(selected_command_count):
+            issues.append(f"{prefix}_verification_selected_command_count_invalid")
+        if not isinstance(skipped_commands, list) or not all(
+            isinstance(item, str) for item in skipped_commands
+        ):
+            issues.append(f"{prefix}_verification_skipped_commands_schema_invalid")
+        if interruption_status not in {
+            None,
+            "timed_out",
+            "stopped",
+            "termination-unconfirmed",
+        }:
+            issues.append(f"{prefix}_verification_interruption_status_invalid")
 
     if isinstance(commands, list) and _is_non_negative_int(command_count):
         if command_count != len(commands):
@@ -1335,6 +1374,29 @@ def _validate_iteration_verification(
         expected_status = _verification_status(command_count, failed_count)
         if iteration.verification_status != expected_status:
             issues.append(f"{prefix}_verification_iteration_status_mismatch")
+    if iteration.verification_status == "passed" and artifact_version == 2:
+        if selected_command_count != command_count:
+            issues.append(f"{prefix}_verification_selected_command_count_mismatch")
+        if skipped_commands != []:
+            issues.append(f"{prefix}_verification_passed_with_skipped_commands")
+        if any(
+            payload.get(field) is not None
+            for field in (
+                "interruption_status",
+                "interruption_command",
+                "interruption_reason",
+            )
+        ):
+            issues.append(f"{prefix}_verification_passed_with_interruption")
+        if isinstance(command_results, list) and any(
+            isinstance(item, dict)
+            and (
+                item.get("interruption_status") is not None
+                or item.get("interruption_reason") is not None
+            )
+            for item in command_results
+        ):
+            issues.append(f"{prefix}_verification_passed_result_interrupted")
     if iteration.verification_status in {"passed", "failed"}:
         for filename in ("verification-summary.md", "test-summary.md"):
             if not (iteration_dir / filename).is_file():
