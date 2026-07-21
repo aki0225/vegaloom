@@ -672,3 +672,36 @@ approve”收紧为“最新轮次必须具备可复核的结构化验证成功�
 
 人工复核 PR diff 后决定是否合并 `main`。合并、标签与发布必须作为独立决策执行，不由本次
 验证自动触发。
+
+---
+
+## 2026-07-21 · AV-STAGE0B-002 · post-merge result
+
+### Baseline
+
+- 合并提交：`main@38bf1a1`
+- 来源 PR：`#1`
+- 合并后 GitHub Actions：`29845250723`
+- 版本收口前包版本：`0.1.1`
+
+### 实际观察
+
+- 阶段 0-B 的 Runtime、测试和文档提交已经进入 `main`。
+- 合并后 Workflow `29845250723` 完成，Checks 为 `10/10 success`。
+- Python 3.11 全量测试为 `515 passed, 1 skipped`，并保持 `516` 节点收集合同。
+- Python 3.12 全部分片、Windows wheel smoke、POSIX 专项和 package 安装验证均通过。
+- 发布收口只需要更新版本、制品路径和当前事实文档，不需要再次修改成功语义 Runtime。
+
+### 裁决
+
+`passed`
+
+阶段 0-B 已完成合并后复核，可以进入独立的 `v0.1.2` 版本与标签收口。该结论不改写
+`AV-STAGE0B-001` 的历史基线和当时限制。
+
+### 限制
+
+- 本结果不单独证明 `v0.1.2` 标签已经创建；标签仍受 release 分支 CI 和合并后 main CI
+  双重门禁约束。
+- GitHub Release 和 PyPI 发布不在本次验证范围内。
+- LangGraph、adapter、数据库、Web UI、多 Agent 和长期 Memory 写入仍不属于 v0.1.2。

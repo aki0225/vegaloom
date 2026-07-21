@@ -416,7 +416,7 @@ worker `stopped/timed_out` 后立即停止 verification/review，并把 loop 交
 `vega stop` 不获取该锁，否则 owner 执行 worker/reviewer/verification 时用户无法请求停止。
 stop 只写 active execution 的 `stop-request.json`，不由第二个 CLI 追加根 trace。
 
-该锁不是数据库事务、目标仓库全局锁、网络文件系统锁或跨机器协调。v0.1.1 仍是本地单用户
+该锁不是数据库事务、目标仓库全局锁、网络文件系统锁或跨机器协调。v0.1.x 仍是本地单用户
 CLI，不提供等待队列、自动重试、分布式调度或持续恶意写者隔离。
 
 ## Finish / Handoff

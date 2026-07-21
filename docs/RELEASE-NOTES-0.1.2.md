@@ -1,9 +1,10 @@
-# Vega v0.1.2 候选发布说明
+# Vega v0.1.2 发布说明
 
-v0.1.2 是 v0.1 冻结范围内的成功语义安全修复候选。它不增加数据库、Web UI、
+v0.1.2 是 v0.1 冻结范围内的成功语义安全维护版本。它不增加数据库、Web UI、
 LangGraph 主线、ATG adapter、多 Agent、自动提交或长期 Memory 写入能力。
 
-本文件描述候选行为；在 `main` 合并、跨平台 CI 全绿和人工确认前，`v0.1.2` 尚未发布。
+成功语义修复已经合并到 `main`，并通过合并后的跨平台 CI。正式版本提交仍遵循独立
+release 分支、release CI、main CI 和人工标签四道门禁。
 
 ## 修复内容
 
@@ -51,11 +52,11 @@ Finish 和 Goal 的提交门禁只采用最新 iteration 的受信验证结果�
   `ready_to_commit`。
 - 依赖“零命令或 `--no-verify` 也可自动成功”的脚本会改为收到非成功状态；这是安全修复，
   不是兼容性回退。
-- 包版本在正式发布提交前仍保持当前稳定版本，不在候选修复分支提前改号。
+- Python distribution、导入包和 CLI 的正式版本均为 `0.1.2`。
 
-## 验证门禁
+## 发布验证
 
-候选合并前必须满足：
+正式标签创建前必须满足：
 
 1. 516 个 pytest 节点的收集合同通过。
 2. Python 3.11 全量测试通过。
@@ -63,7 +64,7 @@ Finish 和 Goal 的提交门禁只采用最新 iteration 的受信验证结果�
 4. Windows 专项、wheel smoke 和 POSIX 专项通过。
 5. wheel/sdist 构建与干净安装验证通过。
 6. `compileall`、Ruff 和 `git diff --check` 通过。
-7. `eval/assurance-validation.md` 追加正式结果，不改写预注册和历史失败证据。
+7. `eval/assurance-validation.md` 只追加合并后结果，不改写预注册和历史失败证据。
 
 ## 不变边界
 

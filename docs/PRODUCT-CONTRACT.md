@@ -151,3 +151,17 @@ append 使用本地非阻塞 OS 文件锁互斥；busy 命令在修改可信业�
 该能力不承诺外部进程持续并发改写目标仓库时的操作系统级原子隔离。runtime 会用前后快照、
 HEAD、策略摘要、index 标记和 reviewer 授权快照发现关键阶段变化，但不会引入目标仓库全局
 锁、网络锁、分布式锁服务或数据库事务。
+
+## v0.1.2 成功语义维护边界
+
+v0.1.2 只收紧现有 Coding Harness 的成功裁决，不新增 Agent 角色、执行阶段或持久化设施：
+
+- 自动成功必须依赖最新 iteration 的非空、完整、未中断且全部通过的结构化验证记录。
+- 零条验证命令、显式跳过、部分执行、证据缺失或损坏均不得被 reviewer `approve`
+  提升为成功。
+- 写入终态前必须重新执行 eval；任一 `FAIL:` 同时使 `state.status` 和
+  `run_finished.status` 为 `failed`。
+- Finish 与 Goal 只使用最新 iteration 的受信验证结论；历史失败保留为证据，但不能覆盖
+  后续已经重新验证通过的修复。
+
+该维护版本不改变 `.vega.yaml` schema、CLI 命令、run 目录结构或 v0.1 的产品停止线。

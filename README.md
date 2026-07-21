@@ -9,7 +9,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Baseline-v0.1.1-4fb8d8?style=for-the-badge" alt="v0.1.1">
+  <img src="https://img.shields.io/badge/Baseline-v0.1.2-4fb8d8?style=for-the-badge" alt="v0.1.2">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -117,7 +117,7 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 | 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |
 | 工作区与验证规范 | [WORKSPACE-HYGIENE](docs/WORKSPACE-HYGIENE.md) |
 | v0.1.1 安全维护更新与迁移 | [RELEASE-NOTES-0.1.1](docs/RELEASE-NOTES-0.1.1.md) |
-| v0.1.2 成功语义安全修复候选 | [RELEASE-NOTES-0.1.2](docs/RELEASE-NOTES-0.1.2.md) |
+| v0.1.2 成功语义安全修复 | [RELEASE-NOTES-0.1.2](docs/RELEASE-NOTES-0.1.2.md) |
 
 ## 定位与边界
 
@@ -126,8 +126,8 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal 和 adapters 是可选能力，不扩大核心 loop 的成功条件。
-- 当前稳定基线为 `v0.1.1`。该版本只整合路径范围、验证隔离、恢复和并发安全修复，
-  不扩大 v0.1 产品范围。
+- 当前稳定基线为 `v0.1.2`。它在 v0.1.1 安全维护基线上进一步收紧结构化验证、
+  终态 eval 和多轮修复的成功语义，不扩大 v0.1 产品范围。
 
 ## 开发验证
 
