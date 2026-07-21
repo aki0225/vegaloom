@@ -169,7 +169,7 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
 ) -> None:
     workspace = tmp_path / "workspace with spaces 空格"
     repo = tmp_path / "repo with spaces 空格"
-    _init_git_repo(repo)
+    _init_git_repo(repo, with_verification=True)
     ready = workspace / "control" / "child-ready"
     release = workspace / "control" / "child-release"
     ready.parent.mkdir(parents=True)
@@ -270,7 +270,7 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
         ).continue_assist(
             run_dir.name,
             repo,
-            verify=False,
+            verify=True,
         )
         final_state = LoopAutomationState.model_validate_json(
             resumed.joinpath("state.json").read_text(encoding="utf-8")
@@ -320,7 +320,7 @@ def test_recovery_supersedes_uncommitted_terminal_trace_and_continues(
 ) -> None:
     workspace = tmp_path / "workspace"
     repo = tmp_path / "repo"
-    _init_git_repo(repo)
+    _init_git_repo(repo, with_verification=True)
     original_write = TraceWriter.write
     crashed = False
 
@@ -354,7 +354,7 @@ def test_recovery_supersedes_uncommitted_terminal_trace_and_continues(
             ),
             "auto",
             max_iterations=1,
-            verify=False,
+            verify=True,
         )
 
     run_dir = next((workspace / "runs").glob("*-loop"))
@@ -370,6 +370,14 @@ def test_recovery_supersedes_uncommitted_terminal_trace_and_continues(
     ]
 
     monkeypatch.setattr(TraceWriter, "write", original_write)
+    monkeypatch.setattr(
+        recovery_runtime_module,
+        "inspect_execution_for_recovery",
+        lambda _run_dir: recovery_runtime_module.ExecutionRecoveryInspection(
+            True,
+            "测试已模拟原 owner 崩溃退出。",
+        ),
+    )
     pending_path = (
         run_dir / ".control" / "recovery-transaction.json"
     )
@@ -487,7 +495,7 @@ def test_recovery_supersedes_uncommitted_terminal_trace_and_continues(
     ).continue_assist(
         run_dir.name,
         repo,
-        verify=False,
+        verify=True,
     )
 
     final_state = LoopAutomationState.model_validate_json(
@@ -911,7 +919,7 @@ def test_continue_rejects_existing_next_iteration_directory(tmp_path: Path) -> N
     assert sentinel.read_text(encoding="utf-8") == "do not overwrite\n"
 
 
-def _init_git_repo(path: Path) -> None:
+def _init_git_repo(path: Path, *, with_verification: bool = False) -> None:
     path.mkdir(parents=True)
     subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True, text=True)
     subprocess.run(
@@ -926,8 +934,25 @@ def _init_git_repo(path: Path) -> None:
         encoding="utf-8",
         newline="\n",
     )
+    tracked_paths = ["README.md"]
+    if with_verification:
+        path.joinpath(".vega.yaml").write_text(
+            "\n".join(
+                [
+                    "version: 1",
+                    "verification:",
+                    "  commands:",
+                    "    - python -c \"print('recovery verification passed')\"",
+                    "  max_commands: 1",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        tracked_paths.append(".vega.yaml")
     subprocess.run(
-        ["git", "add", "README.md"],
+        ["git", "add", "--", *tracked_paths],
         cwd=path,
         check=True,
         capture_output=True,
@@ -973,7 +998,12 @@ def _wait_for_loop_run(workspace: Path, owner: subprocess.Popen[str]) -> Path:
             return True
         return False
 
-    _wait_until(locate, owner=owner, description="loop execution")
+    _wait_until(
+        locate,
+        owner=owner,
+        description="loop execution",
+        timeout_seconds=30.0,
+    )
     assert result is not None
     return result
 

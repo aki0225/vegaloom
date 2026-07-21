@@ -78,6 +78,46 @@ class LoopArtifactIntegrity:
         }
 
 
+def trusted_verification_passed(
+    state: LoopAutomationState,
+    artifact_integrity: LoopArtifactIntegrity,
+) -> bool:
+    """只有最新轮次存在受信、非空且全通过的结构化验证时才返回真。
+
+    自动成功必须依赖与最新 iteration 绑定并经过完整性校验的 artifact，不能只相信
+    state 中可被单独改写的 `verification_status`，也不能把前序轮次的通过结果沿用到
+    后续代码变更。
+    """
+    if not artifact_integrity.valid or not state.iterations:
+        return False
+    latest = state.iterations[-1]
+    if latest.lifecycle != "completed" or latest.verification_status != "passed":
+        return False
+    if latest.verification_failed_count != 0:
+        return False
+
+    for payload in artifact_integrity.verification_results:
+        if payload.get("iteration") != latest.iteration:
+            continue
+        command_count = payload.get("command_count")
+        failed_count = payload.get("failed_count")
+        commands = payload.get("commands")
+        results = payload.get("results")
+        return (
+            _is_positive_int(command_count)
+            and failed_count == 0
+            and isinstance(commands, list)
+            and len(commands) == command_count
+            and isinstance(results, list)
+            and len(results) == command_count
+            and all(
+                isinstance(item, dict) and item.get("status") == "passed"
+                for item in results
+            )
+        )
+    return False
+
+
 def validate_reflect_evidence_freshness(
     workspace: Path,
     repo_path: Path,
@@ -731,8 +771,30 @@ def _completion_eligibility(
         else f"stale({','.join(freshness.issues)})"
     )
     if evidence_type == "loop":
-        eligible = status == "success" and freshness.fresh
-        return eligible, f"loop status={status}, evidence={freshness_summary}"
+        integrity = validate_loop_artifact_integrity(
+            workspace,
+            goal_repo_path,
+            child_dir,
+        )
+        state, state_issue = _load_loop_state(child_dir / "state.json")
+        verification_passed = (
+            state is not None
+            and state_issue is None
+            and trusted_verification_passed(state, integrity)
+        )
+        eligible = (
+            status == "success"
+            and freshness.fresh
+            and integrity.valid
+            and verification_passed
+        )
+        return (
+            eligible,
+            f"loop status={status}, "
+            f"artifact_integrity={'valid' if integrity.valid else 'invalid'}, "
+            f"verification={'passed' if verification_passed else 'unverified'}, "
+            f"evidence={freshness_summary}",
+        )
     if evidence_type == "reflect":
         return (
             False,
@@ -965,6 +1027,7 @@ def _finish_summary_integrity(
         loop_status,
         latest_verdict,
         has_verification_failures,
+        verification_passed=trusted_verification_passed(state, trusted_integrity),
         evidence_fresh=evidence_fresh,
         artifact_integrity_valid=trusted_integrity.valid,
     )
@@ -984,6 +1047,7 @@ def _trusted_finish_status(
     latest_verdict: str | None,
     has_verification_failures: bool,
     *,
+    verification_passed: bool,
     evidence_fresh: bool,
     artifact_integrity_valid: bool,
 ) -> str:
@@ -993,6 +1057,8 @@ def _trusted_finish_status(
         return "needs_human"
     if has_verification_failures:
         return "needs_fix"
+    if not verification_passed:
+        return "needs_human"
     if loop_status == "success" and latest_verdict == "approve":
         return "ready_to_commit"
     if latest_verdict == "request_changes":
@@ -1437,6 +1503,10 @@ def _verification_status(command_count: int, failed_count: int) -> str:
 
 def _is_non_negative_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_positive_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 def _is_sha256(value: object) -> bool:

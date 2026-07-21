@@ -11,6 +11,7 @@ from .decision import DecisionStore
 from .goal_evidence import (
     EvidenceFreshness,
     LoopArtifactIntegrity,
+    trusted_verification_passed,
     validate_loop_artifact_integrity,
     validate_loop_evidence_freshness,
 )
@@ -73,11 +74,13 @@ def build_finish_summary(
     verification_results = list(artifact_integrity.verification_results)
     risk_gate_results = list(artifact_integrity.risk_gate_results)
     has_verification_failures = any((item.get("failed_count") or 0) > 0 for item in verification_results)
+    verification_passed = trusted_verification_passed(state, artifact_integrity)
     final_report = _read_text(run_dir / "final-report.md")
     finish_status = _finish_status(
         state,
         latest_verdict,
         has_verification_failures,
+        verification_passed=verification_passed,
         evidence_fresh=evidence_freshness.fresh,
         artifact_integrity_valid=artifact_integrity.valid,
     )
@@ -98,6 +101,7 @@ def build_finish_summary(
         "verification_results": verification_results,
         "risk_gate_results": [item.model_dump() for item in risk_gate_results],
         "has_verification_failures": has_verification_failures,
+        "verification_passed": verification_passed,
         "artifact_integrity": artifact_integrity.as_dict(),
         "evidence_freshness": evidence_freshness.as_dict(),
         "memory_proposals": [proposal.model_dump() for proposal in proposals],
@@ -108,6 +112,7 @@ def build_finish_summary(
             latest_verdict,
             test_summaries,
             has_verification_failures,
+            verification_passed=verification_passed,
             evidence_fresh=evidence_freshness.fresh,
             artifact_integrity_valid=artifact_integrity.valid,
         ),
@@ -116,6 +121,7 @@ def build_finish_summary(
             latest_verdict,
             final_report,
             has_verification_failures,
+            verification_passed=verification_passed,
             evidence_fresh=evidence_freshness.fresh,
             artifact_integrity_valid=artifact_integrity.valid,
         ),
@@ -231,6 +237,7 @@ def _finish_status(
     latest_verdict: ReviewVerdict | None,
     has_verification_failures: bool = False,
     *,
+    verification_passed: bool = False,
     evidence_fresh: bool = True,
     artifact_integrity_valid: bool = True,
 ) -> str:
@@ -240,6 +247,8 @@ def _finish_status(
         return "needs_human"
     if has_verification_failures:
         return "needs_fix"
+    if not verification_passed:
+        return "needs_human"
     if state.status == "success" and latest_verdict and latest_verdict.verdict == "approve":
         return "ready_to_commit"
     if latest_verdict and latest_verdict.verdict == "request_changes":
@@ -255,6 +264,7 @@ def _commit_checklist(
     test_summaries: list[str],
     has_verification_failures: bool = False,
     *,
+    verification_passed: bool = False,
     evidence_fresh: bool = True,
     artifact_integrity_valid: bool = True,
 ) -> list[str]:
@@ -268,6 +278,10 @@ def _commit_checklist(
         checklist.append("隔离 reviewer 未 approve；提交前需要人工确认。")
     if has_verification_failures:
         checklist.append("自动验证存在失败；修复并重新验证前不能进入提交。")
+    elif verification_passed:
+        checklist.append("最新 iteration 存在受信、非空且全部通过的结构化验证。")
+    else:
+        checklist.append("最新 iteration 缺少受信的结构化验证通过证据；不能自动进入提交。")
     if artifact_integrity_valid:
         checklist.append("迭代 artifact 已与 state 和可信 child review run 完成一致性校验。")
     else:
@@ -296,6 +310,7 @@ def _handoff_notes(
     final_report: str,
     has_verification_failures: bool = False,
     *,
+    verification_passed: bool = False,
     evidence_fresh: bool = True,
     artifact_integrity_valid: bool = True,
 ) -> list[str]:
@@ -306,6 +321,8 @@ def _handoff_notes(
         notes.append("review 后工作区发生变化或可信快照缺失，现有 approve 已失效。")
     if has_verification_failures:
         notes.append("自动验证存在失败，不能仅凭 reviewer approve 进入 ready_to_commit。")
+    elif not verification_passed:
+        notes.append("自动验证结论未知，不能仅凭 reviewer approve 进入 ready_to_commit。")
     if latest_verdict:
         notes.append(f"最新 reviewer 结论：{latest_verdict.verdict}，{latest_verdict.summary}")
     else:
