@@ -352,6 +352,21 @@ class WritingErrorRunner:
 
 
 def _create_successful_loop_run(workspace: Path, repo_dir: Path) -> Path:
+    repo_dir.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                "    - python -c \"print('goal verification passed')\"",
+                "  max_commands: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    _commit_repo_paths(repo_dir, ".vega.yaml", message="add goal verification")
     runtime = LoopAutomationRuntime(
         workspace,
         worker_runner=TrackedChangeRunner(["worker done"]),
@@ -366,7 +381,7 @@ def _create_successful_loop_run(workspace: Path, repo_dir: Path) -> Path:
         ),
         "auto",
         max_iterations=1,
-        verify=False,
+        verify=True,
     )
 
 
@@ -1454,6 +1469,7 @@ def test_loop_continue_rejects_repo_mismatch_without_mutating_run(tmp_path) -> N
 def test_loop_continue_rejects_terminal_run(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
     _init_clean_git_repo(repo_dir)
+    _write_isolated_verification_config(repo_dir)
     runtime = LoopAutomationRuntime(
         tmp_path,
         worker_runner=TrackedChangeRunner(["worker done"]),
@@ -1468,7 +1484,7 @@ def test_loop_continue_rejects_terminal_run(tmp_path) -> None:
         ),
         "auto",
         max_iterations=1,
-        verify=False,
+        verify=True,
     )
 
     with pytest.raises(ValueError, match="只有 needs_human"):
@@ -2774,6 +2790,7 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
 def test_finish_cli_summarizes_successful_loop(tmp_path, monkeypatch) -> None:
     repo_dir = tmp_path / "repo"
     _init_clean_git_repo(repo_dir)
+    _write_isolated_verification_config(repo_dir)
     worker = TrackedChangeRunner(["worker done"])
     reviewer = StaticRunner([_review_json("approve")])
     runtime = LoopAutomationRuntime(tmp_path, worker_runner=worker, reviewer_runner=reviewer)
@@ -3120,6 +3137,7 @@ def test_loop_two_iteration_success_finishes_with_isolated_verification(
 def test_loop_continue_can_resume_auto_loop_after_manual_fix(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
     _init_clean_git_repo(repo_dir)
+    _write_isolated_verification_config(repo_dir)
     worker = TrackedChangeRunner(["worker done"])
     reviewer = StaticRunner([_review_json("request_changes"), _review_json("approve")])
     runtime = LoopAutomationRuntime(tmp_path, worker_runner=worker, reviewer_runner=reviewer)
@@ -3129,9 +3147,9 @@ def test_loop_continue_can_resume_auto_loop_after_manual_fix(tmp_path) -> None:
         source="inline-text",
         repo_path=str(repo_dir),
     )
-    run_dir = runtime.start(brief_input, "auto", max_iterations=1, verify=False)
+    run_dir = runtime.start(brief_input, "auto", max_iterations=1, verify=True)
 
-    resumed = runtime.continue_assist(run_dir.name, repo_dir, verify=False)
+    resumed = runtime.continue_assist(run_dir.name, repo_dir, verify=True)
 
     state = json.loads(resumed.joinpath("state.json").read_text(encoding="utf-8"))
     assert state["status"] == "success"

@@ -463,8 +463,7 @@ def test_loop_eval_rejects_broken_success_evidence(
         verdict["verdict"] = "request_changes"
         verdict_path.write_text(json.dumps(verdict, ensure_ascii=False), encoding="utf-8")
     elif mutation == "missing_verification":
-        state["iterations"][0]["verification_status"] = "passed"
-        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        (run_dir / "iterations" / "01" / "verification-summary.md").unlink()
 
     results = run_loop_eval(run_dir, state["artifacts"])
 
@@ -689,7 +688,7 @@ def _create_successful_loop(tmp_path: Path) -> Path:
         workspace,
         worker_runner=TrackedChangeRunner(),
         reviewer_runner=QueueRunner([_review_json("approve")]),
-    ).start(_brief(repo), "auto", max_iterations=1, verify=False)
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
 
 
 def _minimal_run_state(tmp_path: Path):
@@ -735,8 +734,22 @@ def _init_repo(repo: Path) -> None:
         text=True,
     )
     repo.joinpath("README.md").write_text("# Demo\n", encoding="utf-8")
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                "    - python -c \"print('verification passed')\"",
+                "  max_commands: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
     subprocess.run(
-        ["git", "add", "--", "README.md"],
+        ["git", "add", "--", "README.md", ".vega.yaml"],
         cwd=repo,
         check=True,
         capture_output=True,

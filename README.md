@@ -110,11 +110,14 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 | 完整使用闭环 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| Assurance 威胁模型与证据充分性候选合同 | [ASSURANCE-CONTRACT-CANDIDATE](docs/ASSURANCE-CONTRACT-CANDIDATE.md) |
+| Assurance 逐项验证记录 | [assurance-validation](eval/assurance-validation.md) |
 | 长任务 Goal 与 checkpoint | [LONG-RUNNING-GOALS](docs/LONG-RUNNING-GOALS.md) |
 | v0.1 范围与取舍 | [MVP-SCOPE](docs/MVP-SCOPE.md) |
 | 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |
 | 工作区与验证规范 | [WORKSPACE-HYGIENE](docs/WORKSPACE-HYGIENE.md) |
 | v0.1.1 安全维护更新与迁移 | [RELEASE-NOTES-0.1.1](docs/RELEASE-NOTES-0.1.1.md) |
+| v0.1.2 成功语义安全修复候选 | [RELEASE-NOTES-0.1.2](docs/RELEASE-NOTES-0.1.2.md) |
 
 ## 定位与边界
 

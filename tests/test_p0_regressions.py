@@ -518,6 +518,10 @@ def test_auto_allows_exact_scope_and_writes_bound_evidence(tmp_path: Path) -> No
             "    - README.md",
             "  forbidden_paths:",
             "    - .vega.yaml",
+            "verification:",
+            "  commands:",
+            "    - python -c \"print('scope verification passed')\"",
+            "  max_commands: 1",
         ]
     ) + "\n"
     workspace, repo = _init_repo(tmp_path, config=config)
@@ -527,7 +531,7 @@ def test_auto_allows_exact_scope_and_writes_bound_evidence(tmp_path: Path) -> No
         workspace,
         worker_runner=CountingWorker("worker change"),
         reviewer_runner=reviewer,
-    ).start(_brief(repo), "auto", max_iterations=1, verify=False)
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
 
     state = _read_json(run_dir / "state.json")
     iteration = state["iterations"][0]
@@ -587,7 +591,19 @@ def test_auto_reuses_loop_risk_gate_for_embedded_reviewer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workspace, repo = _init_repo(tmp_path)
+    workspace, repo = _init_repo(
+        tmp_path,
+        config="\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                "    - python -c \"print('risk gate verification passed')\"",
+                "  max_commands: 1",
+                "",
+            ]
+        ),
+    )
     reviewer = CountingReviewer()
 
     def fail_duplicate_review_risk_gate(*args: object, **kwargs: object) -> object:
@@ -604,7 +620,7 @@ def test_auto_reuses_loop_risk_gate_for_embedded_reviewer(
         workspace,
         worker_runner=CountingWorker("worker change"),
         reviewer_runner=reviewer,
-    ).start(_brief(repo), "auto", max_iterations=1, verify=False)
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
 
     state = _read_json(run_dir / "state.json")
     context = _read_json(
@@ -1411,12 +1427,22 @@ def test_legacy_loop_without_scope_artifacts_remains_compatible(tmp_path: Path) 
 def test_legacy_loop_without_scope_evidence_cannot_be_ready_to_commit(
     tmp_path: Path,
 ) -> None:
-    workspace, repo = _init_repo(tmp_path)
+    config = "\n".join(
+        [
+            "version: 1",
+            "verification:",
+            "  commands:",
+            "    - python -c \"print('legacy verification passed')\"",
+            "  max_commands: 1",
+            "",
+        ]
+    )
+    workspace, repo = _init_repo(tmp_path, config=config)
     run_dir = LoopAutomationRuntime(
         workspace,
         worker_runner=CountingWorker("worker change"),
         reviewer_runner=CountingReviewer(),
-    ).start(_brief(repo), "auto", max_iterations=1, verify=False)
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
     state_path = run_dir / "state.json"
     state = _read_json(state_path)
     state.pop("scope_gate_required", None)
@@ -1446,6 +1472,10 @@ def test_scope_gate_root_policy_and_trace_bindings_are_enforced(tmp_path: Path) 
             "scope:",
             "  allowed_paths:",
             "    - README.md",
+            "verification:",
+            "  commands:",
+            "    - python -c \"print('scope binding verification passed')\"",
+            "  max_commands: 1",
         ]
     ) + "\n"
     workspace, repo = _init_repo(tmp_path, config=config)
@@ -1453,7 +1483,7 @@ def test_scope_gate_root_policy_and_trace_bindings_are_enforced(tmp_path: Path) 
         workspace,
         worker_runner=CountingWorker("worker change"),
         reviewer_runner=CountingReviewer(),
-    ).start(_brief(repo), "auto", max_iterations=1, verify=False)
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
 
     state_path = run_dir / "state.json"
     state = _read_json(state_path)

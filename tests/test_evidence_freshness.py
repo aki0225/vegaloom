@@ -507,6 +507,43 @@ def test_goal_finish_evidence_rejects_tampered_summary_identity(tmp_path: Path) 
 
 
 def _create_successful_loop_run(workspace: Path, repo: Path) -> Path:
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                "    - python -c \"print('freshness verification passed')\"",
+                "  max_commands: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    subprocess.run(
+        ["git", "add", "--", ".vega.yaml"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-m",
+            "add verification config",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     runtime = LoopAutomationRuntime(
         workspace,
         worker_runner=TrackedChangeRunner(["worker done"]),
@@ -521,7 +558,7 @@ def _create_successful_loop_run(workspace: Path, repo: Path) -> Path:
         ),
         "auto",
         max_iterations=1,
-        verify=False,
+        verify=True,
     )
 
 
