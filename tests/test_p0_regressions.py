@@ -1427,7 +1427,17 @@ def test_legacy_loop_without_scope_artifacts_remains_compatible(tmp_path: Path) 
 def test_legacy_loop_without_scope_evidence_cannot_be_ready_to_commit(
     tmp_path: Path,
 ) -> None:
-    workspace, repo = _init_repo(tmp_path)
+    config = "\n".join(
+        [
+            "version: 1",
+            "verification:",
+            "  commands:",
+            "    - python -c \"print('legacy verification passed')\"",
+            "  max_commands: 1",
+            "",
+        ]
+    )
+    workspace, repo = _init_repo(tmp_path, config=config)
     run_dir = LoopAutomationRuntime(
         workspace,
         worker_runner=CountingWorker("worker change"),

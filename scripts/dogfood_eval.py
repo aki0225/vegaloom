@@ -190,7 +190,10 @@ def case_core_loop_without_memory(workspace: Path, base_dir: Path) -> EvalCase:
     case_workspace = base_dir / "core-loop-workspace"
     case_workspace.mkdir()
     repo = base_dir / "core-loop-repo"
-    init_repo(repo)
+    init_repo(
+        repo,
+        verification_command="python -c \"print('core loop verification passed')\"",
+    )
     ledger_path = case_workspace / "memory" / "ledger.jsonl"
     runtime = LoopAutomationRuntime(
         case_workspace,
@@ -207,7 +210,7 @@ def case_core_loop_without_memory(workspace: Path, base_dir: Path) -> EvalCase:
         ),
         "auto",
         max_iterations=1,
-        verify=False,
+        verify=True,
     )
     FinishRuntime(case_workspace).run(run_dir.name)
     state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
@@ -501,7 +504,10 @@ def case_large_scope_gate(workspace: Path, base_dir: Path) -> EvalCase:
 
 def case_goal_p0_lifecycle(workspace: Path, base_dir: Path) -> EvalCase:
     repo = base_dir / "goal-p0-repo"
-    init_repo(repo)
+    init_repo(
+        repo,
+        verification_command="python -c \"print('goal loop verification passed')\"",
+    )
     write_text(
         repo / "README.md",
         "# Dogfood Repo\n\nGoal P0 lifecycle evidence.\n",
@@ -555,7 +561,7 @@ def case_goal_p0_lifecycle(workspace: Path, base_dir: Path) -> EvalCase:
         ),
         "auto",
         max_iterations=1,
-        verify=False,
+        verify=True,
     )
     before_status = _git_status(repo)
     runtime.attach(run_dir.name, "01", child_loop.name, "loop", "自动 loop 已通过")
@@ -665,11 +671,29 @@ def render_report(summary: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def init_repo(repo: Path) -> None:
+def init_repo(
+    repo: Path,
+    *,
+    verification_command: str | None = None,
+) -> None:
     if repo.exists():
         shutil.rmtree(repo)
     repo.mkdir(parents=True)
     write_text(repo / "README.md", "# Dogfood Repo\n")
+    if verification_command is not None:
+        write_text(
+            repo / ".vega.yaml",
+            "\n".join(
+                [
+                    "version: 1",
+                    "verification:",
+                    "  commands:",
+                    f"    - {verification_command}",
+                    "  max_commands: 1",
+                    "",
+                ]
+            ),
+        )
     run(["git", "init"], repo)
     run(["git", "config", "core.autocrlf", "false"], repo)
     run(["git", "add", "."], repo)
