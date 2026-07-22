@@ -163,7 +163,7 @@ def test_redact_value_recurses_without_mutating_original_payload() -> None:
     [
         (".env", "environment_file"),
         ("config/.env.local", "environment_file"),
-        ("C:/repo/.ssh/id_rsa", "private_key_name"),
+        ("C:/repo/.ssh/id_rsa", "private_key_name"),  # repo-path-policy: allow-test-fixture
         ("/etc/ssh/ssh_host_ed25519_key", "private_key_name"),
         ("certs/service.pem", "sensitive_key_suffix"),
         ("certs/service.key", "sensitive_key_suffix"),
@@ -173,7 +173,10 @@ def test_redact_value_recurses_without_mutating_original_payload() -> None:
         ("project/.npmrc", "credential_file_name"),
         ("project/.pypirc", "credential_file_name"),
         ("~/.docker/config.json", "docker_credential_config"),
-        ("C:/Users/test/.docker/config.json", "docker_credential_config"),
+        (
+            "C:/Users/test/.docker/config.json",  # repo-path-policy: allow-test-fixture
+            "docker_credential_config",
+        ),
         ("README.md:.env", "windows_alternate_data_stream"),
         ("C:outside.txt", "windows_drive_relative_path"),
     ],

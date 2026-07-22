@@ -191,7 +191,7 @@ def test_config_check_redacts_sensitive_command_and_evidence(tmp_path: Path) -> 
     [
         "../outside.py",
         "/absolute.py",
-        "C:/outside.py",
+        "C:/outside.py",  # repo-path-policy: allow-test-fixture
         r"src\windows-style.py",
         "tests//double-slash.py",
         "safe\u202e.py",

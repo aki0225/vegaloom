@@ -38,8 +38,26 @@ jobs:
 
       - name: 编译与静态检查
         run: |
-          python -m compileall src
-          ruff check src tests
+          python -m compileall src scripts/check_repository_hygiene.py
+          ruff check src tests scripts/check_repository_hygiene.py
+
+      - name: 检查仓库路径与私密文件卫生
+        shell: bash
+        run: |
+          event_name="${{ github.event_name }}"
+          before_sha="${{ github.event.before }}"
+          base_sha=""
+          if [[ "$event_name" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          elif [[ "$event_name" == "push" && -n "$before_sha" && ! "$before_sha" =~ ^0+$ ]]; then
+            base_sha="$before_sha"
+          fi
+
+          if [[ -n "$base_sha" ]]; then
+            python scripts/check_repository_hygiene.py --base-ref "$base_sha"
+          else
+            python scripts/check_repository_hygiene.py
+          fi
 
       - name: 检查本次提交范围的空白错误
         shell: bash
@@ -73,9 +91,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "520" ]]; then
+          if [[ "$node_count" != "529" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 520 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 529 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -177,6 +195,7 @@ jobs:
               tests/test_project_config_hardening.py
               tests/test_path_and_eval_contract.py
               tests/test_redaction.py
+              tests/test_repository_hygiene.py
               tests/test_workspace_snapshot_budget.py
               tests/test_context_boundaries.py
 

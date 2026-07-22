@@ -212,8 +212,8 @@ def test_file_search_parses_windows_absolute_paths_without_losing_drive(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    safe = r"C:\repo\src\app.py"
-    sensitive = r"C:\repo\.env"
+    safe = r"C:\repo\src\app.py"  # repo-path-policy: allow-test-fixture
+    sensitive = r"C:\repo\.env"  # repo-path-policy: allow-test-fixture
     monkeypatch.setattr(
         file_tools.subprocess,
         "run",
