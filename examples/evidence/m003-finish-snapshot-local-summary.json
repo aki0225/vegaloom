@@ -7,6 +7,9 @@
   "red_test_commit": "da5dcd65eef0e827f627b951df986a05a8708e89",
   "candidate_commit": "15924027000f78fd61139ce8a952aa32ccb23188",
   "candidate_tree": "ac15f524475bfb2a303865dadd475aac38707fde",
+  "local_evidence_commit": "927f46eff7231ded01e91a0d5d87312f5624ed0f",
+  "review_correction_commit": "efc09c69491f0eb79293e1f8e3a94e2228cabf98",
+  "reviewed_head_tree": "f5688eef8143e54061bbca210bf11574ce9fb02c",
   "platform": {
     "os": "Windows",
     "python": "3.12.10"
@@ -20,6 +23,8 @@
       "finish_artifact_integrity_calls": 1,
       "missing_review_run_freshness_integrity_calls": 0,
       "missing_review_artifact_freshness_integrity_calls": 0,
+      "missing_review_run_snapshot_integrity_calls": 1,
+      "missing_review_artifact_snapshot_integrity_calls": 1,
       "finish_status": "ready_to_commit",
       "artifact_integrity_valid": true,
       "evidence_freshness_fresh": true,
@@ -27,14 +32,14 @@
       "risk_gate_result_count": 1
     },
     "log": {
-      "path": ".tmp/pytest/logs/m003-green-final-node-20260722.txt",
+      "path": ".tmp/pytest/logs/m003-review-correction-node-20260722.txt",
       "tracked": false,
-      "sha256": "4F08608B48F7AF4275922DE663A1FE270259FBFBEC9D7B1B9CACE07930830B38"
+      "sha256": "8A30C52F21C2480DBB05FA2776023BC389515D3E22FEEF69B82B3CBB411596CD"
     }
   },
   "performance_observation": {
     "baseline_seconds": 18.75,
-    "candidate_seconds": 14.81,
+    "candidate_seconds": 14.73,
     "interpretation": "仅作为同机观察，不作为跨平台性能阈值"
   },
   "collection": {
@@ -128,9 +133,46 @@
   },
   "independent_review": {
     "status": "finding-fixed",
-    "finding": "初版让公开 freshness API 的两个早退路径新增了完整 integrity 扫描",
-    "resolution": "公开 freshness 继续早退；Finish snapshot 仅在需要完整快照时补一次 integrity",
-    "regression_coverage": "同一预注册节点锁定缺少 review_run 和 review run 不存在两种情况"
+    "findings": [
+      "初版让公开 freshness API 的两个早退路径新增了完整 integrity 扫描",
+      "早退回归只锁定公开 freshness 的零次调用，没有直接锁定 Finish snapshot 的一次补偿"
+    ],
+    "resolution": "公开 freshness 继续早退；Finish snapshot 仅在需要完整快照时补一次 integrity；同一节点直接断言两种补偿路径",
+    "regression_coverage": "同一预注册节点锁定缺少 review_run 和 review run 不存在两种情况的 0/1 调用合同"
+  },
+  "pull_request": {
+    "number": 6,
+    "base": "main",
+    "head": "perf/finish-evidence-snapshot",
+    "draft": true
+  },
+  "continuous_integration": {
+    "status": "passed-code-head",
+    "workflows": [
+      {
+        "run_id": 29931641373,
+        "head_commit": "927f46eff7231ded01e91a0d5d87312f5624ed0f",
+        "checks_passed": 10,
+        "checks_total": 10,
+        "conclusion": "success"
+      },
+      {
+        "run_id": 29932356389,
+        "head_commit": "efc09c69491f0eb79293e1f8e3a94e2228cabf98",
+        "checks_passed": 10,
+        "checks_total": 10,
+        "conclusion": "success"
+      }
+    ],
+    "coverage": [
+      "static-and-541-node-collection",
+      "python-3.11-full-suite",
+      "python-3.12-five-shards",
+      "windows-wheel-smoke",
+      "posix-temp-special",
+      "wheel-build-and-install"
+    ],
+    "final_docs_head_requires_ci": true
   },
   "static_checks": {
     "compileall": "passed",
@@ -150,5 +192,5 @@
       "resolution": "按完整 nodeid 集合细分并重新覆盖全部 541 个节点"
     }
   ],
-  "verdict": "passed-local-requires-ci-do-not-merge"
+  "verdict": "passed-pr-ci-final-docs-ci-required-do-not-merge"
 }

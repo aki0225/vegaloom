@@ -4,22 +4,27 @@
 >
 > 分支：`perf/finish-evidence-snapshot`
 >
-> 当前裁决：`passed-local / requires-ci / do-not-merge`
+> PR：`#6`
+>
+> 当前裁决：`passed-pr-ci / final-docs-ci-required / do-not-merge`
 
 ## 一、先看结论
 
-M-003 已完成预注册红灯、最小实现、独立审阅修正和完整本地验证。同一次 Finish 现在只执行
-一次终态 artifact integrity 校验，并让 `finish-summary.json` 同时消费该结果与 evidence
-freshness。完整性、新鲜度、scope、risk 和 project policy 的终态重算没有删除或放宽。
+M-003 已完成预注册红灯、最小实现、两轮独立审阅修正、完整本地验证和代码 head 的跨平台
+PR CI。同一次 Finish 现在只执行一次终态 artifact integrity 校验，并让
+`finish-summary.json` 同时消费该结果与 evidence freshness。完整性、新鲜度、scope、risk
+和 project policy 的终态重算没有删除或放宽。
 
-当前不能合并：候选实现还需要公开 PR 的 Python 3.11、Python 3.12 分片、Windows、POSIX
-和 wheel 构建安装 CI。Roadmap 在跨平台 CI 通过前继续保持 `M-003=next`。
+当前还不能立即合并：本接力文档、post-CI 证据和 Roadmap 更新会形成一个纯文档 head，
+该最新 head 仍须通过 PR CI。通过后才可把 PR 从 Draft 转为 Ready。
 
 关键提交：
 
 - 基线：`da1ac290addd0042f8782476cdb5ece4e53f2aa8`
 - 红灯预注册：`da5dcd65eef0e827f627b951df986a05a8708e89`
 - 候选实现：`15924027000f78fd61139ce8a952aa32ccb23188`
+- 本地证据：`927f46eff7231ded01e91a0d5d87312f5624ed0f`
+- 审阅修正：`efc09c69491f0eb79293e1f8e3a94e2228cabf98`
 
 ## 二、实现内容
 
@@ -50,7 +55,7 @@ E assert 2 == 1
 候选实现最终节点：
 
 ```text
-1 passed in 14.81s
+1 passed in 14.73s
 ```
 
 该节点同时确认：
@@ -61,8 +66,9 @@ E assert 2 == 1
 - risk gate 结果只收集一次。
 - `review_run` 为空时，公开 freshness API 的 integrity 调用次数为 `0`。
 - review run 不存在时，公开 freshness API 的 integrity 调用次数为 `0`。
+- 两种早退下，Finish snapshot 补偿的 integrity 调用次数均为 `1`。
 
-18.75 秒与 14.81 秒只作为同机观察，不是跨平台硬性能阈值。
+18.75 秒与 14.73 秒只作为同机观察，不是跨平台硬性能阈值。
 
 ## 四、独立审阅修正
 
@@ -81,7 +87,9 @@ Finish snapshot
   -> 早退路径：补一次 integrity，形成完整快照
 ```
 
-同一预注册节点已覆盖两种早退情况，审阅发现已关闭。
+同一预注册节点已覆盖两种早退情况。最终审阅进一步指出测试只锁定公开 freshness 的零次
+调用，没有直接锁定 Finish snapshot 的一次补偿；`efc09c6` 已增加这两组断言。两轮审阅
+发现均已关闭，未发现阻塞问题。
 
 ## 五、本地验证
 
@@ -118,18 +126,25 @@ tests/test_runtime_safety_integration.py::test_posix_verification_temp_env_does_
 - `examples/evidence/m003-finish-snapshot-local-summary.json`
 - `eval/assurance-validation.md` 的 `AV-M003-001 local candidate result`
 
+PR `#6` 已形成两次成功 workflow：
+
+```text
+29931641373  927f46e  10/10 success  首轮代码与本地证据 head
+29932356389  efc09c6  10/10 success  审阅修正 head
+```
+
+第二次 workflow 覆盖静态检查与 541 节点收集合同、Python 3.11 全量、Python 3.12 五个
+分片、Windows 专项与 wheel smoke、POSIX 临时目录专项，以及 wheel 构建安装。它证明
+`efc09c6` 满足 M-003 的跨平台退出条件。
+
 ## 六、下一步
 
-1. 推送 `perf/finish-evidence-snapshot`。
-2. 创建 Draft PR，确认 base 为 `main`。
-3. 等待全部 CI job 通过，尤其是 Python 3.11 全量、Python 3.12 分片、Windows、POSIX 和
-   wheel 构建安装。
-4. 对 PR head 做一次独立 diff/证据审阅；发现缺口时只补 M-003 合同，不开始 Stage 1。
-5. 代码 head CI 与审阅通过后，再追加 post-CI 证据并更新 Roadmap：
-   - `M-003=completed`
-   - `Stage 0=completed`
-   - `Stage 1=next`
-6. 最终文档 head 再次通过 CI 后，才可转为 Ready 并合并。
+1. 推送本次 post-CI 与 Roadmap 纯文档提交。
+2. 等待 PR `#6` 最新文档 head 的全部 CI job 通过。
+3. 再次核对 mergeable、head SHA、base=`main` 和 `10/10 success`。
+4. 最新 head 全绿后，把 PR 从 Draft 转为 Ready。
+5. 不自动合并；由维护者在最终人工 diff 复核后决定是否 squash merge。
+6. 合并后的 `main` CI 全绿后，才开始 Assurance Stage 1。
 
 ## 七、在另一台机器继续
 
@@ -153,7 +168,9 @@ python -m pytest -q `
 
 ## 八、剩余边界
 
-- 当前证据只证明本机 Windows / Python 3.12.10；不能替代 PR CI。
+- 本地完整分片证明 Windows / Python 3.12.10，PR CI 已补齐 Python 3.11/3.12、Linux/POSIX、
+  Windows 和构建安装证据。
+- 最新纯文档 head 仍需再次通过 CI，不能沿用旧 head 的绿色状态。
 - 不缓存跨 Finish 调用的验证结果。
 - 不优化 Goal 当前的独立 integrity 路径。
 - 不删除 workspace、scope、risk 或 project policy 的终态重算。

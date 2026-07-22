@@ -1596,3 +1596,67 @@ verification 结论被放宽。
 M-003 已满足本地退出条件，但 Python 3.11/3.12、Linux/POSIX、Windows wheel 和构建安装
 仍必须由 PR CI 证明。在代码 head CI 和独立 PR 审阅通过前，不更新 Roadmap 为 completed，
 不开始 Assurance Stage 1。
+
+---
+
+## 2026-07-22 · AV-M003-001 · PR CI and final review correction
+
+### PR
+
+- PR：`#6`
+- base：`main`
+- head：`perf/finish-evidence-snapshot`
+- 状态：Draft
+
+### 首轮代码与证据 head
+
+```text
+927f46eff7231ded01e91a0d5d87312f5624ed0f
+workflow 29931641373
+10/10 success
+```
+
+通过范围包括静态检查与 541 节点收集合同、Python 3.11 全量、Python 3.12 五个分片、
+Windows 专项与 wheel smoke、POSIX 临时目录专项，以及 wheel 构建安装。
+
+### 最终独立审阅
+
+最终只读审阅未发现阻塞问题，也未发现 fail-closed、state/workspace/review、scope、risk、
+project policy 或 verification 语义被削弱。
+
+审阅指出一个低严重级别测试缺口：同一预注册节点已证明公开 freshness 的两个早退路径不会
+执行 integrity，但没有直接证明 Finish snapshot 在这些路径恰好补一次 integrity。修正提交
+`efc09c69491f0eb79293e1f8e3a94e2228cabf98` 增加两组 `integrity_calls == 1` 断言，
+节点结果为：
+
+```text
+1 passed in 14.73s
+```
+
+该修正不改变实现、不增加测试节点。
+
+### 审阅修正 head CI
+
+```text
+efc09c69491f0eb79293e1f8e3a94e2228cabf98
+workflow 29932356389
+10/10 success
+```
+
+最新代码 head 已再次通过相同的跨平台 10 项门禁，证明新增断言与 M-003 实现共同满足
+541 节点合同。
+
+### Roadmap 裁决
+
+代码 head 已满足 M-003 退出条件，因此统一 Roadmap 更新为：
+
+- `M-003=completed`
+- `Stage 0=completed`
+- `Stage 1=next`
+
+### 当前裁决
+
+`passed-pr-ci / final-docs-ci-required / do-not-merge`
+
+本次 post-CI 证据和 Roadmap 会形成新的纯文档 head。该最新 head 仍须通过全部 CI 后，才能
+把 PR 从 Draft 转为 Ready；不自动合并，不开始 Stage 1 实现。

@@ -2,7 +2,7 @@
 
 > 更新时间：2026-07-22
 > 稳定基线：`v0.1.2`
-> 当前状态：`M-001`、`M-002` 已完成，当前唯一的 `Now` 是 `M-003`
+> 当前状态：`M-001`、`M-002`、`M-003` 已完成，当前唯一的 `Now` 是 Assurance Stage 1
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -59,7 +59,7 @@ Stage 0 的三个已确认维护缺口按以下顺序收口：
 ### M-003：Finish 证据快照复用
 
 - 优先级：`P1`
-- 状态：`next`
+- 状态：`completed`
 - 建议分支：`perf/finish-evidence-snapshot`
 - 证据：`AV-BASE-005`
 - 问题：同一 Finish 调用重复捕获 workspace、Git 和风险 evidence。
@@ -80,7 +80,7 @@ M-001 Adapter 边界
 
 ### Stage 0：基础成功语义与维护收口
 
-状态：`next`
+状态：`completed`
 
 `v0.1.2` 已完成：
 
@@ -88,11 +88,11 @@ M-001 Adapter 边界
 - 验证中断、缺失、损坏或错绑的 evidence fail-closed。
 - Loop、Finish 和 Goal 使用最新可信验证结论。
 
-Stage 0 的剩余任务是上面的 M-003。
+Stage 0 的三个维护任务均已完成，并由各自的预注册回归、本地证据和 PR CI 验证。
 
 ### Stage 1：Threat 与 Evidence 数据合同
 
-状态：`planned`
+状态：`next`
 
 范围：
 
