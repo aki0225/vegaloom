@@ -1817,3 +1817,66 @@ compileall、Ruff、仓库卫生和 `git diff --check` 通过。
 
 下一步必须用修正后的 595 节点合同重新跑完整本地分片。此前因 basetemp 父目录未预创建而产生
 的 fixture setup errors 属于无效验证尝试，不计入产品裁决；重跑必须预先创建每个分片父目录。
+
+---
+
+## 2026-07-22 · AV-STAGE1-001 · candidate checkpoint
+
+### 最新合同
+
+独立审阅继续发现并修正以下边界：
+
+1. Assurance input 在 `stat` 后增长时仍可能被完整读入。
+2. verification artifact 未绑定声明命令、实际命令、命令序号和 verification 临时目录。
+3. 同一个 oversized artifact 失败后会被多个 Evidence 重复读取。
+4. 合法的多命令中断 artifact 会因存在 `skipped_commands` 被误判为结构损坏。
+5. 双斜杠会被 `PurePosixPath` 规范化，导致原始空路径段未被拒绝。
+
+新增红灯均在旧实现上稳定失败，修正后 Stage 1 文件结果为：
+
+```text
+59 passed in 1.24s
+600 tests collected
+```
+
+候选实现提交：`9a67692`。
+
+### 全量分片状态
+
+最后三项审阅修正前，597 节点四分片得到：
+
+```text
+595 passed
+1 skipped
+2 failed
+0 timed out
+```
+
+两条失败分别为 owner crash recovery 在长 Windows basetemp 下进入 `needs_human`，以及
+dogfood eval 在四路并发下只完成 `7/8`。两条随后使用短路径、无并发条件串行复跑：
+
+```text
+owner crash recovery: 1 passed in 13.73s
+dogfood eval: 1 passed in 37.14s
+```
+
+该串行结果关闭了两条既有测试的回归疑点，但最新 600 节点尚未重新完成全量分片，不能把
+597 节点结果外推为最终通过。
+
+### 静态门禁
+
+以下命令通过：
+
+```text
+python -m compileall src scripts/check_repository_hygiene.py
+ruff check src tests scripts/check_repository_hygiene.py --no-cache
+python scripts/check_repository_hygiene.py --base-ref main
+git diff --check
+```
+
+### 裁决
+
+`candidate-committed / full-600-and-pr-ci-required / do-not-merge`
+
+下一步只等待并核对最新分支 head 的跨平台 PR CI；若失败，必须修真实问题，不得放宽
+Assurance 合同或把独立 `sufficient_for_merge` 接入当前 Runtime/Finish 成功语义。
