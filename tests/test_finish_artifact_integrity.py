@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import vega.finish_runtime as finish_runtime
+import vega.goal_evidence as goal_evidence
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import render_gate_report
 from vega.goal_runtime import GoalRuntime
@@ -61,6 +63,40 @@ class TrackedChangeRunner(StaticRunner):
             newline="\n",
         )
         return result
+
+
+def test_finish_reuses_single_terminal_artifact_integrity_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _, run_dir = _create_successful_loop(tmp_path, verify=True)
+    original = goal_evidence.validate_loop_artifact_integrity
+    integrity_calls = 0
+
+    def counted_integrity(*args, **kwargs):
+        nonlocal integrity_calls
+        integrity_calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        goal_evidence,
+        "validate_loop_artifact_integrity",
+        counted_integrity,
+    )
+    monkeypatch.setattr(
+        finish_runtime,
+        "validate_loop_artifact_integrity",
+        counted_integrity,
+        raising=False,
+    )
+
+    FinishRuntime(workspace).run(run_dir.name)
+
+    summary = _read_json(run_dir / "finish-summary.json")
+    assert integrity_calls == 1
+    assert summary["finish_status"] == "ready_to_commit"
+    assert summary["artifact_integrity"]["valid"] is True
+    assert summary["evidence_freshness"]["fresh"] is True
 
 
 def test_finish_rejects_unbound_iteration_verdict(tmp_path: Path) -> None:

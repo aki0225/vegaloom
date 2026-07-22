@@ -1395,3 +1395,123 @@ M-002 的实现、危险案例、安全控制、固定 revision 读取、失效�
 - 嵌套 workspace、bun/deno 和 Corepack 自动安装不在本轮。
 - 通用 Evidence 文件与 Git head 的机器校验属于后续 Assurance 数据合同。
 - 合并后先核对 `main` CI，再把唯一 `Now` 转交给独立的 M-003。
+
+---
+
+## 2026-07-22 · AV-M003-001 · preregistration
+
+### 目标
+
+修复 `M-003`：同一次 Finish 调用只能执行一次终态 artifact integrity 验证，并把该结果与
+evidence freshness 组合成同一个可信 Evidence Validation Snapshot。不能删除完整性、新鲜度、
+risk gate 或 scope gate 的终态重算，也不能改变任何 fail-closed 结果。
+
+### Baseline
+
+- Git 基线：`main@da1ac290addd0042f8782476cdb5ece4e53f2aa8`
+- 工作分支：`perf/finish-evidence-snapshot`
+- 已确认问题：`AV-BASE-005`
+- 影响入口：`vega finish <run>`
+- 范围：只消除同一次 Finish 内重复的完整性整链计算，不混入 Stage 1 Threat/Evidence
+  数据合同、Goal 优化、runner 调参或新的 Agent 能力。
+
+### 当前重复链路
+
+旧实现按以下顺序执行：
+
+```text
+FinishRuntime
+  -> validate_loop_artifact_integrity
+  -> validate_loop_evidence_freshness
+       -> current workspace freshness
+       -> review / reflect freshness
+       -> validate_loop_artifact_integrity
+```
+
+第二次 integrity 位于 freshness 链路末端，是更接近最终写入 `finish-summary.json` 的终态
+重算。候选实现必须保留该安全位置，只删除前面的重复 integrity 调用。
+
+### 预注册回归
+
+新增一个成功控制节点：
+
+1. 先构造 verification passed、review approve 且证据完整的新 loop。
+2. 在构造完成后开始统计 integrity 调用，避免把 Loop 自身校验计入 Finish。
+3. 同时拦截旧 Finish 别名和 `goal_evidence` 中的真实函数。
+4. 执行一次 Finish。
+5. 要求 integrity 调用次数为 `1`。
+6. 同时要求：
+   - `finish_status=ready_to_commit`
+   - `artifact_integrity.valid=true`
+   - `evidence_freshness.fresh=true`
+
+旧实现预期调用次数为 `2`，该断言应先稳定红灯；候选实现转绿后，现有篡改、缺失、错绑、
+风险降级和 workspace 变化测试必须继续 fail-closed。
+
+### 收集合同
+
+- 预期完整节点：`541`
+- 新增节点：`1`
+- 测试文件数量不变，因此 Python 3.12 分片文件集合不变。
+
+### 退出条件
+
+- 预注册节点从 `2 != 1` 转为通过。
+- Finish 只消费一个 Evidence Validation Snapshot。
+- 现有 Finish artifact integrity 与 evidence freshness 回归全部通过。
+- 完整节点、静态检查、Windows、POSIX 和构建安装 CI 全绿。
+- 绝对耗时只作为观察数据，不作为跨机器硬阈值。
+
+### 明确不做
+
+- 不缓存跨 Finish 调用的结果。
+- 不跳过终态 integrity、freshness、scope 或 risk 重算。
+- 不把可变 evidence 写入长期 memory。
+- 不开始 Assurance Stage 1。
+
+---
+
+## 2026-07-22 · AV-M003-001 · red test result
+
+### Baseline
+
+- Git 基线：`main@da1ac290addd0042f8782476cdb5ece4e53f2aa8`
+- 工作分支：`perf/finish-evidence-snapshot`
+- 平台：Windows / Python 3.12
+- 本阶段修改边界：测试、预注册证据和 CI 节点合同；`src/vega/` 没有修改。
+
+### 旧实现复现
+
+只运行新增的 M-003 节点：
+
+```text
+1 failed in 18.75s
+E assert 2 == 1
+```
+
+loop fixture、verification、review 和 Finish 均正常执行并写出 `finish-summary.json`。失败发生在
+首个预注册断言：同一次 Finish 实际调用 artifact integrity `2` 次，而合同要求 `1` 次。
+因此该红灯直接对应 `AV-BASE-005` 的重复整链计算，不是测试基础设施或业务证据损坏。
+
+### 收集与静态门禁
+
+- 完整收集：`541` 个节点。
+- compileall：通过。
+- Ruff：通过。
+- 仓库路径与私密文件卫生检查：通过。
+- `git diff --check`：通过。
+
+### 本地证据
+
+- 红灯日志：`.tmp/pytest/logs/m003-red-20260722.txt`
+- SHA-256：`8159EA07E93A85DA7102503F6A33C33AD8B1293A57F46B04673C73F9A4DDEE01`
+
+`.tmp` 不提交；哈希只用于本机复核，跨机器结论仍须由提交后的测试和 PR CI 证明。
+
+### 裁决
+
+`confirmed-red / not-mergeable`
+
+旧实现稳定复现两次 artifact integrity。下一步只能把 Finish 改为消费一个在 freshness 链路
+末端生成的 Evidence Validation Snapshot；不得通过删除末端 integrity 或弱化 fail-closed
+断言来让测试转绿。
