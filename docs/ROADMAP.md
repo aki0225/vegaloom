@@ -1,8 +1,8 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-07-21
+> 更新时间：2026-07-22
 > 稳定基线：`v0.1.2`
-> 当前状态：主线功能冻结，先收口已确认的 Assurance 维护缺口
+> 当前状态：`M-001` 已完成，当前唯一的 `Now` 是 `M-002`
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -26,7 +26,7 @@ v0.1.2 稳定与冻结
   -> 依次评估数据修改、并发和生产 Handoff 风险
 ```
 
-当前唯一的 `Now` 是先处理 Stage 0 的三个已确认维护缺口：
+Stage 0 的三个已确认维护缺口按以下顺序收口：
 
 1. Adapter junction/reparse point 的真实路径边界。
 2. pnpm/yarn 项目的包管理器命令选择。
@@ -39,7 +39,7 @@ v0.1.2 稳定与冻结
 ### M-001：Adapter 真实路径边界
 
 - 优先级：`P0`
-- 状态：`next`
+- 状态：`completed`
 - 建议分支：`fix/adapter-realpath-boundary`
 - 证据：`AV-BASE-003`
 - 问题：Windows junction 解析后的真实路径可能位于目标仓库外。
@@ -49,7 +49,7 @@ v0.1.2 稳定与冻结
 ### M-002：Node 包管理器选择
 
 - 优先级：`P1`
-- 状态：`planned`
+- 状态：`next`
 - 建议分支：`fix/node-package-manager-selection`
 - 证据：`AV-BASE-004`
 - 问题：pnpm/yarn 项目可能混入错误的 npm 命令。
@@ -88,7 +88,7 @@ M-001 Adapter 边界
 - 验证中断、缺失、损坏或错绑的 evidence fail-closed。
 - Loop、Finish 和 Goal 使用最新可信验证结论。
 
-Stage 0 的剩余任务就是上面的 M-001 至 M-003。
+Stage 0 的剩余任务是上面的 M-002 与 M-003。
 
 ### Stage 1：Threat 与 Evidence 数据合同
 

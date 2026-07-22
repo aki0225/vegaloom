@@ -1019,3 +1019,190 @@ M-002。
 新门禁的危险案例、安全案例、历史案例、日志不回显和文件名规则均通过本地定向验证。Windows
 本机聚合测试没有形成完整通过证据，因此不得据此宣称全量绿；最终合并裁决必须等待 PR 的
 Python 3.11 全量、Python 3.12 五分片、Windows 专项、POSIX 专项和发布包安装 job 全部成功。
+
+---
+
+## 2026-07-22 · AV-M002-001 · preregistration
+
+### 目标
+
+修复 `M-002`：Project Profile 必须为 Node 项目选择唯一可信的 npm、pnpm 或 yarn 命令。
+仓库信号冲突且无法消歧时不得猜测执行，避免错误命令制造假失败、遗漏真实验证，或让
+verification 依据错误工具链形成不可信结论。
+
+### Baseline
+
+- Git 基线：`main@6b74c5b`
+- 工作分支：`fix/node-package-manager-selection`
+- 已确认问题：`AV-BASE-004`
+- 修改前收集合同：`529` 个节点、`21` 个测试文件。
+- 影响入口：Project Profile、worker 项目上下文和自动 verification 命令选择。
+- 范围：只修复根目录 Node 包管理器选择，不混入 M-003、Threat/Evidence 数据模型、依赖安装
+  或新的 Agent 能力。
+
+### 威胁模型
+
+目标仓库的 `package.json` 和 lockfile 可能过期、冲突或来自错误的分支合并。当前实现分别
+计算包管理器、test 命令和 lint 命令，使 pnpm 项目混入 npm，yarn 项目继续使用 npm。自动
+verification 若执行这些命令，可能把工具链选择错误误报为代码失败，也可能错过项目真实的
+测试与静态检查。
+
+本轮防守边界：
+
+1. `.vega.yaml` 中显式 verification 命令继续保持最高优先级；存在时不使用自动 Node
+   test/lint 命令。
+2. 顶层 `package.json.packageManager` 若明确声明 npm、pnpm 或 yarn，则优先于 lockfile。
+3. 没有可用显式声明时，单一 `package-lock.json`、`pnpm-lock.yaml` 或 `yarn.lock` 决定
+   对应包管理器。
+4. 只有 `package.json` 且没有 lockfile 时保留 npm 默认值。
+5. 多个受支持 lockfile 同时存在且没有显式声明时 fail-closed：不选择 Node 包管理器，
+   不生成 Node test/lint 命令。
+6. `tracked_only=True` 时，`packageManager` 必须来自固定 Git revision，不能读取工作区中
+   未提交的修改。
+
+### 方案取舍
+
+- 采用：先得到一次 Node 包管理器选择结果，再让 package manager、test 和 lint 三处消费
+  同一结果，避免独立条件继续漂移。
+- 不采用：分别给 `_detect_package_managers`、`_detect_test_commands` 和
+  `_detect_lint_commands` 增加局部判断。该方案改动小，但无法从结构上保证三个输出一致。
+- 不采用：同时生成 npm、pnpm、yarn 命令并依赖“哪个能运行”。这会把环境偶然性当作证据，
+  违反 fail-closed。
+- 暂不新增 `ProjectProfile` 字段；冲突案例首先通过“不选择、不执行”收紧行为。若后续需要
+  面向用户解释歧义，再单独设计版本化诊断字段。
+
+### 预注册案例
+
+#### npm 安全案例 `AV-M002-NPM-001`
+
+- 只有 `package.json` 时选择 npm。
+- `package.json` 与单一 `package-lock.json` 并存时选择 npm。
+- 精确命令为 `npm test` 与 `npm run lint`。
+
+#### pnpm 安全案例 `AV-M002-PNPM-001`
+
+- `package.json` 与单一 `pnpm-lock.yaml` 并存时只选择 pnpm。
+- `packageManager` 单独声明 pnpm 时也选择 pnpm。
+- 精确命令为 `pnpm test` 与 `pnpm run lint`，不得混入 npm/yarn。
+
+#### yarn 安全案例 `AV-M002-YARN-001`
+
+- `package.json` 与单一 `yarn.lock` 并存时只选择 yarn。
+- 精确命令为 `yarn test` 与 `yarn lint`，不得混入 npm/pnpm。
+
+#### 配置消歧案例 `AV-M002-CONFIG-001`
+
+- `packageManager` 声明 yarn，同时存在陈旧的 npm/pnpm lockfile。
+- 期望：显式声明胜出，只生成 yarn 命令。
+
+#### 冲突危险案例 `AV-M002-DANGER-001`
+
+- `package.json` 与 npm、pnpm、yarn 三个 lockfile 同时存在，且没有 `packageManager`。
+- 期望：不选择 npm/pnpm/yarn，不生成任何 Node test/lint 命令。
+
+#### 固定 revision 案例 `AV-M002-TRACKED-001`
+
+- Git `HEAD` 声明 pnpm，工作区未提交内容改为 yarn。
+- 以 `tracked_only=True` 构建画像。
+- 期望：仍只得到 pnpm 命令，证明隔离审查没有读取工作区污染。
+
+#### 显式验证控制案例 `AV-M002-VEGA-001`
+
+- pnpm 项目同时配置 `.vega.yaml` verification 命令。
+- 期望：包管理器仍可识别为 pnpm，但 test 命令只保留显式配置，lint 为空。
+
+### 成功条件
+
+- 所有预注册案例按期望裁决，npm 安全控制不回归。
+- pnpm/yarn 项目不出现 npm 命令，冲突 lockfile 不产生猜测命令。
+- 固定 revision 与工作区内容不一致时只信任指定 revision。
+- 受影响定向测试、完整 pytest、`compileall`、`ruff`、仓库卫生门禁和
+  `git diff --check` 通过。
+- Python 3.11、Python 3.12 分片、Windows、POSIX 和发布包安装 CI 全部通过后，才可建议
+  合并。
+
+### 失败条件
+
+- 任一 pnpm/yarn 案例仍混入 npm，或 npm 案例被错误切换。
+- 多 lockfile 无显式声明时仍猜测某个包管理器。
+- `package_managers` 与 test/lint 命令来自不同选择结果。
+- tracked profile 读取未提交的 `packageManager`。
+- 为修复选择问题而降低 `.vega.yaml` 显式 verification 的优先级。
+
+### 已知限制
+
+- 本轮不判断 `scripts.test` / `scripts.lint` 是否存在，只验证包管理器选择。
+- 不处理嵌套 workspace 的多包管理器、bun/deno、Corepack 自动安装或依赖完整性。
+- 未知包管理器、损坏的 `package.json` 和面向用户的歧义诊断需另行预注册。
+
+### 外部规则依据
+
+- Node.js Corepack 文档：`packageManager` 用于声明项目期望的包管理器及版本。
+- npm CLI 文档：测试脚本使用 `npm test`，其他脚本可使用 `npm run <script>`。
+- pnpm CLI 文档：测试脚本可使用 `pnpm test`，其他脚本使用 `pnpm run <script>`。
+- Yarn CLI 文档：项目脚本可通过 `yarn <script>` 执行。
+
+### 下一步
+
+先只新增上述回归并在旧实现上记录红灯；确认失败原因与 `AV-BASE-004` 一致后，再修改
+`src/vega/project_profile.py`。本条预注册阶段不得把失败测试描述为可合并结果。
+
+---
+
+## 2026-07-22 · AV-M002-001 · red test result
+
+### Baseline
+
+- Git 基线：`main@6b74c5b`
+- 工作分支：`fix/node-package-manager-selection`
+- 平台：Windows / Python 3.14.3
+- 本阶段修改边界：测试、路线图、验证记录与 CI 节点合同；`src/vega/` 没有修改。
+
+### 旧实现复现
+
+只运行预注册的 9 个 M-002 节点：
+
+```text
+6 failed, 3 passed in 3.53s
+```
+
+三个通过控制为：
+
+1. 仅 `package.json` 的 npm 默认值。
+2. 单一 `package-lock.json` 的 npm 项目。
+3. `.vega.yaml` 显式 verification 继续覆盖自动命令。
+
+六个失败与 `AV-BASE-004` 一致：
+
+1. pnpm lockfile 项目同时生成 `npm test` 与 `pnpm test`，lint 仍为 npm。
+2. yarn lockfile 项目仍生成 npm test/lint。
+3. 仅由 `packageManager` 声明的 pnpm 项目被识别为 npm。
+4. `packageManager` 声明 yarn 时，陈旧 lockfile 仍让实现选择 pnpm。
+5. 三个 lockfile 冲突且无显式声明时，实现猜测选择 pnpm，而不是 fail-closed。
+6. tracked profile 虽识别 pnpm，但命令集合仍混入 npm。
+
+### 收集合同
+
+- 完整收集：`538` 个节点。
+- 唯一 nodeid：`538` 个。
+- 新增节点：`9` 个。
+- 测试文件数量保持 `21` 个，因此 Python 3.12 分片文件集合不变。
+
+### 本地证据
+
+- 红灯日志：`.tmp/pytest/logs/m002-red-before-fix.txt`
+- SHA-256：`E19FE8C85D0F77C013D827331F39A0D8D9CB29AA4D57E2343404AB861158AA35`
+- 收集清单：`.tmp/pytest/m002-collected.txt`
+
+### 裁决
+
+`confirmed-red / not-mergeable`
+
+危险案例稳定复现，npm 与显式 verification 控制案例保持通过，说明红灯针对的是 Node
+包管理器选择缺口而不是 fixture 基础设施故障。本结果只证明旧实现存在问题，不代表候选
+分支可合并。
+
+### 下一步
+
+在同一分支实现一次性 Node 包管理器选择结果，并让 package manager、test 与 lint 输出共同
+消费；转绿后再运行受影响回归、完整门禁与跨平台 CI。
