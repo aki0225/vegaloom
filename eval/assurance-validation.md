@@ -1515,3 +1515,84 @@ loop fixture、verification、review 和 Finish 均正常执行并写出 `finish
 旧实现稳定复现两次 artifact integrity。下一步只能把 Finish 改为消费一个在 freshness 链路
 末端生成的 Evidence Validation Snapshot；不得通过删除末端 integrity 或弱化 fail-closed
 断言来让测试转绿。
+
+---
+
+## 2026-07-22 · AV-M003-001 · local candidate result
+
+### Candidate
+
+- 候选提交：`15924027000f78fd61139ce8a952aa32ccb23188`
+- 候选 tree：`ac15f524475bfb2a303865dadd475aac38707fde`
+- 平台：Windows / Python 3.12.10
+- 修改边界：`goal_evidence`、`finish_runtime` 和同一预注册测试节点。
+
+### 实现结果
+
+Finish 现在调用 `validate_loop_evidence_snapshot()`，由 freshness 链路末端产生一次
+artifact integrity，并将两者作为同一个快照返回。正常成功路径不再先独立执行一次
+integrity，因此预注册调用次数从 `2` 降为 `1`。
+
+公开 `validate_loop_evidence_freshness()` 保持原有早退合同：没有 `review_run` 或引用的 review
+run 不存在时，不执行完整 integrity。Finish snapshot 在这些早退路径才补一次 integrity，
+从而既保持公开 API 语义，又保证 Finish 始终获得完整快照。
+
+### 预注册节点
+
+```text
+1 passed in 14.81s
+```
+
+节点同时确认：
+
+- `finish_status=ready_to_commit`
+- `artifact_integrity.valid=true`
+- `evidence_freshness.fresh=true`
+- `verification_passed=true`
+- `risk_gate_result_count=1`
+- 两种 freshness 早退路径的 integrity 调用次数均为 `0`
+
+红灯的 18.75 秒与候选的 14.81 秒只作为同机观察，不作为跨平台性能阈值。
+
+### 独立审阅
+
+独立审阅发现初版让公开 freshness API 的两个早退路径新增完整 integrity 扫描，扩大了 Goal
+等调用方的耗时和异常面。该问题已通过私有协调函数和同一预注册节点的两种早退断言修正。
+审阅未发现更高严重级别问题，也未发现 fail-closed、scope、risk、project policy 或
+verification 结论被放宽。
+
+### 完整本地覆盖
+
+- 收集：`541` 个节点。
+- 唯一 nodeid：`541` 个。
+- 最终结果：`540 passed, 1 skipped, 0 failed, 0 errors`。
+- 唯一跳过：POSIX shell 变量展开专项；Windows 本地按合同跳过，Linux CI 必须真实通过。
+- 最终有效分片：`71` 个，每个都有明确 passed/skipped 计数。
+
+本机没有安装 CI 额外依赖 `pytest-timeout`，带对应参数的首次命令在收集前退出；部分大分片
+也在并发负载下超过 60 秒。两类尝试均未计入产品裁决，最终使用完整 nodeid 集合细分并覆盖
+全部 541 个节点。
+
+### 静态门禁
+
+- `python -m compileall -q src scripts/check_repository_hygiene.py`：通过。
+- `ruff check src tests scripts/check_repository_hygiene.py --no-cache`：通过。
+- `python scripts/check_repository_hygiene.py --base-ref main`：通过。
+- `git diff --check`：通过。
+
+### 本地证据
+
+- 结构化摘要：`examples/evidence/m003-finish-snapshot-local-summary.json`
+- 接力文档：`docs/M003-FINISH-EVIDENCE-SNAPSHOT-HANDOFF.md`
+- 最终节点日志 SHA-256：
+  `4F08608B48F7AF4275922DE663A1FE270259FBFBEC9D7B1B9CACE07930830B38`
+- 完整分片汇总 SHA-256：
+  `3E3C92E9FCC72BE9DC3C490A6F96C2BCD87CF157D4F3C07535EA8D6EE97DAF5B`
+
+### 裁决
+
+`passed-local / requires-ci / do-not-merge`
+
+M-003 已满足本地退出条件，但 Python 3.11/3.12、Linux/POSIX、Windows wheel 和构建安装
+仍必须由 PR CI 证明。在代码 head CI 和独立 PR 审阅通过前，不更新 Roadmap 为 completed，
+不开始 Assurance Stage 1。

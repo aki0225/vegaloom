@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "case_id": "AV-M003-001",
+  "record_type": "local-result-summary",
+  "recorded_on": "2026-07-22",
+  "baseline_commit": "da1ac290addd0042f8782476cdb5ece4e53f2aa8",
+  "red_test_commit": "da5dcd65eef0e827f627b951df986a05a8708e89",
+  "candidate_commit": "15924027000f78fd61139ce8a952aa32ccb23188",
+  "candidate_tree": "ac15f524475bfb2a303865dadd475aac38707fde",
+  "platform": {
+    "os": "Windows",
+    "python": "3.12.10"
+  },
+  "preregistered_regression": {
+    "status": "passed",
+    "passed": 1,
+    "failed": 0,
+    "duration_seconds": 14.81,
+    "contracts": {
+      "finish_artifact_integrity_calls": 1,
+      "missing_review_run_freshness_integrity_calls": 0,
+      "missing_review_artifact_freshness_integrity_calls": 0,
+      "finish_status": "ready_to_commit",
+      "artifact_integrity_valid": true,
+      "evidence_freshness_fresh": true,
+      "verification_passed": true,
+      "risk_gate_result_count": 1
+    },
+    "log": {
+      "path": ".tmp/pytest/logs/m003-green-final-node-20260722.txt",
+      "tracked": false,
+      "sha256": "4F08608B48F7AF4275922DE663A1FE270259FBFBEC9D7B1B9CACE07930830B38"
+    }
+  },
+  "performance_observation": {
+    "baseline_seconds": 18.75,
+    "candidate_seconds": 14.81,
+    "interpretation": "仅作为同机观察，不作为跨平台性能阈值"
+  },
+  "collection": {
+    "status": "passed",
+    "node_count": 541,
+    "unique_node_count": 541,
+    "test_file_count": 21,
+    "log": {
+      "path": ".tmp/pytest/m003-collected.txt",
+      "tracked": false,
+      "sha256": "A971E3F4659720481EBBE95C75F2FE393A82636501DE1E24182BA0B2C3EA6D54"
+    }
+  },
+  "full_suite": {
+    "status": "passed-local",
+    "passed": 540,
+    "skipped": 1,
+    "failed": 0,
+    "errors": 0,
+    "covered_node_count": 541,
+    "selected_chunk_count": 71,
+    "groups": [
+      {
+        "name": "smoke",
+        "passed": 102,
+        "skipped": 0,
+        "node_count": 102,
+        "duration_seconds": 397.20
+      },
+      {
+        "name": "p0-cli-lock",
+        "passed": 109,
+        "skipped": 0,
+        "node_count": 109,
+        "duration_seconds": 295.96
+      },
+      {
+        "name": "artifacts-runtime-security",
+        "passed": 59,
+        "skipped": 1,
+        "node_count": 60,
+        "duration_seconds": 321.70
+      },
+      {
+        "name": "remaining",
+        "passed": 190,
+        "skipped": 0,
+        "node_count": 190,
+        "duration_seconds": 155.68
+      },
+      {
+        "name": "success-semantics",
+        "passed": 29,
+        "skipped": 0,
+        "node_count": 29,
+        "duration_seconds": 268.16
+      },
+      {
+        "name": "evidence-freshness",
+        "passed": 19,
+        "skipped": 0,
+        "node_count": 19,
+        "duration_seconds": 139.86
+      },
+      {
+        "name": "review-integrity",
+        "passed": 18,
+        "skipped": 0,
+        "node_count": 18,
+        "duration_seconds": 72.03
+      },
+      {
+        "name": "assurance-semantics",
+        "passed": 14,
+        "skipped": 0,
+        "node_count": 14,
+        "duration_seconds": 224.14
+      }
+    ],
+    "summary": {
+      "path": ".tmp/pytest/logs/m003-full-summary.json",
+      "tracked": false,
+      "sha256": "3E3C92E9FCC72BE9DC3C490A6F96C2BCD87CF157D4F3C07535EA8D6EE97DAF5"
+    },
+    "skipped_nodes": [
+      {
+        "nodeid": "tests/test_runtime_safety_integration.py::test_posix_verification_temp_env_does_not_re_evaluate_path",
+        "reason": "当前平台为 Windows，该节点只覆盖 POSIX shell 变量展开语义"
+      }
+    ]
+  },
+  "independent_review": {
+    "status": "finding-fixed",
+    "finding": "初版让公开 freshness API 的两个早退路径新增了完整 integrity 扫描",
+    "resolution": "公开 freshness 继续早退；Finish snapshot 仅在需要完整快照时补一次 integrity",
+    "regression_coverage": "同一预注册节点锁定缺少 review_run 和 review run 不存在两种情况"
+  },
+  "static_checks": {
+    "compileall": "passed",
+    "ruff": "passed",
+    "repository_hygiene": "passed",
+    "git_diff_check": "passed"
+  },
+  "excluded_attempts": [
+    {
+      "reason": "本机未安装 CI 额外依赖 pytest-timeout，带 timeout 参数的命令在收集前退出",
+      "counted_as_product_failure": false,
+      "resolution": "不安装新依赖，改用工具层 60 秒外层限制"
+    },
+    {
+      "reason": "部分大分片在并发资源竞争下超过 60 秒",
+      "counted_as_product_failure": false,
+      "resolution": "按完整 nodeid 集合细分并重新覆盖全部 541 个节点"
+    }
+  ],
+  "verdict": "passed-local-requires-ci-do-not-merge"
+}
