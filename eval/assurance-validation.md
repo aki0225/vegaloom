@@ -705,3 +705,98 @@ approve”收紧为“最新轮次必须具备可复核的结构化验证成功�
   双重门禁约束。
 - GitHub Release 和 PyPI 发布不在本次验证范围内。
 - LangGraph、adapter、数据库、Web UI、多 Agent 和长期 Memory 写入仍不属于 v0.1.2。
+
+---
+
+## 2026-07-22 · AV-M001-001 · preregistration
+
+### 目标
+
+修复 `M-001`：Codex adapter 在目标仓库内生成 skill 文件前，必须确认每个写入目标的真实
+解析路径仍位于目标仓库内。路径越界、无法解析或边界不确定时 fail-closed，不允许通过
+`--force` 绕过。
+
+### Baseline
+
+- Git 基线：`main@1e9bb52`
+- 工作分支：`fix/adapter-realpath-boundary`
+- 已确认问题：`AV-BASE-003`
+- 影响入口：`vega adapters init codex --repo <repo> [--force]`
+- 范围：只处理 adapter 文件写入边界，不混入 Node 包管理器、Finish 性能、Threat/Evidence
+  数据模型或新的 Agent 能力。
+
+### 威胁模型
+
+目标仓库内容不可信。攻击者或错误配置可能预先把 `.codex`、`skills` 或具体 skill 目录设置为
+symlink、Windows junction 或其他可被路径解析跟随的 reparse point，使表面位于仓库内的
+`SKILL.md` 实际写入仓库外。
+
+本轮防守边界：
+
+1. 写入集合必须在任何修改发生前完成全量真实路径预检，避免后一个危险目标导致前一个目标
+   已经部分落盘。
+2. 创建父目录后、写文件前再次解析目标，降低检查与写入之间路径状态变化造成的风险。
+3. 已存在且本应跳过的文件也先验证边界；“不覆盖”不能掩盖危险路径。
+4. 仓库内普通目录和真实解析后仍位于仓库内的目录链接继续可用。
+
+### 方案取舍
+
+- 采用：`Path.resolve(strict=False)` 解析现有链接和不存在的末端路径，再用规范化仓库根执行
+  包含关系校验；先全量预检，写前复核。
+- 不采用：拒绝路径链上的所有 junction/reparse point。该方案简单但会无差别阻塞真实目标仍在
+  仓库内的安全双生案例。
+- 暂不采用：基于目录句柄、`openat`/Windows handle 的逐级 no-follow 原子写入。它能进一步
+  收紧并发替换窗口，但跨平台复杂度明显超过本次已确认维护缺口。
+
+### 预注册案例
+
+#### 危险案例 `AV-M001-DANGER-001`
+
+- 在仓库外创建空目录。
+- 让仓库内 `.codex` 成为指向该目录的 Windows junction；POSIX 对应使用目录 symlink。
+- 执行 adapter 初始化，且外部目录中预先不存在两个目标 skill。
+
+期望：
+
+- CLI 非零退出并报告 adapter 写入路径越过目标仓库边界。
+- 外部目录没有新增 `skills/vega-loop/SKILL.md` 或
+  `skills/vega-review/SKILL.md`。
+- `--force` 不改变该裁决。
+
+#### 安全双生案例 `AV-M001-SAFE-001`
+
+- 在目标仓库内部创建真实目录。
+- 让仓库内 `.codex` 成为指向该仓库内目录的 Windows junction；POSIX 对应使用目录 symlink。
+- 执行 adapter 初始化。
+
+期望：
+
+- CLI 成功。
+- 两个 skill 文件均生成，且其真实解析路径仍位于目标仓库内。
+- 既有普通目录 smoke 继续通过。
+
+### 成功条件
+
+- 危险案例与安全双生案例均按预期裁决。
+- `force=False`、`force=True` 都不能把文件写出仓库。
+- 受影响定向测试、Windows 专项回归、全量 pytest、`compileall`、`ruff` 和
+  `git diff --check` 通过。
+- 错误路径不包含仓库外目标的绝对路径，避免在 CLI 错误中额外泄露本地目录信息。
+
+### 失败条件
+
+- 任一 adapter 文件可经 junction、symlink 或可解析 reparse point 写到仓库外。
+- 发现危险目标前已经写入同批次的其他 adapter 文件。
+- 为阻止越界而无差别拒绝真实目标仍位于仓库内的安全链接。
+- 边界解析失败后继续写入，或 `--force` 绕过边界检查。
+
+### 已知限制
+
+- `Path.resolve` 加写前复核不能消除拥有并发本地写权限的攻击者在最终检查后替换目录的
+  TOCTOU 窗口。
+- 本轮不处理 hardlink 别名、操作系统级恶意竞争或跨进程事务写入；如这些能力进入威胁模型，
+  需要单独预注册句柄级实现与故障注入。
+
+### 下一步
+
+先新增危险案例和安全双生案例并确认危险案例在旧实现上可复现，再实现最小修复。
