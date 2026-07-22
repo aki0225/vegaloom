@@ -1351,3 +1351,47 @@ Windows 专项与 wheel smoke、POSIX 临时目录专项，以及 wheel 构建�
 首轮 workflow `29923884827` 已证明 `1b8d2cc` 的跨平台结果，但新增回归会形成新的 Git
 head。只有该最新 head 的 540 节点 CI 同样全部通过后，才能追加最终 post-CI 结果、更新
 Roadmap 并提出合并建议。
+
+---
+
+## 2026-07-22 · AV-M002-001 · corrected head post-CI result
+
+### PR 与快照
+
+- PR：`#5`
+- 代码 head：`9e649ded05ebfa8f272f7e2bd1b134ac9207170f`
+- Workflow：`29924503421`
+- 状态：`completed / success`
+- Jobs：`10/10 success`
+- 收集合同：`540` 个节点
+
+### 跨平台结果
+
+以下 job 全部成功：
+
+1. 静态检查与节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 的 smoke、p0-cli-lock、artifacts-runtime-security、
+   semantics-evidence-review 和 remaining 分片。
+4. Windows 专项与 wheel smoke。
+5. POSIX 临时目录专项。
+6. wheel 构建与安装。
+
+首轮 `1b8d2cc` 的 538 节点 CI 已通过；独立审阅补出的两个合同节点进入 `9e649de` 后，
+第二轮 540 节点 CI 仍为 10/10 success。实现审阅未发现阻塞性代码问题，测试与证据审阅
+提出的缺口已经关闭。
+
+### 裁决
+
+`passed-pr-ci / code-ready / final-docs-ci-required`
+
+M-002 的实现、危险案例、安全控制、固定 revision 读取、失效声明 fail-closed 和跨平台
+验证均满足退出条件。本条 post-CI 证据、接力文档和 Roadmap 更新会形成新的纯文档 head；
+只有该最新 head 的 PR CI 同样全部通过后，才允许把 PR 转为 Ready 并合入 `main`。
+
+### 后续边界
+
+- `scripts.test` / `scripts.lint` 存在性诊断不在本轮。
+- 嵌套 workspace、bun/deno 和 Corepack 自动安装不在本轮。
+- 通用 Evidence 文件与 Git head 的机器校验属于后续 Assurance 数据合同。
+- 合并后先核对 `main` CI，再把唯一 `Now` 转交给独立的 M-003。

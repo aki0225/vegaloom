@@ -4,18 +4,22 @@
 >
 > 分支：`fix/node-package-manager-selection`
 >
-> 当前裁决：`passed-local / requires-ci / do-not-merge`
+> PR：`#5`
+>
+> 当前裁决：`passed-pr-ci / final-docs-ci-required / do-not-merge`
 
 ## 一、先看结论
 
-M-002 已完成本地实现和完整节点覆盖，但**不要合并 `main`，不要发布版本**。当前分支只适合
-在另一台机器继续复核、创建 Draft PR 或等待跨平台 CI。
+M-002 已完成实现、本地验证、独立审阅修正和代码 head 的跨平台 CI。当前还不能立即合并：
+本接力文档、最终 post-CI 证据和 Roadmap 更新会形成一个纯文档 head，该最新 head 仍须通过
+PR CI，之后才能转为 Ready 并合并。
 
 关键提交：
 
 - 基线：`6b74c5be3e26d6e9d7e5849b1ec76dd9c5b5f2b3`
 - 红灯预注册：`2fad84cdc16a67eacdc9579dfb229e726c002cf1`
 - 实现提交：`c6b5325d025c64270c2bd1fa98fb3b7ae9dc8e2f`
+- 审阅修正：`9e649ded05ebfa8f272f7e2bd1b134ac9207170f`
 
 ## 二、已完成内容
 
@@ -63,7 +67,27 @@ M-002 已完成本地实现和完整节点覆盖，但**不要合并 `main`，�
 首次全量分片尝试因显式 basetemp 的父目录未创建而在 fixture setup 阶段失败；该尝试不计入
 产品裁决。创建受控父目录后，所有 538 个节点已完整重跑并得到上述结果。
 
-## 四、在另一台机器继续
+## 四、独立审阅与 PR CI
+
+两份独立审阅中，实现审阅未发现阻塞性代码问题；测试与证据审阅发现“损坏或不受支持的
+`packageManager` 声明 fail-closed”缺少直接回归。该发现已在 `9e649de` 修正：
+
+- 增加非字符串声明回归。
+- 增加不受支持的 `bun` 声明不能回退到陈旧 lockfile 的回归。
+- 相关选择链路：`11 passed`。
+- 完整收集合同：`540` 个节点。
+
+PR `#5` 已形成两次成功 workflow：
+
+```text
+29923884827  1b8d2cc  10/10 success  首轮 538 节点
+29924503421  9e649de  10/10 success  审阅修正后 540 节点
+```
+
+第二次 workflow 覆盖静态检查、Python 3.11 全量、Python 3.12 分片、Windows、POSIX 和
+wheel 构建安装。它证明代码 head `9e649de` 满足 M-002 的跨平台退出条件。
+
+## 五、在另一台机器继续
 
 首次检出该分支：
 
@@ -87,22 +111,20 @@ git log --oneline -3
 python -m pytest -q `
   tests/test_context_boundaries.py::test_project_profile_selects_one_node_package_manager `
   tests/test_context_boundaries.py::test_project_profile_fails_closed_for_conflicting_node_lockfiles `
+  tests/test_context_boundaries.py::test_project_profile_fails_closed_for_invalid_package_manager_declaration `
   tests/test_context_boundaries.py::test_tracked_project_profile_reads_package_manager_from_fixed_revision `
   tests/test_context_boundaries.py::test_explicit_verification_commands_remain_above_node_auto_detection
 ```
 
-## 五、下一步
+## 六、下一步
 
-建议按以下顺序继续：
+1. 推送本次纯文档提交，等待 PR `#5` 最新 head 的 workflow 全部通过。
+2. 最新 head CI 全绿后，把 PR 从 Draft 转为 Ready。
+3. 再次核对 mergeable、head SHA 和 checks，使用 squash merge 合入 `main`。
+4. 等待合并后的 `main` CI 全绿，再开始独立的 M-003；不在 M-002 分支顺带实现。
+5. 不打新标签，不发布 GitHub Release 或 PyPI。
 
-1. 人工通读 `origin/main...HEAD`，重点看选择优先级和 tracked revision 读取。
-2. 如需远端验证，只创建 Draft PR，不提前合并。
-3. 等待静态检查、Python 3.11、Python 3.12 五分片、Windows、POSIX 和构建安装 job 全部
-   通过。
-4. 将最新 PR head 与 workflow 结果以追加方式写入 `eval/assurance-validation.md`。
-5. CI 与人工 diff 都无阻塞发现后，再单独讨论是否合并；本接力点不授权自动合并或发版。
-
-## 六、剩余边界
+## 七、剩余边界
 
 - 本轮不判断 `scripts.test` / `scripts.lint` 是否存在。
 - 不处理嵌套 workspace、bun/deno 或 Corepack 自动安装。
