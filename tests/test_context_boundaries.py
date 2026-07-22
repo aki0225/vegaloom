@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -305,6 +306,220 @@ def test_project_profile_reads_pyproject_script_entrypoints(tmp_path: Path) -> N
         "demo = demo.cli:app",
         "worker = demo.worker:main",
     ]
+
+
+def _node_package_json(package_manager: str | None = None) -> str:
+    payload: dict[str, object] = {
+        "scripts": {
+            "test": "node --test",
+            "lint": "eslint .",
+        }
+    }
+    if package_manager is not None:
+        payload["packageManager"] = package_manager
+    return json.dumps(payload, ensure_ascii=False) + "\n"
+
+
+@pytest.mark.parametrize(
+    (
+        "files",
+        "expected_manager",
+        "expected_test_commands",
+        "expected_lint_commands",
+    ),
+    [
+        pytest.param(
+            {"package.json": _node_package_json()},
+            "npm",
+            ["npm test"],
+            ["npm run lint"],
+            id="package-json-defaults-to-npm",
+        ),
+        pytest.param(
+            {
+                "package.json": _node_package_json(),
+                "package-lock.json": "{}\n",
+            },
+            "npm",
+            ["npm test"],
+            ["npm run lint"],
+            id="package-lock-selects-npm",
+        ),
+        pytest.param(
+            {
+                "package.json": _node_package_json(),
+                "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+            },
+            "pnpm",
+            ["pnpm test"],
+            ["pnpm run lint"],
+            id="pnpm-lock-selects-pnpm",
+        ),
+        pytest.param(
+            {
+                "package.json": _node_package_json(),
+                "yarn.lock": "__metadata:\n  version: 8\n",
+            },
+            "yarn",
+            ["yarn test"],
+            ["yarn lint"],
+            id="yarn-lock-selects-yarn",
+        ),
+        pytest.param(
+            {"package.json": _node_package_json("pnpm@10.13.1")},
+            "pnpm",
+            ["pnpm test"],
+            ["pnpm run lint"],
+            id="package-manager-selects-pnpm-without-lockfile",
+        ),
+        pytest.param(
+            {
+                "package.json": _node_package_json("yarn@4.9.2"),
+                "package-lock.json": "{}\n",
+                "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+            },
+            "yarn",
+            ["yarn test"],
+            ["yarn lint"],
+            id="package-manager-disambiguates-stale-lockfiles",
+        ),
+    ],
+)
+def test_project_profile_selects_one_node_package_manager(
+    tmp_path: Path,
+    files: dict[str, str],
+    expected_manager: str,
+    expected_test_commands: list[str],
+    expected_lint_commands: list[str],
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for relative_path, content in files.items():
+        repo.joinpath(relative_path).write_text(content, encoding="utf-8")
+
+    profile = build_project_profile(tmp_path, repo)
+
+    assert profile.package_managers == [expected_manager]
+    assert profile.test_commands == expected_test_commands
+    assert profile.lint_commands == expected_lint_commands
+
+
+def test_project_profile_fails_closed_for_conflicting_node_lockfiles(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    files = {
+        "package.json": _node_package_json(),
+        "package-lock.json": "{}\n",
+        "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+        "yarn.lock": "__metadata:\n  version: 8\n",
+    }
+    for relative_path, content in files.items():
+        repo.joinpath(relative_path).write_text(content, encoding="utf-8")
+
+    profile = build_project_profile(tmp_path, repo)
+    node_commands = [
+        command
+        for command in [*profile.test_commands, *profile.lint_commands]
+        if command.startswith(("npm ", "pnpm ", "yarn "))
+    ]
+
+    assert set(profile.package_managers).isdisjoint({"npm", "pnpm", "yarn"})
+    assert node_commands == []
+
+
+@pytest.mark.parametrize(
+    "package_manager",
+    [
+        pytest.param(42, id="invalid-type"),
+        pytest.param("bun@1.2.3", id="unsupported-manager"),
+    ],
+)
+def test_project_profile_fails_closed_for_invalid_package_manager_declaration(
+    tmp_path: Path,
+    package_manager: object,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    package_json = {
+        "packageManager": package_manager,
+        "scripts": {
+            "test": "node --test",
+            "lint": "eslint .",
+        },
+    }
+    files = {
+        "package.json": json.dumps(package_json, ensure_ascii=False) + "\n",
+        "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+    }
+    for relative_path, content in files.items():
+        repo.joinpath(relative_path).write_text(content, encoding="utf-8")
+
+    profile = build_project_profile(tmp_path, repo)
+    node_commands = [
+        command
+        for command in [*profile.test_commands, *profile.lint_commands]
+        if command.startswith(("npm ", "pnpm ", "yarn "))
+    ]
+
+    assert set(profile.package_managers).isdisjoint({"npm", "pnpm", "yarn"})
+    assert node_commands == []
+
+
+def test_tracked_project_profile_reads_package_manager_from_fixed_revision(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            "package.json": _node_package_json("pnpm@10.13.1"),
+            "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+        },
+    )
+    repo.joinpath("package.json").write_text(
+        _node_package_json("yarn@4.9.2"),
+        encoding="utf-8",
+    )
+    repo.joinpath("pnpm-lock.yaml").unlink()
+    repo.joinpath("yarn.lock").write_text(
+        "__metadata:\n  version: 8\n",
+        encoding="utf-8",
+    )
+
+    profile = build_project_profile(tmp_path, repo, tracked_only=True)
+
+    assert profile.package_managers == ["pnpm"]
+    assert profile.test_commands == ["pnpm test"]
+    assert profile.lint_commands == ["pnpm run lint"]
+
+
+def test_explicit_verification_commands_remain_above_node_auto_detection(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    files = {
+        ".vega.yaml": (
+            "version: 1\n"
+            "verification:\n"
+            "  commands:\n"
+            "    - python -c \"print('configured verification')\"\n"
+        ),
+        "package.json": _node_package_json(),
+        "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+    }
+    for relative_path, content in files.items():
+        repo.joinpath(relative_path).write_text(content, encoding="utf-8")
+
+    profile = build_project_profile(tmp_path, repo)
+
+    assert profile.package_managers == ["pnpm"]
+    assert profile.test_commands == [
+        "python -c \"print('configured verification')\""
+    ]
+    assert profile.lint_commands == []
 
 
 def test_tracked_profile_reads_scripts_from_fixed_revision(tmp_path: Path) -> None:

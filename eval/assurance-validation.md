@@ -1019,3 +1019,379 @@ M-002。
 新门禁的危险案例、安全案例、历史案例、日志不回显和文件名规则均通过本地定向验证。Windows
 本机聚合测试没有形成完整通过证据，因此不得据此宣称全量绿；最终合并裁决必须等待 PR 的
 Python 3.11 全量、Python 3.12 五分片、Windows 专项、POSIX 专项和发布包安装 job 全部成功。
+
+---
+
+## 2026-07-22 · AV-M002-001 · preregistration
+
+### 目标
+
+修复 `M-002`：Project Profile 必须为 Node 项目选择唯一可信的 npm、pnpm 或 yarn 命令。
+仓库信号冲突且无法消歧时不得猜测执行，避免错误命令制造假失败、遗漏真实验证，或让
+verification 依据错误工具链形成不可信结论。
+
+### Baseline
+
+- Git 基线：`main@6b74c5b`
+- 工作分支：`fix/node-package-manager-selection`
+- 已确认问题：`AV-BASE-004`
+- 修改前收集合同：`529` 个节点、`21` 个测试文件。
+- 影响入口：Project Profile、worker 项目上下文和自动 verification 命令选择。
+- 范围：只修复根目录 Node 包管理器选择，不混入 M-003、Threat/Evidence 数据模型、依赖安装
+  或新的 Agent 能力。
+
+### 威胁模型
+
+目标仓库的 `package.json` 和 lockfile 可能过期、冲突或来自错误的分支合并。当前实现分别
+计算包管理器、test 命令和 lint 命令，使 pnpm 项目混入 npm，yarn 项目继续使用 npm。自动
+verification 若执行这些命令，可能把工具链选择错误误报为代码失败，也可能错过项目真实的
+测试与静态检查。
+
+本轮防守边界：
+
+1. `.vega.yaml` 中显式 verification 命令继续保持最高优先级；存在时不使用自动 Node
+   test/lint 命令。
+2. 顶层 `package.json.packageManager` 若明确声明 npm、pnpm 或 yarn，则优先于 lockfile。
+3. 没有可用显式声明时，单一 `package-lock.json`、`pnpm-lock.yaml` 或 `yarn.lock` 决定
+   对应包管理器。
+4. 只有 `package.json` 且没有 lockfile 时保留 npm 默认值。
+5. 多个受支持 lockfile 同时存在且没有显式声明时 fail-closed：不选择 Node 包管理器，
+   不生成 Node test/lint 命令。
+6. `tracked_only=True` 时，`packageManager` 必须来自固定 Git revision，不能读取工作区中
+   未提交的修改。
+
+### 方案取舍
+
+- 采用：先得到一次 Node 包管理器选择结果，再让 package manager、test 和 lint 三处消费
+  同一结果，避免独立条件继续漂移。
+- 不采用：分别给 `_detect_package_managers`、`_detect_test_commands` 和
+  `_detect_lint_commands` 增加局部判断。该方案改动小，但无法从结构上保证三个输出一致。
+- 不采用：同时生成 npm、pnpm、yarn 命令并依赖“哪个能运行”。这会把环境偶然性当作证据，
+  违反 fail-closed。
+- 暂不新增 `ProjectProfile` 字段；冲突案例首先通过“不选择、不执行”收紧行为。若后续需要
+  面向用户解释歧义，再单独设计版本化诊断字段。
+
+### 预注册案例
+
+#### npm 安全案例 `AV-M002-NPM-001`
+
+- 只有 `package.json` 时选择 npm。
+- `package.json` 与单一 `package-lock.json` 并存时选择 npm。
+- 精确命令为 `npm test` 与 `npm run lint`。
+
+#### pnpm 安全案例 `AV-M002-PNPM-001`
+
+- `package.json` 与单一 `pnpm-lock.yaml` 并存时只选择 pnpm。
+- `packageManager` 单独声明 pnpm 时也选择 pnpm。
+- 精确命令为 `pnpm test` 与 `pnpm run lint`，不得混入 npm/yarn。
+
+#### yarn 安全案例 `AV-M002-YARN-001`
+
+- `package.json` 与单一 `yarn.lock` 并存时只选择 yarn。
+- 精确命令为 `yarn test` 与 `yarn lint`，不得混入 npm/pnpm。
+
+#### 配置消歧案例 `AV-M002-CONFIG-001`
+
+- `packageManager` 声明 yarn，同时存在陈旧的 npm/pnpm lockfile。
+- 期望：显式声明胜出，只生成 yarn 命令。
+
+#### 冲突危险案例 `AV-M002-DANGER-001`
+
+- `package.json` 与 npm、pnpm、yarn 三个 lockfile 同时存在，且没有 `packageManager`。
+- 期望：不选择 npm/pnpm/yarn，不生成任何 Node test/lint 命令。
+
+#### 固定 revision 案例 `AV-M002-TRACKED-001`
+
+- Git `HEAD` 声明 pnpm，工作区未提交内容改为 yarn。
+- 以 `tracked_only=True` 构建画像。
+- 期望：仍只得到 pnpm 命令，证明隔离审查没有读取工作区污染。
+
+#### 显式验证控制案例 `AV-M002-VEGA-001`
+
+- pnpm 项目同时配置 `.vega.yaml` verification 命令。
+- 期望：包管理器仍可识别为 pnpm，但 test 命令只保留显式配置，lint 为空。
+
+### 成功条件
+
+- 所有预注册案例按期望裁决，npm 安全控制不回归。
+- pnpm/yarn 项目不出现 npm 命令，冲突 lockfile 不产生猜测命令。
+- 固定 revision 与工作区内容不一致时只信任指定 revision。
+- 受影响定向测试、完整 pytest、`compileall`、`ruff`、仓库卫生门禁和
+  `git diff --check` 通过。
+- Python 3.11、Python 3.12 分片、Windows、POSIX 和发布包安装 CI 全部通过后，才可建议
+  合并。
+
+### 失败条件
+
+- 任一 pnpm/yarn 案例仍混入 npm，或 npm 案例被错误切换。
+- 多 lockfile 无显式声明时仍猜测某个包管理器。
+- `package_managers` 与 test/lint 命令来自不同选择结果。
+- tracked profile 读取未提交的 `packageManager`。
+- 为修复选择问题而降低 `.vega.yaml` 显式 verification 的优先级。
+
+### 已知限制
+
+- 本轮不判断 `scripts.test` / `scripts.lint` 是否存在，只验证包管理器选择。
+- 不处理嵌套 workspace 的多包管理器、bun/deno、Corepack 自动安装或依赖完整性。
+- 未知包管理器、损坏的 `package.json` 和面向用户的歧义诊断需另行预注册。
+
+### 外部规则依据
+
+- Node.js Corepack 文档：`packageManager` 用于声明项目期望的包管理器及版本。
+- npm CLI 文档：测试脚本使用 `npm test`，其他脚本可使用 `npm run <script>`。
+- pnpm CLI 文档：测试脚本可使用 `pnpm test`，其他脚本使用 `pnpm run <script>`。
+- Yarn CLI 文档：项目脚本可通过 `yarn <script>` 执行。
+
+### 下一步
+
+先只新增上述回归并在旧实现上记录红灯；确认失败原因与 `AV-BASE-004` 一致后，再修改
+`src/vega/project_profile.py`。本条预注册阶段不得把失败测试描述为可合并结果。
+
+---
+
+## 2026-07-22 · AV-M002-001 · red test result
+
+### Baseline
+
+- Git 基线：`main@6b74c5b`
+- 工作分支：`fix/node-package-manager-selection`
+- 平台：Windows / Python 3.14.3
+- 本阶段修改边界：测试、路线图、验证记录与 CI 节点合同；`src/vega/` 没有修改。
+
+### 旧实现复现
+
+只运行预注册的 9 个 M-002 节点：
+
+```text
+6 failed, 3 passed in 3.53s
+```
+
+三个通过控制为：
+
+1. 仅 `package.json` 的 npm 默认值。
+2. 单一 `package-lock.json` 的 npm 项目。
+3. `.vega.yaml` 显式 verification 继续覆盖自动命令。
+
+六个失败与 `AV-BASE-004` 一致：
+
+1. pnpm lockfile 项目同时生成 `npm test` 与 `pnpm test`，lint 仍为 npm。
+2. yarn lockfile 项目仍生成 npm test/lint。
+3. 仅由 `packageManager` 声明的 pnpm 项目被识别为 npm。
+4. `packageManager` 声明 yarn 时，陈旧 lockfile 仍让实现选择 pnpm。
+5. 三个 lockfile 冲突且无显式声明时，实现猜测选择 pnpm，而不是 fail-closed。
+6. tracked profile 虽识别 pnpm，但命令集合仍混入 npm。
+
+### 收集合同
+
+- 完整收集：`538` 个节点。
+- 唯一 nodeid：`538` 个。
+- 新增节点：`9` 个。
+- 测试文件数量保持 `21` 个，因此 Python 3.12 分片文件集合不变。
+
+### 本地证据
+
+- 红灯日志：`.tmp/pytest/logs/m002-red-before-fix.txt`
+- SHA-256：`E19FE8C85D0F77C013D827331F39A0D8D9CB29AA4D57E2343404AB861158AA35`
+- 收集清单：`.tmp/pytest/m002-collected.txt`
+
+### 裁决
+
+`confirmed-red / not-mergeable`
+
+危险案例稳定复现，npm 与显式 verification 控制案例保持通过，说明红灯针对的是 Node
+包管理器选择缺口而不是 fixture 基础设施故障。本结果只证明旧实现存在问题，不代表候选
+分支可合并。
+
+### 下一步
+
+在同一分支实现一次性 Node 包管理器选择结果，并让 package manager、test 与 lint 输出共同
+消费；转绿后再运行受影响回归、完整门禁与跨平台 CI。
+
+---
+
+## 2026-07-22 · AV-M002-001 · local result
+
+### Baseline
+
+- Git 基线：`main@6b74c5b`
+- 红灯提交：`2fad84cdc16a67eacdc9579dfb229e726c002cf1`
+- 实现提交：`c6b5325d025c64270c2bd1fa98fb3b7ae9dc8e2f`
+- 实现 tree：`2fbbda1907631a16394e786efe70e47f84dda084`
+- 工作分支：`fix/node-package-manager-selection`
+- 平台：Windows / Python 3.14.3
+
+### 实现结果
+
+- 新增一次性 Node 包管理器选择结果，项目画像、test 和 lint 不再分别猜测。
+- 顶层 `packageManager` 的受支持声明优先于 lockfile。
+- 无显式声明时，单一 lockfile 决定 npm、pnpm 或 yarn。
+- 只有 `package.json` 时保留 npm 默认值。
+- 多 lockfile 冲突时不选择 Node 包管理器，也不生成 Node test/lint 命令。
+- 显式声明存在但无法识别时停止猜测，不回退到可能陈旧的 lockfile。
+- tracked profile 使用固定 revision 中的 `package.json` 内容。
+- `.vega.yaml` 显式 verification 覆盖自动 test/lint 的既有优先级保持不变。
+
+### 预注册案例结果
+
+旧实现的 `6 failed, 3 passed` 已转为：
+
+```text
+9 passed in 3.18s
+```
+
+- `AV-M002-NPM-001`：通过。
+- `AV-M002-PNPM-001`：通过，未混入 npm/yarn。
+- `AV-M002-YARN-001`：通过，未混入 npm/pnpm。
+- `AV-M002-CONFIG-001`：通过，显式 yarn 声明消歧陈旧 lockfile。
+- `AV-M002-DANGER-001`：通过，多 lockfile 无声明时 fail-closed。
+- `AV-M002-TRACKED-001`：通过，只读取固定 revision 的 pnpm 声明。
+- `AV-M002-VEGA-001`：通过，显式 verification 继续优先。
+
+### 受影响回归
+
+- `tests/test_context_boundaries.py`：`34 passed`。
+- `tests/test_security_evidence.py`：`15 passed`。
+- `tests/test_project_config_hardening.py`：`25 passed`。
+- Project Profile 与 verification 关键调用节点：`5 passed`。
+
+### 完整本地覆盖
+
+- 完整收集：`538` 个节点。
+- 唯一 nodeid：`538` 个。
+- 完整分片结果：`537 passed, 1 skipped`，无失败、无 error。
+  - smoke：`102 passed`。
+  - p0-cli-lock：`109 passed`。
+  - artifacts-runtime-security：`58 passed, 1 skipped`。
+  - remaining：`188 passed`。
+  - success-semantics：`29 passed`。
+  - evidence-freshness：`19 passed`。
+  - review-integrity：`18 passed`。
+  - assurance-semantics：`14 passed`。
+- 唯一跳过：
+  `tests/test_runtime_safety_integration.py::test_posix_verification_temp_env_does_not_re_evaluate_path`；
+  当前平台为 Windows，该节点只覆盖 POSIX shell 变量展开语义。
+
+首次显式指定分片 basetemp 时，其父目录尚不存在，pytest 在 fixture setup 阶段产生
+`FileNotFoundError`。该尝试没有形成产品失败证据，不计入裁决；创建受控父目录后，全部
+538 个节点已重新执行并得到上述结果。
+
+### 静态门禁
+
+- `python -m compileall -q src scripts/check_repository_hygiene.py`：通过。
+- `ruff check src tests scripts/check_repository_hygiene.py --no-cache`：通过。
+- `python scripts/check_repository_hygiene.py --base-ref origin/main`：通过。
+- `git diff --check`：通过。
+
+### 本地证据
+
+- 结构化摘要：
+  `examples/evidence/m002-node-package-manager-local-summary.json`
+- 摘要 SHA-256：
+  `959730D1F60CE83604AB01640977AE5D42A6A6BE6C8FBF71DE1BB5AB11B02752`
+- 接力文档：`docs/M002-NODE-PACKAGE-MANAGER-HANDOFF.md`
+- 分片原始日志位于未跟踪的 `.tmp/pytest/logs/`，其 SHA-256 已写入结构化摘要。
+
+### 裁决
+
+`passed-local / requires-ci / do-not-merge`
+
+预注册危险案例、安全控制、固定 revision 边界和本地 538 个节点均满足 M-002 的本地退出
+条件。该结果不替代 Python 3.11/3.12、Linux/POSIX、Windows CI 和发布包安装验证，也不授权
+自动合并或发版。
+
+### 剩余风险
+
+- 本轮不判断 `scripts.test` / `scripts.lint` 是否存在。
+- 不处理嵌套 workspace、bun/deno 或 Corepack 自动安装。
+- 冲突与未知声明目前静默 fail-closed，尚未提供版本化的用户诊断字段。
+- Python 3.14.3 的本地高负载耗时不能替代 CI 的 58 秒单节点预算。
+
+### 下一步
+
+推送当前隔离分支与接力文档，供另一台机器继续。后续最多先创建 Draft PR 并等待全部 CI；
+在 post-CI 证据和人工 diff 复核完成前，不合并 `main`。
+
+---
+
+## 2026-07-22 · AV-M002-001 · first PR CI and review correction
+
+### 首轮 PR CI
+
+- PR：`#5`
+- PR head：`1b8d2cc2b88907d487f33bbf597bcb899811b8ef`
+- Workflow：`29923884827`
+- 状态：`completed / success`
+- Jobs：`10/10 success`
+
+通过范围包括静态检查与 538 节点收集合同、Python 3.11 全量、Python 3.12 分片、
+Windows 专项与 wheel smoke、POSIX 临时目录专项，以及 wheel 构建安装验证。
+
+### 独立审阅发现
+
+实现审阅未发现阻塞性代码问题，但测试与证据审阅发现：代码和接力文档都承诺“显式
+`packageManager` 声明损坏或不受支持时 fail-closed”，原有 9 个预注册节点没有直接覆盖
+该声明。首轮 CI 通过只能证明当时的 538 节点全绿，不能替代缺失的合同回归。
+
+通用的“证据文件自动绑定当前 Git head”门禁属于后续 Assurance 数据合同，不在 M-002
+内扩建；本轮继续通过明确记录 head、workflow 和人工复核保持证据边界。
+
+### 审阅修正
+
+- 新增非字符串 `packageManager` 声明的 fail-closed 回归。
+- 新增不受支持的 `bun` 声明不能回退到陈旧 pnpm lockfile 的回归。
+- 相关选择链路：`11 passed in 1.68s`。
+- 完整收集：`540` 个节点。
+- CI 节点合同同步更新为 `540`。
+- compileall、Ruff、仓库卫生检查和 `git diff --check` 通过。
+
+### 裁决
+
+`first-pr-ci-passed / review-correction-passed-local / latest-head-requires-ci / do-not-merge`
+
+首轮 workflow `29923884827` 已证明 `1b8d2cc` 的跨平台结果，但新增回归会形成新的 Git
+head。只有该最新 head 的 540 节点 CI 同样全部通过后，才能追加最终 post-CI 结果、更新
+Roadmap 并提出合并建议。
+
+---
+
+## 2026-07-22 · AV-M002-001 · corrected head post-CI result
+
+### PR 与快照
+
+- PR：`#5`
+- 代码 head：`9e649ded05ebfa8f272f7e2bd1b134ac9207170f`
+- Workflow：`29924503421`
+- 状态：`completed / success`
+- Jobs：`10/10 success`
+- 收集合同：`540` 个节点
+
+### 跨平台结果
+
+以下 job 全部成功：
+
+1. 静态检查与节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 的 smoke、p0-cli-lock、artifacts-runtime-security、
+   semantics-evidence-review 和 remaining 分片。
+4. Windows 专项与 wheel smoke。
+5. POSIX 临时目录专项。
+6. wheel 构建与安装。
+
+首轮 `1b8d2cc` 的 538 节点 CI 已通过；独立审阅补出的两个合同节点进入 `9e649de` 后，
+第二轮 540 节点 CI 仍为 10/10 success。实现审阅未发现阻塞性代码问题，测试与证据审阅
+提出的缺口已经关闭。
+
+### 裁决
+
+`passed-pr-ci / code-ready / final-docs-ci-required`
+
+M-002 的实现、危险案例、安全控制、固定 revision 读取、失效声明 fail-closed 和跨平台
+验证均满足退出条件。本条 post-CI 证据、接力文档和 Roadmap 更新会形成新的纯文档 head；
+只有该最新 head 的 PR CI 同样全部通过后，才允许把 PR 转为 Ready 并合入 `main`。
+
+### 后续边界
+
+- `scripts.test` / `scripts.lint` 存在性诊断不在本轮。
+- 嵌套 workspace、bun/deno 和 Corepack 自动安装不在本轮。
+- 通用 Evidence 文件与 Git head 的机器校验属于后续 Assurance 数据合同。
+- 合并后先核对 `main` CI，再把唯一 `Now` 转交给独立的 M-003。
