@@ -117,6 +117,17 @@ def test_finish_reuses_single_terminal_artifact_integrity_validation(
     assert freshness.fresh is False
     assert "trusted_review_missing" in freshness.issues
 
+    integrity_calls = 0
+    no_review_snapshot = goal_evidence.validate_loop_evidence_snapshot(
+        workspace,
+        repo,
+        run_dir,
+    )
+
+    assert integrity_calls == 1
+    assert no_review_snapshot.evidence_freshness.fresh is False
+    assert "trusted_review_missing" in no_review_snapshot.evidence_freshness.issues
+
     state["iterations"][-1]["review_run"] = "missing-review-run"
     _write_json(state_path, state)
     integrity_calls = 0
@@ -131,6 +142,24 @@ def test_finish_reuses_single_terminal_artifact_integrity_validation(
     assert missing_review_freshness.fresh is False
     assert "trusted_review_missing" in missing_review_freshness.issues
     assert missing_review_freshness.review_run == "missing-review-run"
+
+    integrity_calls = 0
+    missing_review_snapshot = goal_evidence.validate_loop_evidence_snapshot(
+        workspace,
+        repo,
+        run_dir,
+    )
+
+    assert integrity_calls == 1
+    assert missing_review_snapshot.evidence_freshness.fresh is False
+    assert (
+        "trusted_review_missing"
+        in missing_review_snapshot.evidence_freshness.issues
+    )
+    assert (
+        missing_review_snapshot.evidence_freshness.review_run
+        == "missing-review-run"
+    )
 
 
 def test_finish_rejects_unbound_iteration_verdict(tmp_path: Path) -> None:
