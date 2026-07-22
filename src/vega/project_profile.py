@@ -6,6 +6,7 @@ import subprocess
 import tomllib
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from .memory import MemoryLedgerStore
 from .models import ProfileState, ProjectProfile
@@ -49,6 +50,22 @@ ENTRYPOINT_CANDIDATES = [
     "cmd/server/main.go",
     "main.go",
 ]
+NodePackageManager = Literal["npm", "pnpm", "yarn"]
+NODE_PACKAGE_MANAGER_BY_LOCKFILE: dict[str, NodePackageManager] = {
+    "package-lock.json": "npm",
+    "pnpm-lock.yaml": "pnpm",
+    "yarn.lock": "yarn",
+}
+NODE_TEST_COMMANDS: dict[NodePackageManager, str] = {
+    "npm": "npm test",
+    "pnpm": "pnpm test",
+    "yarn": "yarn test",
+}
+NODE_LINT_COMMANDS: dict[NodePackageManager, str] = {
+    "npm": "npm run lint",
+    "pnpm": "pnpm run lint",
+    "yarn": "yarn lint",
+}
 
 
 class ProjectProfileRuntime:
@@ -143,8 +160,21 @@ def build_project_profile(
             repo=repo_scope,
         )
     )
-    test_commands = _detect_test_commands(repo, config_files, tracked_files=tracked_files)
-    lint_commands = _detect_lint_commands(config_files)
+    node_package_manager = _detect_node_package_manager(
+        repo,
+        config_files,
+        tracked_revision=resolved_revision,
+    )
+    test_commands = _detect_test_commands(
+        repo,
+        config_files,
+        tracked_files=tracked_files,
+        node_package_manager=node_package_manager,
+    )
+    lint_commands = _detect_lint_commands(
+        config_files,
+        node_package_manager=node_package_manager,
+    )
     if project_config.verification.commands:
         test_commands = project_config.verification.commands
         lint_commands = []
@@ -152,7 +182,10 @@ def build_project_profile(
         repo_name=repo.name,
         repo_path=str(repo),
         tech_stack=_detect_tech_stack(repo, config_files, tracked_files=tracked_files),
-        package_managers=_detect_package_managers(config_files),
+        package_managers=_detect_package_managers(
+            config_files,
+            node_package_manager=node_package_manager,
+        ),
         test_commands=test_commands,
         lint_commands=lint_commands,
         entrypoints=_existing_files(repo, ENTRYPOINT_CANDIDATES, tracked_files=tracked_files),
@@ -246,18 +279,18 @@ def _detect_tech_stack(
     return _dedupe(stack)
 
 
-def _detect_package_managers(config_files: list[str]) -> list[str]:
+def _detect_package_managers(
+    config_files: list[str],
+    *,
+    node_package_manager: NodePackageManager | None,
+) -> list[str]:
     managers: list[str] = []
     if "pyproject.toml" in config_files:
         managers.append("pip / pyproject")
     if "requirements.txt" in config_files:
         managers.append("pip requirements")
-    if "pnpm-lock.yaml" in config_files:
-        managers.append("pnpm")
-    elif "yarn.lock" in config_files:
-        managers.append("yarn")
-    elif "package-lock.json" in config_files or "package.json" in config_files:
-        managers.append("npm")
+    if node_package_manager is not None:
+        managers.append(node_package_manager)
     if "go.mod" in config_files:
         managers.append("go modules")
     if "pom.xml" in config_files:
@@ -267,6 +300,70 @@ def _detect_package_managers(config_files: list[str]) -> list[str]:
     if "Cargo.toml" in config_files:
         managers.append("cargo")
     return managers
+
+
+def _detect_node_package_manager(
+    repo: Path,
+    config_files: list[str],
+    *,
+    tracked_revision: str | None,
+) -> NodePackageManager | None:
+    if "package.json" in config_files:
+        has_declaration, declared_manager = _read_declared_node_package_manager(
+            repo,
+            tracked_revision=tracked_revision,
+        )
+        # 显式字段一旦存在但无法识别，就停止猜测，避免陈旧 lockfile 覆盖项目声明。
+        if has_declaration:
+            return declared_manager
+
+    lockfile_managers = [
+        manager
+        for lockfile, manager in NODE_PACKAGE_MANAGER_BY_LOCKFILE.items()
+        if lockfile in config_files
+    ]
+    if len(lockfile_managers) == 1:
+        return lockfile_managers[0]
+    # 多 lockfile 常来自分支切换或错误合并；固定优先级只会稳定地产生错误命令。
+    if lockfile_managers:
+        return None
+    if "package.json" in config_files:
+        return "npm"
+    return None
+
+
+def _read_declared_node_package_manager(
+    repo: Path,
+    *,
+    tracked_revision: str | None,
+) -> tuple[bool, NodePackageManager | None]:
+    content = _read_project_file(
+        repo,
+        "package.json",
+        tracked_revision=tracked_revision,
+    )
+    if content is None:
+        return True, None
+    try:
+        document = json.loads(content)
+    except json.JSONDecodeError:
+        return True, None
+    if not isinstance(document, dict):
+        return True, None
+    if "packageManager" not in document:
+        return False, None
+
+    value = document.get("packageManager")
+    if not isinstance(value, str):
+        return True, None
+    manager = value.strip().partition("@")[0].strip()
+    if manager == "npm":
+        return True, "npm"
+    if manager == "pnpm":
+        return True, "pnpm"
+    if manager == "yarn":
+        return True, "yarn"
+    return True, None
 
 
 def _detect_script_entrypoints(
@@ -354,6 +451,7 @@ def _detect_test_commands(
     config_files: list[str],
     *,
     tracked_files: set[str] | None = None,
+    node_package_manager: NodePackageManager | None,
 ) -> list[str]:
     commands: list[str] = []
     if "pyproject.toml" in config_files or _directory_exists(
@@ -362,10 +460,8 @@ def _detect_test_commands(
         tracked_files=tracked_files,
     ):
         commands.append("python -m pytest -q")
-    if "package.json" in config_files:
-        commands.append("npm test")
-    if "pnpm-lock.yaml" in config_files:
-        commands.append("pnpm test")
+    if "package.json" in config_files and node_package_manager is not None:
+        commands.append(NODE_TEST_COMMANDS[node_package_manager])
     if "go.mod" in config_files:
         commands.append("go test ./...")
     if "pom.xml" in config_files:
@@ -377,12 +473,16 @@ def _detect_test_commands(
     return _dedupe(commands)
 
 
-def _detect_lint_commands(config_files: list[str]) -> list[str]:
+def _detect_lint_commands(
+    config_files: list[str],
+    *,
+    node_package_manager: NodePackageManager | None,
+) -> list[str]:
     commands: list[str] = []
     if "pyproject.toml" in config_files:
         commands.append("python -m ruff check .")
-    if "package.json" in config_files:
-        commands.append("npm run lint")
+    if "package.json" in config_files and node_package_manager is not None:
+        commands.append(NODE_LINT_COMMANDS[node_package_manager])
     if "go.mod" in config_files:
         commands.append("go vet ./...")
     if "Cargo.toml" in config_files:
