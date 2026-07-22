@@ -69,7 +69,8 @@ def test_finish_reuses_single_terminal_artifact_integrity_validation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workspace, _, run_dir = _create_successful_loop(tmp_path, verify=True)
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    workspace, repo, run_dir = _create_successful_loop(tmp_path, verify=True)
     original = goal_evidence.validate_loop_artifact_integrity
     integrity_calls = 0
 
@@ -97,6 +98,39 @@ def test_finish_reuses_single_terminal_artifact_integrity_validation(
     assert summary["finish_status"] == "ready_to_commit"
     assert summary["artifact_integrity"]["valid"] is True
     assert summary["evidence_freshness"]["fresh"] is True
+    assert summary["verification_passed"] is True
+    assert summary["artifact_integrity"]["risk_gate_result_count"] == 1
+
+    state_path = run_dir / "state.json"
+    state = _read_json(state_path)
+    state["iterations"][-1]["review_run"] = ""
+    _write_json(state_path, state)
+    integrity_calls = 0
+
+    freshness = goal_evidence.validate_loop_evidence_freshness(
+        workspace,
+        repo,
+        run_dir,
+    )
+
+    assert integrity_calls == 0
+    assert freshness.fresh is False
+    assert "trusted_review_missing" in freshness.issues
+
+    state["iterations"][-1]["review_run"] = "missing-review-run"
+    _write_json(state_path, state)
+    integrity_calls = 0
+
+    missing_review_freshness = goal_evidence.validate_loop_evidence_freshness(
+        workspace,
+        repo,
+        run_dir,
+    )
+
+    assert integrity_calls == 0
+    assert missing_review_freshness.fresh is False
+    assert "trusted_review_missing" in missing_review_freshness.issues
+    assert missing_review_freshness.review_run == "missing-review-run"
 
 
 def test_finish_rejects_unbound_iteration_verdict(tmp_path: Path) -> None:
