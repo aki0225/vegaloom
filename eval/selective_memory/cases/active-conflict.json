@@ -1,0 +1,596 @@
+{
+  "schema_version": 1,
+  "case_id": "active-conflict",
+  "task_id": "task-active-conflict",
+  "run_id": "run-active-conflict",
+  "repo_identity": "repo-phase2-offline",
+  "evidence_hashes": {
+    "iterations/conflict/decoy-1.json": "1111111111111111111111111111111111111111111111111111111111111111",
+    "iterations/conflict/decoy-2.json": "2222222222222222222222222222222222222222222222222222222222222222",
+    "iterations/conflict/decoy-3.json": "3333333333333333333333333333333333333333333333333333333333333333",
+    "iterations/conflict/decoy-4.json": "4444444444444444444444444444444444444444444444444444444444444444",
+    "iterations/conflict/decoy-5.json": "5555555555555555555555555555555555555555555555555555555555555555",
+    "iterations/conflict/conflict-keep-v1.json": "6666666666666666666666666666666666666666666666666666666666666666",
+    "iterations/conflict/conflict-remove-v1.json": "7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-001",
+      "seq": 1,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "decoy-01",
+      "item": {
+        "schema_version": 1,
+        "id": "decoy-01",
+        "task_id": "task-active-conflict",
+        "run_id": "run-active-conflict",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "confirmed_fact",
+        "statement": "与 API 方向冲突无关的高风险事实 1。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-active-conflict-001",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/conflict/decoy-1.json",
+            "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        ],
+        "authority": "verified",
+        "risk": "high",
+        "applicability": {
+          "target": "api-contract"
+        },
+        "created_seq": 1,
+        "updated_seq": 1,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-001",
+      "created_at": "2026-07-13T10:01:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-002",
+      "seq": 2,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "decoy-02",
+      "item": {
+        "schema_version": 1,
+        "id": "decoy-02",
+        "task_id": "task-active-conflict",
+        "run_id": "run-active-conflict",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "confirmed_fact",
+        "statement": "与 API 方向冲突无关的高风险事实 2。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-active-conflict-002",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/conflict/decoy-2.json",
+            "sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+          }
+        ],
+        "authority": "verified",
+        "risk": "high",
+        "applicability": {
+          "target": "api-contract"
+        },
+        "created_seq": 2,
+        "updated_seq": 2,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-002",
+      "created_at": "2026-07-13T10:02:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-003",
+      "seq": 3,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "decoy-03",
+      "item": {
+        "schema_version": 1,
+        "id": "decoy-03",
+        "task_id": "task-active-conflict",
+        "run_id": "run-active-conflict",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "confirmed_fact",
+        "statement": "与 API 方向冲突无关的高风险事实 3。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-active-conflict-003",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/conflict/decoy-3.json",
+            "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+          }
+        ],
+        "authority": "verified",
+        "risk": "high",
+        "applicability": {
+          "target": "api-contract"
+        },
+        "created_seq": 3,
+        "updated_seq": 3,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-003",
+      "created_at": "2026-07-13T10:03:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-004",
+      "seq": 4,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "decoy-04",
+      "item": {
+        "schema_version": 1,
+        "id": "decoy-04",
+        "task_id": "task-active-conflict",
+        "run_id": "run-active-conflict",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "confirmed_fact",
+        "statement": "与 API 方向冲突无关的高风险事实 4。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-active-conflict-004",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/conflict/decoy-4.json",
+            "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+          }
+        ],
+        "authority": "verified",
+        "risk": "high",
+        "applicability": {
+          "target": "api-contract"
+        },
+        "created_seq": 4,
+        "updated_seq": 4,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-004",
+      "created_at": "2026-07-13T10:04:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-005",
+      "seq": 5,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "decoy-05",
+      "item": {
+        "schema_version": 1,
+        "id": "decoy-05",
+        "task_id": "task-active-conflict",
+        "run_id": "run-active-conflict",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "confirmed_fact",
+        "statement": "与 API 方向冲突无关的高风险事实 5。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-active-conflict-005",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/conflict/decoy-5.json",
+            "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+          }
+        ],
+        "authority": "verified",
+        "risk": "high",
+        "applicability": {
+          "target": "api-contract"
+        },
+        "created_seq": 5,
+        "updated_seq": 5,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-005",
+      "created_at": "2026-07-13T10:05:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-006",
+      "seq": 6,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "conflict-keep-v1",
+      "item": {
+        "schema_version": 1,
+        "id": "conflict-keep-v1",
+        "task_id": "task-active-conflict",
+        "run_id": "run-active-conflict",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "constraint_interpretation",
+        "statement": "当前发布必须保留 v1 接口。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-active-conflict-006",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/conflict/conflict-keep-v1.json",
+            "sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        ],
+        "authority": "verified",
+        "risk": "high",
+        "applicability": {
+          "target": "api-contract"
+        },
+        "created_seq": 6,
+        "updated_seq": 6,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": "api-contract-direction"
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-006",
+      "created_at": "2026-07-13T10:06:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-007",
+      "seq": 7,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "conflict-remove-v1",
+      "item": {
+        "schema_version": 1,
+        "id": "conflict-remove-v1",
+        "task_id": "task-active-conflict",
+        "run_id": "run-active-conflict",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "constraint_interpretation",
+        "statement": "当前发布必须删除 v1 接口。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-active-conflict-007",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/conflict/conflict-remove-v1.json",
+            "sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+          }
+        ],
+        "authority": "verified",
+        "risk": "high",
+        "applicability": {
+          "target": "api-contract"
+        },
+        "created_seq": 7,
+        "updated_seq": 7,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": "api-contract-direction"
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-007",
+      "created_at": "2026-07-13T10:07:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-008",
+      "seq": 8,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "invalidate",
+      "memory_id": "decoy-01",
+      "item": null,
+      "patch": {
+        "status": "invalidated",
+        "invalidation_reason": "无关事实已被新验证替代。",
+        "updated_seq": 8
+      },
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-008",
+      "created_at": "2026-07-13T12:08:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-009",
+      "seq": 9,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "invalidate",
+      "memory_id": "decoy-02",
+      "item": null,
+      "patch": {
+        "status": "invalidated",
+        "invalidation_reason": "无关事实已被新验证替代。",
+        "updated_seq": 9
+      },
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-009",
+      "created_at": "2026-07-13T12:09:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-active-conflict-010",
+      "seq": 10,
+      "task_id": "task-active-conflict",
+      "run_id": "run-active-conflict",
+      "repo_identity": "repo-phase2-offline",
+      "op": "invalidate",
+      "memory_id": "conflict-remove-v1",
+      "item": null,
+      "patch": {
+        "status": "invalidated",
+        "invalidation_reason": "人工已确认保留 v1，冲突分支失效。",
+        "updated_seq": 10
+      },
+      "source_type": "verification",
+      "source_ref": "verification-active-conflict-010",
+      "created_at": "2026-07-13T12:10:00Z"
+    }
+  ],
+  "checkpoints": [
+    {
+      "checkpoint_id": "active-conflict-cp-01",
+      "event_seq": 5,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-01",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-02",
+      "event_seq": 5,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-02",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-03",
+      "event_seq": 5,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-03",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-04",
+      "event_seq": 7,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-04",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-05",
+      "event_seq": 8,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-05",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-06",
+      "event_seq": 9,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-06",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-07",
+      "event_seq": 9,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-07",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-08",
+      "event_seq": 9,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-08",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-09",
+      "event_seq": 9,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-09",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-10",
+      "event_seq": 9,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-10",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-11",
+      "event_seq": 10,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-11",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-12",
+      "event_seq": 10,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-12",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-13",
+      "event_seq": 10,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-13",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-14",
+      "event_seq": 10,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-14",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "active-conflict-cp-15",
+      "event_seq": 10,
+      "planned_action": {
+        "checkpoint_id": "active-conflict-cp-15",
+        "action": "change_api_contract",
+        "summary": "在多个高风险候选中处理 API 方向",
+        "context": {
+          "target": "api-contract"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    }
+  ]
+}

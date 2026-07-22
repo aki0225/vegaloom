@@ -1,0 +1,225 @@
+name: Selective Memory 公开实验归档
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: ["experiment/selective-memory-archive"]
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  static:
+    name: 范围、收集与离线复现
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 获取公开主线基线
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装开发依赖
+        run: python -m pip install -e ".[dev]"
+
+      - name: 编译与静态检查
+        run: |
+          python -m compileall \
+            eval/selective_memory \
+            scripts/check_selective_memory_archive.py \
+            scripts/run_selective_memory_phase2.py
+          ruff check \
+            eval/selective_memory \
+            tests/conftest.py \
+            tests/experimental/selective_memory \
+            scripts/check_selective_memory_archive.py \
+            scripts/run_selective_memory_phase2.py
+
+      - name: 检查公开范围与隐私
+        run: |
+          python scripts/check_repository_hygiene.py --base-ref origin/main
+          python scripts/check_selective_memory_archive.py --base-ref origin/main
+          git diff --check origin/main...HEAD
+
+      - name: 核对默认与实验节点
+        shell: bash
+        run: |
+          mkdir -p .tmp/pytest
+          python -m pytest --collect-only -q > .tmp/pytest/default.txt
+          default_count="$(grep -c '::' .tmp/pytest/default.txt || true)"
+          test "$default_count" = "540"
+
+          python -m pytest \
+            --include-selective-memory \
+            --collect-only \
+            -q \
+            tests/experimental/selective_memory \
+            > .tmp/pytest/selective-memory.txt
+          experiment_count="$(grep -c '::' .tmp/pytest/selective-memory.txt || true)"
+          test "$experiment_count" = "39"
+          echo "default=${default_count}, selective-memory=${experiment_count}"
+
+      - name: 重生成并核对 Phase 2
+        run: python scripts/run_selective_memory_phase2.py
+
+  tests:
+    name: ${{ matrix.name }}
+    needs: static
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux Python 3.11
+            os: ubuntu-24.04
+            python: "3.11"
+            timeout_method: signal
+            basetemp: linux-py311
+          - name: Linux Python 3.12
+            os: ubuntu-24.04
+            python: "3.12"
+            timeout_method: signal
+            basetemp: linux-py312
+          - name: Windows Python 3.11
+            os: windows-latest
+            python: "3.11"
+            timeout_method: thread
+            basetemp: windows-py311
+          - name: Windows Python 3.12
+            os: windows-latest
+            python: "3.12"
+            timeout_method: thread
+            basetemp: windows-py312
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装测试依赖
+        run: python -m pip install -e ".[dev]" pytest-timeout
+
+      - name: 运行 Selective Memory 离线测试
+        shell: pwsh
+        run: |
+          @'
+          from __future__ import annotations
+
+          import subprocess
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+
+          shard = "${{ matrix.basetemp }}"
+          timeout_method = "${{ matrix.timeout_method }}"
+          pytest_root = "tests/experimental/selective_memory"
+          run_root = Path(".tmp/pytest/runs") / shard
+          report_path = Path(".tmp/pytest/results") / f"{shard}.xml"
+          report_path.parent.mkdir(parents=True, exist_ok=True)
+
+          collect_command = [
+              sys.executable,
+              "-m",
+              "pytest",
+              "--include-selective-memory",
+              "--collect-only",
+              "-q",
+              "-o",
+              f"cache_dir=.tmp/pytest/cache/{shard}-collect",
+              pytest_root,
+          ]
+          try:
+              collected = subprocess.run(
+                  collect_command,
+                  capture_output=True,
+                  text=True,
+                  timeout=60,
+                  check=False,
+              )
+          except subprocess.TimeoutExpired:
+              print("Selective Memory 节点收集超过 60 秒", file=sys.stderr)
+              raise SystemExit(124)
+
+          sys.stdout.write(collected.stdout)
+          sys.stderr.write(collected.stderr)
+          if collected.returncode != 0:
+              raise SystemExit(collected.returncode)
+
+          collected_count = sum(
+              "::" in line for line in collected.stdout.splitlines()
+          )
+          if collected_count != 39:
+              print(
+                  f"Selective Memory 节点收集数量错误：{collected_count} != 39",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          test_command = [
+              sys.executable,
+              "-m",
+              "pytest",
+              "-q",
+              "--include-selective-memory",
+              "--timeout=58",
+              f"--timeout-method={timeout_method}",
+              f"--basetemp={run_root}",
+              "-o",
+              f"cache_dir=.tmp/pytest/cache/{shard}-run",
+              f"--junitxml={report_path}",
+              pytest_root,
+          ]
+          try:
+              result = subprocess.run(test_command, timeout=60, check=False)
+          except subprocess.TimeoutExpired:
+              print("Selective Memory 测试分片超过 60 秒", file=sys.stderr)
+              raise SystemExit(124)
+          if result.returncode != 0:
+              raise SystemExit(result.returncode)
+
+          root = ET.parse(report_path).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
+          totals = {
+              field: sum(int(suite.attrib.get(field, "0")) for suite in suites)
+              for field in ("tests", "failures", "errors", "skipped")
+          }
+          expected = {
+              "tests": 39,
+              "failures": 0,
+              "errors": 0,
+              "skipped": 0,
+          }
+          if totals != expected:
+              print(
+                  f"Selective Memory 执行计数错误：{totals} != {expected}",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+          print(
+              "Selective Memory 分片通过："
+              f"collected={collected_count}, executed={totals['tests']}"
+          )
+          '@ | python -

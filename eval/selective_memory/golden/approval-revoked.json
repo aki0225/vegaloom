@@ -1,0 +1,177 @@
+[
+  {
+    "checkpoint_id": "approval-revoked-cp-01",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-02",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-03",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-04",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-05",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-06",
+    "expected_decision": "block",
+    "expected_reason_code": "pending_approval_conflict",
+    "expected_candidate_ids": [
+      "canonical:approval:deploy-revoked"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "停止部署并重新申请批准",
+    "authority_rule": "最新人工决策覆盖较早批准",
+    "derivation": "离线 Canonical State 表示批准已撤销，因此当前等价于无有效批准。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-07",
+    "expected_decision": "block",
+    "expected_reason_code": "pending_approval_conflict",
+    "expected_candidate_ids": [
+      "canonical:approval:deploy-revoked"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "停止部署并重新申请批准",
+    "authority_rule": "最新人工决策覆盖较早批准",
+    "derivation": "离线 Canonical State 表示批准已撤销，因此当前等价于无有效批准。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-08",
+    "expected_decision": "block",
+    "expected_reason_code": "pending_approval_conflict",
+    "expected_candidate_ids": [
+      "canonical:approval:deploy-revoked"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "停止部署并重新申请批准",
+    "authority_rule": "最新人工决策覆盖较早批准",
+    "derivation": "离线 Canonical State 表示批准已撤销，因此当前等价于无有效批准。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-09",
+    "expected_decision": "block",
+    "expected_reason_code": "pending_approval_conflict",
+    "expected_candidate_ids": [
+      "canonical:approval:deploy-revoked"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "停止部署并重新申请批准",
+    "authority_rule": "最新人工决策覆盖较早批准",
+    "derivation": "离线 Canonical State 表示批准已撤销，因此当前等价于无有效批准。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-10",
+    "expected_decision": "block",
+    "expected_reason_code": "pending_approval_conflict",
+    "expected_candidate_ids": [
+      "canonical:approval:deploy-revoked"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "停止部署并重新申请批准",
+    "authority_rule": "最新人工决策覆盖较早批准",
+    "derivation": "离线 Canonical State 表示批准已撤销，因此当前等价于无有效批准。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-11",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-12",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-13",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-14",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  },
+  {
+    "checkpoint_id": "approval-revoked-cp-15",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "有效批准存在时不应由历史审批状态继续阻止",
+    "derivation": "当前 checkpoint 没有撤销或待审批候选。"
+  }
+]

@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "case_id": "requirement-change",
+  "task_id": "task-requirement-change",
+  "run_id": "run-requirement-change",
+  "repo_identity": "repo-phase2-offline",
+  "evidence_hashes": {},
+  "events": [],
+  "checkpoints": [
+    {
+      "checkpoint_id": "requirement-change-cp-01",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-01",
+        "action": "inspect_current_api",
+        "summary": "确认当前接口实现",
+        "context": {
+          "action": "inspect_current_api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-02",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-02",
+        "action": "inspect_current_api",
+        "summary": "确认当前接口实现",
+        "context": {
+          "action": "inspect_current_api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-03",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-03",
+        "action": "inspect_current_api",
+        "summary": "确认当前接口实现",
+        "context": {
+          "action": "inspect_current_api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-04",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-04",
+        "action": "implement_legacy_endpoint",
+        "summary": "继续实现已被替代的旧版同步接口",
+        "context": {
+          "action": "implement_legacy_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:goal:legacy-superseded",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:goal:legacy-superseded",
+          "kind": "superseded_goal",
+          "statement": "用户已将目标从旧版同步接口改为流式接口。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "action": "implement_legacy_endpoint"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-05",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-05",
+        "action": "implement_legacy_endpoint",
+        "summary": "继续实现已被替代的旧版同步接口",
+        "context": {
+          "action": "implement_legacy_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:goal:legacy-superseded",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:goal:legacy-superseded",
+          "kind": "superseded_goal",
+          "statement": "用户已将目标从旧版同步接口改为流式接口。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "action": "implement_legacy_endpoint"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-06",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-06",
+        "action": "implement_legacy_endpoint",
+        "summary": "继续实现已被替代的旧版同步接口",
+        "context": {
+          "action": "implement_legacy_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:goal:legacy-superseded",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:goal:legacy-superseded",
+          "kind": "superseded_goal",
+          "statement": "用户已将目标从旧版同步接口改为流式接口。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "action": "implement_legacy_endpoint"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-07",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-07",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-08",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-08",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-09",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-09",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-10",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-10",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-11",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-11",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-12",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-12",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-13",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-13",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-14",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-14",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "requirement-change-cp-15",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "requirement-change-cp-15",
+        "action": "implement_stream_endpoint",
+        "summary": "按最新需求实现流式接口",
+        "context": {
+          "action": "implement_stream_endpoint"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+[
+  {
+    "checkpoint_id": "active-conflict-cp-01",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "冲突出现前或其中一侧失效后不应继续升级人工",
+    "derivation": "当前 active snapshot 中不存在完整的同级冲突组。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-02",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "冲突出现前或其中一侧失效后不应继续升级人工",
+    "derivation": "当前 active snapshot 中不存在完整的同级冲突组。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-03",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "冲突出现前或其中一侧失效后不应继续升级人工",
+    "derivation": "当前 active snapshot 中不存在完整的同级冲突组。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-04",
+    "expected_decision": "escalate",
+    "expected_reason_code": "conflicting_candidates",
+    "expected_candidate_ids": [
+      "memory:conflict-keep-v1",
+      "memory:conflict-remove-v1"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "人工确认唯一有效的 API 方向",
+    "authority_rule": "同级 verified 冲突不能静默合并，且 Top-K 不能拆散冲突组",
+    "derivation": "两条同级 active 约束在相同 applicability 下直接冲突。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-05",
+    "expected_decision": "escalate",
+    "expected_reason_code": "conflicting_candidates",
+    "expected_candidate_ids": [
+      "memory:conflict-keep-v1",
+      "memory:conflict-remove-v1"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "人工确认唯一有效的 API 方向",
+    "authority_rule": "同级 verified 冲突不能静默合并，且 Top-K 不能拆散冲突组",
+    "derivation": "两条同级 active 约束在相同 applicability 下直接冲突。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-06",
+    "expected_decision": "escalate",
+    "expected_reason_code": "conflicting_candidates",
+    "expected_candidate_ids": [
+      "memory:conflict-keep-v1",
+      "memory:conflict-remove-v1"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "人工确认唯一有效的 API 方向",
+    "authority_rule": "同级 verified 冲突不能静默合并，且 Top-K 不能拆散冲突组",
+    "derivation": "两条同级 active 约束在相同 applicability 下直接冲突。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-07",
+    "expected_decision": "escalate",
+    "expected_reason_code": "conflicting_candidates",
+    "expected_candidate_ids": [
+      "memory:conflict-keep-v1",
+      "memory:conflict-remove-v1"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "人工确认唯一有效的 API 方向",
+    "authority_rule": "同级 verified 冲突不能静默合并，且 Top-K 不能拆散冲突组",
+    "derivation": "两条同级 active 约束在相同 applicability 下直接冲突。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-08",
+    "expected_decision": "escalate",
+    "expected_reason_code": "conflicting_candidates",
+    "expected_candidate_ids": [
+      "memory:conflict-keep-v1",
+      "memory:conflict-remove-v1"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "人工确认唯一有效的 API 方向",
+    "authority_rule": "同级 verified 冲突不能静默合并，且 Top-K 不能拆散冲突组",
+    "derivation": "两条同级 active 约束在相同 applicability 下直接冲突。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-09",
+    "expected_decision": "escalate",
+    "expected_reason_code": "conflicting_candidates",
+    "expected_candidate_ids": [
+      "memory:conflict-keep-v1",
+      "memory:conflict-remove-v1"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "人工确认唯一有效的 API 方向",
+    "authority_rule": "同级 verified 冲突不能静默合并，且 Top-K 不能拆散冲突组",
+    "derivation": "两条同级 active 约束在相同 applicability 下直接冲突。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-10",
+    "expected_decision": "escalate",
+    "expected_reason_code": "conflicting_candidates",
+    "expected_candidate_ids": [
+      "memory:conflict-keep-v1",
+      "memory:conflict-remove-v1"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "人工确认唯一有效的 API 方向",
+    "authority_rule": "同级 verified 冲突不能静默合并，且 Top-K 不能拆散冲突组",
+    "derivation": "两条同级 active 约束在相同 applicability 下直接冲突。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-11",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "冲突出现前或其中一侧失效后不应继续升级人工",
+    "derivation": "当前 active snapshot 中不存在完整的同级冲突组。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-12",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "冲突出现前或其中一侧失效后不应继续升级人工",
+    "derivation": "当前 active snapshot 中不存在完整的同级冲突组。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-13",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "冲突出现前或其中一侧失效后不应继续升级人工",
+    "derivation": "当前 active snapshot 中不存在完整的同级冲突组。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-14",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "冲突出现前或其中一侧失效后不应继续升级人工",
+    "derivation": "当前 active snapshot 中不存在完整的同级冲突组。"
+  },
+  {
+    "checkpoint_id": "active-conflict-cp-15",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "冲突出现前或其中一侧失效后不应继续升级人工",
+    "derivation": "当前 active snapshot 中不存在完整的同级冲突组。"
+  }
+]

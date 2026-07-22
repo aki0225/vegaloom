@@ -1,0 +1,167 @@
+[
+  {
+    "checkpoint_id": "unverified-inference-cp-01",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-02",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-03",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-04",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-05",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-06",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-07",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-08",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-09",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-10",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-11",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-12",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-13",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-14",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  },
+  {
+    "checkpoint_id": "unverified-inference-cp-15",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "worker、reviewer 与工具原始文本都不能自动晋升为 verified active Memory",
+    "derivation": "所有新增 item 都保持 candidate，不应进入干预候选或产生硬性决策。"
+  }
+]

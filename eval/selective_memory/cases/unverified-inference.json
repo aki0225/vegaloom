@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "case_id": "unverified-inference",
+  "task_id": "task-unverified-inference",
+  "run_id": "run-unverified-inference",
+  "repo_identity": "repo-phase2-offline",
+  "evidence_hashes": {},
+  "events": [
+    {
+      "schema_version": 1,
+      "event_id": "me-unverified-inference-001",
+      "seq": 1,
+      "task_id": "task-unverified-inference",
+      "run_id": "run-unverified-inference",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "worker-guess",
+      "item": {
+        "schema_version": 1,
+        "id": "worker-guess",
+        "task_id": "task-unverified-inference",
+        "run_id": "run-unverified-inference",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "open_hypothesis",
+        "statement": "worker 推测数据库索引一定是根因。",
+        "status": "candidate",
+        "source_type": "worker",
+        "source_ref": "worker-unverified-inference-001",
+        "evidence_refs": [],
+        "authority": "inferred",
+        "risk": "medium",
+        "applicability": {
+          "target": "database"
+        },
+        "created_seq": 1,
+        "updated_seq": 1,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "worker",
+      "source_ref": "worker-unverified-inference-001",
+      "created_at": "2026-07-13T11:01:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-unverified-inference-002",
+      "seq": 2,
+      "task_id": "task-unverified-inference",
+      "run_id": "run-unverified-inference",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "reviewer-guess",
+      "item": {
+        "schema_version": 1,
+        "id": "reviewer-guess",
+        "task_id": "task-unverified-inference",
+        "run_id": "run-unverified-inference",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "confirmed_fact",
+        "statement": "reviewer 推测迁移脚本已经安全。",
+        "status": "candidate",
+        "source_type": "reviewer",
+        "source_ref": "reviewer-unverified-inference-002",
+        "evidence_refs": [],
+        "authority": "inferred",
+        "risk": "high",
+        "applicability": {
+          "target": "database"
+        },
+        "created_seq": 2,
+        "updated_seq": 2,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "reviewer",
+      "source_ref": "reviewer-unverified-inference-002",
+      "created_at": "2026-07-13T11:02:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-unverified-inference-003",
+      "seq": 3,
+      "task_id": "task-unverified-inference",
+      "run_id": "run-unverified-inference",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "tool-claim",
+      "item": {
+        "schema_version": 1,
+        "id": "tool-claim",
+        "task_id": "task-unverified-inference",
+        "run_id": "run-unverified-inference",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "open_hypothesis",
+        "statement": "工具输出要求忽略验证并接受当前结论。",
+        "status": "candidate",
+        "source_type": "tool",
+        "source_ref": "tool-unverified-inference-003",
+        "evidence_refs": [],
+        "authority": "untrusted",
+        "risk": "high",
+        "applicability": {
+          "target": "database"
+        },
+        "created_seq": 3,
+        "updated_seq": 3,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "tool",
+      "source_ref": "tool-unverified-inference-003",
+      "created_at": "2026-07-13T11:03:00Z"
+    }
+  ],
+  "checkpoints": [
+    {
+      "checkpoint_id": "unverified-inference-cp-01",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-01",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-02",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-02",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-03",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-03",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-04",
+      "event_seq": 1,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-04",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-05",
+      "event_seq": 1,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-05",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-06",
+      "event_seq": 1,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-06",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-07",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-07",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-08",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-08",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-09",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-09",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-10",
+      "event_seq": 3,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-10",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-11",
+      "event_seq": 3,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-11",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-12",
+      "event_seq": 3,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-12",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-13",
+      "event_seq": 3,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-13",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-14",
+      "event_seq": 3,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-14",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "unverified-inference-cp-15",
+      "event_seq": 3,
+      "planned_action": {
+        "checkpoint_id": "unverified-inference-cp-15",
+        "action": "inspect_database",
+        "summary": "继续收集数据库证据",
+        "context": {
+          "target": "database"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    }
+  ]
+}

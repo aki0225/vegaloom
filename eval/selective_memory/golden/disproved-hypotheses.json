@@ -1,0 +1,177 @@
+[
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-01",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-02",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-03",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-04",
+    "expected_decision": "remind",
+    "expected_reason_code": "repeats_failed_attempt",
+    "expected_candidate_ids": [
+      "memory:failure-root-a"
+    ],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "先检查失败方案的适用条件是否发生变化",
+    "authority_rule": "当前可复现验证证据高于 worker 推断，普通提醒按最近三个 checkpoint 去重",
+    "derivation": "planned action 与 verified failed_attempt 的 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-05",
+    "expected_decision": "remind",
+    "expected_reason_code": "repeats_failed_attempt",
+    "expected_candidate_ids": [
+      "memory:failure-root-a"
+    ],
+    "is_high_risk": false,
+    "expected_suppressed": true,
+    "expected_next_action": "先检查失败方案的适用条件是否发生变化",
+    "authority_rule": "当前可复现验证证据高于 worker 推断，普通提醒按最近三个 checkpoint 去重",
+    "derivation": "planned action 与 verified failed_attempt 的 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-06",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-07",
+    "expected_decision": "remind",
+    "expected_reason_code": "repeats_failed_attempt",
+    "expected_candidate_ids": [
+      "memory:failure-root-b"
+    ],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "先检查失败方案的适用条件是否发生变化",
+    "authority_rule": "当前可复现验证证据高于 worker 推断，普通提醒按最近三个 checkpoint 去重",
+    "derivation": "planned action 与 verified failed_attempt 的 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-08",
+    "expected_decision": "remind",
+    "expected_reason_code": "repeats_failed_attempt",
+    "expected_candidate_ids": [
+      "memory:failure-root-b"
+    ],
+    "is_high_risk": false,
+    "expected_suppressed": true,
+    "expected_next_action": "先检查失败方案的适用条件是否发生变化",
+    "authority_rule": "当前可复现验证证据高于 worker 推断，普通提醒按最近三个 checkpoint 去重",
+    "derivation": "planned action 与 verified failed_attempt 的 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-09",
+    "expected_decision": "remind",
+    "expected_reason_code": "repeats_failed_attempt",
+    "expected_candidate_ids": [
+      "memory:failure-root-a"
+    ],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "先检查失败方案的适用条件是否发生变化",
+    "authority_rule": "当前可复现验证证据高于 worker 推断，普通提醒按最近三个 checkpoint 去重",
+    "derivation": "planned action 与 verified failed_attempt 的 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-10",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-11",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-12",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-13",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-14",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  },
+  {
+    "checkpoint_id": "disproved-hypotheses-cp-15",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "新假设和信息收集不应被历史失败候选阻止",
+    "derivation": "planned action 与已证伪方案的 applicability 不匹配。"
+  }
+]

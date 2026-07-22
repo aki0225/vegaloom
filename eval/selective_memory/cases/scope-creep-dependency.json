@@ -1,0 +1,491 @@
+{
+  "schema_version": 1,
+  "case_id": "scope-creep-dependency",
+  "task_id": "task-scope-creep-dependency",
+  "run_id": "run-scope-creep-dependency",
+  "repo_identity": "repo-phase2-offline",
+  "evidence_hashes": {},
+  "events": [],
+  "checkpoints": [
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-01",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-01",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-02",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-02",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-03",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-03",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-04",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-04",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-05",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-05",
+        "action": "add_dependency",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-06",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-06",
+        "action": "add_dependency",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-07",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-07",
+        "action": "add_dependency",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-08",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-08",
+        "action": "add_dependency",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-09",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-09",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-10",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-10",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-11",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-11",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-12",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-12",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-13",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-13",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-14",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-14",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "scope-creep-dependency-cp-15",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "scope-creep-dependency-cp-15",
+        "action": "edit_existing_module",
+        "summary": "检查最小实现过程中的范围膨胀",
+        "context": {
+          "scope": "minimal"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:scope:no-dependency",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:scope:no-dependency",
+          "kind": "current_constraint",
+          "statement": "用户要求最小实现，不允许引入新依赖。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {
+            "scope": "minimal",
+            "blocked_action": "add_dependency"
+          },
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    }
+  ]
+}

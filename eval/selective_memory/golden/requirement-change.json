@@ -1,0 +1,173 @@
+[
+  {
+    "checkpoint_id": "requirement-change-cp-01",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-02",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-03",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-04",
+    "expected_decision": "block",
+    "expected_reason_code": "superseded_goal",
+    "expected_candidate_ids": [
+      "canonical:goal:legacy-superseded"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "停止旧目标并同步最新验收标准",
+    "authority_rule": "当前用户最新要求高于旧计划与任何 Memory",
+    "derivation": "Canonical State 已明确旧接口目标被替代，继续实现必须被阻止。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-05",
+    "expected_decision": "block",
+    "expected_reason_code": "superseded_goal",
+    "expected_candidate_ids": [
+      "canonical:goal:legacy-superseded"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "停止旧目标并同步最新验收标准",
+    "authority_rule": "当前用户最新要求高于旧计划与任何 Memory",
+    "derivation": "Canonical State 已明确旧接口目标被替代，继续实现必须被阻止。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-06",
+    "expected_decision": "block",
+    "expected_reason_code": "superseded_goal",
+    "expected_candidate_ids": [
+      "canonical:goal:legacy-superseded"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "停止旧目标并同步最新验收标准",
+    "authority_rule": "当前用户最新要求高于旧计划与任何 Memory",
+    "derivation": "Canonical State 已明确旧接口目标被替代，继续实现必须被阻止。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-07",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-08",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-09",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-10",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-11",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-12",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-13",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-14",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  },
+  {
+    "checkpoint_id": "requirement-change-cp-15",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "当前行动与最新目标一致时不应产生额外干预",
+    "derivation": "没有仍然适用的冲突、审批或失败候选，按当前计划继续。"
+  }
+]

@@ -1,0 +1,173 @@
+[
+  {
+    "checkpoint_id": "session-resume-cp-01",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-02",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-03",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-04",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-05",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-06",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-07",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-08",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-09",
+    "expected_decision": "remind",
+    "expected_reason_code": "session_resume_risk",
+    "expected_candidate_ids": [
+      "memory:fact-cache-lock"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "恢复后先重新核对双写锁事实",
+    "authority_rule": "Session 恢复时应重新呈现仍适用的 verified 执行事实",
+    "derivation": "事件重放后 verified fact 仍有效且 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-10",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-11",
+    "expected_decision": "remind",
+    "expected_reason_code": "session_resume_risk",
+    "expected_candidate_ids": [
+      "memory:fact-cache-lock"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "恢复后先重新核对双写锁事实",
+    "authority_rule": "Session 恢复时应重新呈现仍适用的 verified 执行事实",
+    "derivation": "事件重放后 verified fact 仍有效且 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-12",
+    "expected_decision": "escalate",
+    "expected_reason_code": "applicability_unknown",
+    "expected_candidate_ids": [
+      "memory:fact-cache-lock"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "补齐当前组件状态后再继续",
+    "authority_rule": "高风险 verified 信息适用条件缺失时不能静默视为不适用",
+    "derivation": "planned action 缺少 component，无法判断双写锁是否仍约束当前行动。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-13",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-14",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  },
+  {
+    "checkpoint_id": "session-resume-cp-15",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "非恢复动作或明确不匹配的组件不触发恢复提醒",
+    "derivation": "当前 checkpoint 没有 Session 恢复风险或 applicability 明确不匹配。"
+  }
+]

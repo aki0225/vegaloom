@@ -1,0 +1,175 @@
+[
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-01",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-02",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-03",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-04",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-05",
+    "expected_decision": "block",
+    "expected_reason_code": "violates_constraint",
+    "expected_candidate_ids": [
+      "canonical:scope:no-dependency"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "回到现有模块内实现，先证明新增依赖不可避免",
+    "authority_rule": "当前用户明确非目标高于实现偏好",
+    "derivation": "planned action 正是 current_constraint 声明的 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-06",
+    "expected_decision": "block",
+    "expected_reason_code": "violates_constraint",
+    "expected_candidate_ids": [
+      "canonical:scope:no-dependency"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "回到现有模块内实现，先证明新增依赖不可避免",
+    "authority_rule": "当前用户明确非目标高于实现偏好",
+    "derivation": "planned action 正是 current_constraint 声明的 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-07",
+    "expected_decision": "block",
+    "expected_reason_code": "violates_constraint",
+    "expected_candidate_ids": [
+      "canonical:scope:no-dependency"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "回到现有模块内实现，先证明新增依赖不可避免",
+    "authority_rule": "当前用户明确非目标高于实现偏好",
+    "derivation": "planned action 正是 current_constraint 声明的 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-08",
+    "expected_decision": "block",
+    "expected_reason_code": "violates_constraint",
+    "expected_candidate_ids": [
+      "canonical:scope:no-dependency"
+    ],
+    "is_high_risk": true,
+    "expected_suppressed": false,
+    "expected_next_action": "回到现有模块内实现，先证明新增依赖不可避免",
+    "authority_rule": "当前用户明确非目标高于实现偏好",
+    "derivation": "planned action 正是 current_constraint 声明的 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-09",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-10",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-11",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-12",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-13",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-14",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  },
+  {
+    "checkpoint_id": "scope-creep-dependency-cp-15",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "约束只阻止明确的 add_dependency，不应阻止正常的最小实现",
+    "derivation": "planned action 未命中 blocked_action。"
+  }
+]

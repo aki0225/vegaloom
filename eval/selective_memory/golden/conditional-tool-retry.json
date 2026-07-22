@@ -1,0 +1,171 @@
+[
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-01",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-02",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-03",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-04",
+    "expected_decision": "remind",
+    "expected_reason_code": "repeats_failed_attempt",
+    "expected_candidate_ids": [
+      "memory:failure-codegen-down"
+    ],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "先检查失败方案的适用条件是否发生变化",
+    "authority_rule": "当前可复现验证证据高于 worker 推断，普通提醒按最近三个 checkpoint 去重",
+    "derivation": "planned action 与 verified failed_attempt 的 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-05",
+    "expected_decision": "remind",
+    "expected_reason_code": "repeats_failed_attempt",
+    "expected_candidate_ids": [
+      "memory:failure-codegen-down"
+    ],
+    "is_high_risk": false,
+    "expected_suppressed": true,
+    "expected_next_action": "先检查失败方案的适用条件是否发生变化",
+    "authority_rule": "当前可复现验证证据高于 worker 推断，普通提醒按最近三个 checkpoint 去重",
+    "derivation": "planned action 与 verified failed_attempt 的 applicability 精确匹配。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-06",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-07",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-08",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-09",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-10",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-11",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-12",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-13",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-14",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  },
+  {
+    "checkpoint_id": "conditional-tool-retry-cp-15",
+    "expected_decision": "allow",
+    "expected_reason_code": "none",
+    "expected_candidate_ids": [],
+    "is_high_risk": false,
+    "expected_suppressed": false,
+    "expected_next_action": "按当前计划继续，并保留既有 Canonical State 门禁",
+    "authority_rule": "前置条件已变化或信息不足时，不应把旧的中风险失败永久变成硬阻止",
+    "derivation": "工具状态恢复时 applicability 明确不匹配；中风险缺字段只记录 uncertainty，不做硬阻止。"
+  }
+]

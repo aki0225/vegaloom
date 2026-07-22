@@ -1,0 +1,341 @@
+{
+  "schema_version": 1,
+  "case_id": "disproved-hypotheses",
+  "task_id": "task-disproved-hypotheses",
+  "run_id": "run-disproved-hypotheses",
+  "repo_identity": "repo-phase2-offline",
+  "evidence_hashes": {
+    "iterations/01/verification-result.json": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "iterations/02/verification-result.json": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "events": [
+    {
+      "schema_version": 1,
+      "event_id": "me-disproved-hypotheses-001",
+      "seq": 1,
+      "task_id": "task-disproved-hypotheses",
+      "run_id": "run-disproved-hypotheses",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "failure-root-a",
+      "item": {
+        "schema_version": 1,
+        "id": "failure-root-a",
+        "task_id": "task-disproved-hypotheses",
+        "run_id": "run-disproved-hypotheses",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "failed_attempt",
+        "statement": "根因假设 A 已被验证证伪。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-disproved-hypotheses-001",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/01/verification-result.json",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "authority": "verified",
+        "risk": "medium",
+        "applicability": {
+          "action": "retry_root_a",
+          "service": "api"
+        },
+        "created_seq": 1,
+        "updated_seq": 1,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-disproved-hypotheses-001",
+      "created_at": "2026-07-13T10:01:00Z"
+    },
+    {
+      "schema_version": 1,
+      "event_id": "me-disproved-hypotheses-002",
+      "seq": 2,
+      "task_id": "task-disproved-hypotheses",
+      "run_id": "run-disproved-hypotheses",
+      "repo_identity": "repo-phase2-offline",
+      "op": "add",
+      "memory_id": "failure-root-b",
+      "item": {
+        "schema_version": 1,
+        "id": "failure-root-b",
+        "task_id": "task-disproved-hypotheses",
+        "run_id": "run-disproved-hypotheses",
+        "repo_identity": "repo-phase2-offline",
+        "kind": "failed_attempt",
+        "statement": "根因假设 B 已被验证证伪。",
+        "status": "active",
+        "source_type": "verification",
+        "source_ref": "verification-disproved-hypotheses-002",
+        "evidence_refs": [
+          {
+            "artifact": "iterations/02/verification-result.json",
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "authority": "verified",
+        "risk": "medium",
+        "applicability": {
+          "action": "retry_root_b",
+          "service": "api"
+        },
+        "created_seq": 2,
+        "updated_seq": 2,
+        "replacement_id": null,
+        "invalidation_reason": null,
+        "conflict_group": null
+      },
+      "patch": {},
+      "source_type": "verification",
+      "source_ref": "verification-disproved-hypotheses-002",
+      "created_at": "2026-07-13T10:02:00Z"
+    }
+  ],
+  "checkpoints": [
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-01",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-01",
+        "action": "inspect_logs",
+        "summary": "读取故障日志",
+        "context": {
+          "action": "inspect_logs",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-02",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-02",
+        "action": "inspect_metrics",
+        "summary": "核对服务指标",
+        "context": {
+          "action": "inspect_metrics",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-03",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-03",
+        "action": "form_root_a",
+        "summary": "形成根因假设 A",
+        "context": {
+          "action": "form_root_a",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-04",
+      "event_seq": 1,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-04",
+        "action": "retry_root_a",
+        "summary": "再次尝试已证伪的根因 A",
+        "context": {
+          "action": "retry_root_a",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-05",
+      "event_seq": 1,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-05",
+        "action": "retry_root_a",
+        "summary": "连续重复根因 A",
+        "context": {
+          "action": "retry_root_a",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-06",
+      "event_seq": 1,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-06",
+        "action": "test_root_c",
+        "summary": "验证新的根因 C",
+        "context": {
+          "action": "test_root_c",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-07",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-07",
+        "action": "retry_root_b",
+        "summary": "再次尝试已证伪的根因 B",
+        "context": {
+          "action": "retry_root_b",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-08",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-08",
+        "action": "retry_root_b",
+        "summary": "连续重复根因 B",
+        "context": {
+          "action": "retry_root_b",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-09",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-09",
+        "action": "retry_root_a",
+        "summary": "隔三个 checkpoint 后再次尝试根因 A",
+        "context": {
+          "action": "retry_root_a",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-10",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-10",
+        "action": "test_root_c",
+        "summary": "继续验证新的根因 C",
+        "context": {
+          "action": "test_root_c",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-11",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-11",
+        "action": "test_root_c",
+        "summary": "继续验证新的根因 C",
+        "context": {
+          "action": "test_root_c",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-12",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-12",
+        "action": "test_root_c",
+        "summary": "继续验证新的根因 C",
+        "context": {
+          "action": "test_root_c",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-13",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-13",
+        "action": "test_root_c",
+        "summary": "继续验证新的根因 C",
+        "context": {
+          "action": "test_root_c",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-14",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-14",
+        "action": "test_root_c",
+        "summary": "继续验证新的根因 C",
+        "context": {
+          "action": "test_root_c",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "disproved-hypotheses-cp-15",
+      "event_seq": 2,
+      "planned_action": {
+        "checkpoint_id": "disproved-hypotheses-cp-15",
+        "action": "test_root_c",
+        "summary": "继续验证新的根因 C",
+        "context": {
+          "action": "test_root_c",
+          "service": "api"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    }
+  ]
+}

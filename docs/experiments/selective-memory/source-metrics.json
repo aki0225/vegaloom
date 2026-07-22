@@ -1,0 +1,345 @@
+{
+  "schema_version": 1,
+  "evidence_status": "full-offline-evidence",
+  "case_count": 10,
+  "checkpoint_count": 150,
+  "labeled_checkpoint_count": 150,
+  "mode_evaluation_count": 600,
+  "mode_metrics": {
+    "A": {
+      "checkpoint_count": 150,
+      "labeled_checkpoint_count": 150,
+      "candidate_count": 0,
+      "injected_characters": 0,
+      "injected_bytes": 0,
+      "injected_lines": 0,
+      "relevant_item_recall": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "shared_canonical_gate_accuracy": {
+        "numerator": 16,
+        "denominator": 16,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "selector_policy_ns": 2042900,
+      "decision_accuracy": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "decision_precision": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "decision_recall": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "high_risk_recall": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "overblocking_rate": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "false_positive_count": 0,
+      "false_negative_count": 0
+    },
+    "B": {
+      "checkpoint_count": 150,
+      "labeled_checkpoint_count": 150,
+      "candidate_count": 138,
+      "injected_characters": 4405,
+      "injected_bytes": 7323,
+      "injected_lines": 111,
+      "relevant_item_recall": {
+        "numerator": 40,
+        "denominator": 40,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "shared_canonical_gate_accuracy": {
+        "numerator": 16,
+        "denominator": 16,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "selector_policy_ns": 3123900,
+      "decision_accuracy": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "decision_precision": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "decision_recall": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "high_risk_recall": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "overblocking_rate": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "false_positive_count": 0,
+      "false_negative_count": 0
+    },
+    "C": {
+      "checkpoint_count": 150,
+      "labeled_checkpoint_count": 150,
+      "candidate_count": 112,
+      "injected_characters": 3501,
+      "injected_bytes": 5789,
+      "injected_lines": 85,
+      "relevant_item_recall": {
+        "numerator": 40,
+        "denominator": 40,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "shared_canonical_gate_accuracy": {
+        "numerator": 16,
+        "denominator": 16,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "selector_policy_ns": 3226600,
+      "decision_accuracy": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "decision_precision": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "decision_recall": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "high_risk_recall": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "overblocking_rate": {
+        "numerator": 0,
+        "denominator": 0,
+        "defined": false,
+        "value": null,
+        "display": "not-applicable"
+      },
+      "false_positive_count": 0,
+      "false_negative_count": 0
+    },
+    "D": {
+      "checkpoint_count": 150,
+      "labeled_checkpoint_count": 150,
+      "candidate_count": 112,
+      "injected_characters": 370,
+      "injected_bytes": 1050,
+      "injected_lines": 14,
+      "relevant_item_recall": {
+        "numerator": 40,
+        "denominator": 40,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "shared_canonical_gate_accuracy": {
+        "numerator": 16,
+        "denominator": 16,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "selector_policy_ns": 4376200,
+      "decision_accuracy": {
+        "numerator": 150,
+        "denominator": 150,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "decision_precision": {
+        "numerator": 33,
+        "denominator": 33,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "decision_recall": {
+        "numerator": 33,
+        "denominator": 33,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "high_risk_recall": {
+        "numerator": 26,
+        "denominator": 26,
+        "defined": true,
+        "value": 1.0,
+        "display": "100.0%"
+      },
+      "overblocking_rate": {
+        "numerator": 0,
+        "denominator": 117,
+        "defined": true,
+        "value": 0.0,
+        "display": "0.0%"
+      },
+      "false_positive_count": 0,
+      "false_negative_count": 0
+    }
+  },
+  "d_injected_characters_vs_c": {
+    "numerator": 370,
+    "denominator": 3501,
+    "defined": true,
+    "value": 0.10568409025992574,
+    "display": "10.6%"
+  },
+  "safety_metrics": {
+    "event_replay_determinism": true,
+    "snapshot_rebuild_success": true,
+    "resume_decision_consistency": true,
+    "candidate_parity": true,
+    "memory_contamination_count": 0,
+    "silent_conflict_merge_count": 0,
+    "stale_item_observation_count": 7,
+    "unknown_applicability_observation_count": 2,
+    "top_k_conflict_bundle_coverage": {
+      "numerator": 7,
+      "denominator": 7,
+      "defined": true,
+      "value": 1.0,
+      "display": "100.0%"
+    }
+  },
+  "quality_metrics": {
+    "dedupe_suppression_accuracy": {
+      "numerator": 9,
+      "denominator": 9,
+      "defined": true,
+      "value": 1.0,
+      "display": "100.0%"
+    },
+    "conflict_escalation_accuracy": {
+      "numerator": 7,
+      "denominator": 7,
+      "defined": true,
+      "value": 1.0,
+      "display": "100.0%"
+    },
+    "stale_reference_count": 0,
+    "stale_reference_rate": {
+      "numerator": 0,
+      "denominator": 33,
+      "defined": true,
+      "value": 0.0,
+      "display": "0.0%"
+    },
+    "false_positive_count": 0,
+    "false_negative_count": 0
+  },
+  "sample_evidence": {
+    "status": "sufficient-offline-samples",
+    "requirements": {
+      "intervention_samples": {
+        "actual": 33,
+        "minimum": 20,
+        "sufficient": true
+      },
+      "high_risk_samples": {
+        "actual": 26,
+        "minimum": 10,
+        "sufficient": true
+      },
+      "relevant_candidate_samples": {
+        "actual": 40,
+        "minimum": 20,
+        "sufficient": true
+      },
+      "stale_rate_intervention_samples": {
+        "actual": 33,
+        "minimum": 20,
+        "sufficient": true
+      }
+    },
+    "reason": "完整 Phase 2 离线样本量门槛已满足。"
+  },
+  "phase2_gates": {
+    "event_replay_determinism": true,
+    "snapshot_rebuild_success": true,
+    "resume_decision_consistency": true,
+    "candidate_parity": true,
+    "memory_contamination_zero": true,
+    "silent_conflict_merge_zero": true,
+    "top_k_conflict_bundle_complete": true,
+    "sample_size_sufficient": true,
+    "d_vs_c_characters_at_most_70_percent": true,
+    "decision_precision_at_least_80_percent": true,
+    "decision_recall_at_least_80_percent": true,
+    "high_risk_recall_at_least_90_percent": true,
+    "stale_reference_rate_below_5_percent": true,
+    "relevant_item_recall_at_least_90_percent": true
+  },
+  "decision": "candidate-for-shadow",
+  "llm_request_count": 0,
+  "real_task_success_claimed": false
+}

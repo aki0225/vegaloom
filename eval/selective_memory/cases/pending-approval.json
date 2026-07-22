@@ -1,0 +1,292 @@
+{
+  "schema_version": 1,
+  "case_id": "pending-approval",
+  "task_id": "task-pending-approval",
+  "run_id": "run-pending-approval",
+  "repo_identity": "repo-phase2-offline",
+  "evidence_hashes": {},
+  "events": [],
+  "checkpoints": [
+    {
+      "checkpoint_id": "pending-approval-cp-01",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-01",
+        "action": "verify_release",
+        "summary": "执行发布前验证",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-02",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-02",
+        "action": "verify_release",
+        "summary": "执行发布前验证",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-03",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-03",
+        "action": "verify_release",
+        "summary": "执行发布前验证",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-04",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-04",
+        "action": "verify_release",
+        "summary": "执行发布前验证",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-05",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-05",
+        "action": "deploy",
+        "summary": "在审批完成前尝试部署",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:approval:deploy",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:approval:deploy",
+          "kind": "pending_approval",
+          "statement": "部署操作尚未获得有效人工批准。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {},
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-06",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-06",
+        "action": "deploy",
+        "summary": "在审批完成前尝试部署",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:approval:deploy",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:approval:deploy",
+          "kind": "pending_approval",
+          "statement": "部署操作尚未获得有效人工批准。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {},
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-07",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-07",
+        "action": "deploy",
+        "summary": "在审批完成前尝试部署",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:approval:deploy",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:approval:deploy",
+          "kind": "pending_approval",
+          "statement": "部署操作尚未获得有效人工批准。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {},
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-08",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-08",
+        "action": "deploy",
+        "summary": "在审批完成前尝试部署",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [
+        {
+          "candidate_id": "canonical:approval:deploy",
+          "source_layer": "canonical_state",
+          "source_ref": "canonical-state#canonical:approval:deploy",
+          "kind": "pending_approval",
+          "statement": "部署操作尚未获得有效人工批准。",
+          "authority": "authoritative",
+          "risk": "high",
+          "applicable": true,
+          "applicability_status": "applicable",
+          "applicability": {},
+          "conflict_group": null
+        }
+      ],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-09",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-09",
+        "action": "deploy",
+        "summary": "审批完成后执行部署或部署后检查",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-10",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-10",
+        "action": "deploy",
+        "summary": "审批完成后执行部署或部署后检查",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-11",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-11",
+        "action": "deploy",
+        "summary": "审批完成后执行部署或部署后检查",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-12",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-12",
+        "action": "deploy",
+        "summary": "审批完成后执行部署或部署后检查",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-13",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-13",
+        "action": "deploy",
+        "summary": "审批完成后执行部署或部署后检查",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-14",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-14",
+        "action": "deploy",
+        "summary": "审批完成后执行部署或部署后检查",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    },
+    {
+      "checkpoint_id": "pending-approval-cp-15",
+      "event_seq": 0,
+      "planned_action": {
+        "checkpoint_id": "pending-approval-cp-15",
+        "action": "deploy",
+        "summary": "审批完成后执行部署或部署后检查",
+        "context": {
+          "environment": "production"
+        },
+        "session_resumed": false
+      },
+      "canonical_candidates": [],
+      "rebuild_snapshot": false
+    }
+  ]
+}
