@@ -1321,7 +1321,10 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
         )
         return SimpleNamespace(status="success", output="ok", error=None)
 
-    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "D:/tools/codex.cmd")
+    monkeypatch.setattr(
+        "vega.runner.shutil.which",
+        lambda _: "D:/tools/codex.cmd",  # repo-path-policy: allow-test-fixture
+    )
     monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
     runner = CodexExecRunner(
         options=CodexExecOptions(
@@ -1341,7 +1344,7 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
 
     assert result.status == "success"
     assert captured["command"] == [
-        "D:/tools/codex.cmd",
+        "D:/tools/codex.cmd",  # repo-path-policy: allow-test-fixture
         "exec",
         "--cd",
         str(repo_dir.resolve()),
@@ -1373,7 +1376,10 @@ def test_codex_exec_runner_executes_raw_command_but_redacts_result_command(
         captured["command"] = command
         return SimpleNamespace(status="success", output="ok", error=None)
 
-    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "D:/tools/codex.cmd")
+    monkeypatch.setattr(
+        "vega.runner.shutil.which",
+        lambda _: "D:/tools/codex.cmd",  # repo-path-policy: allow-test-fixture
+    )
     monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
     runner = CodexExecRunner(options=CodexExecOptions(profile=f"profile-{fake_secret}"))
 

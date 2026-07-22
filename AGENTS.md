@@ -23,13 +23,28 @@ Vega 是本地优先的 AI 编码工作流 harness：worker 改代码，reviewer
 ## 验证命令(改完代码必须跑)
 
 ```powershell
-python -m compileall src
+python -m compileall src scripts/check_repository_hygiene.py
+python scripts/check_repository_hygiene.py --base-ref origin/main
 python -m pytest
-ruff check src tests
+ruff check src tests scripts/check_repository_hygiene.py
 git diff --check
 ```
 
 CI 在 Python 3.11 与 3.12 上跑同样集合。注意两个已知环境差异:测试断言 CLI 输出时须防 CI 注入的 ANSI 渲染(conftest 已有 autouse fixture 清理环境变量),POSIX 进程组探测与 Windows 路径不同——本地绿不等于 CI 绿。
+
+## 公开仓库路径与私密文件卫生
+
+- 文档、证据、示例、配置、注释和 Git 提交信息默认只写仓库相对路径；需要表示仓库或 worktree 位置时，
+  使用 `$repoRoot`、`$worktreePath` 或 `<worktree-path>` 等变量和占位符。
+- 禁止提交盘符绝对路径、UNC 路径或真实 POSIX 用户主目录。命令运行时可以解析绝对路径，
+  但不得把解析结果复制到受 Git 跟踪的公开内容。
+- 测试确需覆盖绝对路径语义时，只能使用明显虚构的值，并在同一行添加
+  `repo-path-policy: allow-test-fixture` 注释；该豁免只对 `tests/` 生效，失效标记也会导致检查失败。
+- `.env`、凭据文件、私钥、数据库和本地 Office 文件不得进入 Git；环境变量示例只允许使用
+  脱敏的 `.env.example`。
+- `scripts/check_repository_hygiene.py` 同时检查当前提交候选和基线到 `HEAD` 的每个提交，
+  防止“先提交本机路径、后续再删除”掩盖公开历史。若已推送的分支曾包含此类内容，合并前
+  必须使用 squash 或重写历史，不能只看最终文件。
 
 ## 代码约定
 

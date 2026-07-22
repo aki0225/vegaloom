@@ -954,3 +954,68 @@ Python 3.11 的“运行全量测试”步骤、五个 Python 3.12 分片、Wind
 本条证据进入分支后会触发新的纯文档 CI。只有该最新 PR head 的 workflow 同样全部通过，且
 人工复核完整 diff 后，才建议合并 `main`。合并后仍需核对 main CI，再更新路线图并开始
 M-002。
+
+---
+
+## 2026-07-22 · AV-REPO-HYGIENE-001 · pre-CI
+
+### Threat
+
+公开仓库可能因文档、证据、示例、配置、注释或 Git 提交信息误带本机绝对路径而泄露开发
+环境结构；后续提交删除该路径只能清理最终文件，不能自动清理已公开的提交历史。被强制
+跟踪的环境文件、凭据、私钥、数据库或本地 Office 文件也可能绕过普通忽略规则。
+
+### Contract
+
+1. 当前跟踪文件和未忽略的新文件不得包含 Windows 盘符绝对路径、UNC 路径或真实 POSIX
+   用户主目录。
+2. 指定基线时，必须逐提交检查变化后的文件和提交信息，不能只检查基线到 `HEAD` 的净 diff。
+3. 测试确需使用虚构绝对路径时，豁免必须与路径位于同一行、只允许出现在 `tests/`，失效
+   豁免也必须 fail-closed。
+4. 失败输出只报告仓库相对文件、行号、提交短哈希和规则，不回显命中的本机路径。
+5. `.env.example` 以外的环境文件，以及常见凭据、私钥、数据库和 Office 本地文件名不得
+   进入提交候选。
+6. CI 必须使用精确 base SHA 执行历史扫描，并继续核对完整节点数和测试文件分片合同。
+
+### Implementation
+
+- 新增 `scripts/check_repository_hygiene.py`。
+- `AGENTS.md` 增加相对路径、测试夹具豁免、敏感文件和 squash/history 规则。
+- CI 静态 job 在测试收集前执行仓库卫生检查。
+- 既有绝对路径测试夹具增加同一行显式豁免，普通文档不能使用该豁免。
+- 新增 `tests/test_repository_hygiene.py`，覆盖盘符、UNC、POSIX 用户目录、非法或失效豁免、
+  敏感文件名，以及“先提交、后删除”仍被历史扫描拒绝。
+
+### Local validation
+
+- 新门禁回归：`9 passed`。
+- 受影响精确节点：`34 passed`。
+- 收集合同：`529` 个节点，`529` 个唯一 nodeid。
+- Python 3.12 分片合同：`21` 个测试文件，无遗漏、重复或意外文件。
+- `python scripts/check_repository_hygiene.py --base-ref origin/main`：通过。
+- `ruff check src tests scripts/check_repository_hygiene.py --no-cache`：通过。
+- `python -m compileall -q src scripts/check_repository_hygiene.py`：通过。
+- `git diff --check`：通过。
+
+以下聚合尝试不计入通过结论：
+
+1. 单进程全量 pytest 达到 15 分钟外层限制，没有产生最终汇总。
+2. 五个受影响测试文件聚合运行达到 20 分钟外层限制，没有产生最终汇总。
+3. 文件级诊断在 `tests/test_assurance_verification_semantics.py` 达到 240 秒文件级预算；
+   终止后确认没有残留进程。随后将该文件的 14 个节点分别运行，结果为 `14 passed`，
+   单节点耗时约 28 至 82 秒，未发现失败或单节点超时。
+
+本地诊断证据：
+
+- 节点收集：`.tmp/pytest/repo-hygiene-collected.txt`
+- 节点收集 SHA-256：`FE09BDD0DBA2D410EBF528BF0E2D8B18B158F9E8D7A59761DA555E813A4F7C88`
+- assurance 逐节点摘要：`.tmp/pytest/logs/assurance-nodes/summary.json`
+- assurance 摘要 SHA-256：`28FF7126B7CF2FA29C4EF058E3083E1DA1D5361CD798D07AFD2ACDC683B53405`
+
+### Verdict
+
+`passed-targeted / requires-pr-ci`
+
+新门禁的危险案例、安全案例、历史案例、日志不回显和文件名规则均通过本地定向验证。Windows
+本机聚合测试没有形成完整通过证据，因此不得据此宣称全量绿；最终合并裁决必须等待 PR 的
+Python 3.11 全量、Python 3.12 五分片、Windows 专项、POSIX 专项和发布包安装 job 全部成功。
