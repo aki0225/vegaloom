@@ -1,9 +1,105 @@
 # Assurance 威胁与证据充分性候选合同
 
-> 状态：候选合同，尚未实现。
-> 基线：Vega `v0.1.1`，`main@176ac381`。
+> 状态：Stage 1 v1 合同已预注册，尚未接入 Runtime 成功判定。
+> 基线：Vega `v0.1.2`，`main@775e1b9`。
 > 建立日期：2026-07-21。
 > 配套验证记录：[`eval/assurance-validation.md`](../eval/assurance-validation.md)。
+
+## 0. Stage 1 v1 可执行合同
+
+本节冻结 Stage 1 的最小机器合同，消除后文候选示例中的歧义。后文的 Threat Family 和纵向
+detector 仍属于后续阶段，不在本轮实现。
+
+### 0.1 版本与严格解析
+
+- `Claim`、`Threat`、`EvidenceRecord`、`AssuranceBundle` 和 `AdequacyResult` 均使用
+  `schema_version: 1`。
+- 所有结构拒绝未知字段；必填字段缺失、类型错误或不受支持版本均 fail-closed。
+- 缺少 `schema_version` 的旧 artifact 可以读取为历史输入，但只能得到 `insufficient`，
+  不得升级为 `sufficient_for_merge`。
+- Stage 1 只生成独立 Assurance 结果，不修改当前 Finish、Goal 或 Runtime 的成功规则。
+
+### 0.2 AssuranceBundle
+
+顶层 Bundle 必须包含：
+
+```yaml
+schema_version: 1
+run_id: "..."
+iteration: 1
+snapshot:
+  head_sha: "..."
+  staged_diff_sha256: "..."
+  unstaged_diff_sha256: "..."
+  review_snapshot_id: "..."
+  project_policy_snapshot_sha256: "..."
+  scope_policy_sha256: "..."
+verification_conclusion: verified
+claims: []
+threats: []
+evidence: []
+```
+
+`snapshot` 必须同时绑定 HEAD、staged/unstaged diff、Reflect review snapshot、项目策略
+snapshot 和 scope policy。调用方还必须提供独立的期望上下文；Bundle 与期望上下文不一致时，
+不能相信 Bundle 自己声明的值。
+
+### 0.3 Claim 与 Threat 来源
+
+Claim 必须包含稳定 ID、陈述、`accepted/candidate` 状态和结构化来源。Threat 必须包含稳定
+ID、类别、来源、`active/candidate` 状态、触发条件、资产、不变量、失败模式、六个风险维度、
+Claim 引用、触发证据、最低证据类型、Evidence 引用、残余风险和人工决策标记。
+
+允许的来源及引用前缀为：
+
+| 来源 | 引用前缀 |
+|---|---|
+| `user_requirement` | `task://` |
+| `project_contract` | `file://` 或 `policy://` |
+| `machine_policy` | `policy://` |
+| `public_contract` | `api://`、`schema://` 或 `file://` |
+| `test_oracle` | `test://` |
+| `deterministic_detector` | `detector://` |
+| `llm_candidate` | `llm://` |
+
+`llm_candidate` 只能保持 `candidate`，不能标记为 `accepted/active`。只有 `accepted` Claim 和
+`active` Threat 参与充分性判定；只有 LLM 候选而没有 active Threat 时，结果必须为
+`insufficient`。
+
+### 0.4 EvidenceRecord 与 artifact 引用
+
+EvidenceRecord 必须包含：
+
+- 稳定 ID 和证据类型。
+- producer、command、environment、input 和 oracle。
+- run ID、iteration 和完整 snapshot。
+- 结构化 result、覆盖的 Threat、artifact 引用和 limitations。
+
+artifact 引用使用：
+
+```yaml
+run_id: "..."
+relative_path: "iterations/01/verification-result.json"
+sha256: "..."
+```
+
+相对路径不得是绝对路径、不得包含 `..`，解析后的真实文件必须仍位于被引用 run 目录内。
+引用文件缺失、路径逃逸、run 不存在或内容 SHA-256 不一致时，Bundle 完整性失败。
+
+### 0.5 确定性 AdequacyResult
+
+AdequacyResult 只能由 `deterministic_validator` 生成，不接受 LLM 自报结论。判定顺序为：
+
+1. schema、引用、run、iteration 或 snapshot 不一致：`insufficient`。
+2. verification 不是 `verified`：`insufficient`。
+3. active Threat 缺少任一最低证据类型，或证据未通过：`insufficient`。
+4. 证据完整但 Threat 明确要求人工决定：`human_required`。
+5. 证据完整且仍有残余上线风险：`requires_staged_rollout`。
+6. 所有 active Threat 的最低证据均完整、通过且无上述限制：
+   `sufficient_for_merge`。
+
+`sufficient_for_merge` 在 Stage 1 仅表示“合同层证据充分”，不改变当前产品的
+`ready_to_commit`，也不声称生产绝对安全。
 
 ## 1. 目的
 

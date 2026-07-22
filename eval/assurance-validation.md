@@ -1660,3 +1660,99 @@ workflow 29932356389
 
 本次 post-CI 证据和 Roadmap 会形成新的纯文档 head。该最新 head 仍须通过全部 CI 后，才能
 把 PR 从 Draft 转为 Ready；不自动合并，不开始 Stage 1 实现。
+
+---
+
+## 2026-07-22 · AV-STAGE1-001 · preregistration
+
+### 目标
+
+冻结并验证 Assurance Stage 1 的最小数据合同：版本化 Claim、Threat、EvidenceRecord、
+AssuranceBundle 和确定性 AdequacyResult。该阶段只生成独立 Assurance artifact，不修改
+Finish、Goal 或 Runtime 的成功语义。
+
+### Baseline
+
+- Git 基线：`main@775e1b9fb20f6c842ca70b7766abd76bab9707e3`。
+- 工作分支：`feat/assurance-stage1-contract`。
+- 稳定版本：`v0.1.2`。
+- 测试文件：`tests/test_assurance_stage1_contract.py`。
+
+### 预注册问题
+
+1. 缺少必填字段或出现未知结构时，是否只能得到 fail-closed 结果。
+2. 伪造、重复或悬空的 Claim/Threat/Evidence 引用是否被拒绝。
+3. run、iteration、HEAD、staged/unstaged diff、review snapshot、项目策略和 scope policy
+   错绑时，是否不能给出充分结论。
+4. artifact 相对路径逃逸、文件缺失或 SHA-256 不一致时，是否被拒绝。
+5. 旧 artifact 是否仍可读取，但不能升级为 `sufficient_for_merge`。
+6. LLM 来源是否只能保留为候选，不能激活 Threat 或宣布证据充分。
+7. 危险案例缺少最低证据时是否为 `insufficient`，对应安全双生案例是否能得到
+   `sufficient_for_merge`。
+8. 残余风险和人工决策是否分别收敛到 `requires_staged_rollout` 与 `human_required`。
+9. 损坏输入是否仍能生成独立、脱敏的 fail-closed `assurance-result.json`。
+
+### 非目标
+
+- 不接 Runtime detector。
+- 不改变 `ready_to_commit`、Finish 或 Goal 成功规则。
+- 不调用 LLM。
+- 不实现数据库 migration、数据修改或并发 Threat Family。
+- 不引入数据库、Web UI、LangGraph、Memory 或多 Agent 产品能力。
+
+### 预期
+
+- 新增 26 个纯合同节点，完整收集从 541 增至 567。
+- 旧实现因缺少 `vega.assurance` 而稳定红灯。
+- 实现后 26 个节点全部通过，且现有 541 个节点结果不被放宽。
+- CI 节点合同更新为 567，并把新文件加入 Python 3.12
+  `semantics-evidence-review` 分片。
+
+### 停止条件
+
+只有以下条件同时满足，Stage 1 才可提出合并建议：
+
+1. 26 个预注册节点转绿。
+2. 完整 567 节点得到明确 passed/skipped/failed 计数。
+3. compileall、Ruff、仓库卫生和 `git diff --check` 通过。
+4. 独立审阅未发现 fail-open、引用逃逸或 LLM 越权。
+5. 最新 PR head 的跨平台 CI 全绿。
+
+---
+
+## 2026-07-22 · AV-STAGE1-001 · red test result
+
+### 旧实现复现
+
+只运行预注册文件：
+
+```text
+26 failed in 0.92s
+ModuleNotFoundError: No module named 'vega.assurance'
+```
+
+完整收集结果：
+
+```text
+567 tests collected in 10.87s
+```
+
+所有失败都发生在测试按需导入 Stage 1 合同模块时。测试文件本身已通过 Ruff；完整节点收集
+成功，因此红灯不是 pytest fixture、临时目录或收集基础设施故障，而是当前主线确实没有该
+合同能力。
+
+### 本地证据
+
+- 红灯日志：`.tmp/pytest/logs/stage1-red.txt`
+- 红灯日志 SHA-256：
+  `9B841AB9CE2045384F0BA98EE71E637CE69569661BB5613E607A54A7468426F7`
+- 收集日志：`.tmp/pytest/logs/stage1-collect.txt`
+- 收集日志 SHA-256：
+  `DA87D6C07638D1E199BA1F475B995A0B46E5C1A250AF1A6BD3B28D2B700430AC`
+
+### 裁决
+
+`confirmed-red / not-mergeable`
+
+下一步只能实现严格版本化模型、run-local artifact 引用解析和确定性充分性校验器；不得通过
+放宽 snapshot、引用或 LLM 来源约束让测试转绿，也不得在本阶段接入 Finish 成功条件。
