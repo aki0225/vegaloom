@@ -119,18 +119,50 @@ def init_adapter(repo_path: Path, target: str, force: bool = False) -> AdapterIn
     normalized = target.strip().lower()
     if normalized != "codex":
         raise ValueError(f"暂不支持的 adapter target：{target}")
-    repo = repo_path.resolve()
+    try:
+        repo = repo_path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("无法确认 adapter 目标仓库路径") from exc
+    if not repo.is_dir():
+        raise ValueError("adapter 目标仓库必须是目录")
+
     created: list[Path] = []
     skipped: list[Path] = []
-    for skill_name, content in CODEX_SKILLS.items():
-        path = repo / ".codex" / "skills" / skill_name / "SKILL.md"
-        if path.exists() and not force:
+    targets = [
+        (repo / ".codex" / "skills" / skill_name / "SKILL.md", content)
+        for skill_name, content in CODEX_SKILLS.items()
+    ]
+
+    # 必须先校验整批目标，避免后一个危险链接让前一个文件已经部分落盘。
+    for path, _ in targets:
+        _resolve_adapter_write_path(repo, path)
+
+    for path, content in targets:
+        resolved_path = _resolve_adapter_write_path(repo, path)
+        if resolved_path.exists() and not force:
             skipped.append(path)
             continue
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content.rstrip() + "\n", encoding="utf-8")
+
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        # mkdir 后再次解析逻辑目标；边界在检查期间发生变化时必须停止。
+        resolved_path = _resolve_adapter_write_path(repo, path)
+        if resolved_path.exists() and not force:
+            skipped.append(path)
+            continue
+        resolved_path.write_text(content.rstrip() + "\n", encoding="utf-8")
         created.append(path)
     return AdapterInitResult(target=normalized, created_files=created, skipped_files=skipped)
+
+
+def _resolve_adapter_write_path(repo: Path, path: Path) -> Path:
+    relative_path = path.relative_to(repo).as_posix()
+    try:
+        resolved_path = path.resolve(strict=False)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"无法确认 adapter 写入路径边界：{relative_path}") from exc
+    if not resolved_path.is_relative_to(repo):
+        raise ValueError(f"adapter 写入路径越过目标仓库边界：{relative_path}")
+    return resolved_path
 
 
 def render_adapter_init_summary(result: AdapterInitResult) -> str:

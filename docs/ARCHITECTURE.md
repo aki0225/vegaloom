@@ -507,6 +507,12 @@ vega adapters init codex --repo <repo>
 
 这些 skill 只描述什么时候调用 `vega loop`、`vega gate`、`vega review`、`vega status`，不安装 hook，不修改全局配置，也不自动执行危险动作。这样可以让主会话理解 Vega 流程，同时保持核心 runtime 与具体工具解耦。
 
+初始化会先解析整批目标文件的真实路径；任一目标越过目标仓库或无法确认边界时，在写入前
+停止。创建父目录后还会在写文件前再次解析，`--force` 只能覆盖仓库内文件，不能绕过边界。
+真实目标仍位于仓库内的 symlink、Windows junction 或其他可解析目录链接可以继续使用。
+该检查不承诺抵御拥有并发本地写权限的攻击者在最终检查后替换目录；句柄级 no-follow 写入
+和此类 TOCTOU 故障注入需要单独的威胁合同。
+
 ## Tool Broker
 
 Tool Broker 只治理 `engineering-change` 的窄只读上下文工具和 Git 检查入口：

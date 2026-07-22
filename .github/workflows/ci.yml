@@ -73,9 +73,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "516" ]]; then
+          if [[ "$node_count" != "520" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 516 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 520 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -158,6 +158,7 @@ jobs:
           - name: artifacts-runtime-security
             test_timeout: 58
             files: >-
+              tests/test_adapter_realpath_boundary.py
               tests/test_finish_artifact_integrity.py
               tests/test_runtime_safety_integration.py
               tests/test_security_evidence.py
@@ -230,6 +231,7 @@ jobs:
             --timeout=58 `
             --timeout-method=thread `
             --basetemp=.tmp/pytest/runs/windows `
+            tests/test_adapter_realpath_boundary.py `
             tests/test_runtime_safety_integration.py::test_windows_verification_preserves_nested_python_quotes `
             tests/test_execution_control_safety.py `
             tests/test_run_mutation_lock.py

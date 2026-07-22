@@ -705,3 +705,252 @@ approve”收紧为“最新轮次必须具备可复核的结构化验证成功�
   双重门禁约束。
 - GitHub Release 和 PyPI 发布不在本次验证范围内。
 - LangGraph、adapter、数据库、Web UI、多 Agent 和长期 Memory 写入仍不属于 v0.1.2。
+
+---
+
+## 2026-07-22 · AV-M001-001 · preregistration
+
+### 目标
+
+修复 `M-001`：Codex adapter 在目标仓库内生成 skill 文件前，必须确认每个写入目标的真实
+解析路径仍位于目标仓库内。路径越界、无法解析或边界不确定时 fail-closed，不允许通过
+`--force` 绕过。
+
+### Baseline
+
+- Git 基线：`main@1e9bb52`
+- 工作分支：`fix/adapter-realpath-boundary`
+- 已确认问题：`AV-BASE-003`
+- 影响入口：`vega adapters init codex --repo <repo> [--force]`
+- 范围：只处理 adapter 文件写入边界，不混入 Node 包管理器、Finish 性能、Threat/Evidence
+  数据模型或新的 Agent 能力。
+
+### 威胁模型
+
+目标仓库内容不可信。攻击者或错误配置可能预先把 `.codex`、`skills` 或具体 skill 目录设置为
+symlink、Windows junction 或其他可被路径解析跟随的 reparse point，使表面位于仓库内的
+`SKILL.md` 实际写入仓库外。
+
+本轮防守边界：
+
+1. 写入集合必须在任何修改发生前完成全量真实路径预检，避免后一个危险目标导致前一个目标
+   已经部分落盘。
+2. 创建父目录后、写文件前再次解析目标，降低检查与写入之间路径状态变化造成的风险。
+3. 已存在且本应跳过的文件也先验证边界；“不覆盖”不能掩盖危险路径。
+4. 仓库内普通目录和真实解析后仍位于仓库内的目录链接继续可用。
+
+### 方案取舍
+
+- 采用：`Path.resolve(strict=False)` 解析现有链接和不存在的末端路径，再用规范化仓库根执行
+  包含关系校验；先全量预检，写前复核。
+- 不采用：拒绝路径链上的所有 junction/reparse point。该方案简单但会无差别阻塞真实目标仍在
+  仓库内的安全双生案例。
+- 暂不采用：基于目录句柄、`openat`/Windows handle 的逐级 no-follow 原子写入。它能进一步
+  收紧并发替换窗口，但跨平台复杂度明显超过本次已确认维护缺口。
+
+### 预注册案例
+
+#### 危险案例 `AV-M001-DANGER-001`
+
+- 在仓库外创建空目录。
+- 让仓库内 `.codex` 成为指向该目录的 Windows junction；POSIX 对应使用目录 symlink。
+- 执行 adapter 初始化，且外部目录中预先不存在两个目标 skill。
+
+期望：
+
+- CLI 非零退出并报告 adapter 写入路径越过目标仓库边界。
+- 外部目录没有新增 `skills/vega-loop/SKILL.md` 或
+  `skills/vega-review/SKILL.md`。
+- `--force` 不改变该裁决。
+
+#### 安全双生案例 `AV-M001-SAFE-001`
+
+- 在目标仓库内部创建真实目录。
+- 让仓库内 `.codex` 成为指向该仓库内目录的 Windows junction；POSIX 对应使用目录 symlink。
+- 执行 adapter 初始化。
+
+期望：
+
+- CLI 成功。
+- 两个 skill 文件均生成，且其真实解析路径仍位于目标仓库内。
+- 既有普通目录 smoke 继续通过。
+
+### 成功条件
+
+- 危险案例与安全双生案例均按预期裁决。
+- `force=False`、`force=True` 都不能把文件写出仓库。
+- 受影响定向测试、Windows 专项回归、全量 pytest、`compileall`、`ruff` 和
+  `git diff --check` 通过。
+- 错误路径不包含仓库外目标的绝对路径，避免在 CLI 错误中额外泄露本地目录信息。
+
+### 失败条件
+
+- 任一 adapter 文件可经 junction、symlink 或可解析 reparse point 写到仓库外。
+- 发现危险目标前已经写入同批次的其他 adapter 文件。
+- 为阻止越界而无差别拒绝真实目标仍位于仓库内的安全链接。
+- 边界解析失败后继续写入，或 `--force` 绕过边界检查。
+
+### 已知限制
+
+- `Path.resolve` 加写前复核不能消除拥有并发本地写权限的攻击者在最终检查后替换目录的
+  TOCTOU 窗口。
+- 本轮不处理 hardlink 别名、操作系统级恶意竞争或跨进程事务写入；如这些能力进入威胁模型，
+  需要单独预注册句柄级实现与故障注入。
+
+### 下一步
+
+先新增危险案例和安全双生案例并确认危险案例在旧实现上可复现，再实现最小修复。
+
+---
+
+## 2026-07-22 · AV-M001-001 · local result
+
+### Baseline
+
+- Git 基线：`main@1e9bb52`
+- 候选提交：`c1a9271328335be534fdc72e110d7f99fb36c5bb`
+- 工作分支：`fix/adapter-realpath-boundary`
+- 平台：Windows 10 / Python 3.14.3 / NTFS junction
+
+### 旧实现复现
+
+新增测试但尚未修改 Runtime 时：
+
+```text
+3 failed, 1 passed in 2.87s
+```
+
+三个危险案例都观察到 CLI 返回成功：外部 `.codex` junction 在 `force=False`、`force=True`
+下均未被拒绝，后置 `vega-review` junction 还会让同批次的 `vega-loop` 文件先落盘。仓库内
+安全 junction 控制案例通过。
+
+### 实现结果
+
+- 目标仓库根使用 `resolve(strict=True)` 固化；无法确认仓库路径时停止。
+- 写入前先构造并预检整批 adapter 目标，任一真实路径越界时不产生本批次文件。
+- 创建父目录使用已经解析且位于仓库内的路径，随后在写文件前再次解析逻辑目标。
+- `force=False` 的既有文件跳过语义和 `force=True` 的覆盖语义都在边界检查之后执行。
+- 错误只报告仓库相对目标，不包含仓库外真实路径。
+- 真实目标仍位于仓库内的 junction/symlink 控制案例继续成功。
+
+### 预注册案例结果
+
+- `AV-M001-DANGER-001 / skip-existing`：通过。外部既有 sentinel 内容未变化，CLI 非零退出。
+- `AV-M001-DANGER-001 / force`：通过。外部空目录没有新增 skill，CLI 非零退出。
+- 后置危险目标批次预检：通过。`vega-loop` 未部分落盘，外部 `vega-review/SKILL.md`
+  未生成。
+- `AV-M001-SAFE-001`：通过。仓库内 junction 生成两个 skill，真实路径仍位于仓库内。
+- 既有普通目录 smoke：通过。
+
+### 本地验证
+
+- 当前候选定向回归：`5 passed in 1.00s`。
+- 收集合同：`520` 个节点，`520` 个唯一 nodeid。
+- Windows 本地完整节点覆盖：`519 passed, 1 skipped`，无失败、无 error。
+  - smoke：`102 passed`。
+  - p0/CLI/lock：`109 passed`。
+  - artifacts/runtime/security：当前 adapter 4 个节点通过；其余 `54 passed, 1 skipped`。
+  - semantics/evidence/review：`80 passed`。
+  - remaining：`170 passed`。
+- 唯一跳过：
+  `tests/test_runtime_safety_integration.py::test_posix_verification_temp_env_does_not_re_evaluate_path`，
+  原因是本地 Windows 不执行 POSIX shell 变量展开语义；远端 POSIX job 必须真实通过。
+- `ruff check src tests --no-cache`：通过。
+- `python -m compileall -q src`：通过。
+- `git diff --check`：通过。
+- CI Python 3.12 分片文件合同：20 个测试文件，无遗漏、重复或意外文件。
+- CI 收集阈值已从历史 v0.1.2 的 516 更新为当前 520；历史证据未改写。
+
+### 本地证据
+
+- 摘要：`.tmp/pytest/logs/m001-full-summary.json`
+- SHA-256：`0EAF5B129353D3BCD1E5C2CADB3F94305137B58986D3AFF12C5B1100D247EB99`
+
+以下尝试不计入通过结论：
+
+1. 单进程全量 pytest 超过 304 秒外层限制且没有保留最终汇总。
+2. 重定向 smoke 运行被外层终止后触发 pytest terminal writer
+   `OSError: [Errno 22] Invalid argument`，JUnit 明确记录为 internal error。
+3. 四分片并行时 semantics 分片达到 1200 秒组级上限；随后改用 80 个精确 nodeid 串行分片，
+   全部返回 0。
+
+### 裁决
+
+`passed-local / requires-ci`
+
+预注册的 Windows junction 危险案例与安全双生案例均满足退出条件，当前 520 个测试节点已在
+本地完整覆盖。由于本机不能替代 Linux/POSIX、Python 3.11/3.12 和发布包安装验证，合并前仍
+必须等待 PR CI 全部通过。
+
+### 剩余风险
+
+- 最终解析与文件写入之间仍存在已预注册的 TOCTOU 窗口。
+- hardlink 别名、句柄级 no-follow、防恶意并发替换和跨进程事务不在本轮范围内。
+- 本地 Python 3.14.3 的高负载耗时不能替代 CI 的 58 秒单节点预算；远端超时必须如实视为失败。
+
+### 下一步
+
+推送独立分支并创建 PR。只有静态检查、Python 3.11 全量、Python 3.12 五个分片、Windows
+专项、POSIX 专项和 wheel/sdist 安装验证全部通过后，才追加 post-CI result 并提出合并建议。
+
+---
+
+## 2026-07-22 · AV-M001-001 · transport correction
+
+首次推送提交 `c1a9271328335be534fdc72e110d7f99fb36c5bb` 被 GitHub `GH007` 邮箱隐私保护
+拒绝，远端没有创建该分支。随后只把作者和提交者邮箱改为公开的 GitHub noreply 地址：
+
+- 更正前提交：`c1a9271328335be534fdc72e110d7f99fb36c5bb`
+- 更正后提交：`f44dca1772517bfe1f531a0be28f6c073472c527`
+- 更正前 tree：`d6a709bb8f83261f3a4864466b6a9f1e9657c62b`
+- 更正后 tree：`d6a709bb8f83261f3a4864466b6a9f1e9657c62b`
+
+两个 tree 完全一致，代码、测试、文档和 CI 配置内容没有变化；本地验证结论继续绑定该相同
+文件树。更正后的本地摘要为：
+
+- 摘要：`.tmp/pytest/logs/m001-full-summary-v2.json`
+- SHA-256：`F726417D3DB498970CF70E64F758852AC1DEA0E3B266A10CF0CAA3E85CC69345`
+
+---
+
+## 2026-07-22 · AV-M001-001 · post-CI result
+
+### Baseline
+
+- PR：`#2`
+- PR head：`ffad154a1ab4a2b6e14a6779c8d114661905fba2`
+- Workflow：`29896556016`
+- 触发：`pull_request`
+
+### GitHub Actions
+
+Workflow 最终状态为 `completed / success`，10 个 job 全部通过：
+
+1. 静态检查与节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 分片 smoke。
+4. Python 3.12 分片 p0-cli-lock。
+5. Python 3.12 分片 artifacts-runtime-security。
+6. Python 3.12 分片 semantics-evidence-review。
+7. Python 3.12 分片 remaining。
+8. Windows 专项与 wheel smoke。
+9. POSIX 临时目录专项。
+10. 构建并安装 wheel。
+
+静态 job 通过意味着当前 workflow 中的 `520` 节点收集阈值和 20 个测试文件分片合同均满足。
+Python 3.11 的“运行全量测试”步骤、五个 Python 3.12 分片、Windows、POSIX 和发布包安装
+步骤分别返回 `success`。公开未登录 API 不提供原始 job 日志，因此本记录不臆造日志中未直接
+读取到的逐项 pytest 汇总数字。
+
+### 裁决
+
+`passed-pr-ci / ready-for-human-merge-review`
+
+预注册危险案例、安全双生案例、本地 520 节点覆盖和 PR 跨平台 CI 均满足 M-001 的退出条件。
+该结论只支持进入人工 diff 与合并复核，不自动触发合并。
+
+### 下一步
+
+本条证据进入分支后会触发新的纯文档 CI。只有该最新 PR head 的 workflow 同样全部通过，且
+人工复核完整 diff 后，才建议合并 `main`。合并后仍需核对 main CI，再更新路线图并开始
+M-002。
