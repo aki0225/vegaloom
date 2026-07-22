@@ -1395,3 +1395,268 @@ M-002 的实现、危险案例、安全控制、固定 revision 读取、失效�
 - 嵌套 workspace、bun/deno 和 Corepack 自动安装不在本轮。
 - 通用 Evidence 文件与 Git head 的机器校验属于后续 Assurance 数据合同。
 - 合并后先核对 `main` CI，再把唯一 `Now` 转交给独立的 M-003。
+
+---
+
+## 2026-07-22 · AV-M003-001 · preregistration
+
+### 目标
+
+修复 `M-003`：同一次 Finish 调用只能执行一次终态 artifact integrity 验证，并把该结果与
+evidence freshness 组合成同一个可信 Evidence Validation Snapshot。不能删除完整性、新鲜度、
+risk gate 或 scope gate 的终态重算，也不能改变任何 fail-closed 结果。
+
+### Baseline
+
+- Git 基线：`main@da1ac290addd0042f8782476cdb5ece4e53f2aa8`
+- 工作分支：`perf/finish-evidence-snapshot`
+- 已确认问题：`AV-BASE-005`
+- 影响入口：`vega finish <run>`
+- 范围：只消除同一次 Finish 内重复的完整性整链计算，不混入 Stage 1 Threat/Evidence
+  数据合同、Goal 优化、runner 调参或新的 Agent 能力。
+
+### 当前重复链路
+
+旧实现按以下顺序执行：
+
+```text
+FinishRuntime
+  -> validate_loop_artifact_integrity
+  -> validate_loop_evidence_freshness
+       -> current workspace freshness
+       -> review / reflect freshness
+       -> validate_loop_artifact_integrity
+```
+
+第二次 integrity 位于 freshness 链路末端，是更接近最终写入 `finish-summary.json` 的终态
+重算。候选实现必须保留该安全位置，只删除前面的重复 integrity 调用。
+
+### 预注册回归
+
+新增一个成功控制节点：
+
+1. 先构造 verification passed、review approve 且证据完整的新 loop。
+2. 在构造完成后开始统计 integrity 调用，避免把 Loop 自身校验计入 Finish。
+3. 同时拦截旧 Finish 别名和 `goal_evidence` 中的真实函数。
+4. 执行一次 Finish。
+5. 要求 integrity 调用次数为 `1`。
+6. 同时要求：
+   - `finish_status=ready_to_commit`
+   - `artifact_integrity.valid=true`
+   - `evidence_freshness.fresh=true`
+
+旧实现预期调用次数为 `2`，该断言应先稳定红灯；候选实现转绿后，现有篡改、缺失、错绑、
+风险降级和 workspace 变化测试必须继续 fail-closed。
+
+### 收集合同
+
+- 预期完整节点：`541`
+- 新增节点：`1`
+- 测试文件数量不变，因此 Python 3.12 分片文件集合不变。
+
+### 退出条件
+
+- 预注册节点从 `2 != 1` 转为通过。
+- Finish 只消费一个 Evidence Validation Snapshot。
+- 现有 Finish artifact integrity 与 evidence freshness 回归全部通过。
+- 完整节点、静态检查、Windows、POSIX 和构建安装 CI 全绿。
+- 绝对耗时只作为观察数据，不作为跨机器硬阈值。
+
+### 明确不做
+
+- 不缓存跨 Finish 调用的结果。
+- 不跳过终态 integrity、freshness、scope 或 risk 重算。
+- 不把可变 evidence 写入长期 memory。
+- 不开始 Assurance Stage 1。
+
+---
+
+## 2026-07-22 · AV-M003-001 · red test result
+
+### Baseline
+
+- Git 基线：`main@da1ac290addd0042f8782476cdb5ece4e53f2aa8`
+- 工作分支：`perf/finish-evidence-snapshot`
+- 平台：Windows / Python 3.12
+- 本阶段修改边界：测试、预注册证据和 CI 节点合同；`src/vega/` 没有修改。
+
+### 旧实现复现
+
+只运行新增的 M-003 节点：
+
+```text
+1 failed in 18.75s
+E assert 2 == 1
+```
+
+loop fixture、verification、review 和 Finish 均正常执行并写出 `finish-summary.json`。失败发生在
+首个预注册断言：同一次 Finish 实际调用 artifact integrity `2` 次，而合同要求 `1` 次。
+因此该红灯直接对应 `AV-BASE-005` 的重复整链计算，不是测试基础设施或业务证据损坏。
+
+### 收集与静态门禁
+
+- 完整收集：`541` 个节点。
+- compileall：通过。
+- Ruff：通过。
+- 仓库路径与私密文件卫生检查：通过。
+- `git diff --check`：通过。
+
+### 本地证据
+
+- 红灯日志：`.tmp/pytest/logs/m003-red-20260722.txt`
+- SHA-256：`8159EA07E93A85DA7102503F6A33C33AD8B1293A57F46B04673C73F9A4DDEE01`
+
+`.tmp` 不提交；哈希只用于本机复核，跨机器结论仍须由提交后的测试和 PR CI 证明。
+
+### 裁决
+
+`confirmed-red / not-mergeable`
+
+旧实现稳定复现两次 artifact integrity。下一步只能把 Finish 改为消费一个在 freshness 链路
+末端生成的 Evidence Validation Snapshot；不得通过删除末端 integrity 或弱化 fail-closed
+断言来让测试转绿。
+
+---
+
+## 2026-07-22 · AV-M003-001 · local candidate result
+
+### Candidate
+
+- 候选提交：`15924027000f78fd61139ce8a952aa32ccb23188`
+- 候选 tree：`ac15f524475bfb2a303865dadd475aac38707fde`
+- 平台：Windows / Python 3.12.10
+- 修改边界：`goal_evidence`、`finish_runtime` 和同一预注册测试节点。
+
+### 实现结果
+
+Finish 现在调用 `validate_loop_evidence_snapshot()`，由 freshness 链路末端产生一次
+artifact integrity，并将两者作为同一个快照返回。正常成功路径不再先独立执行一次
+integrity，因此预注册调用次数从 `2` 降为 `1`。
+
+公开 `validate_loop_evidence_freshness()` 保持原有早退合同：没有 `review_run` 或引用的 review
+run 不存在时，不执行完整 integrity。Finish snapshot 在这些早退路径才补一次 integrity，
+从而既保持公开 API 语义，又保证 Finish 始终获得完整快照。
+
+### 预注册节点
+
+```text
+1 passed in 14.81s
+```
+
+节点同时确认：
+
+- `finish_status=ready_to_commit`
+- `artifact_integrity.valid=true`
+- `evidence_freshness.fresh=true`
+- `verification_passed=true`
+- `risk_gate_result_count=1`
+- 两种 freshness 早退路径的 integrity 调用次数均为 `0`
+
+红灯的 18.75 秒与候选的 14.81 秒只作为同机观察，不作为跨平台性能阈值。
+
+### 独立审阅
+
+独立审阅发现初版让公开 freshness API 的两个早退路径新增完整 integrity 扫描，扩大了 Goal
+等调用方的耗时和异常面。该问题已通过私有协调函数和同一预注册节点的两种早退断言修正。
+审阅未发现更高严重级别问题，也未发现 fail-closed、scope、risk、project policy 或
+verification 结论被放宽。
+
+### 完整本地覆盖
+
+- 收集：`541` 个节点。
+- 唯一 nodeid：`541` 个。
+- 最终结果：`540 passed, 1 skipped, 0 failed, 0 errors`。
+- 唯一跳过：POSIX shell 变量展开专项；Windows 本地按合同跳过，Linux CI 必须真实通过。
+- 最终有效分片：`71` 个，每个都有明确 passed/skipped 计数。
+
+本机没有安装 CI 额外依赖 `pytest-timeout`，带对应参数的首次命令在收集前退出；部分大分片
+也在并发负载下超过 60 秒。两类尝试均未计入产品裁决，最终使用完整 nodeid 集合细分并覆盖
+全部 541 个节点。
+
+### 静态门禁
+
+- `python -m compileall -q src scripts/check_repository_hygiene.py`：通过。
+- `ruff check src tests scripts/check_repository_hygiene.py --no-cache`：通过。
+- `python scripts/check_repository_hygiene.py --base-ref main`：通过。
+- `git diff --check`：通过。
+
+### 本地证据
+
+- 结构化摘要：`examples/evidence/m003-finish-snapshot-local-summary.json`
+- 接力文档：`docs/M003-FINISH-EVIDENCE-SNAPSHOT-HANDOFF.md`
+- 最终节点日志 SHA-256：
+  `4F08608B48F7AF4275922DE663A1FE270259FBFBEC9D7B1B9CACE07930830B38`
+- 完整分片汇总 SHA-256：
+  `3E3C92E9FCC72BE9DC3C490A6F96C2BCD87CF157D4F3C07535EA8D6EE97DAF5B`
+
+### 裁决
+
+`passed-local / requires-ci / do-not-merge`
+
+M-003 已满足本地退出条件，但 Python 3.11/3.12、Linux/POSIX、Windows wheel 和构建安装
+仍必须由 PR CI 证明。在代码 head CI 和独立 PR 审阅通过前，不更新 Roadmap 为 completed，
+不开始 Assurance Stage 1。
+
+---
+
+## 2026-07-22 · AV-M003-001 · PR CI and final review correction
+
+### PR
+
+- PR：`#6`
+- base：`main`
+- head：`perf/finish-evidence-snapshot`
+- 状态：Draft
+
+### 首轮代码与证据 head
+
+```text
+927f46eff7231ded01e91a0d5d87312f5624ed0f
+workflow 29931641373
+10/10 success
+```
+
+通过范围包括静态检查与 541 节点收集合同、Python 3.11 全量、Python 3.12 五个分片、
+Windows 专项与 wheel smoke、POSIX 临时目录专项，以及 wheel 构建安装。
+
+### 最终独立审阅
+
+最终只读审阅未发现阻塞问题，也未发现 fail-closed、state/workspace/review、scope、risk、
+project policy 或 verification 语义被削弱。
+
+审阅指出一个低严重级别测试缺口：同一预注册节点已证明公开 freshness 的两个早退路径不会
+执行 integrity，但没有直接证明 Finish snapshot 在这些路径恰好补一次 integrity。修正提交
+`efc09c69491f0eb79293e1f8e3a94e2228cabf98` 增加两组 `integrity_calls == 1` 断言，
+节点结果为：
+
+```text
+1 passed in 14.73s
+```
+
+该修正不改变实现、不增加测试节点。
+
+### 审阅修正 head CI
+
+```text
+efc09c69491f0eb79293e1f8e3a94e2228cabf98
+workflow 29932356389
+10/10 success
+```
+
+最新代码 head 已再次通过相同的跨平台 10 项门禁，证明新增断言与 M-003 实现共同满足
+541 节点合同。
+
+### Roadmap 裁决
+
+代码 head 已满足 M-003 退出条件，因此统一 Roadmap 更新为：
+
+- `M-003=completed`
+- `Stage 0=completed`
+- `Stage 1=next`
+
+### 当前裁决
+
+`passed-pr-ci / final-docs-ci-required / do-not-merge`
+
+本次 post-CI 证据和 Roadmap 会形成新的纯文档 head。该最新 head 仍须通过全部 CI 后，才能
+把 PR 从 Draft 转为 Ready；不自动合并，不开始 Stage 1 实现。

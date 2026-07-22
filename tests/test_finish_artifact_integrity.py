@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import vega.finish_runtime as finish_runtime
+import vega.goal_evidence as goal_evidence
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import render_gate_report
 from vega.goal_runtime import GoalRuntime
@@ -61,6 +63,103 @@ class TrackedChangeRunner(StaticRunner):
             newline="\n",
         )
         return result
+
+
+def test_finish_reuses_single_terminal_artifact_integrity_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    workspace, repo, run_dir = _create_successful_loop(tmp_path, verify=True)
+    original = goal_evidence.validate_loop_artifact_integrity
+    integrity_calls = 0
+
+    def counted_integrity(*args, **kwargs):
+        nonlocal integrity_calls
+        integrity_calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        goal_evidence,
+        "validate_loop_artifact_integrity",
+        counted_integrity,
+    )
+    monkeypatch.setattr(
+        finish_runtime,
+        "validate_loop_artifact_integrity",
+        counted_integrity,
+        raising=False,
+    )
+
+    FinishRuntime(workspace).run(run_dir.name)
+
+    summary = _read_json(run_dir / "finish-summary.json")
+    assert integrity_calls == 1
+    assert summary["finish_status"] == "ready_to_commit"
+    assert summary["artifact_integrity"]["valid"] is True
+    assert summary["evidence_freshness"]["fresh"] is True
+    assert summary["verification_passed"] is True
+    assert summary["artifact_integrity"]["risk_gate_result_count"] == 1
+
+    state_path = run_dir / "state.json"
+    state = _read_json(state_path)
+    state["iterations"][-1]["review_run"] = ""
+    _write_json(state_path, state)
+    integrity_calls = 0
+
+    freshness = goal_evidence.validate_loop_evidence_freshness(
+        workspace,
+        repo,
+        run_dir,
+    )
+
+    assert integrity_calls == 0
+    assert freshness.fresh is False
+    assert "trusted_review_missing" in freshness.issues
+
+    integrity_calls = 0
+    no_review_snapshot = goal_evidence.validate_loop_evidence_snapshot(
+        workspace,
+        repo,
+        run_dir,
+    )
+
+    assert integrity_calls == 1
+    assert no_review_snapshot.evidence_freshness.fresh is False
+    assert "trusted_review_missing" in no_review_snapshot.evidence_freshness.issues
+
+    state["iterations"][-1]["review_run"] = "missing-review-run"
+    _write_json(state_path, state)
+    integrity_calls = 0
+
+    missing_review_freshness = goal_evidence.validate_loop_evidence_freshness(
+        workspace,
+        repo,
+        run_dir,
+    )
+
+    assert integrity_calls == 0
+    assert missing_review_freshness.fresh is False
+    assert "trusted_review_missing" in missing_review_freshness.issues
+    assert missing_review_freshness.review_run == "missing-review-run"
+
+    integrity_calls = 0
+    missing_review_snapshot = goal_evidence.validate_loop_evidence_snapshot(
+        workspace,
+        repo,
+        run_dir,
+    )
+
+    assert integrity_calls == 1
+    assert missing_review_snapshot.evidence_freshness.fresh is False
+    assert (
+        "trusted_review_missing"
+        in missing_review_snapshot.evidence_freshness.issues
+    )
+    assert (
+        missing_review_snapshot.evidence_freshness.review_run
+        == "missing-review-run"
+    )
 
 
 def test_finish_rejects_unbound_iteration_verdict(tmp_path: Path) -> None:

@@ -13,8 +13,7 @@ from .goal_evidence import (
     LoopArtifactIntegrity,
     latest_verification_failed,
     trusted_verification_passed,
-    validate_loop_artifact_integrity,
-    validate_loop_evidence_freshness,
+    validate_loop_evidence_snapshot,
 )
 from .memory import MemoryProposalStore
 from .models import LoopAutomationState, ReviewVerdict
@@ -38,22 +37,17 @@ class FinishRuntime:
         except ValueError as exc:
             _write_finish_diagnostic(run_dir, str(exc))
             raise
-        artifact_integrity = validate_loop_artifact_integrity(
+        validation_snapshot = validate_loop_evidence_snapshot(
             self.workspace,
             Path(state.repo_path),
             run_dir,
             state=state,
         )
-        freshness = validate_loop_evidence_freshness(
-            self.workspace,
-            Path(state.repo_path),
-            run_dir,
-        )
         summary = build_finish_summary(
             run_dir,
             state,
-            freshness,
-            artifact_integrity,
+            validation_snapshot.evidence_freshness,
+            validation_snapshot.artifact_integrity,
         )
         write_redacted_json(run_dir / "finish-summary.json", summary)
         write_redacted_text(run_dir / "finish-report.md", render_finish_report(summary))

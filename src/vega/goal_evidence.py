@@ -78,6 +78,12 @@ class LoopArtifactIntegrity:
         }
 
 
+@dataclass(frozen=True)
+class LoopEvidenceValidationSnapshot:
+    artifact_integrity: LoopArtifactIntegrity
+    evidence_freshness: EvidenceFreshness
+
+
 def trusted_verification_passed(
     state: LoopAutomationState,
     artifact_integrity: LoopArtifactIntegrity,
@@ -620,24 +626,78 @@ def validate_loop_evidence_freshness(
         if isinstance(loop_run, Path)
         else resolve_run_dir(workspace, loop_run)
     )
-    state = _read_json(loop_dir / "state.json")
+    evidence_freshness, _ = _validate_loop_evidence_freshness(
+        workspace,
+        repo,
+        loop_dir,
+    )
+    return evidence_freshness
+
+
+def validate_loop_evidence_snapshot(
+    workspace: Path,
+    repo_path: Path,
+    loop_run: str | Path,
+    *,
+    state: LoopAutomationState | None = None,
+) -> LoopEvidenceValidationSnapshot:
+    repo = repo_path.resolve()
+    loop_dir = (
+        loop_run.resolve()
+        if isinstance(loop_run, Path)
+        else resolve_run_dir(workspace, loop_run)
+    )
+    evidence_freshness, artifact_integrity = _validate_loop_evidence_freshness(
+        workspace,
+        repo,
+        loop_dir,
+        state=state,
+    )
+    if artifact_integrity is None:
+        artifact_integrity = validate_loop_artifact_integrity(
+            workspace,
+            repo,
+            loop_dir,
+            state=state,
+        )
+    return LoopEvidenceValidationSnapshot(
+        artifact_integrity=artifact_integrity,
+        evidence_freshness=evidence_freshness,
+    )
+
+
+def _validate_loop_evidence_freshness(
+    workspace: Path,
+    repo: Path,
+    loop_dir: Path,
+    *,
+    state: LoopAutomationState | None = None,
+) -> tuple[EvidenceFreshness, LoopArtifactIntegrity | None]:
+    state_payload = (
+        state.model_dump(mode="json")
+        if state is not None
+        else _read_json(loop_dir / "state.json")
+    )
     current_fingerprint, snapshot_issues = _current_workspace_fingerprint(repo, None)
     issues = list(snapshot_issues)
-    if str(state.get("run_id") or "") != loop_dir.name:
+    if str(state_payload.get("run_id") or "") != loop_dir.name:
         issues.append("loop_run_id_mismatch")
-    loop_repo = str(state.get("repo_path") or "")
+    loop_repo = str(state_payload.get("repo_path") or "")
     if not loop_repo or _normalized_path(loop_repo) != _normalized_path(repo):
         issues.append("loop_repo_mismatch")
-    iterations = state.get("iterations") or []
+    iterations = state_payload.get("iterations") or []
     latest = iterations[-1] if iterations else {}
     review_run = str(latest.get("review_run") or "")
     reflect_run = str(latest.get("reflect_run") or "")
     if not review_run:
         issues.append("trusted_review_missing")
-        return _freshness(
-            issues,
-            current_fingerprint,
-            source_run=reflect_run,
+        return (
+            _freshness(
+                issues,
+                current_fingerprint,
+                source_run=reflect_run,
+            ),
+            None,
         )
     try:
         review_freshness = validate_review_evidence_freshness(
@@ -648,30 +708,37 @@ def validate_loop_evidence_freshness(
         )
     except FileNotFoundError:
         issues.append("trusted_review_missing")
-        return _freshness(
-            issues,
-            current_fingerprint,
-            source_run=reflect_run,
-            review_run=review_run,
+        return (
+            _freshness(
+                issues,
+                current_fingerprint,
+                source_run=reflect_run,
+                review_run=review_run,
+            ),
+            None,
         )
     issues.extend(review_freshness.issues)
     if reflect_run != review_freshness.source_run:
         issues.append("loop_review_source_mismatch")
     if latest.get("verdict") != "approve":
         issues.append("latest_iteration_not_approved")
-    integrity = validate_loop_artifact_integrity(
+    artifact_integrity = validate_loop_artifact_integrity(
         workspace,
         repo,
         loop_dir,
+        state=state,
     )
-    issues.extend(integrity.issues)
-    return _freshness(
-        issues,
-        current_fingerprint,
-        trusted_workspace_fingerprint=review_freshness.trusted_workspace_fingerprint,
-        source_run=review_freshness.source_run,
-        review_run=review_freshness.review_run,
-        snapshot_id=review_freshness.snapshot_id,
+    issues.extend(artifact_integrity.issues)
+    return (
+        _freshness(
+            issues,
+            current_fingerprint,
+            trusted_workspace_fingerprint=review_freshness.trusted_workspace_fingerprint,
+            source_run=review_freshness.source_run,
+            review_run=review_freshness.review_run,
+            snapshot_id=review_freshness.snapshot_id,
+        ),
+        artifact_integrity,
     )
 
 
