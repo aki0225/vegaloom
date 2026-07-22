@@ -14,7 +14,8 @@ detector 仍属于后续阶段，不在本轮实现。
 
 - `Claim`、`Threat`、`EvidenceRecord`、`AssuranceBundle` 和 `AdequacyResult` 均使用
   `schema_version: 1`。
-- 所有结构拒绝未知字段；必填字段缺失、类型错误或不受支持版本均 fail-closed。
+- 所有结构使用严格类型并拒绝未知字段；必填字段缺失、字符串到整数的隐式转换、
+  布尔值冒充版本号或不受支持版本均 fail-closed。
 - 缺少 `schema_version` 的旧 artifact 可以读取为历史输入，但只能得到 `insufficient`，
   不得升级为 `sufficient_for_merge`。
 - Stage 1 只生成独立 Assurance 结果，不修改当前 Finish、Goal 或 Runtime 的成功规则。
@@ -41,8 +42,19 @@ evidence: []
 ```
 
 `snapshot` 必须同时绑定 HEAD、staged/unstaged diff、Reflect review snapshot、项目策略
-snapshot 和 scope policy。调用方还必须提供独立的期望上下文；Bundle 与期望上下文不一致时，
+snapshot 和非空 scope policy hash。“没有显式 scope”也必须绑定规范化空策略的确定性 hash，
+不能使用 `null`。调用方还必须提供独立的可信期望上下文；Bundle 与期望上下文不一致时，
 不能相信 Bundle 自己声明的值。
+
+可信期望上下文还必须冻结：
+
+- accepted Claim 集合的规范化 SHA-256。
+- active Threat 集合的规范化 SHA-256。
+- 允许进入充分性判定的 Evidence 合同摘要。
+
+因此，模型输出即使把自己的来源标签改写为 `deterministic_detector`，或删除确定性 Threat，
+也会因来源集合 hash 不匹配而 fail-closed。该期望上下文必须由项目规则或确定性 detector
+在接收候选 Bundle 之前建立，不能从待校验 Bundle 自己反推。
 
 ### 0.3 Claim 与 Threat 来源
 
@@ -78,13 +90,30 @@ EvidenceRecord 必须包含：
 artifact 引用使用：
 
 ```yaml
+artifact_type: verification_result
 run_id: "..."
 relative_path: "iterations/01/verification-result.json"
 sha256: "..."
 ```
 
-相对路径不得是绝对路径、不得包含 `..`，解析后的真实文件必须仍位于被引用 run 目录内。
-引用文件缺失、路径逃逸、run 不存在或内容 SHA-256 不一致时，Bundle 完整性失败。
+Stage 1 v1 只接受当前 run、当前 iteration 的
+`iterations/<NN>/verification-result.json`。相对路径不得是绝对路径、不得包含 `..`、盘符、
+URI scheme、空路径段或 NTFS ADS；解析后的真实文件必须仍位于当前 run 目录内。引用文件缺失、
+目录替代、静态 symlink/junction 逃逸、其他 run/iteration、内容 SHA-256 不一致时，Bundle
+完整性失败。
+
+哈希一致只证明字节未被替换，不足以证明 Evidence 语义。校验器还必须解析 verification
+artifact v2，交叉检查 run、iteration、shell、命令序号、声明命令、实际命令、verification
+临时目录、结果数、失败数、跳过命令、中断状态、退出码和耗时，并要求 EvidenceRecord 的
+command/result 与对应结构化命令结果一致。
+`verification_conclusion` 由这些 artifact 重算；Bundle 自报结论只能用于一致性检查。
+多命令验证若发生中断，允许保留尚未执行的 `skipped_commands`，但必须满足“已完成命令数 +
+跳过命令数 = 原始选中命令数”，且总体结论只能是 `interrupted`。
+
+输入 artifact 上限为 2 MiB，单个 Evidence artifact 上限为 4 MiB，单次校验读取总预算为
+16 MiB；所有文件使用有界读取，不依赖读取前的 `stat` 结果，相同真实路径只读取一次。
+成功和失败读取都会缓存并计入总预算。超限、损坏 JSON、读取期间增长或递归深度异常均写出
+独立 `insufficient` 结果，而不是抛出成功路径。
 
 ### 0.5 确定性 AdequacyResult
 
@@ -99,7 +128,8 @@ AdequacyResult 只能由 `deterministic_validator` 生成，不接受 LLM 自报
    `sufficient_for_merge`。
 
 `sufficient_for_merge` 在 Stage 1 仅表示“合同层证据充分”，不改变当前产品的
-`ready_to_commit`，也不声称生产绝对安全。
+`ready_to_commit`，也不声称生产绝对安全。AdequacyResult 必须携带已验证 snapshot、可信
+Claim/Threat 集合 hash、Evidence 合同集合 hash 和原始输入 hash，避免结果脱离来源后被重放。
 
 ## 1. 目的
 

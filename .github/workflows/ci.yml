@@ -91,9 +91,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "567" ]]; then
+          if [[ "$node_count" != "600" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 567 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 600 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -252,6 +252,7 @@ jobs:
             --timeout-method=thread `
             --basetemp=.tmp/pytest/runs/windows `
             tests/test_adapter_realpath_boundary.py `
+            tests/test_assurance_stage1_contract.py `
             tests/test_runtime_safety_integration.py::test_windows_verification_preserves_nested_python_quotes `
             tests/test_execution_control_safety.py `
             tests/test_run_mutation_lock.py
@@ -269,6 +270,7 @@ jobs:
           if ($version.Trim() -ne "0.1.2") {
             throw "Windows wheel 版本不一致：$version"
           }
+          & $venvPython -I -c "from vega.assurance import AdequacyResult; print(AdequacyResult.__name__)"
           Push-Location $env:RUNNER_TEMP
           try {
             $loops = & $vegaCli list-loops
@@ -357,6 +359,8 @@ jobs:
             .tmp/release-validation/venv/bin/python -I -c \
               "import vega; print(vega.__version__)"
           )" = "0.1.2"
+          .tmp/release-validation/venv/bin/python -I -c \
+            "from vega.assurance import AdequacyResult; print(AdequacyResult.__name__)"
           test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.1.2"
           .tmp/release-validation/venv/bin/vega --help >/dev/null
 

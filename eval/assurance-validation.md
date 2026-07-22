@@ -1756,3 +1756,64 @@ ModuleNotFoundError: No module named 'vega.assurance'
 
 下一步只能实现严格版本化模型、run-local artifact 引用解析和确定性充分性校验器；不得通过
 放宽 snapshot、引用或 LLM 来源约束让测试转绿，也不得在本阶段接入 Finish 成功条件。
+
+---
+
+## 2026-07-22 · AV-STAGE1-001 · independent review correction
+
+### 首轮实现结果
+
+预注册的 26 个节点一度全部通过，但三路独立只读审阅发现该结果不足以满足合同：
+
+1. 其他 run 或旧 iteration 中哈希相同的 artifact 可被当前 EvidenceRecord 复用。
+2. 任意文件只要哈希匹配，就可能配合 Bundle 自报的 `result.status=passed` 冒充证据。
+3. Bundle 自报的 `verification_conclusion` 未由结构化 artifact 重算。
+4. LLM 可把来源标签改写为 `deterministic_detector`，原实现没有独立来源集合绑定。
+5. candidate Threat 的悬空 Claim/Evidence 引用未被检查。
+6. Pydantic 默认类型转换接受字符串 iteration 或布尔 schema version。
+7. scope policy hash 可为 `null`。
+8. Evidence 读取没有单文件、总字节和输入大小预算。
+9. Windows 专项和 wheel smoke 没有直接覆盖新模块。
+
+该首轮 `26 passed` 不能作为可合并证据，也没有提交。
+
+### 修正
+
+- Artifact 强制绑定当前 run/current iteration 的固定 verification-result 路径。
+- 解析 verification artifact v2，重算命令、结果、失败数、中断和总体验证结论。
+- 可信上下文独立冻结 accepted Claim、active Threat 和允许的 Evidence 合同 hash。
+- 所有 Threat（包括 LLM candidate）都检查双向引用。
+- 全部模型启用严格类型，scope policy hash 改为必需。
+- 路径拒绝盘符、URI scheme、NTFS ADS、`..` 和静态 symlink/junction 逃逸。
+- 输入、单 Evidence 文件和总读取量增加硬预算，并按真实路径去重。
+- 独立 AdequacyResult 写入 snapshot、来源集合 hash 和输入 hash。
+- Windows CI 直接运行 Stage 1 文件，Windows/Linux wheel smoke 都导入新模块。
+
+### 审阅修正回归
+
+测试文件从 26 个节点扩展到 54 个节点，新增覆盖：
+
+- 重复 Claim/Threat/Evidence ID 与完整双向引用。
+- 未知字段、不支持版本、布尔版本号和错误类型。
+- Bundle、Evidence、Artifact 的 run/iteration/snapshot 错绑。
+- 文件缺失、目录替代、真实链接逃逸、NTFS ADS 和跨 run/iteration 复用。
+- 结构化 verification 与 Evidence 自报结果矛盾。
+- LLM 来源伪装和 candidate 悬空引用。
+- 损坏/深层 JSON、输入过大、Evidence 文件过大和持久化脱敏。
+- 结果 snapshot 与可信来源 hash 绑定。
+
+当前定向结果：
+
+```text
+54 passed in 2.64s
+595 tests collected
+```
+
+compileall、Ruff、仓库卫生和 `git diff --check` 通过。
+
+### 裁决
+
+`review-correction-passed-targeted / full-suite-required / do-not-merge`
+
+下一步必须用修正后的 595 节点合同重新跑完整本地分片。此前因 basetemp 父目录未预创建而产生
+的 fixture setup errors 属于无效验证尝试，不计入产品裁决；重跑必须预先创建每个分片父目录。
