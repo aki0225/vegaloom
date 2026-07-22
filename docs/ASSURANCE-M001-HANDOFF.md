@@ -6,18 +6,20 @@
 > PR：`#2`
 > 基线：`main@1e9bb52`
 > 实现提交：`f44dca1772517bfe1f531a0be28f6c073472c527`
+> 已通过 CI head：`ffad154a1ab4a2b6e14a6779c8d114661905fba2`
+> 已通过 Workflow：`29896556016`
 
 ## 当前结论
 
-`M-001` 已完成实现和 Windows 本地验证，当前状态为：
+`M-001` 已完成实现、Windows 本地验证和首轮 PR 跨平台 CI，当前状态为：
 
 ```text
-passed-local / requires-ci
+passed-pr-ci / ready-for-human-merge-review
 ```
 
-代码已经推送到公开远端并创建 PR，但没有合并。必须等 PR 的静态检查、Python 3.11 全量、
-Python 3.12 五个分片、Windows 专项、POSIX 专项和发布包安装验证全部通过后，才能提出合并
-建议。
+PR head `ffad154` 的 workflow `29896556016` 已 `completed / success`，10 个 job 全部通过。
+当前 post-CI 证据与本接力文档会形成新的纯文档提交；必须等该最新 head 的 CI 再次全绿并
+完成人工 diff 复核后，才能提出合并建议。
 
 ## 已完成内容
 
@@ -55,6 +57,18 @@ tests/test_runtime_safety_integration.py::test_posix_verification_temp_env_does_
 
 它不能由 Windows 本地结果替代，PR POSIX job 必须真实通过。
 
+远端 PR CI：
+
+```text
+Workflow 29896556016
+Head ffad154a1ab4a2b6e14a6779c8d114661905fba2
+10/10 jobs success
+```
+
+通过范围包括静态检查与 520 节点收集合同、Python 3.11 全量、Python 3.12 五个分片、
+Windows wheel smoke、POSIX 专项和 wheel/sdist 安装验证。公开未登录 API 不提供原始 job
+日志，因此没有把未直接读取到的逐项 pytest 汇总数字写成事实。
+
 本地证据摘要：
 
 ```text
@@ -85,18 +99,16 @@ git -C F:\workspace\vegaloom-adapter-realpath log -3 --oneline
 
 不要对存在未提交改动的目录执行 reset、clean 或强制切分支。
 
-## PR CI 通过后的步骤
+## 下一步
 
-1. 核对 PR `#2` 的所有 job 都是 `success`，不能只看旧 commit status。
-2. 记录 workflow ID、PR head SHA、各 job 结论和 Python 测试计数。
-3. 只向 `eval/assurance-validation.md` 追加 `AV-M001-001 · post-CI result`，不得改写现有记录。
-4. 复核 PR 相对 `main` 的完整 diff，重点检查：
+1. 等待本接力文档与 post-CI 证据提交触发的最新 workflow，核对全部 job 为 `success`。
+2. 复核 PR 相对 `main` 的完整 diff，重点检查：
    - 仓库外真实路径是否仍可能被写入。
    - `--force` 和 skip 是否可能绕过检查。
    - 安全的仓库内链接是否被无差别拒绝。
    - CI 的 520 节点和分片文件合同是否一致。
-5. CI 与人工 diff 复核都通过后，再向用户提出合并建议；不要自动合并。
-6. M-001 合并并完成 post-merge CI 前，不开始 M-002。
+3. 最新 CI 与人工 diff 复核都通过后，再向用户提出合并建议；不要自动合并。
+4. M-001 合并并完成 post-merge CI 前，不开始 M-002。
 
 ## 剩余风险
 

@@ -910,3 +910,47 @@ symlink、Windows junction 或其他可被路径解析跟随的 reparse point，
 
 - 摘要：`.tmp/pytest/logs/m001-full-summary-v2.json`
 - SHA-256：`F726417D3DB498970CF70E64F758852AC1DEA0E3B266A10CF0CAA3E85CC69345`
+
+---
+
+## 2026-07-22 · AV-M001-001 · post-CI result
+
+### Baseline
+
+- PR：`#2`
+- PR head：`ffad154a1ab4a2b6e14a6779c8d114661905fba2`
+- Workflow：`29896556016`
+- 触发：`pull_request`
+
+### GitHub Actions
+
+Workflow 最终状态为 `completed / success`，10 个 job 全部通过：
+
+1. 静态检查与节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 分片 smoke。
+4. Python 3.12 分片 p0-cli-lock。
+5. Python 3.12 分片 artifacts-runtime-security。
+6. Python 3.12 分片 semantics-evidence-review。
+7. Python 3.12 分片 remaining。
+8. Windows 专项与 wheel smoke。
+9. POSIX 临时目录专项。
+10. 构建并安装 wheel。
+
+静态 job 通过意味着当前 workflow 中的 `520` 节点收集阈值和 20 个测试文件分片合同均满足。
+Python 3.11 的“运行全量测试”步骤、五个 Python 3.12 分片、Windows、POSIX 和发布包安装
+步骤分别返回 `success`。公开未登录 API 不提供原始 job 日志，因此本记录不臆造日志中未直接
+读取到的逐项 pytest 汇总数字。
+
+### 裁决
+
+`passed-pr-ci / ready-for-human-merge-review`
+
+预注册危险案例、安全双生案例、本地 520 节点覆盖和 PR 跨平台 CI 均满足 M-001 的退出条件。
+该结论只支持进入人工 diff 与合并复核，不自动触发合并。
+
+### 下一步
+
+本条证据进入分支后会触发新的纯文档 CI。只有该最新 PR head 的 workflow 同样全部通过，且
+人工复核完整 diff 后，才建议合并 `main`。合并后仍需核对 main CI，再更新路线图并开始
+M-002。
