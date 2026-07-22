@@ -1310,3 +1310,44 @@ verification 若执行这些命令，可能把工具链选择错误误报为代�
 
 推送当前隔离分支与接力文档，供另一台机器继续。后续最多先创建 Draft PR 并等待全部 CI；
 在 post-CI 证据和人工 diff 复核完成前，不合并 `main`。
+
+---
+
+## 2026-07-22 · AV-M002-001 · first PR CI and review correction
+
+### 首轮 PR CI
+
+- PR：`#5`
+- PR head：`1b8d2cc2b88907d487f33bbf597bcb899811b8ef`
+- Workflow：`29923884827`
+- 状态：`completed / success`
+- Jobs：`10/10 success`
+
+通过范围包括静态检查与 538 节点收集合同、Python 3.11 全量、Python 3.12 分片、
+Windows 专项与 wheel smoke、POSIX 临时目录专项，以及 wheel 构建安装验证。
+
+### 独立审阅发现
+
+实现审阅未发现阻塞性代码问题，但测试与证据审阅发现：代码和接力文档都承诺“显式
+`packageManager` 声明损坏或不受支持时 fail-closed”，原有 9 个预注册节点没有直接覆盖
+该声明。首轮 CI 通过只能证明当时的 538 节点全绿，不能替代缺失的合同回归。
+
+通用的“证据文件自动绑定当前 Git head”门禁属于后续 Assurance 数据合同，不在 M-002
+内扩建；本轮继续通过明确记录 head、workflow 和人工复核保持证据边界。
+
+### 审阅修正
+
+- 新增非字符串 `packageManager` 声明的 fail-closed 回归。
+- 新增不受支持的 `bun` 声明不能回退到陈旧 pnpm lockfile 的回归。
+- 相关选择链路：`11 passed in 1.68s`。
+- 完整收集：`540` 个节点。
+- CI 节点合同同步更新为 `540`。
+- compileall、Ruff、仓库卫生检查和 `git diff --check` 通过。
+
+### 裁决
+
+`first-pr-ci-passed / review-correction-passed-local / latest-head-requires-ci / do-not-merge`
+
+首轮 workflow `29923884827` 已证明 `1b8d2cc` 的跨平台结果，但新增回归会形成新的 Git
+head。只有该最新 head 的 540 节点 CI 同样全部通过后，才能追加最终 post-CI 结果、更新
+Roadmap 并提出合并建议。

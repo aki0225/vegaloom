@@ -429,6 +429,44 @@ def test_project_profile_fails_closed_for_conflicting_node_lockfiles(
     assert node_commands == []
 
 
+@pytest.mark.parametrize(
+    "package_manager",
+    [
+        pytest.param(42, id="invalid-type"),
+        pytest.param("bun@1.2.3", id="unsupported-manager"),
+    ],
+)
+def test_project_profile_fails_closed_for_invalid_package_manager_declaration(
+    tmp_path: Path,
+    package_manager: object,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    package_json = {
+        "packageManager": package_manager,
+        "scripts": {
+            "test": "node --test",
+            "lint": "eslint .",
+        },
+    }
+    files = {
+        "package.json": json.dumps(package_json, ensure_ascii=False) + "\n",
+        "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+    }
+    for relative_path, content in files.items():
+        repo.joinpath(relative_path).write_text(content, encoding="utf-8")
+
+    profile = build_project_profile(tmp_path, repo)
+    node_commands = [
+        command
+        for command in [*profile.test_commands, *profile.lint_commands]
+        if command.startswith(("npm ", "pnpm ", "yarn "))
+    ]
+
+    assert set(profile.package_managers).isdisjoint({"npm", "pnpm", "yarn"})
+    assert node_commands == []
+
+
 def test_tracked_project_profile_reads_package_manager_from_fixed_revision(
     tmp_path: Path,
 ) -> None:
