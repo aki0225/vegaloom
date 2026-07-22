@@ -85,16 +85,17 @@ F726417D3DB498970CF70E64F758852AC1DEA0E3B266A10CF0CAA3E85CC69345
 在已有仓库中：
 
 ```powershell
+$worktreePath = "<worktree-path>"
 git fetch origin
-git worktree add F:\workspace\vegaloom-adapter-realpath `
+git worktree add $worktreePath `
   origin/fix/adapter-realpath-boundary
 ```
 
 如果目标目录已存在，先检查：
 
 ```powershell
-git -C F:\workspace\vegaloom-adapter-realpath status -sb
-git -C F:\workspace\vegaloom-adapter-realpath log -3 --oneline
+git -C $worktreePath status -sb
+git -C $worktreePath log -3 --oneline
 ```
 
 不要对存在未提交改动的目录执行 reset、clean 或强制切分支。
