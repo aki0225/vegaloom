@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "case_id": "AV-M002-001",
+  "record_type": "local-result-summary",
+  "recorded_on": "2026-07-22",
+  "baseline_commit": "6b74c5be3e26d6e9d7e5849b1ec76dd9c5b5f2b3",
+  "red_test_commit": "2fad84cdc16a67eacdc9579dfb229e726c002cf1",
+  "candidate_commit": "c6b5325d025c64270c2bd1fa98fb3b7ae9dc8e2f",
+  "candidate_tree": "2fbbda1907631a16394e786efe70e47f84dda084",
+  "platform": {
+    "os": "Windows",
+    "python": "3.14.3"
+  },
+  "preregistered_regression": {
+    "status": "passed",
+    "passed": 9,
+    "failed": 0,
+    "duration_seconds": 3.18,
+    "log": {
+      "path": ".tmp/pytest/logs/m002-green-after-fix.txt",
+      "tracked": false,
+      "sha256": "C1B04DF4F62139F50582480CA284339C665E716647E8C5321409B02B78283A8E"
+    }
+  },
+  "collection": {
+    "status": "passed",
+    "node_count": 538,
+    "unique_node_count": 538,
+    "test_file_count": 21,
+    "log": {
+      "path": ".tmp/pytest/m002-green-collected.txt",
+      "tracked": false,
+      "sha256": "8676750D911BEABC7B314374A0DF349D89990F5765497974A7470C906226B65A"
+    }
+  },
+  "full_suite": {
+    "status": "passed-local",
+    "passed": 537,
+    "skipped": 1,
+    "failed": 0,
+    "errors": 0,
+    "covered_node_count": 538,
+    "shards": [
+      {
+        "name": "smoke",
+        "passed": 102,
+        "skipped": 0,
+        "duration_seconds": 1186.93,
+        "log_sha256": "7EC3FF5E720E0C77CCCBCC199AC230F35E4A9DB43691725971098C93E45D2F54"
+      },
+      {
+        "name": "p0-cli-lock",
+        "passed": 109,
+        "skipped": 0,
+        "duration_seconds": 688.48,
+        "log_sha256": "BD9249EE59AE3C449FDD54649E3C404609EED2625C2004CE1138B56A168FF927"
+      },
+      {
+        "name": "artifacts-runtime-security",
+        "passed": 58,
+        "skipped": 1,
+        "duration_seconds": 760.1,
+        "log_sha256": "D994EFFDB12601FFB8DB7F8ADA2EF27AF78EBD64A3168E790ABECAC71EC8CB14"
+      },
+      {
+        "name": "remaining",
+        "passed": 188,
+        "skipped": 0,
+        "duration_seconds": 298.65,
+        "log_sha256": "A4ED857F53E1EF12BFC3E237B655C328A0FA5FDA56F9AD12ABCC46915AB24A86"
+      },
+      {
+        "name": "success-semantics",
+        "passed": 29,
+        "skipped": 0,
+        "duration_seconds": 601.12,
+        "log_sha256": "88B2A944AED1BC3DA6A159CEB5F495BFDDCBE7ACC672F5D397E04F6B89D3EF5F"
+      },
+      {
+        "name": "evidence-freshness",
+        "passed": 19,
+        "skipped": 0,
+        "duration_seconds": 368.27,
+        "log_sha256": "4581393328CC121A98FEEFC79AA738CB372E5A128F9FA8C60173BD9EA5023612"
+      },
+      {
+        "name": "review-integrity",
+        "passed": 18,
+        "skipped": 0,
+        "duration_seconds": 174.68,
+        "log_sha256": "E7D37D9DA5CC94FA43B970907685E64FD2928FB69DD185774669F8773806316E"
+      },
+      {
+        "name": "assurance-semantics",
+        "passed": 14,
+        "skipped": 0,
+        "duration_seconds": 646.42,
+        "log_sha256": "77FEC0E08ECEB14CC9EFF97CBA1511D435B3A7FD34FAC6A838AEBD36D61A0889"
+      }
+    ],
+    "skipped_nodes": [
+      {
+        "nodeid": "tests/test_runtime_safety_integration.py::test_posix_verification_temp_env_does_not_re_evaluate_path",
+        "reason": "当前平台为 Windows，该节点只覆盖 POSIX shell 变量展开语义"
+      }
+    ]
+  },
+  "static_checks": {
+    "compileall": "passed",
+    "ruff": "passed",
+    "repository_hygiene": "passed",
+    "git_diff_check": "passed"
+  },
+  "excluded_attempts": [
+    {
+      "reason": "首次显式 basetemp 的父目录不存在，pytest 在 fixture setup 阶段产生 FileNotFoundError",
+      "counted_as_product_failure": false,
+      "resolution": "创建受控父目录后完整重跑所有分片"
+    }
+  ],
+  "verdict": "passed-local-requires-ci-do-not-merge"
+}

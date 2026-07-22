@@ -1206,3 +1206,107 @@ verification 若执行这些命令，可能把工具链选择错误误报为代�
 
 在同一分支实现一次性 Node 包管理器选择结果，并让 package manager、test 与 lint 输出共同
 消费；转绿后再运行受影响回归、完整门禁与跨平台 CI。
+
+---
+
+## 2026-07-22 · AV-M002-001 · local result
+
+### Baseline
+
+- Git 基线：`main@6b74c5b`
+- 红灯提交：`2fad84cdc16a67eacdc9579dfb229e726c002cf1`
+- 实现提交：`c6b5325d025c64270c2bd1fa98fb3b7ae9dc8e2f`
+- 实现 tree：`2fbbda1907631a16394e786efe70e47f84dda084`
+- 工作分支：`fix/node-package-manager-selection`
+- 平台：Windows / Python 3.14.3
+
+### 实现结果
+
+- 新增一次性 Node 包管理器选择结果，项目画像、test 和 lint 不再分别猜测。
+- 顶层 `packageManager` 的受支持声明优先于 lockfile。
+- 无显式声明时，单一 lockfile 决定 npm、pnpm 或 yarn。
+- 只有 `package.json` 时保留 npm 默认值。
+- 多 lockfile 冲突时不选择 Node 包管理器，也不生成 Node test/lint 命令。
+- 显式声明存在但无法识别时停止猜测，不回退到可能陈旧的 lockfile。
+- tracked profile 使用固定 revision 中的 `package.json` 内容。
+- `.vega.yaml` 显式 verification 覆盖自动 test/lint 的既有优先级保持不变。
+
+### 预注册案例结果
+
+旧实现的 `6 failed, 3 passed` 已转为：
+
+```text
+9 passed in 3.18s
+```
+
+- `AV-M002-NPM-001`：通过。
+- `AV-M002-PNPM-001`：通过，未混入 npm/yarn。
+- `AV-M002-YARN-001`：通过，未混入 npm/pnpm。
+- `AV-M002-CONFIG-001`：通过，显式 yarn 声明消歧陈旧 lockfile。
+- `AV-M002-DANGER-001`：通过，多 lockfile 无声明时 fail-closed。
+- `AV-M002-TRACKED-001`：通过，只读取固定 revision 的 pnpm 声明。
+- `AV-M002-VEGA-001`：通过，显式 verification 继续优先。
+
+### 受影响回归
+
+- `tests/test_context_boundaries.py`：`34 passed`。
+- `tests/test_security_evidence.py`：`15 passed`。
+- `tests/test_project_config_hardening.py`：`25 passed`。
+- Project Profile 与 verification 关键调用节点：`5 passed`。
+
+### 完整本地覆盖
+
+- 完整收集：`538` 个节点。
+- 唯一 nodeid：`538` 个。
+- 完整分片结果：`537 passed, 1 skipped`，无失败、无 error。
+  - smoke：`102 passed`。
+  - p0-cli-lock：`109 passed`。
+  - artifacts-runtime-security：`58 passed, 1 skipped`。
+  - remaining：`188 passed`。
+  - success-semantics：`29 passed`。
+  - evidence-freshness：`19 passed`。
+  - review-integrity：`18 passed`。
+  - assurance-semantics：`14 passed`。
+- 唯一跳过：
+  `tests/test_runtime_safety_integration.py::test_posix_verification_temp_env_does_not_re_evaluate_path`；
+  当前平台为 Windows，该节点只覆盖 POSIX shell 变量展开语义。
+
+首次显式指定分片 basetemp 时，其父目录尚不存在，pytest 在 fixture setup 阶段产生
+`FileNotFoundError`。该尝试没有形成产品失败证据，不计入裁决；创建受控父目录后，全部
+538 个节点已重新执行并得到上述结果。
+
+### 静态门禁
+
+- `python -m compileall -q src scripts/check_repository_hygiene.py`：通过。
+- `ruff check src tests scripts/check_repository_hygiene.py --no-cache`：通过。
+- `python scripts/check_repository_hygiene.py --base-ref origin/main`：通过。
+- `git diff --check`：通过。
+
+### 本地证据
+
+- 结构化摘要：
+  `examples/evidence/m002-node-package-manager-local-summary.json`
+- 摘要 SHA-256：
+  `959730D1F60CE83604AB01640977AE5D42A6A6BE6C8FBF71DE1BB5AB11B02752`
+- 接力文档：`docs/M002-NODE-PACKAGE-MANAGER-HANDOFF.md`
+- 分片原始日志位于未跟踪的 `.tmp/pytest/logs/`，其 SHA-256 已写入结构化摘要。
+
+### 裁决
+
+`passed-local / requires-ci / do-not-merge`
+
+预注册危险案例、安全控制、固定 revision 边界和本地 538 个节点均满足 M-002 的本地退出
+条件。该结果不替代 Python 3.11/3.12、Linux/POSIX、Windows CI 和发布包安装验证，也不授权
+自动合并或发版。
+
+### 剩余风险
+
+- 本轮不判断 `scripts.test` / `scripts.lint` 是否存在。
+- 不处理嵌套 workspace、bun/deno 或 Corepack 自动安装。
+- 冲突与未知声明目前静默 fail-closed，尚未提供版本化的用户诊断字段。
+- Python 3.14.3 的本地高负载耗时不能替代 CI 的 58 秒单节点预算。
+
+### 下一步
+
+推送当前隔离分支与接力文档，供另一台机器继续。后续最多先创建 Draft PR 并等待全部 CI；
+在 post-CI 证据和人工 diff 复核完成前，不合并 `main`。
