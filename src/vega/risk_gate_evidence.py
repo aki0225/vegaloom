@@ -149,7 +149,12 @@ def validate_iteration_risk_gate_artifacts(
             issues.append("risk_gate_recommendation_missing")
         if result and _reviewer_evidence_present(iteration):
             if result.recommendation == "human-review":
-                issues.append("risk_gate_human_review_bypassed")
+                if not _has_valid_consumed_approval(
+                    iteration_dir,
+                    iteration,
+                    repo_path=repo_path,
+                ):
+                    issues.append("risk_gate_human_review_bypassed")
         if result:
             _validate_result_policy(result, issues)
             _validate_recomputed_result(
@@ -196,6 +201,26 @@ def _reviewer_evidence_present(iteration: LoopIterationState) -> bool:
         or iteration.review_run is not None
         or iteration.verdict is not None
     )
+
+
+def _has_valid_consumed_approval(
+    iteration_dir: Path,
+    iteration: LoopIterationState,
+    *,
+    repo_path: Path | None,
+) -> bool:
+    if repo_path is None:
+        return False
+    try:
+        from .loop_graph_decision import validate_consumed_approval
+
+        return validate_consumed_approval(
+            iteration_dir.parents[1],
+            iteration=iteration.iteration,
+            repo_path=repo_path,
+        )
+    except Exception:  # noqa: BLE001 - approval 证据不完整时必须 fail-closed
+        return False
 
 
 def _read_text(path: Path, prefix: str, issues: list[str]) -> str:

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from vega import eval as eval_runner
@@ -28,12 +30,24 @@ from vega.loop_spec import load_loop_spec, load_loop_spec_file
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.memory import MemoryLedgerStore
 from vega.models import BriefInput, MemoryProposal, RunState, ToolResult
-from vega.project_config import CodexExecOptions, check_project_config, load_project_config
+from vega.project_config import (
+    CodexExecOptions,
+    CodexProviderDescriptor,
+    check_project_config,
+    codex_provider_descriptor_sha256,
+    load_project_config,
+    render_project_config_summary,
+)
 from vega.project_profile import build_project_profile
 from vega.reflect_runtime import ReflectRuntime
 from vega.recovery_runtime import RecoveryRuntime
 from vega.review_runtime import ReviewPackRuntime, ReviewRuntime, parse_review_verdict
-from vega.runner import CodexExecRunner, RunnerResult
+from vega.runner import (
+    CodexExecRunner,
+    RunnerResult,
+    build_codex_exec_command,
+    build_codex_exec_identity,
+)
 from vega.run_status import run_status_payload
 from vega.runtime import EngineeringChangeRuntime
 from vega.run_utils import create_run_dir
@@ -42,6 +56,11 @@ from vega.tools import git_tools
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
+
+
+def _strip_ansi(value: str) -> str:
+    return _ANSI_ESCAPE_PATTERN.sub("", value)
 
 
 def test_project_skeleton_exists() -> None:
@@ -52,11 +71,7 @@ def test_project_skeleton_exists() -> None:
     assert PROJECT_ROOT.joinpath("examples", "tasks", "check-atg-mcp-docs.md").exists()
 
 
-def _clear_vega_env(
-    monkeypatch,
-    *,
-    provider_alias: str | None = "test-provider",
-) -> None:
+def _clear_vega_env(monkeypatch) -> None:
     for name in [
         "VEGA_API_KEY",
         "VEGA_BASE_URL",
@@ -66,8 +81,6 @@ def _clear_vega_env(
         "VEGA_TIMEOUT_SECONDS",
     ]:
         monkeypatch.delenv(name, raising=False)
-    if provider_alias is not None:
-        monkeypatch.setenv("VEGA_PROVIDER_ALIAS", provider_alias)
 
 
 def _copy_loop_spec(tmp_path: Path) -> None:
@@ -504,15 +517,8 @@ def test_llm_client_from_env_uses_safe_defaults(monkeypatch) -> None:
     assert not client.available()
     assert client.model == "gpt-5.5"
     assert client.reasoning_effort == "xhigh"
-    assert client.provider_alias == "test-provider"
+    assert client.provider_alias == "sandbox-provider"
     assert client.timeout_seconds == 180.0
-
-
-def test_llm_client_from_env_requires_provider_alias(monkeypatch) -> None:
-    _clear_vega_env(monkeypatch, provider_alias=None)
-
-    with pytest.raises(ValueError, match="VEGA_PROVIDER_ALIAS"):
-        LLMClient.from_env()
 
 
 def test_cli_run_creates_core_artifacts_without_memory_proposal(tmp_path, monkeypatch) -> None:
@@ -557,7 +563,7 @@ def test_runtime_uses_mock_llm_for_plan_and_report(tmp_path, monkeypatch) -> Non
 
     class MockLLMClient:
         model = "gpt-5.5"
-        provider_alias = "test-provider"
+        provider_alias = "sandbox-provider"
 
         def available(self) -> bool:
             return True
@@ -589,7 +595,7 @@ def test_runtime_uses_mock_llm_for_plan_and_report(tmp_path, monkeypatch) -> Non
     )
     trace_text = run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8")
     assert '"llm_available": true' in trace_text
-    assert '"provider_alias": "test-provider"' in trace_text
+    assert '"provider_alias": "sandbox-provider"' in trace_text
 
 
 def test_eval_failure_marks_run_failed_after_artifacts_are_written(tmp_path, monkeypatch) -> None:
@@ -599,7 +605,7 @@ def test_eval_failure_marks_run_failed_after_artifacts_are_written(tmp_path, mon
 
     class BadReportLLMClient:
         model = "gpt-5.5"
-        provider_alias = "test-provider"
+        provider_alias = "sandbox-provider"
 
         def available(self) -> bool:
             return True
@@ -672,7 +678,7 @@ def test_llm_exception_falls_back_and_marks_unanswered_run_failed(
 
     class FailingLLMClient:
         model = "gpt-5.5"
-        provider_alias = "test-provider"
+        provider_alias = "sandbox-provider"
 
         def available(self) -> bool:
             return True
@@ -890,6 +896,7 @@ def test_brief_feature_supports_input_file_and_generates_feature_artifacts(tmp_p
 
 
 def test_brief_cli_requires_exactly_one_input_source(tmp_path, monkeypatch) -> None:
+    assert _strip_ansi("\x1b[31m错误\x1b[0m") == "错误"
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
     input_file = tmp_path / "bug.md"
@@ -910,11 +917,11 @@ def test_brief_cli_requires_exactly_one_input_source(tmp_path, monkeypatch) -> N
         ],
     )
     assert both.exit_code != 0
-    assert "只能二选一" in both.output
+    assert "只能二选一" in _strip_ansi(both.output)
 
     none = CliRunner().invoke(app, ["brief", "bug", "--repo", str(repo_dir)])
     assert none.exit_code != 0
-    assert "必须提供 --input 或 --text" in none.output
+    assert "必须提供 --input 或 --text" in _strip_ansi(none.output)
 
 
 def test_memory_search_filters_by_repo_tag_and_path(tmp_path) -> None:
@@ -1062,6 +1069,8 @@ def test_review_pack_generates_isolated_context_from_reflect_run(tmp_path) -> No
         "review-prompt.md",
         "review-checklist.md",
         "review-context.json",
+        "acceptance-evidence.md",
+        "acceptance-evidence.json",
         "review-prompt-metrics.json",
         "review-prompt-metrics.md",
         "eval.md",
@@ -1078,10 +1087,182 @@ def test_review_pack_generates_isolated_context_from_reflect_run(tmp_path) -> No
     assert metrics["chars"] == len(prompt)
     assert metrics["status"] == "within_budget"
     assert metrics["sections"]["project_context"] > 0
+    assert metrics["sections"]["acceptance_evidence"] > 0
     context = json.loads(run_dir.joinpath("review-context.json").read_text(encoding="utf-8"))
     assert context["contains_worker_chat"] is False
     assert context["changed_files"] == ["README.md"]
+    assert context["acceptance_evidence"]["items"][0]["path"] == "README.md"
+    assert "content" not in context["acceptance_evidence"]["items"][0]
     assert context["truncated_sections"] == []
+
+
+def test_review_pack_binds_baseline_readme_and_related_tests(tmp_path) -> None:
+    from vega.brief_runtime import BriefRuntime
+
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    repo_dir.joinpath("README.md").write_text(
+        "# Slug 需求\n\nUNICODE_REQUIREMENT：不可分解 Unicode 字符作为分隔符。\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo_dir.joinpath("src").mkdir()
+    repo_dir.joinpath("src", "slugify.py").write_text(
+        "def normalize_slug(value: str) -> str:\n    raise NotImplementedError\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo_dir.joinpath("tests").mkdir()
+    repo_dir.joinpath("tests", "test_slugify.py").write_text(
+        "def test_unicode_boundary():\n"
+        "    # UNICODE_TEST_CONTRACT\n"
+        "    assert normalize_slug('a中b') == 'a-b'\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _commit_repo_paths(
+        repo_dir,
+        "README.md",
+        "src/slugify.py",
+        "tests/test_slugify.py",
+        message="增加 slug 基线合同",
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_dir,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    repo_dir.joinpath("src", "slugify.py").write_text(
+        "def normalize_slug(value: str) -> str:\n    return value.lower()\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    brief_run = BriefRuntime(tmp_path).run(
+        BriefInput(
+            mode="bug",
+            text="修复 `src/slugify.py`，行为以 README 和现有测试为准。",
+            source="test",
+            repo_path=str(repo_dir),
+        )
+    )
+    reflect_run = ReflectRuntime(tmp_path).run(
+        repo_dir,
+        source_run=brief_run.name,
+    )
+
+    run_dir = ReviewPackRuntime(tmp_path).run(repo_dir, reflect_run.name)
+
+    evidence = json.loads(
+        run_dir.joinpath("acceptance-evidence.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    items = {item["path"]: item for item in evidence["items"]}
+    assert evidence["tracked_revision"] == head
+    assert evidence["truncated"] is False
+    assert set(items) == {"README.md", "tests/test_slugify.py"}
+    assert "UNICODE_REQUIREMENT" in items["README.md"]["content"]
+    assert "UNICODE_TEST_CONTRACT" in items["tests/test_slugify.py"]["content"]
+    assert all(item["revision"] == head for item in items.values())
+    assert all(len(item["source_sha256"]) == 64 for item in items.values())
+    assert all(len(item["included_sha256"]) == 64 for item in items.values())
+    prompt = run_dir.joinpath("review-prompt.md").read_text(encoding="utf-8")
+    assert "UNICODE_REQUIREMENT" in prompt
+    assert "UNICODE_TEST_CONTRACT" in prompt
+    context = json.loads(
+        run_dir.joinpath("review-context.json").read_text(encoding="utf-8")
+    )
+    assert all(
+        "content" not in item
+        for item in context["acceptance_evidence"]["items"]
+    )
+
+
+def test_review_runtime_cannot_approve_truncated_acceptance_evidence(
+    tmp_path,
+) -> None:
+    from vega.brief_runtime import BriefRuntime
+
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    repo_dir.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "prompt_budget:",
+                "  reviewer_max_chars: 60000",
+                "  reviewer_acceptance_max_chars: 1000",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo_dir.joinpath("README.md").write_text(
+        "# 大型需求\n\n" + ("完整验收合同。" * 300) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo_dir.joinpath("src").mkdir()
+    repo_dir.joinpath("src", "feature.py").write_text(
+        "VALUE = 1\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _commit_repo_paths(
+        repo_dir,
+        ".vega.yaml",
+        "README.md",
+        "src/feature.py",
+        message="增加有界验收合同",
+    )
+    repo_dir.joinpath("src", "feature.py").write_text(
+        "VALUE = 2\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    brief_run = BriefRuntime(tmp_path).run(
+        BriefInput(
+            mode="feature",
+            text="修改 `src/feature.py`，遵守 README 验收合同。",
+            source="test",
+            repo_path=str(repo_dir),
+        )
+    )
+    reflect_run = ReflectRuntime(tmp_path).run(
+        repo_dir,
+        source_run=brief_run.name,
+    )
+    runner = StaticRunner([_review_json("approve")])
+
+    run_dir = ReviewRuntime(tmp_path, runner=runner).run(
+        repo_dir,
+        reflect_run.name,
+    )
+
+    state = json.loads(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    verdict = json.loads(
+        run_dir.joinpath("review-verdict.json").read_text(encoding="utf-8")
+    )
+    context = json.loads(
+        run_dir.joinpath("review-context.json").read_text(encoding="utf-8")
+    )
+    evidence = json.loads(
+        run_dir.joinpath("acceptance-evidence.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(runner.calls) == 1
+    assert evidence["truncated"] is True
+    assert evidence["used_chars"] == 1000
+    assert context["truncated_sections"] == ["acceptance_evidence"]
+    assert verdict["verdict"] == "needs_human"
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "evidence_truncated"
 
 
 def test_reviewer_prompt_excludes_untracked_file_content(tmp_path) -> None:
@@ -1174,6 +1355,7 @@ def test_review_runtime_uses_read_only_runner_and_writes_verdict(tmp_path) -> No
     run_dir = ReviewRuntime(tmp_path, runner=runner).run(repo_dir, reflect_run.name)
 
     assert runner.calls[0]["sandbox"] == "read-only"
+    assert runner.calls[0]["repo_path"] == repo_dir.resolve()
     verdict = json.loads(run_dir.joinpath("review-verdict.json").read_text(encoding="utf-8"))
     assert verdict["verdict"] == "approve"
     state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
@@ -1225,7 +1407,7 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
         )
         return SimpleNamespace(status="success", output="ok", error=None)
 
-    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "D:/tools/codex.cmd")
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
     monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
     runner = CodexExecRunner(
         options=CodexExecOptions(
@@ -1245,7 +1427,7 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
 
     assert result.status == "success"
     assert captured["command"] == [
-        "D:/tools/codex.cmd",
+        "C:/fixtures/bin/codex.cmd",
         "exec",
         "--cd",
         str(repo_dir.resolve()),
@@ -1260,7 +1442,409 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
         "--ephemeral",
         "-",
     ]
+    assert "--ignore-user-config" not in captured["command"]
     assert captured["input_text"] == "完成最小修改"
+    context = captured["context"]
+    assert isinstance(context, RunnerExecutionContext)
+    assert context.runner_identity == {
+        "kind": "CodexExecRunner",
+        "runner": "codex-exec",
+        "config_mode": "profile",
+        "ignore_user_config": "false",
+        "ephemeral": "true",
+        "sandbox": "workspace-write",
+        "profile": "vega-worker",
+        "model": "gpt-test",
+        "reasoning_effort": "medium",
+    }
+
+
+def test_codex_exec_runner_adds_ignore_user_config_when_enabled(tmp_path, monkeypatch) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
+    runner = CodexExecRunner(options=CodexExecOptions(ignore_user_config=True))
+
+    command = runner.build_command(repo_dir, "read-only")
+
+    assert command == [
+        "C:/fixtures/bin/codex.cmd",
+        "exec",
+        "--cd",
+        str(repo_dir.resolve()),
+        "--sandbox",
+        "read-only",
+        "--ignore-user-config",
+        "-",
+    ]
+    assert runner.execution_identity("read-only") == {
+        "kind": "CodexExecRunner",
+        "runner": "codex-exec",
+        "config_mode": "ignore_user_config",
+        "ignore_user_config": "true",
+        "ephemeral": "false",
+        "sandbox": "read-only",
+    }
+
+
+def test_codex_exec_runner_adds_fixed_windows_sandbox_session_override(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
+    runner = CodexExecRunner(
+        options=CodexExecOptions(
+            ignore_user_config=True,
+            windows_sandbox_session_override="elevated",
+        )
+    )
+
+    command = runner.build_command(repo_dir, "workspace-write")
+
+    assert command == [
+        "C:/fixtures/bin/codex.cmd",
+        "exec",
+        "--cd",
+        str(repo_dir.resolve()),
+        "--sandbox",
+        "workspace-write",
+        "--ignore-user-config",
+        "--config",
+        'windows.sandbox="elevated"',
+        "-",
+    ]
+    assert runner.execution_identity("workspace-write") == {
+        "kind": "CodexExecRunner",
+        "runner": "codex-exec",
+        "config_mode": "ignore_user_config",
+        "ignore_user_config": "true",
+        "ephemeral": "false",
+        "sandbox": "workspace-write",
+        "windows_sandbox_session_override": "elevated",
+    }
+
+
+def test_codex_exec_runner_can_disable_multi_agent(tmp_path, monkeypatch) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
+    runner = CodexExecRunner(
+        options=CodexExecOptions(disable_multi_agent=True)
+    )
+
+    command = runner.build_command(repo_dir, "workspace-write")
+
+    assert command == [
+        "C:/fixtures/bin/codex.cmd",
+        "exec",
+        "--cd",
+        str(repo_dir.resolve()),
+        "--sandbox",
+        "workspace-write",
+        "--disable",
+        "multi_agent",
+        "-",
+    ]
+    assert runner.execution_identity("workspace-write") == {
+        "kind": "CodexExecRunner",
+        "runner": "codex-exec",
+        "config_mode": "default",
+        "ignore_user_config": "false",
+        "ephemeral": "false",
+        "sandbox": "workspace-write",
+        "multi_agent": "disabled",
+    }
+
+
+def test_codex_exec_runner_adds_explicit_loopback_provider(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
+    provider = CodexProviderDescriptor(
+        name="sandboxproxy",
+        base_url="http://LOCALHOST:18080/v1/",
+        wire_api="responses",
+        requires_openai_auth=True,
+        supports_websockets=False,
+    )
+    options = CodexExecOptions(
+        ignore_user_config=True,
+        provider=provider,
+        windows_sandbox_session_override="elevated",
+        model="sandbox-model",
+        reasoning_effort="high",
+        ephemeral=True,
+    )
+    runner = CodexExecRunner(options=options)
+
+    command = runner.build_command(repo_dir, "workspace-write")
+    identity = runner.execution_identity("workspace-write")
+
+    assert provider.base_url == "http://localhost:18080/v1"
+    assert command == [
+        "C:/fixtures/bin/codex.cmd",
+        "exec",
+        "--cd",
+        str(repo_dir.resolve()),
+        "--sandbox",
+        "workspace-write",
+        "--ignore-user-config",
+        "--config",
+        'windows.sandbox="elevated"',
+        "--config",
+        'model_provider="sandboxproxy"',
+        "--config",
+        'model_providers.sandboxproxy.name="sandboxproxy"',
+        "--config",
+        (
+            "model_providers.sandboxproxy.base_url="
+            '"http://localhost:18080/v1"'
+        ),
+        "--config",
+        'model_providers.sandboxproxy.wire_api="responses"',
+        "--config",
+        "model_providers.sandboxproxy.requires_openai_auth=true",
+        "--config",
+        "model_providers.sandboxproxy.supports_websockets=false",
+        "--model",
+        "sandbox-model",
+        "--config",
+        'model_reasoning_effort="high"',
+        "--ephemeral",
+        "-",
+    ]
+    assert command == build_codex_exec_command(
+        "C:/fixtures/bin/codex.cmd",
+        options,
+        repo_dir,
+        "workspace-write",
+    )
+    assert identity == build_codex_exec_identity(
+        options,
+        "workspace-write",
+    )
+    assert identity == {
+        "kind": "CodexExecRunner",
+        "runner": "codex-exec",
+        "config_mode": "isolated_provider",
+        "ignore_user_config": "true",
+        "ephemeral": "true",
+        "sandbox": "workspace-write",
+        "windows_sandbox_session_override": "elevated",
+        "provider": "sandboxproxy",
+        "provider_base_url": "http://localhost:18080/v1",
+        "provider_wire_api": "responses",
+        "provider_requires_openai_auth": "true",
+        "provider_supports_websockets": "false",
+        "provider_descriptor_sha256": (
+            codex_provider_descriptor_sha256(provider)
+        ),
+        "model": "sandbox-model",
+        "reasoning_effort": "high",
+    }
+
+
+@pytest.mark.parametrize(
+    "name, base_url, message",
+    [
+        ("sub.2api", "http://127.0.0.1:18080/v1", "provider.name"),
+        ("sandboxproxy", "https://127.0.0.1:18080/v1", "只允许 http"),
+        ("sandboxproxy", "http://example.com:18080/v1", "只能指向 loopback"),
+        ("sandboxproxy", "http://127.0.0.1/v1", "必须显式提供端口"),
+        ("sandboxproxy", "http://127.0.0.1:0/v1", "端口必须大于 0"),
+        (
+            "sandboxproxy",
+            "http://user@127.0.0.1:18080/v1",
+            "禁止包含 userinfo",
+        ),
+        (
+            "sandboxproxy",
+            "http://127.0.0.1:18080/v1?token=fake",
+            "禁止包含 query",
+        ),
+        (
+            "sandboxproxy",
+            "http://127.0.0.1:18080/v1#fragment",
+            "禁止包含 query",
+        ),
+        (
+            "sandboxproxy",
+            "http://127.0.0.1:18080/v1 path",
+            "禁止包含空白",
+        ),
+        (
+            "sandboxproxy",
+            "http://127.0.0.1:18080\\v1",
+            "禁止包含空白、反斜杠",
+        ),
+    ],
+)
+def test_codex_provider_descriptor_rejects_unsafe_values(
+    name: str,
+    base_url: str,
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        CodexProviderDescriptor(name=name, base_url=base_url)
+
+
+def test_codex_exec_runner_rejects_mutated_provider_descriptor(
+    tmp_path,
+) -> None:
+    provider = CodexProviderDescriptor(
+        name="sandboxproxy",
+        base_url="http://127.0.0.1:18080/v1",
+    )
+    invalid_provider = provider.model_copy(
+        update={"base_url": "https://example.com/v1"}
+    )
+    options = CodexExecOptions(
+        ignore_user_config=True,
+        provider=provider,
+    ).model_copy(update={"provider": invalid_provider})
+
+    with pytest.raises(
+        ValueError,
+        match="CodexProviderDescriptor 未通过严格重验证",
+    ):
+        build_codex_exec_command(
+            "codex",
+            options,
+            tmp_path,
+            "workspace-write",
+        )
+    with pytest.raises(
+        ValueError,
+        match="CodexProviderDescriptor 未通过严格重验证",
+    ):
+        build_codex_exec_identity(options, "workspace-write")
+
+
+@pytest.mark.parametrize(
+    "observed_sandbox, expected_status",
+    [
+        ("workspace-write", "success"),
+        ("read-only", "error"),
+        (None, "error"),
+    ],
+)
+def test_codex_exec_runner_validates_live_sandbox_when_override_is_enabled(
+    tmp_path,
+    monkeypatch,
+    observed_sandbox,
+    expected_status,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    header = "OpenAI Codex v0.144.4\n"
+    if observed_sandbox is not None:
+        header += f"sandbox: {observed_sandbox}\n"
+    header += "user\n完成最小修改\n"
+
+    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+        del command, input_text, cwd, timeout_seconds, context
+        return SimpleNamespace(status="success", output=header, error=None)
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+    runner = CodexExecRunner(
+        options=CodexExecOptions(
+            ignore_user_config=True,
+            windows_sandbox_session_override="elevated",
+        )
+    )
+
+    result = runner.run(
+        "完成最小修改",
+        repo_dir,
+        sandbox="workspace-write",
+        timeout_seconds=60,
+    )
+
+    assert result.status == expected_status
+    if expected_status == "success":
+        assert result.error is None
+    else:
+        assert result.error is not None
+        assert "live header sandbox 与请求不一致" in result.error
+
+
+def test_codex_exec_runner_rejects_mutated_conflicting_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
+    options = CodexExecOptions(profile="vega-worker")
+
+    with pytest.raises(ValidationError):
+        options.ignore_user_config = True
+
+    invalid_options = options.model_copy(
+        update={"ignore_user_config": True}
+    )
+    runner = CodexExecRunner(options=invalid_options)
+    with pytest.raises(
+        ValueError,
+        match="profile 与 ignore_user_config=True 不能同时配置",
+    ):
+        runner.build_command(repo_dir, "read-only")
+
+
+@pytest.mark.parametrize(
+    "options, message",
+    [
+        (
+            CodexExecOptions().model_copy(
+                update={"windows_sandbox_session_override": "elevated"}
+            ),
+            "仅可与 ignore_user_config=True 配合使用",
+        ),
+        (
+            CodexExecOptions(ignore_user_config=True).model_copy(
+                update={"windows_sandbox_session_override": "danger-full-access"}
+            ),
+            "当前只允许 elevated",
+        ),
+    ],
+)
+def test_codex_exec_runner_rejects_mutated_windows_sandbox_override(
+    tmp_path,
+    monkeypatch,
+    options,
+    message,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
+
+    with pytest.raises(ValueError, match=message):
+        CodexExecRunner(options=options).build_command(repo_dir, "workspace-write")
+
+
+def test_codex_exec_runner_rejects_mutated_ignore_user_config_type(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
+    options = CodexExecOptions(
+        ignore_user_config=True,
+        windows_sandbox_session_override="elevated",
+    ).model_copy(update={"ignore_user_config": "false"})
+    runner = CodexExecRunner(options=options)
+
+    with pytest.raises(ValueError, match="ignore_user_config 必须是布尔值"):
+        runner.build_command(repo_dir, "workspace-write")
+    with pytest.raises(ValueError, match="ignore_user_config 必须是布尔值"):
+        runner.execution_identity("workspace-write")
 
 
 def test_codex_exec_runner_executes_raw_command_but_redacts_result_command(
@@ -1277,7 +1861,7 @@ def test_codex_exec_runner_executes_raw_command_but_redacts_result_command(
         captured["command"] = command
         return SimpleNamespace(status="success", output="ok", error=None)
 
-    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "D:/tools/codex.cmd")
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: "C:/fixtures/bin/codex.cmd")
     monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
     runner = CodexExecRunner(options=CodexExecOptions(profile=f"profile-{fake_secret}"))
 
@@ -1465,6 +2049,8 @@ def test_loop_auto_runs_detected_verification_commands(tmp_path) -> None:
     )
     assert run_dir.joinpath("iterations", "01", "review-context.json").exists()
     assert run_dir.joinpath("iterations", "01", "review-checklist.md").exists()
+    assert run_dir.joinpath("iterations", "01", "acceptance-evidence.md").exists()
+    assert run_dir.joinpath("iterations", "01", "acceptance-evidence.json").exists()
     state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
     assert state["status"] == "success"
     assert state["memory_proposals"] == []
@@ -1714,6 +2300,8 @@ def test_project_config_parses_codex_exec_role_options(tmp_path) -> None:
                 "      model: gpt-worker",
                 "      reasoning_effort: medium",
                 "    reviewer:",
+                "      ignore_user_config: true",
+                "      windows_sandbox_session_override: elevated",
                 "      model: gpt-reviewer",
                 "      reasoning_effort: high",
                 "      ephemeral: true",
@@ -1721,6 +2309,7 @@ def test_project_config_parses_codex_exec_role_options(tmp_path) -> None:
                 "  worker_max_chars: 12000",
                 "  reviewer_max_chars: 24000",
                 "  reviewer_diff_max_chars: 8000",
+                "  reviewer_acceptance_max_chars: 6000",
             ]
         )
         + "\n",
@@ -1731,13 +2320,84 @@ def test_project_config_parses_codex_exec_role_options(tmp_path) -> None:
 
     assert config.runner.codex_exec.worker.model == "gpt-worker"
     assert config.runner.codex_exec.worker.reasoning_effort == "medium"
+    assert not config.runner.codex_exec.worker.ignore_user_config
     assert not config.runner.codex_exec.worker.ephemeral
+    assert config.runner.codex_exec.reviewer.ignore_user_config
+    assert (
+        config.runner.codex_exec.reviewer.windows_sandbox_session_override
+        == "elevated"
+    )
     assert config.runner.codex_exec.reviewer.model == "gpt-reviewer"
     assert config.runner.codex_exec.reviewer.reasoning_effort == "high"
     assert config.runner.codex_exec.reviewer.ephemeral
     assert config.prompt_budget.worker_max_chars == 12000
     assert config.prompt_budget.reviewer_max_chars == 24000
     assert config.prompt_budget.reviewer_diff_max_chars == 8000
+    assert config.prompt_budget.reviewer_acceptance_max_chars == 6000
+
+    summary = render_project_config_summary(config)
+    assert "`worker.ignore_user_config`：`False`" in summary
+    assert "`reviewer.profile`：`未加载用户配置`" in summary
+    assert "`reviewer.ignore_user_config`：`True`" in summary
+    assert "reviewer 验收证据最大字符数：`6000`" in summary
+    assert (
+        "`reviewer.windows_sandbox_session_override`：`elevated`"
+        in summary
+    )
+
+
+def test_project_config_parses_explicit_loopback_provider(tmp_path) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    repo_dir.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "runner:",
+                "  codex_exec:",
+                "    worker:",
+                "      ignore_user_config: true",
+                "      provider:",
+                "        name: sandboxproxy",
+                "        base_url: http://127.0.0.1:18080/v1/",
+                "        wire_api: responses",
+                "        requires_openai_auth: true",
+                "        supports_websockets: false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    config = load_project_config(repo_dir)
+    provider = config.runner.codex_exec.worker.provider
+
+    assert provider is not None
+    assert provider.base_url == "http://127.0.0.1:18080/v1"
+    summary = render_project_config_summary(config)
+    assert "`worker.provider`：`sandboxproxy`" in summary
+    assert (
+        "`worker.provider_base_url`：`http://127.0.0.1:18080/v1`"
+        in summary
+    )
+    assert codex_provider_descriptor_sha256(provider) in summary
+
+
+def test_codex_exec_options_reject_profile_with_ignore_user_config() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="profile 与 ignore_user_config=True 不能同时配置",
+    ):
+        CodexExecOptions(profile="vega-worker", ignore_user_config=True)
+
+
+def test_codex_exec_options_reject_windows_sandbox_override_without_ignore() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="仅可与 ignore_user_config=True 配合使用",
+    ):
+        CodexExecOptions(windows_sandbox_session_override="elevated")
 
 
 def test_loop_stops_before_worker_when_prompt_budget_is_exceeded(tmp_path) -> None:
@@ -1860,6 +2520,8 @@ def test_review_runtime_cannot_approve_truncated_evidence(tmp_path) -> None:
         "      args:\n        - --dangerously-bypass-approvals-and-sandbox",
         "      profile: --dangerously-bypass-approvals-and-sandbox",
         "      profile: ../unsafe-profile",
+        "      windows_sandbox_session_override: unelevated",
+        "      windows_sandbox_session_override: elevated",
     ],
 )
 def test_config_check_rejects_unsafe_codex_exec_options(tmp_path, worker_config) -> None:
@@ -2362,6 +3024,44 @@ def test_goal_finish_evidence_rejects_forged_valid_summary_after_artifact_tamper
     assert "finish_status_mismatch" in evidence["validation_summary"]
 
 
+def test_goal_finish_evidence_rejects_report_summary_hash_mismatch(
+    tmp_path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    goal_file = _write_goal_file(tmp_path)
+    runtime = GoalRuntime(tmp_path)
+    run_dir = runtime.start(
+        repo_dir,
+        goal_file.read_text(encoding="utf-8"),
+        str(goal_file),
+        None,
+    )
+    runtime.step(run_dir.name)
+    child_loop = _create_successful_loop_run(tmp_path, repo_dir)
+    FinishRuntime(tmp_path).run(child_loop.name)
+    child_loop.joinpath("finish-report.md").write_text(
+        "# Tampered Finish Report\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    runtime.attach(
+        run_dir.name,
+        "01",
+        child_loop.name,
+        "finish",
+        "finish report 已漂移",
+    )
+
+    state = json.loads(
+        run_dir.joinpath("goal-state.json").read_text(encoding="utf-8")
+    )
+    evidence = state["checkpoint_records"][0]["refs"][0]
+    assert evidence["completion_eligible"] is False
+    assert "finish_report_hash_mismatch" in evidence["validation_summary"]
+
+
 def test_goal_checkpoint_done_writes_report_and_updates_status(tmp_path, monkeypatch) -> None:
     repo_dir = tmp_path / "repo"
     _init_clean_git_repo(repo_dir)
@@ -2613,7 +3313,7 @@ def test_goal_attach_cli_rejects_unknown_evidence_type(tmp_path, monkeypatch) ->
     )
 
     assert result.exit_code != 0
-    assert "--type 只能是" in result.output
+    assert "--type 只能是" in _strip_ansi(result.output)
 
 
 def test_goal_recover_turns_running_goal_into_needs_human(tmp_path) -> None:
@@ -2958,7 +3658,9 @@ def test_stop_cli_only_stops_recorded_owned_process(tmp_path, monkeypatch) -> No
         stopped_payload = run_status_payload(tmp_path, run_dir.name)
         assert stopped_payload["execution"]["status"] == "stopped"
         assert context.execution_dir.joinpath("stop-request.json").exists()
-        assert "execution_stop_requested" in run_dir.joinpath("trace.jsonl").read_text(
+        assert "execution_stop_broadcast_requested" in run_dir.joinpath(
+            "trace.jsonl"
+        ).read_text(
             encoding="utf-8"
         )
     finally:

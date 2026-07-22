@@ -297,6 +297,150 @@ review pack 不再分别重复注入 Project Profile 和 Project Knowledge；它
 - 超预算时不会启动 worker/reviewer，也不会静默删除关键证据。
 - token usage 与 prompt 字符数不是简单线性关系，工具调用和模型执行路径仍占较大影响。
 
+### 7.4 Windows `--ignore-user-config` 的 sandbox session 修复
+
+Codex CLI `0.144.4` 在 Windows 上使用 `--ignore-user-config` 时，不会加载用户
+`config.toml` 中的：
+
+```toml
+[windows]
+sandbox = "elevated"
+```
+
+已确认的失败链路是：Windows sandbox level 为 `Disabled` 时，本次环境即使命令显式请求
+`--sandbox workspace-write`，live header 仍会报告 `sandbox: read-only`。如果确实需要
+忽略其他用户配置，同时保留这个 Windows sandbox session 前置条件，可以只对白名单字段做
+显式配置。下面只对需要 `workspace-write` 的 worker 启用；reviewer 继续保持默认的
+`read-only` 配置来源：
+
+```yaml
+runner:
+  worker: codex-exec
+  reviewer: codex-exec
+  codex_exec:
+    worker:
+      ignore_user_config: true
+      windows_sandbox_session_override: elevated
+      reasoning_effort: medium
+      ephemeral: true
+    reviewer:
+      reasoning_effort: high
+      ephemeral: true
+```
+
+worker 命令会固定包含：
+
+```text
+--sandbox workspace-write
+--ignore-user-config
+--config windows.sandbox="elevated"
+```
+
+`execution.json` 的 Runner identity 同时记录：
+
+```text
+config_mode = ignore_user_config
+ignore_user_config = true
+windows_sandbox_session_override = elevated
+sandbox = workspace-write
+```
+
+这里有四条使用边界：
+
+- `windows_sandbox_session_override` 当前只接受 `elevated`。
+- 该字段没有 `ignore_user_config: true` 时配置检查直接失败。
+- Vega 不接受任意 `--config`、任意 CLI 参数或 sandbox bypass。
+- 配置成功只证明命令和 identity 已冻结；启用该字段后，Runner 会只从 Codex live header
+  核对实际 sandbox，缺失或降级时转为错误，不能仅凭请求参数宣称获得 `workspace-write`。
+
+Gate 4.5 R2 的历史预注册和结果不因这项实现而改变。R2 仍是 `blocked`；本实现阶段也没有
+触发新的真实 Codex 调用。新的真实 preflight 必须使用全新预注册、session 和调用授权。
+
+### 7.5 `--ignore-user-config` 下显式绑定 loopback provider
+
+R4 暴露了另一条独立链路：Codex 认证已经是 API key，但可用 provider 只存在于用户
+`config.toml`。此时：
+
+```text
+--ignore-user-config
+  保留 Codex 管理的认证
+  丢失用户配置中的 provider endpoint
+```
+
+Vega 现在允许在角色配置中显式声明一个不含凭证的 loopback provider。真实 worker 和
+reviewer 应使用同一 descriptor：
+
+```yaml
+runner:
+  worker: codex-exec
+  reviewer: codex-exec
+  codex_exec:
+    worker:
+      ignore_user_config: true
+      provider:
+        name: sandboxproxy
+        base_url: http://127.0.0.1:18080/v1
+        wire_api: responses
+        requires_openai_auth: true
+        supports_websockets: false
+      windows_sandbox_session_override: elevated
+      model: sandbox-model
+      reasoning_effort: high
+      ephemeral: true
+    reviewer:
+      ignore_user_config: true
+      provider:
+        name: sandboxproxy
+        base_url: http://127.0.0.1:18080/v1
+        wire_api: responses
+        requires_openai_auth: true
+        supports_websockets: false
+      windows_sandbox_session_override: elevated
+      model: sandbox-model
+      reasoning_effort: high
+      ephemeral: true
+```
+
+固定命令片段为：
+
+```text
+--ignore-user-config
+--config windows.sandbox="elevated"
+--config model_provider="sandboxproxy"
+--config model_providers.sandboxproxy.name="sandboxproxy"
+--config model_providers.sandboxproxy.base_url="http://127.0.0.1:18080/v1"
+--config model_providers.sandboxproxy.wire_api="responses"
+--config model_providers.sandboxproxy.requires_openai_auth=true
+--config model_providers.sandboxproxy.supports_websockets=false
+```
+
+`execution.json` 的 Runner identity 至少记录：
+
+```text
+config_mode = isolated_provider
+provider = sandboxproxy
+provider_base_url = http://127.0.0.1:18080/v1
+provider_wire_api = responses
+provider_requires_openai_auth = true
+provider_supports_websockets = false
+provider_descriptor_sha256 = <sha256>
+```
+
+安全边界：
+
+- endpoint 只允许 `http://127.0.0.1:<port>`、`http://localhost:<port>` 或
+  `http://[::1]:<port>`；
+- 端口必须显式提供且大于 0；
+- 禁止 userinfo、query、fragment、空白、反斜杠、外部 host 和 HTTPS；
+- provider name 不允许点号，不能借此注入任意 dotted TOML key；
+- descriptor 在命令启动前会再次严格校验，变异后的未验证模型也不能绕过边界；
+- 配置中没有 API key 字段，Vega 不读取或持久化 Codex credential；
+- Gate 4.5 harness 只通过 `codex login status` 判断脱敏认证类型，不保存该命令的原始输出；
+- live header、认证模式、provider、model、sandbox 或命令形态不一致时立即停止，不自动重试。
+
+这项能力只证明配置身份可以被显式、可审计地绑定。R4 的历史 `blocked` 结论保持冻结；是否
+真的解除外部 provider 阻塞，必须由独立 R5 合同和全新真实 session 证明。
+
 ## 8. 防止自动化造“屎山”的 Harness 点
 
 Vega 的设计不是让 AI 无限自动写，而是把自动化关进一组 harness 里。
@@ -388,7 +532,7 @@ vega gate --repo . --run <reflect_run> --scope refactor
 - `trace.jsonl` 记录关键事件。
 - 每轮都有独立的 `iterations/<n>/`。
 - `execution.json` 记录 worker/reviewer 的 owned PID、heartbeat、deadline 和终态。
-- `vega stop --run <run> --reason "..."` 通过 `stop-request.json` 请求当前 owned process 安全停止。
+- `vega stop --run <run> --reason "..."` 建立永久 run 级 `stop-latch.json`，向该 run 的全部 active execution 广播 `stop-request.json`，并阻止同一 run 后续 execution 启动；它不是只停止当前或最新 execution。
 - `timeout-report.md` / `stop-report.md` 记录中断原因，并阻止本轮继续 verification/review。
 - `recovery-report.md` 只接管 lease 过期、PID 消失、execution 终态或记录缺失的 `running` loop。
 - `loop continue` 只允许同一仓库中处于 `needs_human` 的 run。

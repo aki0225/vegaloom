@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "date": "2026-07-19",
+  "timezone": "Asia/Shanghai",
+  "overall_status": "failed-at-gate-7a",
+  "baseline": {
+    "branch": "experiment/langgraph-comparison",
+    "commit": "private-gate-7-v1-baseline-redacted",
+    "tree": "f367577d877e9499cbd342b02effac65eadad88e",
+    "case_sha256": "9dcb5e157892b0bf0434c220366b52cb7da7a8789d8a163d940be46d4d36bdd9",
+    "plan_sha256": "ad521158f5fbd13317dcee3bbe3378499e22866c4b1ae298966cb4f0f162257f",
+    "gate_7a_tag": "gate-7a-pre-run-v1",
+    "gate_7c_tag": "gate-7c-langgraph-pre-run-v1"
+  },
+  "gate_7a": {
+    "status": "failed",
+    "session": "gate7a-flask-5928-real-v1",
+    "consumed_tag": "gate-7a-consumed-v1",
+    "consumed_tag_object": "private-gate-7-v1-consumed-tag-object-redacted",
+    "consumed_tag_commit": "private-gate-7-v1-baseline-redacted",
+    "terminal_recorded_at": "2026-07-19T11:04:40.021884+00:00",
+    "terminal_status": "failed",
+    "provider_sessions_used": 1,
+    "provider_session_hard_limit": 3,
+    "automatic_retry_event_count": 0,
+    "request_max_retries": 0,
+    "stream_max_retries": 0,
+    "checkpoint_started": [
+      "CP01"
+    ],
+    "checkpoint_completed": [],
+    "checkpoint_failed": [
+      "CP01"
+    ],
+    "provider": "sandboxproxy",
+    "wire_api": "responses",
+    "model": "sandbox-model",
+    "reasoning_effort": "high",
+    "execution_returncode": 1,
+    "execution_status": "failed",
+    "termination_unconfirmed": false,
+    "tokens_used": 11965,
+    "command_sha256": "34bc2575c29a2fa4e822df6b732fd4404c8d67038696fdbf5d66f65e5d54a1f0",
+    "process_output_sha256": "5aec1efdcdeb210190fa742aae772667b0acb363050d6d5a45bab993e34aa278",
+    "process_output_bytes": 3063,
+    "error_evidence": {
+      "collab_spawn_failure_count": 1,
+      "bad_gateway_count": 2,
+      "proxy_status": 502,
+      "proxy": "Sandbox Proxy",
+      "upstream_provider": "Sandbox Provider",
+      "upstream_route": "https://provider.example.invalid/v1/responses"
+    },
+    "event_chain": {
+      "coordinator_event_count": 2,
+      "machine_e_event_count": 2,
+      "coordinator_last_hash": "b96c72e2fd64c490c14eba4aa3f330b10946f2f3c707b2e2b54ff2c6902d6ece",
+      "machine_e_last_hash": "a523a08b0c2e7d4e0c8d22298e1b7a7981b21586c65b02c4024d3042d4a58034"
+    },
+    "authority_claim": {
+      "ref": "refs/tags/gate7-claims/gate7a-flask-5928-real-v1/linear",
+      "commit": "f515ef6dce107cd09d96895061dcad98b4b32f9b",
+      "duplicate_claim_rejected": true
+    },
+    "workspace": {
+      "changed_files": [],
+      "checkpoint_commits": 0,
+      "handoff_exists": false,
+      "machine_result_exists": false,
+      "success_summary_exists": false,
+      "source_remote_ref_count": 2,
+      "source_remote_contains_oracle": false
+    },
+    "artifact_scan": {
+      "files_scanned": 302,
+      "files_skipped": 8534,
+      "canary_hit_count": 0,
+      "sensitive_material_hit_count": 0
+    }
+  },
+  "gate_7c": {
+    "status": "not-started",
+    "session": "gate7c-flask-5928-real-v1",
+    "trigger_condition_met": false,
+    "consumed_tag": "gate-7c-langgraph-consumed-v1",
+    "consumed_tag_exists": false,
+    "provider_sessions_used": 0,
+    "output_exists": false,
+    "fixture_exists": false
+  },
+  "conclusion": {
+    "large_task_protocol_proven": false,
+    "langgraph_comparison_performed": false,
+    "default_engine_changed": false,
+    "default_engine": "linear",
+    "retry_same_baseline_allowed": false
+  }
+}

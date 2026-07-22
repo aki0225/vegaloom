@@ -362,6 +362,7 @@ class LoopAutomationState(BaseModel):
     status: Literal["created", "running", "success", "failed", "needs_human"] = "created"
     task_mode: Literal["bug", "feature"]
     automation_mode: Literal["assist", "auto"]
+    engine: Literal["linear", "langgraph"] = "linear"
     repo_path: str
     input_source: str
     current_step: str = "created"
@@ -404,6 +405,9 @@ class GoalCheckpointRef(BaseModel):
     completion_eligible: bool = False
     validation_summary: str = ""
     artifacts: list[str] = Field(default_factory=list)
+    review_source_run: str | None = None
+    review_kind: Literal["ordinary", "parallel_review"] | None = None
+    review_binding_sha256: str | None = None
     attached_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 

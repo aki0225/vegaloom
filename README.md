@@ -1,20 +1,45 @@
-# Vega ｜织女星
+<div align="center">
 
-**One writes. One reviews. Never the same context.**
+<img src="docs/assets/vega-hero.jpg" width="100%" alt="Vega：一个写，一个审，独立会话共享证据">
 
-Vega 是一个本地优先的 AI 编码工作流 Harness。它将 worker 与 reviewer 隔离，并用项目自己的
-验证命令、风险门禁和运行证据，把一次编码任务收口成可审查、可恢复、可人工接管的闭环。
+# Vega
 
-```text
-task → context → worker → verification → risk gate → isolated review → report
-```
+<h3>One writes. One reviews. Separate sessions, shared evidence.</h3>
+
+<p>
+  <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=experiment%2Flanggraph-comparison&style=for-the-badge&label=Experiment%20CI" alt="LangGraph 实验分支 CI"></a>
+  <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/Experiment-partial-F59E0B?style=for-the-badge" alt="LangGraph 实验结论 partial">
+  <img src="https://img.shields.io/badge/Branch_Base-v0.1.0-4fb8d8?style=for-the-badge" alt="分支基线 v0.1.0">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
+</p>
+
+**[核心能力](#核心能力)** ·
+**[安装](#安装)** ·
+**[快速开始](#快速开始)** ·
+**[关键行为](#关键行为)** ·
+**[文档](#文档)** ·
+**[定位与边界](#定位与边界)**
+
+</div>
+
+写代码的 AI 不该自己审自己写的东西。Vega 是一个本地优先的 AI 编码工作流 harness：worker 负责改代码，
+reviewer 使用独立会话，不继承 worker 的完整聊天记录，并在同一目标仓库的只读视图中结合项目规则、diff
+和验证证据进行审查；每次任务用项目自己的验证命令和风险门禁收口，失败、中断或证据不足时留好现场，
+交还给人。Vega 的重点不是增加更多 Agent，而是让写、验、审和交付之间的边界更清楚。
+
+<p align="center">
+  <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，worker 与 reviewer 使用独立会话，失败 fail-closed 交还人工">
+</p>
+
+<p align="center"><sub>一次任务的完整闭环：写与审会话分离，任何一环证据不足都 fail-closed 交还人工。</sub></p>
 
 ## 核心能力
 
 - 从任务、`AGENTS.md`、项目画像和 `.vega.yaml` 编译执行上下文。
 - 支持 bug、feature 的人工协作 `assist` 与显式自动化 `auto` 流程。
 - 运行项目自己的测试、静态检查和其他确定性验证。
-- 使用独立只读 reviewer 审查 diff、测试证据和项目规则。
+- 使用独立只读 reviewer 会话审查 diff、测试证据和项目规则，不传递 worker 完整对话。
 - 根据变更路径、diff 规模和预算输出风险等级与审查建议。
 - 在失败、中断或证据不足时保存 state、trace、报告和人工接管入口。
 - 不自动 commit、push、release，也不自动接受长期 Memory。
@@ -23,6 +48,9 @@ task → context → worker → verification → risk gate → isolated review �
 
 要求 Python `>=3.11` 和 Git。只有使用自动 worker 或隔离 reviewer 时才需要已安装并登录
 Codex CLI。
+
+命名约定：`Vega` 是产品名，`vegaloom` 是公开仓库、Python distribution 和发布制品名，
+`vega` 是 Python 导入包与 CLI 命令。
 
 ```powershell
 git clone https://github.com/aki0225/vegaloom.git
@@ -58,6 +86,15 @@ vega status --run <run_id>
 vega finish --run <run_id>
 ```
 
+只需要只读检查和报告时，可以使用兼容的 Inspection Loop：
+
+```powershell
+vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --repo .
+```
+
+`vega do/loop` 使用 `LoopAutomationRuntime`，是当前日常 Coding Harness 主线；
+`vega run engineering-change` 使用 `EngineeringChangeRuntime`，保留为 YAML 驱动的只读基线。
+
 ## 关键行为
 
 - 确定性验证高于模型结论；测试失败时 reviewer 的 `approve` 不能把运行变成成功。
@@ -66,6 +103,31 @@ vega finish --run <run_id>
 - 高风险路径、超预算变更或明确的 `human-review` 不会被 AI reviewer 自动放行。
 - 证据缺失、过期或相互不一致时 fail-closed，并交还人工判断。
 - Vega 不会自动提交、推送、发布、删除文件或写入长期 Memory。
+
+## 本分支：LangGraph 实验归档
+
+当前 checkout 从公开 `v0.1.0` 标签建立同源净化分支，并导入冻结实验终点；它不是默认
+产品路径。实验最终分类为 **`partial`**：
+
+- 默认产品引擎继续使用 `linear`，默认 Reviewer 继续使用 `single`；
+- LangGraph 只保留为可选的 recovery/HITL 实验控制面；
+- crash recovery 证明可以在对账后复用 worker 结果，避免重复外部副作用；
+- 82 次真实 Reviewer session 未证明 adaptive/fixed-three 的质量收益，却增加 token 与误报；
+- Goal/Handoff 被判断为引擎无关能力；
+- 真实大任务 A/B 因证据预算超限没有形成收益结论。
+
+源实验仓与公开仓没有共同 ancestor，因此本分支不公开源实验的中间 commit 历史，而是
+保留可审计的源码、测试、预注册合同和结论文档。公开归档还会把本机绝对路径、实验
+Provider/model/endpoint 身份和私有提交引用替换为明确的占位符或合成标识；这些标识只用于
+公开复核，不代表原实验环境的字面配置。原始 `runs/`、`.local-validation/`、`.tmp/` 与
+任何凭证均不进入 Git。
+
+阅读入口：
+
+- [公开归档说明](docs/experiments/langgraph-orchestration/PUBLIC-ARCHIVE.md)
+- [最终决策](docs/experiments/langgraph-orchestration/DECISION.md)
+- [三分钟演示契约](docs/experiments/langgraph-orchestration/DEMO.md)
+- [精简实验摘要](docs/experiments/LANGGRAPH-ORCHESTRATION-SUMMARY.md)
 
 ## 文档
 
@@ -76,7 +138,10 @@ vega finish --run <run_id>
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | 长任务 Goal 与 checkpoint | [LONG-RUNNING-GOALS](docs/LONG-RUNNING-GOALS.md) |
 | v0.1 范围与取舍 | [MVP-SCOPE](docs/MVP-SCOPE.md) |
+| 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |
 | 工作区与验证规范 | [WORKSPACE-HYGIENE](docs/WORKSPACE-HYGIENE.md) |
+| v0.1.1 安全维护更新与迁移 | [RELEASE-NOTES-0.1.1](docs/RELEASE-NOTES-0.1.1.md) |
+| LangGraph 实验公开归档 | [PUBLIC-ARCHIVE](docs/experiments/langgraph-orchestration/PUBLIC-ARCHIVE.md) |
 
 ## 定位与边界
 
@@ -85,7 +150,9 @@ vega finish --run <run_id>
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal 和 adapters 是可选能力，不扩大核心 loop 的成功条件。
-- 当前稳定基线为 `v0.1.0`。
+- LangGraph 实验的 `partial` 结论不改变公开 `main` 的 Linear + single Reviewer 默认路径。
+- 公开主线当前稳定基线为 `v0.1.1`；本归档分支的同源父历史是 `v0.1.0`，两者不能混作
+  同一个 Runtime 基线。
 
 ## 开发验证
 
@@ -95,5 +162,3 @@ python -m pytest
 ruff check src tests
 git diff --check
 ```
-
-Vega 的重点不是增加更多 Agent，而是让写、验、审和交付之间的边界更清楚。

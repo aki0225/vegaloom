@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
 from typing import cast
 
@@ -229,6 +230,126 @@ class GoalRuntime:
             checkpoint=checkpoint_id,
             ref_count=len(record.refs),
             completion_mode=completion_mode,
+        )
+        return run_dir
+
+    def handoff(self, run: str, checkpoint: str, input_path: str) -> Path:
+        run_dir, state, contract = self._load(run)
+        _ensure_action_allowed(state, "handoff")
+        checkpoint_id = _normalize_checkpoint(checkpoint)
+        record = _find_checkpoint_record(state, checkpoint_id)
+        if record is None:
+            raise ValueError(f"checkpoint 不存在：{checkpoint_id}")
+        if record.status != "done":
+            raise ValueError(f"checkpoint {checkpoint_id} 必须先完成，才能执行 handoff。")
+        refreshed_refs, refresh_errors = _revalidate_checkpoint_refs(
+            self.workspace,
+            Path(state.repo_path),
+            record,
+        )
+        if refresh_errors:
+            raise ValueError("checkpoint 证据重新校验失败：" + "；".join(refresh_errors))
+        record.refs = refreshed_refs
+        handoff_input = _load_goal_handoff_input(input_path)
+        core = _load_goal_handoff_core()
+        result = core["create_goal_handoff"](
+            handoff_input,
+            workspace=self.workspace,
+            run_id=state.run_id,
+            checkpoint=checkpoint_id,
+            objective=contract.objective,
+            repo_path=state.repo_path,
+        )
+        artifact_paths = _goal_handoff_artifacts(result)
+        if not artifact_paths:
+            raise ValueError("goal handoff 未返回任何 artifact_paths。")
+        state.artifacts = _dedupe([*state.artifacts, *artifact_paths])
+        state.status = "checkpoint_done"
+        state.current_step = "handoff_created"
+        write_redacted_text(
+            run_dir / "goal-handoff-report.md",
+            _render_goal_handoff_report(state, checkpoint_id, result),
+        )
+        state.artifacts = _dedupe([*state.artifacts, "goal-handoff-report.md"])
+        _write_progress(run_dir, state, contract)
+        _save_goal_state(run_dir, state)
+        TraceWriter(run_dir / "goal-trace.jsonl").write(
+            "goal_handoff_created",
+            checkpoint=checkpoint_id,
+            artifact_paths=artifact_paths,
+            status=_goal_handoff_status(result),
+        )
+        return run_dir
+
+    def handoff_context(
+        self,
+        run: str,
+        checkpoint: str,
+        version: str,
+        consumer_session_id: str,
+        consumer_worker_epoch: str,
+        max_chars: int,
+    ) -> Path:
+        run_dir, state, contract = self._load(run)
+        _ensure_action_allowed(state, "handoff_context")
+        checkpoint_id = _normalize_checkpoint(checkpoint)
+        record = _find_checkpoint_record(state, checkpoint_id)
+        if record is None:
+            raise ValueError(f"checkpoint 不存在：{checkpoint_id}")
+        if record.status != "done":
+            raise ValueError(f"checkpoint {checkpoint_id} 必须先完成，才能编译 handoff context。")
+        refreshed_refs, refresh_errors = _revalidate_checkpoint_refs(
+            self.workspace,
+            Path(state.repo_path),
+            record,
+        )
+        if refresh_errors:
+            raise ValueError("checkpoint 证据重新校验失败：" + "；".join(refresh_errors))
+        record.refs = refreshed_refs
+        core = _load_goal_handoff_core()
+        result = core["compile_goal_handoff_context"](
+            workspace=self.workspace,
+            run_id=state.run_id,
+            checkpoint=checkpoint_id,
+            version=version,
+            consumer_session_id=consumer_session_id,
+            consumer_worker_epoch=consumer_worker_epoch,
+            max_chars=max_chars,
+            objective=contract.objective,
+            repo_path=state.repo_path,
+        )
+        artifact_paths = _goal_handoff_artifacts(result)
+        if not artifact_paths:
+            raise ValueError("goal handoff context 未返回任何 artifact_paths。")
+        state.artifacts = _dedupe([*state.artifacts, *artifact_paths])
+        handoff_status = _goal_handoff_status(result)
+        if handoff_status == "blocked":
+            state.status = "blocked"
+            state.current_step = "handoff_blocked"
+        elif handoff_status == "split_required":
+            state.status = "checkpoint_done"
+            state.current_step = "handoff_split_required"
+        elif handoff_status == "ready":
+            state.status = "checkpoint_done"
+            state.current_step = "handoff_context_ready"
+        else:
+            state.status = "blocked"
+            state.current_step = "handoff_blocked"
+        write_redacted_text(
+            run_dir / "goal-handoff-context-report.md",
+            _render_goal_handoff_context_report(state, checkpoint_id, result),
+        )
+        state.artifacts = _dedupe([*state.artifacts, "goal-handoff-context-report.md"])
+        _write_progress(run_dir, state, contract)
+        _save_goal_state(run_dir, state)
+        TraceWriter(run_dir / "goal-trace.jsonl").write(
+            "goal_handoff_context_compiled",
+            checkpoint=checkpoint_id,
+            version=version,
+            consumer_session_id=consumer_session_id,
+            consumer_worker_epoch=consumer_worker_epoch,
+            artifact_paths=artifact_paths,
+            status=handoff_status,
         )
         return run_dir
 
@@ -861,6 +982,78 @@ def _checkpoint_completion_is_current(
     return _checkpoint_completion_is_valid(refreshed)
 
 
+def _load_goal_handoff_input(input_path: str) -> object:
+    try:
+        from .goal_handoff import GoalHandoffInput
+    except Exception as exc:  # noqa: BLE001 - 核心模块缺失时必须 fail-closed
+        raise ValueError("goal_handoff 核心模块不可用。") from exc
+    try:
+        return GoalHandoffInput.model_validate_json(Path(input_path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise ValueError(f"handoff input 无法读取：{input_path}") from exc
+    except ValidationError as exc:
+        raise ValueError(f"handoff input schema 不合法：{exc.errors()[0]['type']}") from exc
+
+
+def _load_goal_handoff_core() -> dict[str, object]:
+    try:
+        module = import_module(".goal_handoff", __package__)
+    except Exception as exc:  # noqa: BLE001 - 核心模块缺失时必须 fail-closed
+        raise ValueError("goal_handoff 核心模块不可用。") from exc
+    required = ("create_goal_handoff", "compile_goal_handoff_context")
+    core: dict[str, object] = {}
+    for name in required:
+        value = getattr(module, name, None)
+        if value is None:
+            raise ValueError(f"goal_handoff 缺少核心函数：{name}")
+        core[name] = value
+    return core
+
+
+def _goal_handoff_artifacts(result: object) -> list[str]:
+    artifact_paths = getattr(result, "artifact_paths", None)
+    if not isinstance(artifact_paths, list):
+        return []
+    return [str(item) for item in artifact_paths if isinstance(item, str) and item.strip()]
+
+
+def _goal_handoff_status(result: object) -> str:
+    status = getattr(result, "status", None)
+    return status if isinstance(status, str) and status else "unknown"
+
+
+def _render_goal_handoff_report(state: GoalState, checkpoint_id: str, result: object) -> str:
+    return "\n".join(
+        [
+            "# Goal Handoff Report",
+            "",
+            f"- run：`{state.run_id}`",
+            f"- checkpoint：`{checkpoint_id}`",
+            f"- status：`{_goal_handoff_status(result)}`",
+            "",
+            "## Artifacts",
+            "",
+        ]
+        + [f"- {item}" for item in _goal_handoff_artifacts(result)]
+    ).rstrip() + "\n"
+
+
+def _render_goal_handoff_context_report(state: GoalState, checkpoint_id: str, result: object) -> str:
+    return "\n".join(
+        [
+            "# Goal Handoff Context Report",
+            "",
+            f"- run：`{state.run_id}`",
+            f"- checkpoint：`{checkpoint_id}`",
+            f"- status：`{_goal_handoff_status(result)}`",
+            "",
+            "## Artifacts",
+            "",
+        ]
+        + [f"- {item}" for item in _goal_handoff_artifacts(result)]
+    ).rstrip() + "\n"
+
+
 def _revalidate_checkpoint_refs(
     workspace: Path,
     repo_path: Path,
@@ -876,6 +1069,7 @@ def _revalidate_checkpoint_refs(
                 reference.run,
                 reference.type,
                 reference.note,
+                expected_ref=reference,
             )
         except (FileNotFoundError, ValueError) as exc:
             errors.append(f"{reference.type}:{reference.run} -> {exc}")
@@ -886,6 +1080,12 @@ def _revalidate_checkpoint_refs(
 
 
 def _ensure_action_allowed(state: GoalState, action: str) -> None:
+    if (
+        action in {"handoff", "handoff_context"}
+        and state.status == "blocked"
+        and state.current_step == "handoff_blocked"
+    ):
+        return
     if action == "resume":
         if state.status == "paused":
             return
@@ -901,6 +1101,8 @@ def _ensure_action_allowed(state: GoalState, action: str) -> None:
         "step": {"created", "running", "checkpoint_done"},
         "attach": {"running"},
         "checkpoint_done": {"running"},
+        "handoff": {"checkpoint_done"},
+        "handoff_context": {"checkpoint_done"},
         "pause": {"created", "running", "checkpoint_done"},
         "stop": {
             "created",

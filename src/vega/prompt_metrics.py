@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -46,14 +47,21 @@ def measure_prompt(
     )
 
 
-def write_prompt_metrics(run_dir: Path, prefix: str, metrics: PromptMetrics) -> None:
-    run_dir.joinpath(f"{prefix}-metrics.json").write_text(
+def write_prompt_metrics(
+    run_dir: Path,
+    prefix: str,
+    metrics: PromptMetrics,
+    *,
+    write_text: Callable[[Path, str], None] | None = None,
+) -> None:
+    writer = write_text or _write_text
+    writer(
+        run_dir.joinpath(f"{prefix}-metrics.json"),
         json.dumps(metrics.model_dump(), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
     )
-    run_dir.joinpath(f"{prefix}-metrics.md").write_text(
+    writer(
+        run_dir.joinpath(f"{prefix}-metrics.md"),
         render_prompt_metrics(metrics),
-        encoding="utf-8",
     )
 
 
@@ -111,3 +119,7 @@ def write_context_budget_report(run_dir: Path, prefix: str, metrics: PromptMetri
         encoding="utf-8",
     )
     return filename
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")

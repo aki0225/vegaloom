@@ -1,46 +1,405 @@
-name: 持续集成
+name: LangGraph 实验分支持续集成
 
-on:
+"on":
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - experiment/langgraph-comparison
+      - fix/langgraph-archive-ci
+      - fix/langgraph-public-sanitization-closure
+      - fix/langgraph-public-sanitization-closure-v2
   pull_request:
     branches: [main]
 
 permissions:
   contents: read
 
-jobs:
-  test:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
+concurrency:
+  group: langgraph-experiment-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  static:
+    name: 静态检查与冻结节点合同
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: 配置 Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装完整实验依赖
+        run: python -m pip install -e ".[dev,langgraph]"
+
+      - name: 编译与静态检查
+        run: |
+          python -m compileall src
+          ruff check src tests
+
+      - name: 检查公开归档身份脱敏
+        if: >-
+          github.ref_name == 'experiment/langgraph-comparison' ||
+          github.head_ref == 'experiment/langgraph-comparison' ||
+          github.ref_name == 'fix/langgraph-public-sanitization-closure' ||
+          github.head_ref == 'fix/langgraph-public-sanitization-closure' ||
+          github.ref_name == 'fix/langgraph-public-sanitization-closure-v2' ||
+          github.head_ref == 'fix/langgraph-public-sanitization-closure-v2'
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            python scripts/check_langgraph_public_archive.py --working-tree-only
+          else
+            python scripts/check_langgraph_public_archive.py --history-base v0.1.0
+          fi
+
+      - name: 检查本次提交范围的空白错误
+        shell: bash
+        run: |
+          event_name="${{ github.event_name }}"
+          before_sha="${{ github.event.before }}"
+          base_sha=""
+          if [[ "$event_name" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          elif [[ "$event_name" == "push" && -n "$before_sha" && ! "$before_sha" =~ ^0+$ ]]; then
+            base_sha="$before_sha"
+          fi
+
+          if [[ -n "$base_sha" ]] && git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+            git diff --check "${base_sha}..HEAD"
+          else
+            if [[ -n "$base_sha" ]]; then
+              echo "事件 before SHA 在强制更新后不可达，改为检查当前提交自身：${base_sha}"
+            fi
+            git show --check --format= HEAD
+          fi
+
+      - name: 核对完整测试节点
+        shell: bash
+        run: |
+          mkdir -p .tmp/pytest/cache
+          python -m pytest --require-langgraph --collect-only -q \
+            -o cache_dir=.tmp/pytest/cache/static-collect \
+            > .tmp/pytest/linux-collected.txt
+          node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
+          if [[ "$node_count" != "847" ]]; then
+            cat .tmp/pytest/linux-collected.txt
+            echo "期望收集 847 个节点，实际为 ${node_count}" >&2
+            exit 1
+          fi
+          echo "已收集并核对 ${node_count} 个测试节点"
+
+      - name: 核对测试分片覆盖全部文件
+        shell: bash
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          from pathlib import Path
+
+          import yaml
+
+          workflow = yaml.safe_load(Path(".github/workflows/ci.yml").read_text(encoding="utf-8"))
+          shards = [
+              shard
+              for shard in workflow["jobs"]["tests"]["strategy"]["matrix"]["include"]
+              if shard["python-version"] == "3.12"
+          ]
+          listed = [
+              file_name
+              for shard in shards
+              for file_name in str(shard["files"]).split()
+          ]
+          actual = sorted(path.as_posix() for path in Path("tests").rglob("test_*.py"))
+          counts = Counter(listed)
+          duplicates = sorted(path for path, count in counts.items() if count > 1)
+          missing = sorted(set(actual) - set(listed))
+          unexpected = sorted(set(listed) - set(actual))
+          if duplicates or missing or unexpected:
+              raise SystemExit(
+                  "测试分片文件集合不完整："
+                  f"duplicates={duplicates}, missing={missing}, unexpected={unexpected}"
+              )
+          print(f"测试分片完整覆盖 {len(actual)} 个测试文件")
+          PY
+
+  base-without-langgraph:
+    name: 基础路径不强制安装 LangGraph
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 仅安装基础与开发依赖
+        run: python -m pip install -e ".[dev]"
+
+      - name: 验证基础导入和依赖门禁
+        run: |
+          python -c "import vega"
+          mkdir -p .tmp/pytest/runs .tmp/pytest/cache
+          python -m pytest -q \
+            --basetemp=.tmp/pytest/runs/base-without-langgraph \
+            -o cache_dir=.tmp/pytest/cache/base-without-langgraph \
+            tests/test_langgraph_dependency_gate.py
+
+  tests:
+    name: Python ${{ matrix.python-version }} / ${{ matrix.name }}
+    needs: static
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: graph-contract
+            python-version: "3.11"
+            files: >-
+              tests/experimental/langgraph_engine/test_engine_selection.py
+              tests/experimental/langgraph_engine/test_handler_boundary.py
+              tests/experimental/langgraph_engine/test_graph_state_contract.py
+              tests/experimental/langgraph_engine/test_step_result_manifest.py
+          - name: semantic-parity
+            python-version: "3.11"
+            timeout_seconds: 300
+            files: >-
+              tests/experimental/langgraph_engine/test_linear_graph_semantic_parity.py
+          - name: recovery-core
+            python-version: "3.11"
+            files: >-
+              tests/experimental/langgraph_engine/test_checkpoint_resume.py
+              tests/experimental/langgraph_engine/test_crash_windows.py
+          - name: recovery-handoff
+            python-version: "3.11"
+            files: >-
+              tests/experimental/langgraph_engine/test_checkpoint_handoff.py
+              tests/experimental/langgraph_engine/test_goal_cross_session.py
+              tests/experimental/langgraph_engine/test_decision_binding.py
+              tests/experimental/langgraph_engine/test_hitl_cli.py
+              tests/experimental/langgraph_engine/test_interrupt_resume.py
+              tests/experimental/langgraph_engine/test_legacy_run_compatibility.py
+          - name: parallel-review-core
+            python-version: "3.11"
+            files: >-
+              tests/experimental/langgraph_engine/test_parallel_review_artifacts.py
+              tests/experimental/langgraph_engine/test_parallel_review_contract.py
+              tests/experimental/langgraph_engine/test_parallel_review_graph.py
+          - name: parallel-review-resume
+            python-version: "3.11"
+            files: >-
+              tests/experimental/langgraph_engine/test_parallel_review_resume.py
+              tests/experimental/langgraph_engine/test_parallel_review_runner_adapter.py
+              tests/experimental/langgraph_engine/test_parallel_review_stop_latch.py
+          - name: dogfood-and-eval
+            python-version: "3.11"
+            files: >-
+              tests/experimental/langgraph_engine/test_core_dogfood_harness.py
+              tests/experimental/langgraph_engine/test_gate6_handoff_dogfood.py
+              tests/experimental/langgraph_engine/test_gate7_large_task_dogfood.py
+              tests/experimental/langgraph_engine/test_reviewer_topology_dataset.py
+              tests/experimental/langgraph_engine/test_reviewer_topology_eval.py
+              tests/experimental/langgraph_engine/test_reviewer_topology_harness.py
+          - name: base-recovery
+            python-version: "3.11"
+            files: >-
+              tests/test_cli_recovery_hardening.py
+              tests/test_evidence_freshness.py
+              tests/test_execution_control_safety.py
+              tests/test_finish_artifact_integrity.py
+          - name: base-security
+            python-version: "3.11"
+            files: >-
+              tests/test_p0_regressions.py
+              tests/test_path_and_eval_contract.py
+              tests/test_project_config_hardening.py
+              tests/test_redaction.py
+          - name: base-evidence
+            python-version: "3.11"
+            files: >-
+              tests/test_review_artifact_integrity.py
+              tests/test_runtime_safety_integration.py
+              tests/test_security_evidence.py
+              tests/test_success_semantics.py
+              tests/test_workspace_snapshot_budget.py
+          - name: base-smoke
+            python-version: "3.11"
+            files: >-
+              tests/test_langgraph_dependency_gate.py
+              tests/test_smoke.py
+          - name: graph-contract
+            python-version: "3.12"
+            files: >-
+              tests/experimental/langgraph_engine/test_engine_selection.py
+              tests/experimental/langgraph_engine/test_handler_boundary.py
+              tests/experimental/langgraph_engine/test_graph_state_contract.py
+              tests/experimental/langgraph_engine/test_step_result_manifest.py
+          - name: semantic-parity
+            python-version: "3.12"
+            timeout_seconds: 300
+            files: >-
+              tests/experimental/langgraph_engine/test_linear_graph_semantic_parity.py
+          - name: recovery-core
+            python-version: "3.12"
+            files: >-
+              tests/experimental/langgraph_engine/test_checkpoint_resume.py
+              tests/experimental/langgraph_engine/test_crash_windows.py
+          - name: recovery-handoff
+            python-version: "3.12"
+            files: >-
+              tests/experimental/langgraph_engine/test_checkpoint_handoff.py
+              tests/experimental/langgraph_engine/test_goal_cross_session.py
+              tests/experimental/langgraph_engine/test_decision_binding.py
+              tests/experimental/langgraph_engine/test_hitl_cli.py
+              tests/experimental/langgraph_engine/test_interrupt_resume.py
+              tests/experimental/langgraph_engine/test_legacy_run_compatibility.py
+          - name: parallel-review-core
+            python-version: "3.12"
+            files: >-
+              tests/experimental/langgraph_engine/test_parallel_review_artifacts.py
+              tests/experimental/langgraph_engine/test_parallel_review_contract.py
+              tests/experimental/langgraph_engine/test_parallel_review_graph.py
+          - name: parallel-review-resume
+            python-version: "3.12"
+            files: >-
+              tests/experimental/langgraph_engine/test_parallel_review_resume.py
+              tests/experimental/langgraph_engine/test_parallel_review_runner_adapter.py
+              tests/experimental/langgraph_engine/test_parallel_review_stop_latch.py
+          - name: dogfood-and-eval
+            python-version: "3.12"
+            files: >-
+              tests/experimental/langgraph_engine/test_core_dogfood_harness.py
+              tests/experimental/langgraph_engine/test_gate6_handoff_dogfood.py
+              tests/experimental/langgraph_engine/test_gate7_large_task_dogfood.py
+              tests/experimental/langgraph_engine/test_reviewer_topology_dataset.py
+              tests/experimental/langgraph_engine/test_reviewer_topology_eval.py
+              tests/experimental/langgraph_engine/test_reviewer_topology_harness.py
+          - name: base-recovery
+            python-version: "3.12"
+            files: >-
+              tests/test_cli_recovery_hardening.py
+              tests/test_evidence_freshness.py
+              tests/test_execution_control_safety.py
+              tests/test_finish_artifact_integrity.py
+          - name: base-security
+            python-version: "3.12"
+            files: >-
+              tests/test_p0_regressions.py
+              tests/test_path_and_eval_contract.py
+              tests/test_project_config_hardening.py
+              tests/test_redaction.py
+          - name: base-evidence
+            python-version: "3.12"
+            files: >-
+              tests/test_review_artifact_integrity.py
+              tests/test_runtime_safety_integration.py
+              tests/test_security_evidence.py
+              tests/test_success_semantics.py
+              tests/test_workspace_snapshot_budget.py
+          - name: base-smoke
+            python-version: "3.12"
+            files: >-
+              tests/test_langgraph_dependency_gate.py
+              tests/test_smoke.py
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: 安装依赖
+      - name: 安装完整实验依赖
+        run: python -m pip install -e ".[dev,langgraph]" pytest-timeout
+
+      - name: 运行测试分片
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          mkdir -p .tmp/pytest/runs .tmp/pytest/cache
+          log_path=".tmp/pytest/${{ matrix.python-version }}-${{ matrix.name }}.log"
+          set +e
+          python -m pytest -q \
+            --require-langgraph \
+            --timeout="${{ matrix.timeout_seconds || 58 }}" \
+            --timeout-method=signal \
+            --basetemp=".tmp/pytest/runs/${{ matrix.python-version }}-${{ matrix.name }}" \
+            -o cache_dir=".tmp/pytest/cache/${{ matrix.python-version }}-${{ matrix.name }}" \
+            ${{ matrix.files }} 2>&1 | tee "$log_path"
+          pytest_status="${PIPESTATUS[0]}"
+          set -e
+          if [[ "$pytest_status" -ne 0 ]]; then
+            python -c 'import sys; from pathlib import Path; text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")[-12000:]; escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"); print(f"::error title=pytest failure summary::{escaped}")' "$log_path"
+          fi
+          exit "$pytest_status"
 
-      - name: 编译检查
-        run: python -m compileall -q src
+  windows-boundaries:
+    name: Windows 关键边界
+    needs: static
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: 静态检查
-        run: ruff check src tests
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: 运行测试
-        env:
-          VEGA_PROVIDER_ALIAS: ci-test-provider
-        run: pytest
+      - name: 安装完整实验依赖
+        run: python -m pip install -e ".[dev,langgraph]" pytest-timeout
 
-      - name: 空白字符检查
-        run: git diff --check
+      - name: 运行 Windows 关键边界
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .tmp/pytest/runs,.tmp/pytest/cache | Out-Null
+          $logPath = ".tmp/pytest/windows-boundaries.log"
+          $previousErrorPreference = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          python -m pytest -q `
+            --require-langgraph `
+            --timeout=58 `
+            --timeout-method=thread `
+            --basetemp=.tmp/pytest/runs/w `
+            -o cache_dir=.tmp/pytest/cache/w `
+            tests/experimental/langgraph_engine/test_engine_selection.py `
+            tests/experimental/langgraph_engine/test_graph_state_contract.py `
+            tests/experimental/langgraph_engine/test_checkpoint_resume.py `
+            tests/experimental/langgraph_engine/test_hitl_cli.py `
+            tests/test_execution_control_safety.py `
+            tests/test_langgraph_dependency_gate.py *> $logPath
+          $pytestStatus = $LASTEXITCODE
+          $ErrorActionPreference = $previousErrorPreference
+          Get-Content -Path $logPath
+          if ($pytestStatus -ne 0) {
+            $summary = Get-Content -Raw -Path $logPath
+            if ($summary.Length -gt 12000) {
+              $summary = $summary.Substring($summary.Length - 12000)
+            }
+            $escaped = $summary.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A")
+            Write-Output "::error title=pytest failure summary::$escaped"
+          }
+          exit $pytestStatus

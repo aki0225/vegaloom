@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 430" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5b6b80"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c4534f"/>
+    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1420"/>
+      <stop offset="1" stop-color="#0a0f18"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="430" rx="14" fill="url(#bg)"/>
+
+  <!-- 隔离分界:worker 侧与 reviewer 侧 -->
+  <line x1="985" y1="52" x2="985" y2="300" stroke="#31435c" stroke-width="1.6" stroke-dasharray="7 7"/>
+  <text x="985" y="38" text-anchor="middle" fill="#5b6b80" font-size="17" letter-spacing="2">ISOLATED CONTEXTS</text>
+  <text x="700" y="76" text-anchor="middle" fill="#e0a33c" font-size="15" letter-spacing="3">WRITES</text>
+  <text x="1210" y="76" text-anchor="middle" fill="#4fb8d8" font-size="15" letter-spacing="3">REVIEWS</text>
+
+  <!-- 主链节点 y=110..190 -->
+  <!-- Task -->
+  <rect x="42" y="115" width="150" height="70" rx="10" fill="#141d2c" stroke="#3a4c66" stroke-width="1.5"/>
+  <text x="117" y="146" text-anchor="middle" fill="#dbe4ee" font-size="20" font-weight="600">Task</text>
+  <text x="117" y="170" text-anchor="middle" fill="#7d8ca0" font-size="14">bug / feature</text>
+
+  <!-- Context -->
+  <rect x="236" y="115" width="176" height="70" rx="10" fill="#141d2c" stroke="#3a4c66" stroke-width="1.5"/>
+  <text x="324" y="146" text-anchor="middle" fill="#dbe4ee" font-size="20" font-weight="600">Context</text>
+  <text x="324" y="170" text-anchor="middle" fill="#7d8ca0" font-size="14">AGENTS.md · .vega.yaml</text>
+
+  <!-- Worker (amber) -->
+  <rect x="456" y="115" width="176" height="70" rx="10" fill="#1d1809" fill-opacity="0.92" stroke="#e0a33c" stroke-width="2"/>
+  <text x="544" y="146" text-anchor="middle" fill="#f2c15e" font-size="20" font-weight="600">Worker</text>
+  <text x="544" y="170" text-anchor="middle" fill="#a98f55" font-size="14">writes the change</text>
+
+  <!-- Verification -->
+  <rect x="676" y="115" width="186" height="70" rx="10" fill="#141d2c" stroke="#3a4c66" stroke-width="1.5"/>
+  <text x="769" y="146" text-anchor="middle" fill="#dbe4ee" font-size="20" font-weight="600">Verification</text>
+  <text x="769" y="170" text-anchor="middle" fill="#7d8ca0" font-size="14">tests · lint · checks</text>
+
+  <!-- Risk gate (diamond-ish) -->
+  <rect x="896" y="112" width="130" height="76" rx="14" fill="#181523" stroke="#8b6fc9" stroke-width="1.8"/>
+  <text x="961" y="145" text-anchor="middle" fill="#c9b8ea" font-size="19" font-weight="600">Risk gate</text>
+  <text x="961" y="169" text-anchor="middle" fill="#84739f" font-size="13.5">paths · size · budget</text>
+
+  <!-- Isolated review (cyan) -->
+  <rect x="1090" y="115" width="200" height="70" rx="10" fill="#0a1a20" fill-opacity="0.95" stroke="#4fb8d8" stroke-width="2"/>
+  <text x="1190" y="146" text-anchor="middle" fill="#7fd0e8" font-size="20" font-weight="600">Isolated review</text>
+  <text x="1190" y="170" text-anchor="middle" fill="#5b8fa2" font-size="14">diff + evidence only</text>
+
+  <!-- Report -->
+  <rect x="1334" y="115" width="176" height="70" rx="10" fill="#12211a" stroke="#4b9d6e" stroke-width="1.8"/>
+  <text x="1422" y="146" text-anchor="middle" fill="#8ed0aa" font-size="20" font-weight="600">Report</text>
+  <text x="1422" y="170" text-anchor="middle" fill="#5f8871" font-size="14">state · trace · verdict</text>
+
+  <!-- 主链箭头 -->
+  <line x1="192" y1="150" x2="230" y2="150" stroke="#5b6b80" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="412" y1="150" x2="450" y2="150" stroke="#5b6b80" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="632" y1="150" x2="670" y2="150" stroke="#5b6b80" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="862" y1="150" x2="890" y2="150" stroke="#5b6b80" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1026" y1="150" x2="1084" y2="150" stroke="#5b6b80" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1290" y1="150" x2="1328" y2="150" stroke="#5b6b80" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- fail-closed 通道 -->
+  <rect x="456" y="290" width="620" height="66" rx="10" fill="#1c1113" stroke="#c4534f" stroke-width="1.8"/>
+  <text x="766" y="318" text-anchor="middle" fill="#e08a86" font-size="19" font-weight="600">Fail closed — hand back to a human</text>
+  <text x="766" y="342" text-anchor="middle" fill="#9c6a68" font-size="14">failed verification · missing or stale evidence · interruption with unknown side effects</text>
+
+  <line x1="769" y1="185" x2="769" y2="284" stroke="#c4534f" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#arr-red)"/>
+  <line x1="961" y1="188" x2="961" y2="260" stroke="#c4534f" stroke-width="1.8" stroke-dasharray="6 5"/>
+  <line x1="961" y1="260" x2="900" y2="260" stroke="#c4534f" stroke-width="1.8" stroke-dasharray="6 5"/>
+  <line x1="900" y1="260" x2="900" y2="284" stroke="#c4534f" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#arr-red)"/>
+  <line x1="1190" y1="185" x2="1190" y2="260" stroke="#c4534f" stroke-width="1.8" stroke-dasharray="6 5"/>
+  <line x1="1190" y1="260" x2="1120" y2="260" stroke="#c4534f" stroke-width="1.8" stroke-dasharray="6 5"/>
+  <line x1="1120" y1="260" x2="1120" y2="284" stroke="#c4534f" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#arr-red)"/>
+
+  <!-- 底部原则 -->
+  <text x="800" y="404" text-anchor="middle" fill="#4c5c72" font-size="15" letter-spacing="0.5">deterministic verification &gt; model opinion — a reviewer&#8217;s approve can never turn a failed run into a success</text>
+</svg>

@@ -60,6 +60,23 @@ class DecisionStore:
             entries = [entry for entry in entries if entry.type == normalized]
         return entries
 
+    def get(self, decision_id: str) -> DecisionEntry:
+        normalized_id = decision_id.strip()
+        if not normalized_id:
+            raise ValueError("decision id 不能为空")
+        matches = [
+            entry
+            for entry in self.list()
+            if entry.id == normalized_id
+        ]
+        if not matches:
+            raise ValueError(f"decision ledger 不存在：{normalized_id}")
+        if len(matches) != 1:
+            raise ValueError(
+                f"decision ledger 包含重复 identity：{normalized_id}"
+            )
+        return matches[0]
+
 
 def append_run_decision(
     workspace: Path,

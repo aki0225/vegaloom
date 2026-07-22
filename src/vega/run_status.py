@@ -5,12 +5,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from .decision import DecisionStore
 from .execution_control import (
     ACTIVE_EXECUTION_STATUSES,
     ExecutionRecord,
     find_execution_records,
 )
+from .loop_engine import parse_loop_state_json, read_persisted_loop_engine
+from .loop_graph_state import GraphStateValidationError, read_graph_state
+from .models import LoopAutomationState
 from .run_utils import resolve_run_dir, resolve_runs_root
 
 
@@ -41,6 +46,8 @@ def render_run_status(workspace: Path, run: str) -> str:
         f"- 状态：`{payload['status']}`",
         f"- 当前步骤：`{payload['current_step']}`",
     ]
+    if payload.get("engine"):
+        lines.append(f"- 编排引擎：`{payload['engine']}`")
     if payload.get("repo_path"):
         lines.append(f"- 仓库：`{payload['repo_path']}`")
     if payload.get("risk"):
@@ -73,12 +80,63 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     run_dir = resolve_run_dir(workspace, run)
     state = _read_state(run_dir)
     kind = _infer_kind(run_dir, state)
+    if kind == "loop":
+        engine = read_persisted_loop_engine(state)
+        try:
+            loop_state = LoopAutomationState.model_validate(state)
+        except ValidationError as exc:
+            raise ValueError(
+                f"run `{run_dir.name}` 的 loop state.json schema 不合法"
+            ) from exc
+        graph_state = None
+        graph_state_path = run_dir / "graph" / "graph-state.json"
+        if loop_state.engine == "langgraph":
+            requires_trusted_graph_state = (
+                loop_state.status == "success"
+                or (
+                    loop_state.status == "running"
+                    and loop_state.current_step == "human_decision"
+                )
+            )
+            if requires_trusted_graph_state:
+                from .loop_graph_checkpoint import (
+                    GraphCheckpointValidationError,
+                    validate_checkpoint_manifest,
+                )
+
+                try:
+                    validate_checkpoint_manifest(run_dir)
+                except GraphCheckpointValidationError as exc:
+                    raise ValueError(
+                        f"run `{run_dir.name}` 的 checkpoint 不可信；"
+                        "已拒绝展示 success 或 HITL resume 指引。"
+                    ) from exc
+            if not graph_state_path.is_file():
+                if requires_trusted_graph_state:
+                    raise ValueError(
+                        f"run `{run_dir.name}` 缺少可信 Graph State；"
+                        "已拒绝展示 success 或 HITL resume 指引。"
+                    )
+            else:
+                try:
+                    graph_state = read_graph_state(run_dir)
+                except GraphStateValidationError as exc:
+                    if requires_trusted_graph_state:
+                        raise ValueError(
+                            f"run `{run_dir.name}` 的 Graph State 不可信；"
+                            "已拒绝展示 success 或 HITL resume 指引。"
+                        ) from exc
+        state = loop_state.model_dump(mode="json")
+    else:
+        engine = None
+        graph_state = None
     decisions = DecisionStore(run_dir).list()
     execution = _latest_execution_payload(run_dir)
     return {
         "run_id": run_dir.name,
         "run_dir": str(run_dir.resolve()),
         "kind": kind,
+        "engine": engine,
         "status": state.get("status", "unknown"),
         "current_step": state.get("current_step", "unknown"),
         "repo_path": state.get("repo_path"),
@@ -86,6 +144,11 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         "recommendation": state.get("recommendation"),
         "decision_count": len(decisions),
         "latest_decisions": [entry.model_dump() for entry in decisions[-3:]],
+        "pending_human_decision_id": (
+            graph_state["pending_human_decision_id"]
+            if graph_state is not None
+            else None
+        ),
         "execution": execution,
         "next_steps": next_steps_for_run(workspace, run_dir, state, kind),
         "key_artifacts": key_artifacts_for_run(run_dir, state, kind),
@@ -106,14 +169,36 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
             "确认没有残留进程后，保留当前 run 作为证据，并从新的 run 继续工作。",
         ]
     if (
+        run_kind == "loop"
+        and state.get("engine") == "langgraph"
+        and state.get("current_step") == "graph_recovery_needs_human"
+    ):
+        return _loop_next_steps(run_dir, state)
+    if (
         run_kind in {"loop", "review"}
         and execution
         and execution["status"] in ACTIVE_EXECUTION_STATUSES
     ):
+        recovery_guidance = (
+            (
+                "该 run 使用 LangGraph checkpoint；execution 仍活跃时不能 recover，"
+                "请先等待终态或显式 stop。"
+                if _has_graph_recovery_control(run_dir)
+                else (
+                    "该旧版 langgraph run 缺少 Gate 3 checkpoint 控制证据，"
+                    "不能自动 recover、continue 或 finish。"
+                )
+            )
+            if run_kind == "loop" and state.get("engine") == "langgraph"
+            else (
+                "fresh execution 不能直接 recover；只有 heartbeat 过期、"
+                "PID 消失或 execution 终态后才能接管。"
+            )
+        )
         return [
             f"当前 `{execution['step']}` 仍在运行，可继续等待并查看 `{execution['path']}`。",
             f"如需停止：`vega stop --run {run_dir.name} --reason \"...\"`。",
-            "fresh execution 不能直接 recover；只有 heartbeat 过期、PID 消失或 execution 终态后才能接管。",
+            recovery_guidance,
         ]
     if run_kind == "loop":
         return _loop_next_steps(run_dir, state)
@@ -198,6 +283,10 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
             "worker-context-budget-report.md",
             "project-context.md",
             "final-report.md",
+            "graph-failure-report.md",
+            "graph-recovery-report.md",
+            "graph/checkpoint-manifest.json",
+            "graph/run-config.json",
             "recovery-report.md",
             "eval.md",
         ],
@@ -231,6 +320,8 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
             "progress.md",
             "goal-state.json",
             "goal-trace.jsonl",
+            "goal-handoff-report.md",
+            "goal-handoff-context-report.md",
             "goal-final-report.md",
             "goal-eval.md",
             "stop-report.md",
@@ -241,10 +332,22 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
     if (run_dir / "decisions.jsonl").exists():
         result.append(str((run_dir / "decisions.jsonl").resolve()))
     if run_kind == "loop":
+        graph_state_path = run_dir / "graph" / "graph-state.json"
+        if graph_state_path.exists():
+            result.append(str(graph_state_path.resolve()))
         for item in ["finish-report.md", "finish-summary.json"]:
             path = run_dir / item
             if path.exists():
                 result.append(str(path.resolve()))
+        for directory in (
+            run_dir / "graph" / "pending-decisions",
+            run_dir / "graph" / "decision-consumptions",
+        ):
+            if directory.is_dir():
+                result.extend(
+                    str(path.resolve())
+                    for path in sorted(directory.glob("*.json"))
+                )
         # status 面向“下一步怎么做”，多轮 loop 时只展示最新一轮关键产物，避免三四轮后输出被历史文件淹没。
         result.extend(_latest_iteration_artifacts(run_dir, state))
     if run_kind == "review":
@@ -260,6 +363,77 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
 
 
 def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
+    if state.get("engine", "linear") == "langgraph":
+        status = state.get("status")
+        recovery_ready = _has_graph_recovery_control(run_dir)
+        if status == "running" and state.get("current_step") == "human_decision":
+            try:
+                graph_state = read_graph_state(run_dir)
+                pending_id = graph_state["pending_human_decision_id"]
+            except GraphStateValidationError:
+                pending_id = None
+            if pending_id:
+                pending_ref = (
+                    f"graph/pending-decisions/{pending_id}.json"
+                )
+                return [
+                    f"读取 `{run_dir / pending_ref}`，确认 workspace、policy、"
+                    "verification 和 risk evidence binding。",
+                    f"批准：`vega decision approve --run {run_dir.name} --type gate "
+                    f'--reason "..." --ref {pending_ref}`。',
+                    f"拒绝：`vega decision reject --run {run_dir.name} --type gate "
+                    f'--reason "..." --ref {pending_ref}`。',
+                    f"ledger 写入后运行：`vega resume --run {run_dir.name} "
+                    "--decision-id <dec-id> --engine langgraph`。",
+                ]
+            return [
+                "当前 run 声明等待人工 decision，但 Graph State 缺少可信 pending identity。",
+                "不要直接 resume；保留现场并检查 checkpoint 与 pending decision artifacts。",
+            ]
+        if state.get("current_step") == "graph_evidence_failed":
+            return [
+                f"读取 `{run_dir / 'graph-failure-report.md'}`、"
+                f"`{run_dir / 'state.json'}` 和 `eval.md`。",
+                "Graph State 最终证据失败，原 success 已撤销；"
+                "不得把该 run 作为成功证据。",
+                (
+                    f"如 checkpoint 仍可信且写入故障已解除，可运行："
+                    f"`vega recover --run {run_dir.name} --engine langgraph "
+                    '--reason "修复 Graph 终态证据"`；否则保留现场人工检查。'
+                    if recovery_ready
+                    else "该旧版 run 缺少 Gate 3 checkpoint，只能保留现场人工检查。"
+                ),
+            ]
+        if status == "success":
+            return [
+                f"读取 `{run_dir / 'final-report.md'}`、`eval.md` 和 `graph/graph-state.json`。",
+                "该 LangGraph run 已达到可信业务终态；人工检查 diff 后再自行 commit。",
+                "checkpoint 只拥有图游标；state.json、execution 和 workspace 仍是恢复对账依据。",
+            ]
+        if status == "running" and recovery_ready:
+            return [
+                f"读取 `{run_dir / 'state.json'}`、"
+                f"`{run_dir / 'graph/checkpoint-manifest.json'}` 和 execution 证据。",
+                f"确认原进程已退出后运行：`vega recover --run {run_dir.name} "
+                '--engine langgraph --reason "CLI 或进程中断"`。',
+                "恢复会先对账 workspace、execution 和 Step Result；不确定现场会转入 needs_human。",
+            ]
+        if state.get("current_step") == "graph_recovery_needs_human":
+            return [
+                f"读取 `{run_dir / 'graph-recovery-report.md'}`、`graph/` 原现场"
+                "和已存在的 execution.json。",
+                "当前现场无法证明可安全重放；不要再次启动 worker 或覆盖 workspace。",
+                "人工确认进程、diff 和 evidence chain 后，新建 run 或显式处理现场。",
+            ]
+        return [
+            f"读取 `{run_dir / 'state.json'}`、`eval.md` 和 `graph/graph-state.json`。",
+            (
+                "该 LangGraph run 已进入安全终态或人工判断状态；"
+                "不应由 linear continue / finish 接管。"
+                if recovery_ready
+                else "该旧版顺序 graph run 缺少 Gate 3 checkpoint，不能自动恢复。"
+            ),
+        ]
     status = state.get("status")
     current_step = state.get("current_step")
     if status == "needs_human" and current_step == "waiting_for_worker":
@@ -360,6 +534,7 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
 
 def _goal_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     status = state.get("status")
+    current_step = state.get("current_step")
     if status == "created":
         return [
             f"人工审查 `{run_dir / 'goal-contract.md'}`。",
@@ -372,6 +547,28 @@ def _goal_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
             f"证据挂载完成后运行：`vega goal checkpoint-done --run {run_dir.name} --checkpoint <n>`。",
         ]
     if status == "checkpoint_done":
+        if current_step == "handoff_created":
+            return [
+                f"读取 `{run_dir / 'goal-handoff-report.md'}` 和最新 handoff artifact。",
+                (
+                    f"用 fresh consumer 编译 context：`vega goal handoff-context "
+                    f"--run {run_dir.name} --checkpoint <n> --version v0001 "
+                    "--consumer-session-id <session> --consumer-worker-epoch <epoch>`。"
+                ),
+                "只有 context status 为 ready 才能启动 consumer worker。",
+            ]
+        if current_step == "handoff_context_ready":
+            return [
+                "读取最新 `checkpoint-context.md`、`checkpoint-context.json` 和 context metrics。",
+                "关闭 source session 后，仅把 compiled context 与绑定 artifacts 交给 fresh consumer worker。",
+                "consumer worker 不得读取 source chat、accepted memory，也不得自动 commit/push/release。",
+            ]
+        if current_step == "handoff_split_required":
+            return [
+                "读取最新 `checkpoint-split-plan.md` 和 `context-metrics.json`。",
+                "当前 context 超出预算，禁止启动 provider；由人工决定新的 checkpoint 边界后再编译。",
+                "不得静默截断 objective、constraints、verified facts、失败原因或证据引用。",
+            ]
         return [
             f"读取 `{run_dir / 'progress.md'}` 和最新 `checkpoint-report.md`。",
             f"如继续推进，运行：`vega goal step --run {run_dir.name}` 生成下一个 checkpoint plan。",
@@ -382,6 +579,12 @@ def _goal_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
         return [
             f"如确认继续，运行：`vega goal resume --run {run_dir.name}`。",
             f"如方向变化，运行：`vega goal stop --run {run_dir.name} --reason \"...\"`。",
+        ]
+    if status == "blocked" and current_step == "handoff_blocked":
+        return [
+            f"读取 `{run_dir / 'goal-handoff-context-report.md'}` 和 handoff-blocked artifact。",
+            "当前 handoff 未通过身份、证据、workspace 或 policy 校验，禁止启动 consumer worker。",
+            "保留 blocked 证据，人工修复漂移后从新的 handoff version/session 重新编译。",
         ]
     if status == "needs_human":
         if state.get("current_step") == "completion_eval_failed":
@@ -417,7 +620,7 @@ def _read_state(run_dir: Path) -> dict[str, Any]:
             f"run `{run_dir.name}` 的 state.json 无法读取；已拒绝展示不完整状态。"
         ) from exc
     try:
-        payload = json.loads(raw)
+        payload = parse_loop_state_json(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(
             f"run `{run_dir.name}` 的 state.json 无法解析；已拒绝降级展示损坏状态。"
@@ -496,7 +699,7 @@ def _referenced_child_run_ids(run_dirs: list[Path]) -> set[str]:
 
 def _infer_kind(run_dir: Path, state: dict[str, Any] | None = None) -> str:
     data = state if state is not None else _read_state_for_selection(run_dir)
-    if "automation_mode" in data:
+    if "engine" in data or "automation_mode" in data:
         return "loop"
     if (run_dir / "review-pack.md").exists():
         if (
@@ -604,6 +807,18 @@ def _latest_goal_artifacts(run_dir: Path) -> list[str]:
         matches = sorted(run_dir.glob(pattern))
         if matches:
             result.append(str(matches[-1].resolve()))
+    for pattern in [
+        "checkpoints/*/handoffs/*/checkpoint-handoff.json",
+        "checkpoints/*/handoffs/*/handoff-report.md",
+        "checkpoints/*/handoffs/*/consumers/*/checkpoint-context.md",
+        "checkpoints/*/handoffs/*/consumers/*/checkpoint-context.json",
+        "checkpoints/*/handoffs/*/consumers/*/context-metrics.json",
+        "checkpoints/*/handoffs/*/consumers/*/checkpoint-split-plan.md",
+        "checkpoints/*/handoffs/*/consumers/*/handoff-blocked.md",
+    ]:
+        matches = sorted(run_dir.glob(pattern))
+        if matches:
+            result.append(str(matches[-1].resolve()))
     return result
 
 
@@ -629,6 +844,14 @@ def _latest_execution_payload(run_dir: Path) -> dict[str, Any] | None:
         "deadline": lease.deadline,
         "path": str(record.path.resolve()),
     }
+
+
+def _has_graph_recovery_control(run_dir: Path) -> bool:
+    return (
+        run_dir.joinpath("graph", "run-config.json").is_file()
+        and run_dir.joinpath("graph", "checkpoint-manifest.json").is_file()
+        and run_dir.joinpath("graph", "checkpoints.sqlite").is_file()
+    )
 
 
 def _execution_heartbeat_utc(record: ExecutionRecord) -> datetime:

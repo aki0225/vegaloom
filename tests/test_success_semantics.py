@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -588,7 +589,6 @@ def test_success_finalization_checks_success_evidence_before_terminal_event(
 
 def test_failed_review_run_cannot_promote_parent_loop_to_success(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     workspace = tmp_path / "workspace"
     repo = tmp_path / "repo"
@@ -614,7 +614,10 @@ def test_failed_review_run_cannot_promote_parent_loop_to_success(
         worker_runner=TrackedChangeRunner(),
         reviewer_runner=QueueRunner([_review_json("approve")]),
     )
-    monkeypatch.setattr(runtime, "_run_review", lambda *args, **kwargs: review_run)
+    runtime.step_services = replace(
+        runtime.step_services,
+        dispatch_review=lambda _: review_run,
+    )
 
     run_dir = runtime.start(_brief(repo), "auto", max_iterations=1, verify=False)
 

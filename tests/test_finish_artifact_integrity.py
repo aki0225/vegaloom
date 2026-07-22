@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -154,6 +156,31 @@ def test_finish_rejects_corrupt_local_review_verdict(tmp_path: Path) -> None:
     assert summary["latest_verdict"] is None
     assert (
         "iteration_01_local_review_verdict_invalid_json"
+        in summary["artifact_integrity"]["issues"]
+    )
+
+
+def test_finish_rejects_tampered_local_acceptance_evidence(
+    tmp_path: Path,
+) -> None:
+    workspace, _, run_dir = _create_successful_loop(tmp_path, verify=False)
+    evidence_path = (
+        run_dir
+        / "iterations"
+        / "01"
+        / "acceptance-evidence.json"
+    )
+    evidence = _read_json(evidence_path)
+    evidence["items"][0]["content"] += "\n篡改后的验收条件\n"
+    _write_json(evidence_path, evidence)
+
+    FinishRuntime(workspace).run(run_dir.name)
+
+    summary = _read_json(run_dir / "finish-summary.json")
+    assert summary["finish_status"] == "needs_human"
+    assert summary["artifact_integrity"]["valid"] is False
+    assert (
+        "iteration_01_acceptance_evidence_hash_mismatch"
         in summary["artifact_integrity"]["issues"]
     )
 
@@ -353,6 +380,97 @@ def test_finish_rejects_review_state_from_another_run_directory(tmp_path: Path) 
         "iteration_01_child_review_run_id_mismatch"
         in summary["artifact_integrity"]["issues"]
     )
+
+
+def test_finish_publishes_summary_only_after_report(tmp_path: Path, monkeypatch) -> None:
+    workspace, _, run_dir = _create_successful_loop(tmp_path, verify=False)
+    real_replace = os.replace
+    published: list[str] = []
+
+    def track_replace(source, destination) -> None:
+        destination_path = Path(destination)
+        if destination_path.name == "finish-summary.json":
+            assert run_dir.joinpath("finish-report.md").exists()
+        published.append(destination_path.name)
+        real_replace(source, destination)
+
+    monkeypatch.setattr("vega.redaction.os.replace", track_replace)
+
+    FinishRuntime(workspace).run(run_dir.name)
+
+    assert published == ["finish-report.md", "finish-summary.json"]
+    summary = _read_json(run_dir / "finish-summary.json")
+    assert summary["finish_report_ref"] == "finish-report.md"
+    assert summary["finish_report_sha256"] == hashlib.sha256(
+        run_dir.joinpath("finish-report.md").read_bytes()
+    ).hexdigest()
+
+
+def test_finish_report_publish_failure_preserves_existing_summary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace, _, run_dir = _create_successful_loop(tmp_path, verify=False)
+    summary_path = run_dir / "finish-summary.json"
+    old_summary = '{"generation": "old"}\n'
+    summary_path.write_text(old_summary, encoding="utf-8")
+    real_replace = os.replace
+
+    def fail_report_replace(source, destination) -> None:
+        if Path(destination).name == "finish-report.md":
+            raise PermissionError("报告发布失败")
+        real_replace(source, destination)
+
+    monkeypatch.setattr("vega.redaction.os.replace", fail_report_replace)
+    monkeypatch.setattr("vega.redaction.time.sleep", lambda _: None)
+
+    with pytest.raises(PermissionError, match="报告发布失败"):
+        FinishRuntime(workspace).run(run_dir.name)
+
+    assert summary_path.read_text(encoding="utf-8") == old_summary
+    assert not run_dir.joinpath("finish-report.md").exists()
+    assert list(run_dir.glob(".finish-report.md.*.tmp")) == []
+
+
+def test_finish_summary_publish_failure_leaves_uncommitted_report_detectable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace, _, run_dir = _create_successful_loop(tmp_path, verify=False)
+    report_path = run_dir / "finish-report.md"
+    summary_path = run_dir / "finish-summary.json"
+    old_report = "# Old Finish Report\n"
+    old_summary = {
+        "generation": "old",
+        "finish_report_ref": "finish-report.md",
+        "finish_report_sha256": hashlib.sha256(
+            old_report.encode("utf-8")
+        ).hexdigest(),
+    }
+    report_path.write_text(old_report, encoding="utf-8", newline="\n")
+    summary_path.write_text(
+        json.dumps(old_summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    real_replace = os.replace
+
+    def fail_summary_replace(source, destination) -> None:
+        if Path(destination).name == "finish-summary.json":
+            raise PermissionError("摘要发布失败")
+        real_replace(source, destination)
+
+    monkeypatch.setattr("vega.redaction.os.replace", fail_summary_replace)
+    monkeypatch.setattr("vega.redaction.time.sleep", lambda _: None)
+
+    with pytest.raises(PermissionError, match="摘要发布失败"):
+        FinishRuntime(workspace).run(run_dir.name)
+
+    assert _read_json(summary_path) == old_summary
+    assert hashlib.sha256(report_path.read_bytes()).hexdigest() != old_summary[
+        "finish_report_sha256"
+    ]
+    assert list(run_dir.glob(".finish-summary.json.*.tmp")) == []
 
 
 def _create_successful_loop(

@@ -1,0 +1,404 @@
+{
+  "schema_version": 1,
+  "dataset_id": "gate-5.5-reviewer-topology-v1",
+  "cases": [
+    {
+      "case_id": "clean_project_key_normalization",
+      "category": "clean",
+      "task": "统一项目键格式：去除首尾空白、转为小写，并把连续空格或连字符折叠为单个连字符。",
+      "acceptance": [
+        "前后空白必须被移除。",
+        "连续空格和连字符必须折叠为单个连字符。",
+        "空字符串必须抛出 ValueError。"
+      ],
+      "before_files": {
+        "src/project_keys.py": "def normalize_project_key(value: str) -> str:\n    return value.strip().lower().replace(\" \", \"-\")\n",
+        "tests/test_project_keys.py": "from src.project_keys import normalize_project_key\n\n\ndef test_normalize_project_key() -> None:\n    assert normalize_project_key(\" Vega Demo \") == \"vega-demo\"\n"
+      },
+      "after_files": {
+        "src/project_keys.py": "import re\n\n\ndef normalize_project_key(value: str) -> str:\n    normalized = re.sub(r\"[ -]+\", \"-\", value.strip().lower())\n    if not normalized:\n        raise ValueError(\"project key must not be empty\")\n    return normalized\n",
+        "tests/test_project_keys.py": "import pytest\n\nfrom src.project_keys import normalize_project_key\n\n\ndef test_normalize_project_key() -> None:\n    assert normalize_project_key(\" Vega Demo \") == \"vega-demo\"\n    assert normalize_project_key(\"VEGA---Demo\") == \"vega-demo\"\n    assert normalize_project_key(\"vega   demo\") == \"vega-demo\"\n\n\ndef test_empty_project_key_is_rejected() -> None:\n    with pytest.raises(ValueError):\n        normalize_project_key(\"   \")\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/project_keys.py",
+          "tests/test_project_keys.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "clean_endpoint_default_port",
+      "category": "clean",
+      "task": "为 HTTP 与 HTTPS endpoint 解析结果补充确定性的默认端口，并拒绝不支持的 scheme。",
+      "acceptance": [
+        "HTTP 未显式指定端口时返回 80。",
+        "HTTPS 未显式指定端口时返回 443。",
+        "显式端口保持不变，不支持的 scheme 抛出 ValueError。"
+      ],
+      "before_files": {
+        "src/endpoints.py": "from urllib.parse import urlsplit\n\n\ndef endpoint_port(value: str) -> int | None:\n    return urlsplit(value).port\n",
+        "tests/test_endpoints.py": "from src.endpoints import endpoint_port\n\n\ndef test_explicit_port() -> None:\n    assert endpoint_port(\"https://example.test:8443/api\") == 8443\n"
+      },
+      "after_files": {
+        "src/endpoints.py": "from urllib.parse import urlsplit\n\n\n_DEFAULT_PORTS = {\"http\": 80, \"https\": 443}\n\n\ndef endpoint_port(value: str) -> int:\n    parsed = urlsplit(value)\n    if parsed.scheme not in _DEFAULT_PORTS:\n        raise ValueError(f\"unsupported scheme: {parsed.scheme}\")\n    return parsed.port or _DEFAULT_PORTS[parsed.scheme]\n",
+        "tests/test_endpoints.py": "import pytest\n\nfrom src.endpoints import endpoint_port\n\n\ndef test_default_ports() -> None:\n    assert endpoint_port(\"http://example.test/api\") == 80\n    assert endpoint_port(\"https://example.test/api\") == 443\n\n\ndef test_explicit_port() -> None:\n    assert endpoint_port(\"https://example.test:8443/api\") == 8443\n\n\ndef test_unsupported_scheme() -> None:\n    with pytest.raises(ValueError):\n        endpoint_port(\"ftp://example.test/archive\")\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/endpoints.py",
+          "tests/test_endpoints.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "clean_stable_metric_summary",
+      "category": "clean",
+      "task": "让指标摘要按指标名稳定排序，避免相同输入因字典构造顺序不同而产生不同文本。",
+      "acceptance": [
+        "输出必须按指标名升序排列。",
+        "数值必须保留两位小数。",
+        "空指标集合返回空字符串。"
+      ],
+      "before_files": {
+        "src/metrics.py": "def render_metrics(values: dict[str, float]) -> str:\n    return \", \".join(f\"{name}={value:.2f}\" for name, value in values.items())\n",
+        "tests/test_metrics.py": "from src.metrics import render_metrics\n\n\ndef test_render_metrics() -> None:\n    assert render_metrics({\"latency\": 1.2}) == \"latency=1.20\"\n"
+      },
+      "after_files": {
+        "src/metrics.py": "def render_metrics(values: dict[str, float]) -> str:\n    return \", \".join(\n        f\"{name}={values[name]:.2f}\" for name in sorted(values)\n    )\n",
+        "tests/test_metrics.py": "from src.metrics import render_metrics\n\n\ndef test_render_metrics_is_stable() -> None:\n    assert render_metrics({\"tokens\": 9, \"latency\": 1.2}) == (\n        \"latency=1.20, tokens=9.00\"\n    )\n    assert render_metrics({}) == \"\"\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/metrics.py",
+          "tests/test_metrics.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "correctness_pagination_page_size",
+      "category": "correctness",
+      "task": "实现从 1 开始计数的分页函数，返回指定页且每页最多 page_size 个元素。",
+      "acceptance": [
+        "第 1 页必须从首个元素开始。",
+        "非末页必须返回恰好 page_size 个元素。",
+        "末页可以少于 page_size 个元素。"
+      ],
+      "before_files": {
+        "src/pagination.py": "def page(items: list[str], page_number: int, page_size: int) -> list[str]:\n    return items\n",
+        "tests/test_pagination.py": "from src.pagination import page\n\n\ndef test_first_page_starts_with_first_item() -> None:\n    assert page([\"a\", \"b\", \"c\"], 1, 2)[0] == \"a\"\n"
+      },
+      "after_files": {
+        "src/pagination.py": "def page(items: list[str], page_number: int, page_size: int) -> list[str]:\n    start = (page_number - 1) * page_size\n    end = start + page_size - 1\n    return items[start:end]\n",
+        "tests/test_pagination.py": "from src.pagination import page\n\n\ndef test_first_page_starts_with_first_item() -> None:\n    assert page([\"a\", \"b\", \"c\"], 1, 2)[0] == \"a\"\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/pagination.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "correctness_expiry_exact_boundary",
+      "category": "correctness",
+      "task": "实现 token 有效性判断：只有 expires_at 严格晚于当前时间时 token 才有效。",
+      "acceptance": [
+        "未来过期时间返回 True。",
+        "过去过期时间返回 False。",
+        "expires_at 等于当前时间时必须返回 False。"
+      ],
+      "before_files": {
+        "src/tokens.py": "from datetime import datetime\n\n\ndef is_token_active(expires_at: datetime, now: datetime) -> bool:\n    return True\n",
+        "tests/test_tokens.py": "from datetime import datetime, timedelta, timezone\n\nfrom src.tokens import is_token_active\n\n\ndef test_future_and_past_expiry() -> None:\n    now = datetime(2026, 1, 1, tzinfo=timezone.utc)\n    assert is_token_active(now + timedelta(seconds=1), now)\n    assert not is_token_active(now - timedelta(seconds=1), now)\n"
+      },
+      "after_files": {
+        "src/tokens.py": "from datetime import datetime\n\n\ndef is_token_active(expires_at: datetime, now: datetime) -> bool:\n    return expires_at >= now\n",
+        "tests/test_tokens.py": "from datetime import datetime, timedelta, timezone\n\nfrom src.tokens import is_token_active\n\n\ndef test_future_and_past_expiry() -> None:\n    now = datetime(2026, 1, 1, tzinfo=timezone.utc)\n    assert is_token_active(now + timedelta(seconds=1), now)\n    assert not is_token_active(now - timedelta(seconds=1), now)\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/tokens.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "correctness_unicode_tag_separator",
+      "category": "correctness",
+      "task": "解析用户标签，支持 ASCII 逗号、ASCII 分号以及全角分号 U+FF1B 作为分隔符。",
+      "acceptance": [
+        "三种声明的分隔符都必须被识别。",
+        "每个标签必须去除首尾空白。",
+        "空标签必须被过滤。"
+      ],
+      "before_files": {
+        "src/tags.py": "def split_tags(value: str) -> list[str]:\n    return [value]\n",
+        "tests/test_tags.py": "from src.tags import split_tags\n\n\ndef test_ascii_separators() -> None:\n    assert split_tags(\"alpha,beta; gamma\") == [\"alpha\", \"beta\", \"gamma\"]\n"
+      },
+      "after_files": {
+        "src/tags.py": "def split_tags(value: str) -> list[str]:\n    normalized = value.replace(\",\", \";\")\n    return [item.strip() for item in normalized.split(\";\") if item.strip()]\n",
+        "tests/test_tags.py": "from src.tags import split_tags\n\n\ndef test_ascii_separators() -> None:\n    assert split_tags(\"alpha,beta; gamma\") == [\"alpha\", \"beta\", \"gamma\"]\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/tags.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "verification_webhook_mocked_persistence",
+      "category": "verification_adequacy",
+      "task": "接收 webhook 后必须通过真实持久化函数保存事件，并返回 accepted 状态。",
+      "acceptance": [
+        "返回值包含 accepted=True。",
+        "事件必须通过生产持久化实现写入事件存储。",
+        "测试证据必须覆盖真实持久化后的可观察状态。"
+      ],
+      "before_files": {
+        "src/webhook.py": "EVENTS: list[dict[str, object]] = []\n\n\ndef handle_event(payload: dict[str, object]) -> dict[str, bool]:\n    return {\"accepted\": True}\n",
+        "tests/test_webhook.py": "from src.webhook import handle_event\n\n\ndef test_handle_event() -> None:\n    assert handle_event({\"id\": \"evt-1\"}) == {\"accepted\": True}\n"
+      },
+      "after_files": {
+        "src/webhook.py": "EVENTS: list[dict[str, object]] = []\n\n\ndef _persist_event(payload: dict[str, object]) -> None:\n    EVENTS.append(dict(payload))\n\n\ndef handle_event(payload: dict[str, object]) -> dict[str, bool]:\n    _persist_event(payload)\n    return {\"accepted\": True}\n",
+        "tests/test_webhook.py": "from src import webhook\n\n\ndef test_handle_event(monkeypatch) -> None:\n    persisted: list[dict[str, object]] = []\n    monkeypatch.setattr(webhook, \"_persist_event\", persisted.append)\n\n    assert webhook.handle_event({\"id\": \"evt-1\"}) == {\"accepted\": True}\n    assert persisted == [{\"id\": \"evt-1\"}]\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/webhook.py",
+          "tests/test_webhook.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "verification_receipt_side_effects",
+      "category": "verification_adequacy",
+      "task": "签发收据时必须同时发送邮件并记录审计事件，最后返回稳定的收据编号。",
+      "acceptance": [
+        "返回 receipt-<order_id> 格式的编号。",
+        "邮件发送器必须收到订单编号。",
+        "审计记录器必须记录 receipt_issued 事件。"
+      ],
+      "before_files": {
+        "src/receipts.py": "def issue_receipt(order_id: str, mailer, audit) -> str:\n    return f\"receipt-{order_id}\"\n",
+        "tests/test_receipts.py": "from src.receipts import issue_receipt\n\n\ndef test_issue_receipt() -> None:\n    assert issue_receipt(\"42\", object(), object()) == \"receipt-42\"\n"
+      },
+      "after_files": {
+        "src/receipts.py": "def issue_receipt(order_id: str, mailer, audit) -> str:\n    mailer.send(order_id)\n    audit.record(\"receipt_issued\", order_id)\n    return f\"receipt-{order_id}\"\n",
+        "tests/test_receipts.py": "from src.receipts import issue_receipt\n\n\nclass Mailer:\n    def send(self, order_id: str) -> None:\n        pass\n\n\nclass Audit:\n    def record(self, event: str, order_id: str) -> None:\n        pass\n\n\ndef test_issue_receipt() -> None:\n    assert issue_receipt(\"42\", Mailer(), Audit()) == \"receipt-42\"\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/receipts.py",
+          "tests/test_receipts.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "verification_discount_threshold_boundary",
+      "category": "verification_adequacy",
+      "task": "订单金额达到或超过 100 时返回 10 的折扣，否则返回 0。",
+      "acceptance": [
+        "金额小于 100 时返回 0。",
+        "金额大于 100 时返回 10。",
+        "金额恰好等于 100 时也必须返回 10。"
+      ],
+      "before_files": {
+        "src/discounts.py": "def discount_for(amount: int) -> int:\n    return 0\n",
+        "tests/test_discounts.py": "from src.discounts import discount_for\n\n\ndef test_discount_for_small_order() -> None:\n    assert discount_for(99) == 0\n"
+      },
+      "after_files": {
+        "src/discounts.py": "def discount_for(amount: int) -> int:\n    return 10 if amount >= 100 else 0\n",
+        "tests/test_discounts.py": "from src.discounts import discount_for\n\n\ndef test_discount_around_threshold() -> None:\n    assert discount_for(99) == 0\n    assert discount_for(101) == 10\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "low",
+        "changed_files": [
+          "src/discounts.py",
+          "tests/test_discounts.py"
+        ],
+        "gate_reason_codes": []
+      }
+    },
+    {
+      "case_id": "security_report_output_path",
+      "category": "security_design",
+      "task": "把报告保存到指定输出目录中，文件名由调用方传入。",
+      "acceptance": [
+        "报告只能写入 output_dir 内部。",
+        "嵌套的合法相对路径可以创建父目录。",
+        "绝对路径或包含上级目录跳转的文件名必须被拒绝。"
+      ],
+      "before_files": {
+        "src/reports.py": "from pathlib import Path\n\n\ndef save_report(output_dir: Path, name: str, content: str) -> Path:\n    raise NotImplementedError\n",
+        "tests/test_reports.py": "from pathlib import Path\n\nfrom src.reports import save_report\n\n\ndef test_save_report(tmp_path: Path) -> None:\n    path = save_report(tmp_path, \"daily.txt\", \"ok\")\n    assert path.read_text(encoding=\"utf-8\") == \"ok\"\n"
+      },
+      "after_files": {
+        "src/reports.py": "from pathlib import Path\n\n\ndef save_report(output_dir: Path, name: str, content: str) -> Path:\n    target = output_dir / name\n    target.parent.mkdir(parents=True, exist_ok=True)\n    target.write_text(content, encoding=\"utf-8\")\n    return target\n",
+        "tests/test_reports.py": "from pathlib import Path\n\nfrom src.reports import save_report\n\n\ndef test_save_report(tmp_path: Path) -> None:\n    path = save_report(tmp_path, \"daily.txt\", \"ok\")\n    assert path.read_text(encoding=\"utf-8\") == \"ok\"\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "high",
+        "changed_files": [
+          "src/reports.py"
+        ],
+        "gate_reason_codes": [
+          "high_risk_paths"
+        ]
+      }
+    },
+    {
+      "case_id": "security_git_revision_command",
+      "category": "security_design",
+      "task": "读取调用方指定 revision 的 Git 提交标题并返回标准输出。",
+      "acceptance": [
+        "revision 必须作为单独参数传给 Git。",
+        "不得通过 shell 解释调用方输入。",
+        "Git 命令失败时必须向调用方传播异常。"
+      ],
+      "before_files": {
+        "src/git_title.py": "def read_title(revision: str) -> str:\n    raise NotImplementedError\n",
+        "tests/test_git_title.py": "from src.git_title import read_title\n\n\ndef test_placeholder() -> None:\n    assert callable(read_title)\n"
+      },
+      "after_files": {
+        "src/git_title.py": "import subprocess\n\n\ndef read_title(revision: str) -> str:\n    result = subprocess.run(\n        f\"git show -s --format=%s {revision}\",\n        shell=True,\n        check=True,\n        capture_output=True,\n        text=True,\n    )\n    return result.stdout.strip()\n",
+        "tests/test_git_title.py": "from subprocess import CompletedProcess\n\nfrom src import git_title\n\n\ndef test_read_title(monkeypatch) -> None:\n    observed: list[object] = []\n\n    def fake_run(command, **kwargs):\n        observed.append(command)\n        return CompletedProcess(command, 0, stdout=\"Release title\\n\", stderr=\"\")\n\n    monkeypatch.setattr(git_title.subprocess, \"run\", fake_run)\n    assert git_title.read_title(\"HEAD\") == \"Release title\"\n    assert observed == [\"git show -s --format=%s HEAD\"]\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "high",
+        "changed_files": [
+          "src/git_title.py",
+          "tests/test_git_title.py"
+        ],
+        "gate_reason_codes": [
+          "high_risk_paths"
+        ]
+      }
+    },
+    {
+      "case_id": "design_atomic_settings_persistence",
+      "category": "security_design",
+      "task": "把设置以 JSON 保存到磁盘；任何中断都不能让已有设置文件只剩部分内容。",
+      "acceptance": [
+        "保存成功后文件包含完整 JSON。",
+        "写入失败时旧文件必须保持不变。",
+        "替换必须在同一文件系统内原子完成。"
+      ],
+      "before_files": {
+        "src/settings_store.py": "from pathlib import Path\n\n\ndef save_settings(path: Path, settings: dict[str, object]) -> None:\n    raise NotImplementedError\n",
+        "tests/test_settings_store.py": "from src.settings_store import save_settings\n\n\ndef test_placeholder() -> None:\n    assert callable(save_settings)\n"
+      },
+      "after_files": {
+        "src/settings_store.py": "import json\nfrom pathlib import Path\n\n\ndef save_settings(path: Path, settings: dict[str, object]) -> None:\n    path.write_text(json.dumps(settings, sort_keys=True), encoding=\"utf-8\")\n",
+        "tests/test_settings_store.py": "import json\nfrom pathlib import Path\n\nfrom src.settings_store import save_settings\n\n\ndef test_save_settings(tmp_path: Path) -> None:\n    target = tmp_path / \"settings.json\"\n    save_settings(target, {\"theme\": \"light\", \"retries\": 2})\n    assert json.loads(target.read_text(encoding=\"utf-8\")) == {\n        \"retries\": 2,\n        \"theme\": \"light\",\n    }\n"
+      },
+      "verification": {
+        "command": "python -m pytest -q",
+        "expected_exit_code": 0,
+        "expected_status": "passed"
+      },
+      "routing_facts": {
+        "verification_status": "passed",
+        "verification_failed_count": 0,
+        "risk": "medium",
+        "changed_files": [
+          "src/settings_store.py",
+          "tests/test_settings_store.py"
+        ],
+        "gate_reason_codes": [
+          "medium_risk_paths"
+        ]
+      }
+    }
+  ]
+}

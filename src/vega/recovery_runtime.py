@@ -6,6 +6,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .execution_control import ExecutionRecoveryInspection, inspect_execution_for_recovery
+from .loop_engine import (
+    preflight_persisted_engine,
+    require_persisted_linear_engine,
+)
 from .models import LoopAutomationState
 from .redaction import redact_text, write_redacted_text
 from .run_utils import resolve_run_dir
@@ -16,7 +20,12 @@ class RecoveryRuntime:
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace
 
-    def recover_loop(self, run: str, reason: str) -> Path:
+    def recover_loop(
+        self,
+        run: str,
+        reason: str,
+        engine: str | None = None,
+    ) -> Path:
         """把中断在 running 的 loop 标记为 needs_human，并保留恢复说明。
 
         recover 只修复 Vega 自己的状态机，不清理工作区、不杀进程、不自动继续。
@@ -24,6 +33,7 @@ class RecoveryRuntime:
         """
         run_dir = resolve_run_dir(self.workspace, run)
         state_path = run_dir / "state.json"
+        persisted_engine = preflight_persisted_engine(state_path, engine)
         try:
             state = LoopAutomationState.model_validate_json(state_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, ValidationError) as exc:
@@ -44,6 +54,22 @@ class RecoveryRuntime:
                 "loop state.run_id 与 run 目录身份不一致；"
                 "为避免在错误证据链上 recovery，已拒绝接管。"
             )
+        if persisted_engine == "langgraph":
+            from .loop_graph_recovery import read_graph_run_config
+            from .loop_runtime import LoopAutomationRuntime
+
+            # Graph attempt 身份已绑定创建时的 timeout；CLI recover 必须复用持久化配置，
+            # 不能用 Runtime 默认值覆盖非默认 run。
+            run_config = read_graph_run_config(run_dir)
+            return LoopAutomationRuntime(
+                self.workspace,
+                timeout_seconds=run_config.timeout_seconds,
+            ).recover_langgraph(
+                run_dir.name,
+                reason,
+                engine=engine,
+            )
+        require_persisted_linear_engine(state.engine, engine)
         if state.status != "running":
             raise ValueError(f"只能 recover status=running 的 loop，当前状态：{state.status}")
         if not reason.strip():

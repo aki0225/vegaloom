@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "case_identity": {
+    "case_id": "gate7-flask-teardown-goal-handoff-v1",
+    "real_session": "gate7a-flask-5928-real-v1",
+    "langgraph_session": "gate7c-flask-5928-real-v1",
+    "branch": "experiment/langgraph-comparison",
+    "repo_task": "pallets/flask PR #5928",
+    "date": "2026-07-19",
+    "base": "7b0088693ece1bd3a9238a6fdf56ed8df7a4d43b",
+    "merge": "c34d6e81fd8e405e6d4178bf24b364918811ef17",
+    "merge_tree": "a5b249e710d1253bee4c099faf91e45f9ebfbddd",
+    "changed_files": 10,
+    "diff_command": "git diff --binary --full-index <base> <merge>",
+    "diff_bytes": 19266,
+    "diff_sha256": "d8e20d91ebe30ca5056be1b3e4d84d989dbba6fd2a16829baecf0620bdc4d33b",
+    "base_full_suite": "494 passed",
+    "merge_full_suite": "495 passed",
+    "python": "3.12.11",
+    "uv": "0.10.10"
+  },
+  "exact_files": {
+    "whitelist_count": 10,
+    "files": [
+      "tests/test_appctx.py",
+      "tests/test_basic.py",
+      "tests/test_blueprints.py",
+      "tests/test_helpers.py",
+      "tests/test_testing.py",
+      "src/flask/helpers.py",
+      "src/flask/app.py",
+      "src/flask/ctx.py",
+      "docs/appcontext.rst",
+      "CHANGES.rst"
+    ],
+    "scope_rule": "任何增删改都算 scope drift"
+  },
+  "checkpoints": [
+    {
+      "id": "CP01",
+      "name": "tests-only precheck",
+      "scope": [
+        "tests/test_appctx.py",
+        "tests/test_basic.py",
+        "tests/test_blueprints.py",
+        "tests/test_helpers.py",
+        "tests/test_testing.py"
+      ],
+      "goal": "只改测试期望，不碰生产代码。",
+      "instructions": [
+        "新增 test_robust_teardown，覆盖 request/app teardown callbacks 与两个 teardown signals 即使抛错也都被调用。",
+        "Python 3.12 下最终异常必须保留 request 与 app 两层错误分组。",
+        "在其余 4 个测试文件中把 response、stream 或 builder 的资源关闭改成确定性语义，避免失败路径遗留资源。",
+        "本阶段不实现生产修复，robust 节点必须保持 expected-fail。"
+      ],
+      "acceptance": [
+        "只改 5 个测试文件。",
+        "机器必须运行两个独立 pytest 进程。",
+        "进程 A 只跑 tests/test_appctx.py::test_robust_teardown，且必须 expected-fail。",
+        "进程 B 使用 -k \"not test_robust_teardown\" 跑其余 suite，且必须 494 passed。",
+        "不引入新依赖。",
+        "不修改白名单外文件。"
+      ],
+      "expected_state": "terminal_with_isolated_expected_failure",
+      "verification": {
+        "commands": [
+          {
+            "command": "python -m pytest tests/test_appctx.py::test_robust_teardown -q",
+            "expected": "expected-fail"
+          },
+          {
+            "command": "python -m pytest -k \"not test_robust_teardown\" -q",
+            "expected": "494 passed"
+          }
+        ],
+        "notes": "CP01 以测试级冻结为准，不要求生产实现变更。"
+      }
+    },
+    {
+      "id": "CP02",
+      "name": "behavior repair",
+      "scope": [
+        "src/flask/helpers.py",
+        "src/flask/app.py"
+      ],
+      "goal": "直接修复 request/app teardown callbacks + signals 行为。",
+      "instructions": [
+        "在 helpers.py 提供可复用的内部错误收集机制，能捕获 BaseException 并延迟统一抛出。",
+        "在 app.py 中让 request teardown callbacks、request_tearing_down signal、app teardown callbacks、appcontext_tearing_down signal 在前序抛错时仍全部执行。",
+        "固定 Python 3.12 行为：每一层的多个错误以 BaseExceptionGroup 保留。",
+        "本阶段不得修改 AppContext.pop，因此端到端 robust 节点仍应 expected-fail。"
+      ],
+      "acceptance": [
+        "只改 2 个生产文件。",
+        "request/app teardown callbacks 全调用。",
+        "signals 全调用。",
+        "错误统一抛出。",
+        "机器必须运行两个独立 pytest 进程。",
+        "进程 A 只跑 tests/test_appctx.py::test_robust_teardown，且必须 expected-fail。",
+        "进程 B 使用 -k \"not test_robust_teardown\" 跑其余 suite，且必须 494 passed。",
+        "CP02 另有直接行为 probe，且必须 pass。",
+        "不提前触碰 ctx.py、appcontext.rst 或 CHANGES.rst。"
+      ],
+      "expected_state": "terminal_with_isolated_expected_failure_plus_probe",
+      "verification": {
+        "commands": [
+          {
+            "command": "python -m pytest tests/test_appctx.py::test_robust_teardown -q",
+            "expected": "expected-fail"
+          },
+          {
+            "command": "python -m pytest -k \"not test_robust_teardown\" -q",
+            "expected": "494 passed"
+          }
+        ],
+        "direct_behavior_probe": {
+          "status": "must-pass",
+          "notes": "行为验证必须覆盖 callbacks 与 signals 的一致性。"
+        }
+      }
+    },
+    {
+      "id": "CP03",
+      "name": "context and docs freeze",
+      "scope": [
+        "src/flask/ctx.py",
+        "docs/appcontext.rst",
+        "CHANGES.rst"
+      ],
+      "goal": "冻结文档与上下文收口。",
+      "instructions": [
+        "在 AppContext.pop 中统一收集 request teardown、request close、app teardown 和 appcontext_popped 的错误。",
+        "无论前序步骤是否抛错，都必须完成 context token reset，最后再统一抛出。",
+        "更新 appcontext 文档和 CHANGES，说明所有 teardown callbacks 都会执行且错误延迟抛出。",
+        "最终 robust 节点与完整 495 项 suite 都必须通过。"
+      ],
+      "acceptance": [
+        "只改 3 个文件。",
+        "先单独运行 robust 节点且必须 pass。",
+        "再运行完整 suite 且必须 495 passed。",
+        "文档与实现一致。",
+        "不新增任何额外 scope。"
+      ],
+      "expected_state": "terminal_with_robust_node_then_full_pass",
+      "verification": {
+        "commands": [
+          {
+            "command": "python -m pytest tests/test_appctx.py::test_robust_teardown -q",
+            "expected": "pass"
+          },
+          {
+            "command": "python -m pytest -q",
+            "expected": "495 passed"
+          }
+        ],
+        "notes": "CP03 作为最终收口点，必须先通过独立 robust 节点，再通过完整 suite。"
+      }
+    }
+  ],
+  "validation_contract": {
+    "parse_and_scope": [
+      "JSON 必须可解析。",
+      "exact_files 必须恰好 10 个。",
+      "任何非白名单路径都视为 drift。",
+      "diff budget 和 diff SHA 必须与固定事实一致。"
+    ],
+    "behavioral": [
+      "CP01 必须先用独立 pytest 进程隔离 robust 节点，再用 -k 过滤后的新进程跑其余 suite。",
+      "CP02 必须先用独立 pytest 进程隔离 robust 节点，再用 -k 过滤后的新进程跑其余 suite，并额外通过 direct behavior probe。",
+      "CP03 必须先让独立 robust 节点 pass，再让完整 suite 达到 495 passed。"
+    ],
+    "event_hash_chain": {
+      "required": true,
+      "fields": [
+        "attempt",
+        "retry",
+        "recovery",
+        "migration"
+      ],
+      "automatic_retries": 0,
+      "client_retry_config": {
+        "request_max_retries": 0,
+        "stream_max_retries": 0
+      },
+      "shared_authority_claim": "human_pre_registered_inputs_only"
+    },
+    "stop_conditions": [
+      "scope 不是 exact paths。",
+      "diff budget 不一致。",
+      "event hash chain 断裂。",
+      "source chat 泄漏。",
+      "memory 泄漏。",
+      "machine path canary 泄漏。",
+      "robust 节点没有在独立 pytest 进程中运行。",
+      "过滤后的新进程没有达到 494 passed 或 495 passed。",
+      "CP02 direct behavior probe 未通过。",
+      "试图把人工预注册改写成 Agent 产出。",
+      "试图宣称真实物理换机。",
+      "最终 tree、canonical diff bytes 或 diff SHA 与冻结身份不一致。",
+      "artifact 扫描发现 canary、Authorization bearer 或 API key 形态。",
+      "任何完整测试不是明确 passed。"
+    ]
+  },
+  "provider_budget": {
+    "provider": "sandboxproxy",
+    "base_url": "http://127.0.0.1:18080/v1",
+    "wire_api": "responses",
+    "model": "sandbox-model",
+    "reasoning": "high",
+    "auth": "chatgpt",
+    "session": "ephemeral",
+    "memory": "off",
+    "automatic_retries": 0,
+    "request_max_retries": 0,
+    "stream_max_retries": 0,
+    "preflight_sessions": 0,
+    "fresh_sessions_per_arm": 3
+  },
+  "topology": {
+    "gate_7a": {
+      "name": "linear + Goal/Handoff",
+      "execution_name": "gate-7a-pre-run-v1",
+      "consumed_name": "gate-7a-consumed-v1",
+      "machine_e": "independent clone + control process",
+      "machine_f": "fresh clone + new control process after CP02 planned migration",
+      "exchange_rule": "only Git refs + sealed handoff bundle"
+    },
+    "gate_7c": {
+      "name": "LangGraph compare",
+      "execution_name": "gate-7c-langgraph-pre-run-v1",
+      "consumed_name": "gate-7c-langgraph-consumed-v1",
+      "allowed_only_after_gate_7a": true,
+      "no_scope_expansion": true,
+      "orchestration": "CP01/CP02/CP03 are persisted LangGraph nodes",
+      "interrupt_after": "CP02",
+      "resume_rule": "Machine F opens the same SQLite checkpoint and executes only CP03"
+    },
+    "control_checkout": {
+      "mode": "strict clean clone from pushed baseline tag",
+      "allowed_worktree_dirt": [],
+      "user_uv_lock_in_parent_checkout_is_outside_baseline": true
+    },
+    "worker_isolation": {
+      "gold_diff": "metadata + SHA only",
+      "correctness_source": [
+        "project tests",
+        "behavior verification"
+      ]
+    }
+  },
+  "gates": {
+    "gate_7a_success_conditions": [
+      "三个 checkpoint 都已预注册。",
+      "exact 10 文件白名单未漂移。",
+      "machine / event / hash / identity 字段完整。",
+      "自动重试为 0。",
+      "shared authority claim 唯一。",
+      "canary leak = 0。",
+      "commit / tree / ref / handoff / plan / case hash 全复核通过。",
+      "最终 tree 与 canonical diff bytes / SHA 等于冻结身份。",
+      "失败均进入 terminal state。"
+    ],
+    "gate_7c_trigger_conditions": [
+      "Gate 7A 成功。",
+      "事实锚点未漂移。",
+      "scope 未扩大。",
+      "可以在相同事实边界下做 LangGraph 对照。"
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,9 +15,19 @@ from .goal_evidence import (
     validate_loop_artifact_integrity,
     validate_loop_evidence_freshness,
 )
+from .loop_engine import (
+    preflight_persisted_linear_engine,
+    require_persisted_linear_engine,
+)
 from .memory import MemoryProposalStore
 from .models import LoopAutomationState, ReviewVerdict
-from .redaction import redact_text, redact_value, write_redacted_json, write_redacted_text
+from .redaction import (
+    redact_text,
+    redact_value,
+    write_redacted_json,
+    write_redacted_json_atomic,
+    write_redacted_text_atomic,
+)
 from .run_utils import resolve_run_dir
 
 
@@ -24,13 +35,15 @@ class FinishRuntime:
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace
 
-    def run(self, run: str) -> Path:
+    def run(self, run: str, engine: str | None = None) -> Path:
         run_dir = resolve_run_dir(self.workspace, run)
+        preflight_persisted_linear_engine(run_dir / "state.json", engine)
         try:
             state = _load_finish_state(run_dir)
         except ValueError as exc:
             _write_finish_diagnostic(run_dir, str(exc))
             raise
+        require_persisted_linear_engine(state.engine, engine)
         artifact_integrity = validate_loop_artifact_integrity(
             self.workspace,
             Path(state.repo_path),
@@ -48,8 +61,13 @@ class FinishRuntime:
             freshness,
             artifact_integrity,
         )
-        write_redacted_json(run_dir / "finish-summary.json", summary)
-        write_redacted_text(run_dir / "finish-report.md", render_finish_report(summary))
+        report = render_finish_report(summary)
+        summary["finish_report_ref"] = "finish-report.md"
+        summary["finish_report_sha256"] = hashlib.sha256(
+            redact_text(report).encode("utf-8")
+        ).hexdigest()
+        write_redacted_text_atomic(run_dir / "finish-report.md", report)
+        write_redacted_json_atomic(run_dir / "finish-summary.json", summary)
         return run_dir
 
 

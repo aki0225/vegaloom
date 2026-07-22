@@ -9,6 +9,7 @@ import pytest
 
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
+from vega.goal_evidence import validate_review_evidence_freshness
 from vega.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput
@@ -89,6 +90,33 @@ def test_finish_rejects_workspace_changes_after_approved_review(tmp_path: Path) 
     assert summary["loop_status"] == "success"
     assert summary["evidence_freshness"]["fresh"] is False
     assert "workspace_changed_since_review" in summary["evidence_freshness"]["issues"]
+
+
+def test_review_freshness_rejects_tampered_acceptance_evidence(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    loop_run = _create_successful_loop_run(workspace, repo)
+    loop_state = _read_json(loop_run / "state.json")
+    review_run = loop_state["iterations"][0]["review_run"]
+    evidence_path = workspace / "runs" / review_run / "acceptance-evidence.json"
+    evidence = _read_json(evidence_path)
+    evidence["items"][0]["content"] += "\n篡改后的验收条件\n"
+    _write_json(evidence_path, evidence)
+
+    freshness = validate_review_evidence_freshness(
+        workspace,
+        repo,
+        review_run,
+    )
+
+    assert freshness.fresh is False
+    assert (
+        "review_acceptance_evidence_content_invalid"
+        in freshness.issues
+    )
 
 
 def test_goal_complete_revalidates_expired_finish_evidence(tmp_path: Path) -> None:

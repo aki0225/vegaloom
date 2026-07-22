@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from pydantic import ValidationError
 
+from .brief_generator import extract_related_paths
 from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk
 from .models import BriefState, GateResult, ReviewFinding, ReviewState, ReviewVerdict
@@ -22,7 +24,7 @@ from .prompt_metrics import (
     write_context_budget_report,
     write_prompt_metrics,
 )
-from .redaction import redact_text, redact_value
+from .redaction import is_sensitive_path, redact_text, redact_value
 from .run_utils import create_run_dir, resolve_run_dir
 from .runner import Runner, RunnerResult, make_runner
 from .trace import TraceWriter
@@ -36,6 +38,8 @@ REVIEW_PACK_ARTIFACTS = [
     "review-checklist.md",
     "review-context.json",
     "project-context.md",
+    "acceptance-evidence.md",
+    "acceptance-evidence.json",
     "review-prompt-metrics.json",
     "review-prompt-metrics.md",
     "eval.md",
@@ -47,6 +51,33 @@ REVIEW_ARTIFACTS = [
     "review-verdict.json",
 ]
 MAX_TEXT_CHARS = 20000
+MAX_ACCEPTANCE_EVIDENCE_ITEMS = 8
+MAX_ACCEPTANCE_EVIDENCE_ITEM_CHARS = 8000
+ACCEPTANCE_TEXT_SUFFIXES = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".go",
+    ".h",
+    ".hpp",
+    ".java",
+    ".js",
+    ".jsx",
+    ".kt",
+    ".md",
+    ".mdx",
+    ".php",
+    ".py",
+    ".rb",
+    ".rst",
+    ".rs",
+    ".scala",
+    ".swift",
+    ".ts",
+    ".tsx",
+    ".txt",
+}
 
 
 def _evaluate_review_risk_gate(
@@ -78,6 +109,68 @@ def _review_risk_gate_result(inputs: dict[str, Any]) -> GateResult | None:
         return GateResult.model_validate(gate.get("result"))
     except ValidationError:
         return None
+
+
+def _evaluate_review_human_approval(
+    repo_path: Path,
+    risk_gate_result: GateResult | None,
+    *,
+    parent_run_dir: Path | None,
+    iteration: int | None,
+    consumption_ref: str | None,
+) -> dict[str, Any]:
+    if (
+        risk_gate_result is None
+        or risk_gate_result.recommendation != "human-review"
+    ):
+        return {"status": "not_required"}
+    if (
+        parent_run_dir is None
+        or iteration is None
+        or consumption_ref is None
+    ):
+        return {"status": "missing"}
+    expected_prefix = "graph/decision-consumptions/pending-"
+    if (
+        not consumption_ref.startswith(expected_prefix)
+        or not consumption_ref.endswith(".json")
+        or "\\" in consumption_ref
+        or ".." in Path(consumption_ref).parts
+    ):
+        return {
+            "status": "invalid",
+            "diagnostic": "consumption_ref 不合法",
+        }
+    consumption_path = parent_run_dir.joinpath(
+        *consumption_ref.split("/")
+    )
+    try:
+        from .loop_graph_decision import validate_consumed_approval
+
+        if not consumption_path.is_file():
+            raise ValueError("consumption artifact 不存在")
+        validate_consumed_approval(
+            parent_run_dir,
+            iteration=iteration,
+            repo_path=repo_path,
+            consumption_ref=consumption_ref,
+        )
+    except Exception as exc:  # noqa: BLE001 - approval 不可信时必须 fail-closed
+        return {
+            "status": "invalid",
+            "parent_run_id": parent_run_dir.name,
+            "iteration": iteration,
+            "consumption_ref": consumption_ref,
+            "diagnostic": redact_text(
+                f"{type(exc).__name__}: {exc}"
+            )[:1000],
+        }
+    return {
+        "status": "valid",
+        "parent_run_id": parent_run_dir.name,
+        "iteration": iteration,
+        "consumption_ref": consumption_ref,
+    }
 
 
 class ReviewPackRuntime:
@@ -151,6 +244,9 @@ class ReviewRuntime:
         runner_name: str = "codex-exec",
         execution_context: RunnerExecutionContext | None = None,
         project_config: ProjectConfig | None = None,
+        human_approval_run_dir: Path | None = None,
+        human_approval_iteration: int | None = None,
+        human_approval_ref: str | None = None,
     ) -> Path:
         execution_config = project_config or load_project_config(repo_path)
         if self.runner is None and runner_name == "codex-exec" and execution_config.runner.reviewer:
@@ -172,11 +268,26 @@ class ReviewRuntime:
             self.workspace,
             repo_path,
             source_run,
+            # standalone review 的 runner 配置可以来自当前工作树，但 reviewer
+            # 上下文不能因此注入未跟踪或 worker 改写后的 `.vega.yaml`。只有
+            # loop 显式传入启动时冻结的 project_config 时才复用该快照。
+            config=project_config,
         )
         inputs["risk_gate"] = _evaluate_review_risk_gate(
             self.workspace,
             repo_path,
             source_run,
+        )
+        risk_gate_result = _review_risk_gate_result(inputs)
+        inputs["human_approval"] = _evaluate_review_human_approval(
+            repo_path,
+            risk_gate_result,
+            parent_run_dir=human_approval_run_dir,
+            iteration=human_approval_iteration,
+            consumption_ref=human_approval_ref,
+        )
+        human_approval_valid = (
+            inputs["human_approval"].get("status") == "valid"
         )
         pre_review_evidence_issues = list(inputs["evidence_issues"])
         state.changed_files = inputs["changed_files"]
@@ -189,7 +300,6 @@ class ReviewRuntime:
             diagnostics=inputs["evidence_diagnostics"],
         )
         trace.write("review_prompt_measured", metrics=metrics.model_dump())
-        risk_gate_result = _review_risk_gate_result(inputs)
         risk_gate_status = str(inputs["risk_gate"].get("status") or "failed")
         trace.write(
             "review_risk_gate_evaluated",
@@ -199,6 +309,7 @@ class ReviewRuntime:
             recommendation=(
                 risk_gate_result.recommendation if risk_gate_result else None
             ),
+            human_approval_valid=human_approval_valid,
         )
 
         state.current_step = "run_reviewer"
@@ -306,7 +417,10 @@ class ReviewRuntime:
             eval_results.append("FAIL: reviewer prompt 超过上下文预算，未启动外部 runner")
         elif risk_gate_result is None:
             eval_results.append("FAIL: review 风险门禁评估失败，未启动外部 runner")
-        elif risk_gate_result.recommendation == "human-review":
+        elif (
+            risk_gate_result.recommendation == "human-review"
+            and not human_approval_valid
+        ):
             eval_results.append("FAIL: review 风险门禁要求人工审查，不能作为自动通过结论")
         elif result.status == "skipped":
             eval_results.append("PASS: runner=none 已跳过外部审查")
@@ -334,7 +448,10 @@ class ReviewRuntime:
         elif risk_gate_result is None:
             state.status = "needs_human"
             state.current_step = "risk_gate_failed"
-        elif risk_gate_result.recommendation == "human-review":
+        elif (
+            risk_gate_result.recommendation == "human-review"
+            and not human_approval_valid
+        ):
             state.status = "needs_human"
             state.current_step = "risk_gate_needs_human"
         elif result.status in {"error", "timed_out", "stopped"}:
@@ -470,6 +587,32 @@ def collect_review_inputs(
         knowledge,
         render_project_config_summary(config),
     )
+    acceptance_evidence = _collect_acceptance_evidence(
+        repo,
+        current_snapshot.head_sha,
+        source_brief,
+        changed_files,
+        max_chars=config.prompt_budget.reviewer_acceptance_max_chars,
+    )
+    acceptance_evidence_text = render_acceptance_evidence(
+        acceptance_evidence
+    )
+    evidence_issues = list(
+        dict.fromkeys(
+            [
+                *evidence_issues,
+                *acceptance_evidence["issues"],
+            ]
+        )
+    )
+    evidence_diagnostics = list(
+        dict.fromkeys(
+            [
+                *evidence_diagnostics,
+                *acceptance_evidence["diagnostics"],
+            ]
+        )
+    )
     source_brief, source_brief_truncated = _truncate_with_status(source_brief)
     reflection, reflection_truncated = _truncate_with_status(reflection)
     diff_summary, diff_summary_truncated = _truncate_with_status(diff_summary)
@@ -488,6 +631,10 @@ def collect_review_inputs(
             ("test_summary", test_summary_truncated),
             ("project_context", project_context_truncated),
             ("full_diff", full_diff_truncated),
+            (
+                "acceptance_evidence",
+                bool(acceptance_evidence["truncated"]),
+            ),
         ]
         if truncated
     ]
@@ -503,6 +650,8 @@ def collect_review_inputs(
         "changed_files": changed_files,
         "full_diff": full_diff,
         "project_context": project_context,
+        "acceptance_evidence": acceptance_evidence,
+        "acceptance_evidence_text": acceptance_evidence_text,
         "truncated_sections": truncated_sections,
         "evidence_issues": evidence_issues,
         "evidence_diagnostics": evidence_diagnostics,
@@ -521,12 +670,414 @@ def collect_review_inputs(
         "workspace_changed_during_review": False,
         "review_execution_issues": [],
         "reviewer_prompt_max_chars": config.prompt_budget.reviewer_max_chars,
+        "reviewer_acceptance_max_chars": (
+            config.prompt_budget.reviewer_acceptance_max_chars
+        ),
         "memory_hit_count": len(knowledge.memory_hits),
         "agents_files": [
             redact_text(item.path)
             for item in knowledge.agents_instructions
         ],
     }
+
+
+def _collect_acceptance_evidence(
+    repo_path: Path,
+    tracked_revision: str,
+    source_brief: str,
+    changed_files: list[str],
+    *,
+    max_chars: int,
+) -> dict[str, Any]:
+    """从冻结的 HEAD 读取有界需求/测试证据，避免 worker 改写审查标准。
+
+    Review 的 full diff 负责说明“改了什么”；这里补的是“原本要求什么、基线测试
+    怎么定义”。只选择根 README、brief 显式引用的需求/测试文件，以及与变更文件同名
+    的测试或文档，不递归注入整个仓库。
+    """
+
+    try:
+        tracked_paths = _tracked_repo_paths(repo_path, tracked_revision)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        diagnostic = redact_text(
+            f"acceptance_evidence_tracked_tree_unreadable: "
+            f"{type(exc).__name__}: {exc}"
+        )[:1000]
+        return {
+            "schema_version": 1,
+            "tracked_revision": tracked_revision,
+            "max_chars": max_chars,
+            "used_chars": 0,
+            "truncated": False,
+            "items": [],
+            "omitted_paths": [],
+            "issues": ["acceptance_evidence_tracked_tree_unreadable"],
+            "diagnostics": [diagnostic],
+        }
+
+    tracked_set = set(tracked_paths)
+    candidates: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add_candidate(path: str, reason: str) -> None:
+        normalized = _normalize_acceptance_path(path)
+        if (
+            normalized is None
+            or normalized not in tracked_set
+            or normalized in seen
+            or not _is_acceptance_candidate(normalized)
+        ):
+            return
+        seen.add(normalized)
+        candidates.append((normalized, reason))
+
+    for path in extract_related_paths(source_brief):
+        add_candidate(path, "Agent Brief 显式引用")
+
+    for path in tracked_paths:
+        if _is_root_readme(path):
+            add_candidate(path, "仓库根 README 需求基线")
+
+    related_stems = _changed_file_stems(changed_files)
+    for path in tracked_paths:
+        if (
+            related_stems
+            and _is_requirement_path(path)
+            and _path_matches_stems(path, related_stems)
+        ):
+            add_candidate(path, "与变更文件同名的需求文档")
+
+    for path in tracked_paths:
+        if (
+            related_stems
+            and _is_test_path(path)
+            and _path_matches_stems(path, related_stems)
+        ):
+            add_candidate(path, "与变更文件同名的基线测试")
+
+    items: list[dict[str, Any]] = []
+    issues: list[str] = []
+    diagnostics: list[str] = []
+    omitted_paths: list[str] = []
+    remaining = max_chars
+    for path, selection_reason in candidates:
+        if len(items) >= MAX_ACCEPTANCE_EVIDENCE_ITEMS or remaining <= 0:
+            omitted_paths.append(path)
+            continue
+        try:
+            raw_content = _read_tracked_text(
+                repo_path,
+                tracked_revision,
+                path,
+            )
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            issue = f"acceptance_evidence_source_unreadable:{path}"
+            issues.append(issue)
+            diagnostics.append(
+                redact_text(
+                    f"{issue}: {type(exc).__name__}: {exc}"
+                )[:1000]
+            )
+            continue
+        content = redact_text(raw_content)
+        if not content.strip():
+            continue
+        included_limit = min(
+            MAX_ACCEPTANCE_EVIDENCE_ITEM_CHARS,
+            remaining,
+        )
+        included_content = content[:included_limit]
+        truncated = len(included_content) < len(content)
+        item = {
+            "kind": (
+                "tracked_test"
+                if _is_test_path(path)
+                else "tracked_requirement"
+            ),
+            "path": path,
+            "revision": tracked_revision,
+            "selection_reason": selection_reason,
+            "source_chars": len(content),
+            "included_chars": len(included_content),
+            "source_sha256": _sha256_text(content),
+            "included_sha256": _sha256_text(included_content),
+            "truncated": truncated,
+            "content": included_content,
+        }
+        items.append(item)
+        remaining -= len(included_content)
+
+    return {
+        "schema_version": 1,
+        "tracked_revision": tracked_revision,
+        "max_chars": max_chars,
+        "used_chars": sum(
+            int(item["included_chars"])
+            for item in items
+        ),
+        "truncated": bool(
+            omitted_paths
+            or any(bool(item["truncated"]) for item in items)
+        ),
+        "items": items,
+        "omitted_paths": omitted_paths,
+        "issues": list(dict.fromkeys(issues)),
+        "diagnostics": list(dict.fromkeys(diagnostics)),
+    }
+
+
+def render_acceptance_evidence(evidence: dict[str, Any]) -> str:
+    lines = [
+        "# 验收证据包",
+        "",
+        "- 来源只允许使用冻结 Git revision 中的 tracked 文件。",
+        f"- Git revision：`{evidence['tracked_revision']}`",
+        f"- 内容预算：`{evidence['used_chars']}` / `{evidence['max_chars']}` 字符。",
+        "- 选择规则：Agent Brief 显式引用、根 README、与变更文件同名的需求文档和基线测试。",
+    ]
+    if evidence["truncated"]:
+        lines.append(
+            "- 证据包已截断或省略候选；本轮 reviewer 不得据此自动 approve。"
+        )
+    if evidence["issues"]:
+        lines.append(
+            "- 证据收集异常："
+            + "、".join(f"`{item}`" for item in evidence["issues"])
+            + "。"
+        )
+    items = evidence["items"]
+    if not items:
+        lines.extend(
+            [
+                "",
+                "- 未匹配到额外 tracked 需求或测试文件；仍以 Agent Brief、项目规则、diff 和验证证据为准。",
+            ]
+        )
+    for item in items:
+        lines.extend(
+            [
+                "",
+                f"## `{item['path']}`",
+                "",
+                f"- 类型：`{item['kind']}`",
+                f"- 选择原因：{item['selection_reason']}",
+                f"- revision：`{item['revision']}`",
+                f"- 完整脱敏内容 SHA-256：`{item['source_sha256']}`",
+                f"- 注入内容 SHA-256：`{item['included_sha256']}`",
+                f"- 字符数：`{item['included_chars']}` / `{item['source_chars']}`",
+                f"- 是否截断：`{item['truncated']}`",
+                "",
+                "```text",
+                str(item["content"]).rstrip(),
+                "```",
+            ]
+        )
+    if evidence["omitted_paths"]:
+        lines.extend(
+            [
+                "",
+                "## 因预算省略的候选",
+                "",
+                *(
+                    f"- `{path}`"
+                    for path in evidence["omitted_paths"]
+                ),
+            ]
+        )
+    return redact_text("\n".join(lines).rstrip() + "\n")
+
+
+def _acceptance_evidence_manifest(
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        **{
+            key: value
+            for key, value in evidence.items()
+            if key != "items"
+        },
+        "items": [
+            {
+                key: value
+                for key, value in item.items()
+                if key != "content"
+            }
+            for item in evidence["items"]
+        ],
+    }
+
+
+def _tracked_repo_paths(repo_path: Path, revision: str) -> list[str]:
+    result = subprocess.run(
+        [
+            "git",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "-z",
+            revision,
+            "--",
+        ],
+        cwd=repo_path,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env=_git_read_env(repo_path),
+    )
+    if result.returncode != 0:
+        diagnostic = (result.stderr or b"").decode(
+            "utf-8",
+            errors="replace",
+        ).strip()
+        raise RuntimeError(
+            "无法读取 reviewer acceptance evidence 的 tracked tree。"
+            + (
+                f" Git 诊断：{redact_text(diagnostic)}"
+                if diagnostic
+                else ""
+            )
+        )
+    paths: list[str] = []
+    for raw_path in result.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        normalized = _normalize_acceptance_path(
+            raw_path.decode("utf-8", errors="replace")
+        )
+        if normalized is not None:
+            paths.append(normalized)
+    return sorted(dict.fromkeys(paths), key=str.casefold)
+
+
+def _read_tracked_text(
+    repo_path: Path,
+    revision: str,
+    relative_path: str,
+) -> str:
+    normalized = _normalize_acceptance_path(relative_path)
+    if normalized is None:
+        raise ValueError("验收证据路径不合法")
+    result = subprocess.run(
+        ["git", "show", f"{revision}:{normalized}"],
+        cwd=repo_path,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env=_git_read_env(repo_path),
+    )
+    if result.returncode != 0:
+        diagnostic = (result.stderr or b"").decode(
+            "utf-8",
+            errors="replace",
+        ).strip()
+        raise RuntimeError(
+            f"无法读取 tracked 验收证据 `{normalized}`。"
+            + (
+                f" Git 诊断：{redact_text(diagnostic)}"
+                if diagnostic
+                else ""
+            )
+        )
+    return result.stdout.decode("utf-8", errors="replace")
+
+
+def _git_read_env(repo_path: Path) -> dict[str, str]:
+    return {
+        **os.environ,
+        "GIT_CEILING_DIRECTORIES": str(repo_path.resolve().parent),
+    }
+
+
+def _normalize_acceptance_path(path: str) -> str | None:
+    normalized = path.strip().strip("`").replace("\\", "/")
+    if (
+        not normalized
+        or any(character in normalized for character in ("\0", "\r", "\n", ":"))
+    ):
+        return None
+    candidate = PurePosixPath(normalized)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        return None
+    canonical = candidate.as_posix()
+    if is_sensitive_path(canonical):
+        return None
+    return canonical
+
+
+def _is_acceptance_candidate(path: str) -> bool:
+    suffix = PurePosixPath(path).suffix.lower()
+    return (
+        suffix in ACCEPTANCE_TEXT_SUFFIXES
+        and (
+            _is_root_readme(path)
+            or _is_requirement_path(path)
+            or _is_test_path(path)
+        )
+    )
+
+
+def _is_root_readme(path: str) -> bool:
+    candidate = PurePosixPath(path)
+    return (
+        len(candidate.parts) == 1
+        and candidate.name.casefold().startswith("readme")
+    )
+
+
+def _is_requirement_path(path: str) -> bool:
+    candidate = PurePosixPath(path)
+    parts = {part.casefold() for part in candidate.parts[:-1]}
+    suffix = candidate.suffix.casefold()
+    return _is_root_readme(path) or (
+        suffix in {".md", ".mdx", ".rst", ".txt"}
+        and bool(parts & {"doc", "docs", "spec", "specs"})
+    )
+
+
+def _is_test_path(path: str) -> bool:
+    candidate = PurePosixPath(path)
+    parts = {part.casefold() for part in candidate.parts[:-1]}
+    name = candidate.name.casefold()
+    stem = candidate.stem.casefold()
+    return bool(
+        parts & {"test", "tests", "spec", "specs", "__tests__"}
+    ) or (
+        name.startswith("test_")
+        or stem.endswith("_test")
+        or ".test." in name
+        or ".spec." in name
+    )
+
+
+def _changed_file_stems(changed_files: list[str]) -> set[str]:
+    ignored = {
+        "__init__",
+        "app",
+        "index",
+        "main",
+        "mod",
+        "package",
+    }
+    stems: set[str] = set()
+    for path in changed_files:
+        normalized = _normalize_acceptance_path(path)
+        if normalized is None:
+            continue
+        stem = PurePosixPath(normalized).stem.casefold()
+        for prefix in ("test_", "spec_"):
+            if stem.startswith(prefix):
+                stem = stem.removeprefix(prefix)
+        for suffix in ("_test", "_spec"):
+            if stem.endswith(suffix):
+                stem = stem.removesuffix(suffix)
+        if len(stem) >= 3 and stem not in ignored:
+            stems.add(stem)
+    return stems
+
+
+def _path_matches_stems(path: str, stems: set[str]) -> bool:
+    normalized = PurePosixPath(path).as_posix().casefold()
+    return any(stem in normalized for stem in stems)
 
 
 def render_review_checklist() -> str:
@@ -546,6 +1097,7 @@ def render_review_checklist() -> str:
 
 def render_review_pack(inputs: dict[str, Any]) -> str:
     risk_gate = inputs.get("risk_gate")
+    human_approval = inputs.get("human_approval")
     risk_gate_note: list[str] = []
     if isinstance(risk_gate, dict) and risk_gate.get("status") == "success":
         try:
@@ -557,9 +1109,18 @@ def render_review_pack(inputs: dict[str, Any]) -> str:
                 f"- 风险门禁：`{result.risk}` / `{result.recommendation}`。"
             )
             if result.recommendation == "human-review":
-                risk_gate_note.append(
-                    "- 风险门禁要求人工审查；本次 reviewer 只提供辅助发现，不能替代人工确认。"
-                )
+                if (
+                    isinstance(human_approval, dict)
+                    and human_approval.get("status") == "valid"
+                ):
+                    risk_gate_note.append(
+                        "- 风险门禁已绑定并消费有效人工批准；"
+                        "本次隔离 reviewer 结论仍需满足全部证据校验。"
+                    )
+                else:
+                    risk_gate_note.append(
+                        "- 风险门禁要求人工审查；本次 reviewer 只提供辅助发现，不能替代人工确认。"
+                    )
     elif risk_gate is not None:
         risk_gate_note.append("- 风险门禁评估失败；本次审查不能作为自动通过结论。")
     text = "\n".join(
@@ -600,6 +1161,8 @@ def render_review_pack(inputs: dict[str, Any]) -> str:
             "## 原始需求 / Agent Brief",
             "",
             inputs["source_brief"] or "- 未找到上游 agent-brief.md。",
+            "",
+            inputs["acceptance_evidence_text"],
             "",
             "## 执行后复盘",
             "",
@@ -662,6 +1225,9 @@ def render_review_context(inputs: dict[str, Any]) -> dict[str, Any]:
         "agents_files": inputs["agents_files"],
         "memory_hit_count": inputs["memory_hit_count"],
         "contains_worker_chat": False,
+        "acceptance_evidence": _acceptance_evidence_manifest(
+            inputs["acceptance_evidence"]
+        ),
         "truncated_sections": inputs["truncated_sections"],
         "evidence_consistent": inputs["evidence_consistent"],
         "evidence_issues": inputs["evidence_issues"],
@@ -680,6 +1246,7 @@ def render_review_context(inputs: dict[str, Any]) -> dict[str, Any]:
         "workspace_changed_during_review": inputs["workspace_changed_during_review"],
         "review_execution_issues": inputs["review_execution_issues"],
         "risk_gate": inputs.get("risk_gate"),
+        "human_approval": inputs.get("human_approval"),
     }
     return redact_value(context)
 
@@ -785,6 +1352,7 @@ def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
             if metrics.exceeded
             else "PASS: review prompt 未超过上下文预算"
         )
+    results.extend(_evaluate_acceptance_evidence(run_dir))
     context = _read_json(run_dir / "review-context.json")
     truncated_sections = context.get("truncated_sections") or []
     if truncated_sections:
@@ -804,6 +1372,32 @@ def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
         )
     else:
         results.append("PASS: review 证据与当前工作区属于同一快照")
+    try:
+        from .parallel_review_runtime import (
+            validate_parallel_review_compatibility_source,
+        )
+
+        parallel_review_issues = (
+            validate_parallel_review_compatibility_source(run_dir)
+        )
+    except Exception as exc:  # noqa: BLE001 - eval 必须 fail-closed
+        results.append(
+            "FAIL: parallel review source evidence 无法校验："
+            f"{type(exc).__name__}"
+        )
+    else:
+        if parallel_review_issues:
+            results.append(
+                "FAIL: parallel review source evidence 不可信"
+            )
+            results.extend(
+                f"FAIL: parallel review source issue：{issue}"
+                for issue in parallel_review_issues
+            )
+        elif parallel_review_issues is not None:
+            results.append(
+                "PASS: parallel review source evidence 可回溯"
+            )
     risk_gate = context.get("risk_gate")
     if risk_gate is not None:
         if not isinstance(risk_gate, dict):
@@ -817,10 +1411,71 @@ def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
                 results.append("FAIL: review 风险门禁结果格式不合法")
             else:
                 if result.recommendation == "human-review":
-                    results.append("FAIL: review 风险门禁要求人工审查")
+                    human_approval = context.get("human_approval")
+                    if (
+                        isinstance(human_approval, dict)
+                        and human_approval.get("status") == "valid"
+                    ):
+                        results.append(
+                            "PASS: review 风险门禁已绑定有效人工批准"
+                        )
+                    else:
+                        results.append("FAIL: review 风险门禁要求人工审查")
                 else:
                     results.append("PASS: review 风险门禁允许隔离审查")
     return results
+
+
+def _evaluate_acceptance_evidence(run_dir: Path) -> list[str]:
+    path = run_dir / "acceptance-evidence.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return ["FAIL: acceptance evidence manifest 无法解析"]
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        return ["FAIL: acceptance evidence manifest schema 不合法"]
+    max_chars = payload.get("max_chars")
+    used_chars = payload.get("used_chars")
+    items = payload.get("items")
+    if (
+        not isinstance(max_chars, int)
+        or not isinstance(used_chars, int)
+        or not isinstance(items, list)
+        or used_chars < 0
+        or used_chars > max_chars
+    ):
+        return ["FAIL: acceptance evidence manifest 预算字段不合法"]
+    calculated_chars = 0
+    failures: list[str] = []
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            failures.append(
+                f"FAIL: acceptance evidence item {index} 不是 object"
+            )
+            continue
+        content = item.get("content")
+        included_chars = item.get("included_chars")
+        included_sha256 = item.get("included_sha256")
+        if (
+            not isinstance(content, str)
+            or not isinstance(included_chars, int)
+            or included_chars != len(content)
+            or included_sha256 != _sha256_text(content)
+        ):
+            failures.append(
+                f"FAIL: acceptance evidence item {index} 内容绑定不合法"
+            )
+            continue
+        calculated_chars += included_chars
+    if calculated_chars != used_chars:
+        failures.append(
+            "FAIL: acceptance evidence used_chars 与 item 内容不一致"
+        )
+    if failures:
+        return failures
+    return [
+        "PASS: acceptance evidence 来源、哈希、截断和字符预算可校验"
+    ]
 
 
 def render_eval(results: list[str]) -> str:
@@ -830,6 +1485,19 @@ def render_eval(results: list[str]) -> str:
 def _write_review_pack_artifacts(run_dir: Path, inputs: dict[str, Any]) -> PromptMetrics:
     run_dir.joinpath("review-checklist.md").write_text(
         redact_text(render_review_checklist()),
+        encoding="utf-8",
+    )
+    run_dir.joinpath("acceptance-evidence.md").write_text(
+        redact_text(inputs["acceptance_evidence_text"]),
+        encoding="utf-8",
+    )
+    run_dir.joinpath("acceptance-evidence.json").write_text(
+        json.dumps(
+            redact_value(inputs["acceptance_evidence"]),
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     review_pack = render_review_pack(inputs)
@@ -854,6 +1522,7 @@ def _write_review_pack_artifacts(run_dir: Path, inputs: dict[str, Any]) -> Promp
             "diff_summary": inputs["diff_summary"],
             "test_summary": inputs["test_summary"],
             "project_context": inputs["project_context"],
+            "acceptance_evidence": inputs["acceptance_evidence_text"],
             "full_diff": inputs["full_diff"],
         },
     )

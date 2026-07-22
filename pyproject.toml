@@ -19,6 +19,10 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.5",
 ]
+langgraph = [
+  "langgraph>=1.2,<1.3",
+  "langgraph-checkpoint-sqlite>=3.1,<3.2",
+]
 
 [project.scripts]
 vega = "vega.cli:app"
@@ -35,3 +39,6 @@ cache-dir = ".tmp/ruff/cache"
 testpaths = ["tests"]
 pythonpath = ["src"]
 cache_dir = ".tmp/pytest/cache"
+markers = [
+  "requires_langgraph: 需要安装项目 langgraph 可选依赖的 LangGraph 实验测试。",
+]

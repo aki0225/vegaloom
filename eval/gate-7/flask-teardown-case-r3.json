@@ -1,0 +1,40 @@
+{
+  "schema_version": 2,
+  "base_case": "flask-teardown-case.json",
+  "case_identity": {
+    "case_id": "gate7-flask-teardown-goal-handoff-r3-v1",
+    "real_session": "gate7a-flask-5928-real-r3-v1",
+    "langgraph_session": "gate7c-flask-5928-real-r3-v1",
+    "date": "2026-07-19"
+  },
+  "provider_budget": {
+    "multi_agent": "disabled",
+    "preflight_sessions": 0
+  },
+  "topology": {
+    "gate_7a": {
+      "execution_name": "gate-7a-pre-run-r3-v1",
+      "consumed_name": "gate-7a-consumed-r3-v1"
+    },
+    "gate_7c": {
+      "execution_name": "gate-7c-langgraph-pre-run-r3-v1",
+      "consumed_name": "gate-7c-langgraph-consumed-r3-v1"
+    },
+    "worker_isolation": {
+      "multi_agent": "disabled-by-cli",
+      "worker_cli": [
+        "--disable",
+        "multi_agent"
+      ],
+      "git_config": "project-local-safe-directory"
+    }
+  },
+  "r2_contract": {
+    "v1_case_immutable": true,
+    "case_hash_mode": "canonical-json",
+    "graph_schema_version": "gate7-r3-v1",
+    "worker_multi_agent": "disabled-by-cli",
+    "provider_calls_before_consumed_claim": 0,
+    "repair_revision": "r3-project-local-git-safe-directory"
+  }
+}

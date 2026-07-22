@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
+from urllib.parse import urlsplit, urlunsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from .redaction import redact_text
 
 
 CONFIG_FILENAMES = [".vega.yaml", ".vega.yml"]
 CODEX_PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+CODEX_PROVIDER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_LOOPBACK_PROVIDER_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 def project_policy_snapshot(repo_path: Path) -> dict[str, str | None]:
@@ -63,18 +67,123 @@ class PromptBudgetConfig(BaseModel):
     worker_max_chars: int = Field(default=40_000, ge=1_000, le=1_000_000)
     reviewer_max_chars: int = Field(default=60_000, ge=1_000, le=1_000_000)
     reviewer_diff_max_chars: int = Field(default=30_000, ge=1_000, le=500_000)
+    reviewer_acceptance_max_chars: int = Field(
+        default=20_000,
+        ge=1_000,
+        le=500_000,
+    )
+
+
+class CodexProviderDescriptor(BaseModel):
+    """显式绑定给 Codex 的非秘密 loopback provider 配置。
+
+    该配置会进入模型命令和项目策略快照，因此只允许本机 loopback endpoint，避免目标仓库
+    通过 `.vega.yaml` 把源码发送到任意外部地址。认证值仍由 Codex 自己管理，Vega 不读取、
+    复制或持久化 API key。
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    base_url: str
+    wire_api: Literal["responses"] = "responses"
+    requires_openai_auth: bool = True
+    supports_websockets: bool = False
+    request_max_retries: int | None = Field(default=None, ge=0, le=100)
+    stream_max_retries: int | None = Field(default=None, ge=0, le=100)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = _normalize_codex_cli_value(value, "provider.name")
+        assert normalized is not None
+        if not CODEX_PROVIDER_NAME_PATTERN.fullmatch(normalized):
+            raise ValueError(
+                "provider.name 只能包含字母、数字、下划线和连字符"
+            )
+        return normalized
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("provider.base_url 不能为空")
+        if len(normalized) > 500:
+            raise ValueError("provider.base_url 长度不能超过 500")
+        if any(
+            character.isspace() or character in {"\\", "\0"}
+            for character in normalized
+        ):
+            raise ValueError(
+                "provider.base_url 禁止包含空白、反斜杠或 NUL"
+            )
+        try:
+            parsed = urlsplit(normalized)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("provider.base_url 不是合法 URL") from exc
+        if parsed.scheme != "http":
+            raise ValueError("provider.base_url 当前只允许 http loopback endpoint")
+        if parsed.hostname not in _LOOPBACK_PROVIDER_HOSTS:
+            raise ValueError("provider.base_url 只能指向 loopback host")
+        if port is None:
+            raise ValueError("provider.base_url 必须显式提供端口")
+        if port == 0:
+            raise ValueError("provider.base_url 端口必须大于 0")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("provider.base_url 禁止包含 userinfo")
+        if parsed.query or parsed.fragment:
+            raise ValueError("provider.base_url 禁止包含 query 或 fragment")
+        hostname = parsed.hostname
+        assert hostname is not None
+        normalized_host = (
+            f"[{hostname}]"
+            if ":" in hostname
+            else hostname
+        )
+        path = parsed.path.rstrip("/")
+        return urlunsplit(
+            (
+                parsed.scheme,
+                f"{normalized_host}:{port}",
+                path,
+                "",
+                "",
+            )
+        )
+
+
+def codex_provider_descriptor_sha256(
+    descriptor: CodexProviderDescriptor,
+) -> str:
+    """返回不含凭证的 provider descriptor 稳定指纹。"""
+
+    payload = json.dumps(
+        descriptor.model_dump(mode="json", exclude_none=True),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 class CodexExecOptions(BaseModel):
     """允许项目按角色覆盖的 Codex exec 参数。
 
-    这里只开放模型、推理强度、profile 和临时会话，不接受任意 CLI 参数。这样既能让
-    worker/reviewer 使用不同成本策略，也不会把 sandbox bypass 等危险开关暴露给 YAML。
+    这里只开放模型、推理强度、profile、忽略用户配置、受限 loopback provider、固定
+    Windows sandbox session override、禁用多代理和临时会话，不接受任意 CLI 参数。
+    这样既能让 worker/reviewer 使用不同成本策略，也不会把 sandbox bypass 或任意出站
+    endpoint 暴露给 YAML。
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     profile: str | None = None
+    ignore_user_config: bool = False
+    provider: CodexProviderDescriptor | None = None
+    windows_sandbox_session_override: Literal["elevated"] | None = None
+    disable_multi_agent: bool = False
     model: str | None = None
     reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
     ephemeral: bool = False
@@ -91,6 +200,24 @@ class CodexExecOptions(BaseModel):
     @classmethod
     def validate_model(cls, value: str | None, info: ValidationInfo) -> str | None:
         return _normalize_codex_cli_value(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_user_config_source(self) -> Self:
+        if self.profile is not None and self.ignore_user_config:
+            raise ValueError("profile 与 ignore_user_config=True 不能同时配置")
+        if self.provider is not None and not self.ignore_user_config:
+            raise ValueError(
+                "显式 provider 仅可与 ignore_user_config=True 配合使用"
+            )
+        if (
+            self.windows_sandbox_session_override is not None
+            and not self.ignore_user_config
+        ):
+            raise ValueError(
+                "windows_sandbox_session_override 仅可与 "
+                "ignore_user_config=True 配合使用"
+            )
+        return self
 
 
 def _normalize_codex_cli_value(value: str | None, field_name: str) -> str | None:
@@ -464,6 +591,8 @@ def render_project_config_summary(config: ProjectConfig) -> str:
             f"- worker 最大字符数：`{config.prompt_budget.worker_max_chars}`",
             f"- reviewer 最大字符数：`{config.prompt_budget.reviewer_max_chars}`",
             f"- reviewer diff 最大字符数：`{config.prompt_budget.reviewer_diff_max_chars}`",
+            "- reviewer 验收证据最大字符数："
+            f"`{config.prompt_budget.reviewer_acceptance_max_chars}`",
             "",
             "## 变更预算",
             "",
@@ -503,8 +632,27 @@ def render_project_config_summary(config: ProjectConfig) -> str:
 
 
 def _render_codex_exec_options(role: str, options: CodexExecOptions) -> list[str]:
+    profile_summary = options.profile or (
+        "未加载用户配置" if options.ignore_user_config else "继承用户配置"
+    )
+    provider = options.provider
     return [
-        f"- `{role}.profile`：`{options.profile or '继承用户配置'}`",
+        f"- `{role}.profile`：`{profile_summary}`",
+        f"- `{role}.ignore_user_config`：`{options.ignore_user_config}`",
+        f"- `{role}.provider`：`{provider.name if provider else '未显式绑定'}`",
+        (
+            f"- `{role}.provider_base_url`："
+            f"`{provider.base_url if provider else '未显式绑定'}`"
+        ),
+        (
+            f"- `{role}.provider_descriptor_sha256`："
+            f"`{codex_provider_descriptor_sha256(provider) if provider else '未显式绑定'}`"
+        ),
+        (
+            f"- `{role}.windows_sandbox_session_override`："
+            f"`{options.windows_sandbox_session_override or '未设置'}`"
+        ),
+        f"- `{role}.disable_multi_agent`：`{options.disable_multi_agent}`",
         f"- `{role}.model`：`{options.model or '继承用户配置'}`",
         f"- `{role}.reasoning_effort`：`{options.reasoning_effort or '继承用户配置'}`",
         f"- `{role}.ephemeral`：`{options.ephemeral}`",

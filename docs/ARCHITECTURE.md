@@ -163,11 +163,15 @@ prompt_budget:
   worker_max_chars: 40000
   reviewer_max_chars: 60000
   reviewer_diff_max_chars: 30000
+  reviewer_acceptance_max_chars: 20000
 runner:
   worker: codex-exec
   reviewer: codex-exec
   codex_exec:
     worker:
+      # 仅在 Windows 且需要忽略其他用户配置时，成对取消下面两行的注释。
+      # ignore_user_config: true
+      # windows_sandbox_session_override: elevated
       reasoning_effort: medium
       ephemeral: true
     reviewer:
@@ -179,11 +183,53 @@ runner:
 
 Codex runner 采用“角色策略 + 固定安全边界”：
 
-- worker/reviewer 可以分别选择 `profile`、`model`、`reasoning_effort` 和 `ephemeral`。
+- worker/reviewer 可以分别选择 `profile`、`model`、`reasoning_effort`、`ephemeral` 和
+  `ignore_user_config`；在完全忽略用户配置时，还可以选择受限的 loopback `provider`。
 - 空的 `profile/model/reasoning_effort` 继承用户 Codex 配置，避免 Vega 复制一套全局模型配置。
+- `ignore_user_config: true` 会生成 Codex CLI 的 `--ignore-user-config`，继续复用 Codex
+  自身认证，但不加载用户 `config.toml`；它与 `profile` 互斥，防止同时声明两套配置来源。
+- `provider` 只允许 `http` loopback endpoint、显式端口、`responses` wire API 和两个布尔
+  能力字段；禁止 userinfo、query、fragment、外部 host、HTTPS 和任意 TOML/CLI 透传。
+  provider 只能与 `ignore_user_config: true` 配合，API key 仍由 Codex 自己管理。
+- Windows 上还允许一个窄字段
+  `windows_sandbox_session_override: elevated`。它只可与
+  `ignore_user_config: true` 配合，固定生成
+  `--config windows.sandbox="elevated"`，并进入 Runner identity。
 - runtime 只把白名单字段编译成 `codex exec` 参数，不接受 YAML 传入任意 args。
 - worker 的 sandbox 固定为 `workspace-write`，reviewer 固定为 `read-only`，不开放 bypass 参数。
-- `execution.json` 记录最终命令；`project-context.md` 记录有效角色策略。
+- `execution.json` 记录脱敏命令、原始命令哈希和包含配置来源的 Runner 身份；
+  `project-context.md` 记录有效角色策略。
+
+这个 Windows 字段不是通用 Codex config 透传口。Codex CLI `0.144.4` 在使用
+`--ignore-user-config` 后不会加载用户 `[windows] sandbox="elevated"`；当 Windows sandbox
+level 为 `Disabled` 时，本次已确认环境中的显式 `--sandbox workspace-write` 会在 live
+header 中被降为 `read-only`。Vega 因此只恢复这一项已确认丢失的 session 前置条件，不允许配置其他
+`windows.sandbox` 值、任意 dotted config、任意 CLI 参数或 sandbox bypass。未启用
+`ignore_user_config` 时不得设置该字段，因为用户配置仍是 Windows session 设置的来源。启用
+override 后，成功进程还必须从 Codex live header 观察到请求的实际 sandbox；缺失或降级时
+Runner 会转为错误并停止后续流程。
+
+受限 provider descriptor 解决的是另一条已确认的配置丢失链路：当当前认证是 API key，
+而可用 endpoint 只存在于用户 `config.toml` 时，`--ignore-user-config` 会保留认证、却丢失
+provider。Vega 因此允许在项目策略中显式声明以下非秘密字段：
+
+```yaml
+runner:
+  codex_exec:
+    worker:
+      ignore_user_config: true
+      provider:
+        name: sandboxproxy
+        base_url: http://127.0.0.1:18080/v1
+        wire_api: responses
+        requires_openai_auth: true
+        supports_websockets: false
+```
+
+descriptor 会以固定顺序编译为 `model_provider` 和 `model_providers.<name>.*` overrides，
+其 SHA-256、规范化 base URL 和能力字段进入 Runner identity。命令启动前会重新严格校验嵌套
+descriptor，防止调用方通过未验证的模型拷贝绕过 loopback 限制。这里仍然没有 API key
+字段，也不会读取或复制 Codex credential store。
 
 这样可以让高频 worker 使用中等推理成本，让 reviewer 保持更高审查强度，同时不把 Vega
 扩张成新的模型配置中心。`ephemeral: true` 只控制 Codex session 是否持久化，不代表 run
@@ -195,6 +241,8 @@ Prompt 预算采用“先度量、再门禁、不静默丢证据”的策略：
 - worker/reviewer 在调用外部 runner 前记录精确字符数、UTF-8 字节数、行数和分段规模。
 - `worker_max_chars` / `reviewer_max_chars` 约束最终实际 prompt，而不是单个来源文件。
 - reviewer 的 full diff 先按 `reviewer_diff_max_chars` 显式截断并留下截断标记。
+- reviewer 的验收证据只从冻结 Git HEAD 读取；`reviewer_acceptance_max_chars` 约束
+  README、显式需求文档和相关基线测试的注入内容。
 - 任一 review evidence section 被截断后，即使模型输出 approve，也会被 runtime 改为 `needs_human`。
 - 最终 prompt 仍超预算时进入 `needs_human`，不启动外部 runner。
 - 不通过静默删除需求、AGENTS.md、验证失败或关键 diff 来“强行塞进上下文”。
@@ -202,8 +250,10 @@ Prompt 预算采用“先度量、再门禁、不静默丢证据”的策略：
   `.vega.yaml` 不能关闭本轮 reviewer 或临时缩小其预算。
 
 review pack 不再分别重复注入 Project Profile 和 Project Knowledge。两者连同 runtime 策略统一由
-`project-context.md` 提供；review pack 只保留需求、复盘、diff 摘要、测试摘要、项目上下文和
-full diff 六类事实材料。
+`project-context.md` 提供；review pack 保留需求、冻结验收证据、复盘、diff 摘要、测试摘要、
+项目上下文和 full diff 七类事实材料。冻结验收证据同时写入
+`acceptance-evidence.md/json`，并在 review child run、loop iteration 与 Finish 新鲜度检查之间
+校验来源 revision、内容哈希、字符预算和副本一致性。
 
 大目标不应该直接让 auto worker 一口气执行。`vega plan --repo <repo> --input <goal.md> --scope refactor` 会先生成 `change-plan.md`、`scope-profile.md` 和 `phase-plan.md`，供人工确认 scope 后再拆 phase 执行。`vega gate --scope <profile>` 会使用对应 budget profile，表示“这是经过声明的大范围变更”，而不是悄悄放宽默认小任务预算。
 
@@ -355,13 +405,13 @@ RunnerExecutionContext
   -> stopped | timed_out | completed | failed
 ```
 
-`execution.json` 记录 run、step、iteration、owner PID、child PID、command、heartbeat、lease、deadline 和终态。stdout/stderr 直接写入 `process-output.txt`，避免外部进程长输出填满 PIPE。`vega stop --run <run> --reason "..."` 只为指定 run 最新的 active execution 写停止请求；runner 只终止自己记录的 PID，不枚举或 kill 用户的其他 Codex/Node 进程。每条 verification 命令也写入独立 execution 目录，并在墙钟 deadline 到达时终止对应 owned process tree，避免后代进程继续写入。
+`execution.json` 记录 run、step、iteration、owner PID、child PID、command、heartbeat、lease、deadline 和终态。stdout/stderr 直接写入 `process-output.txt`，避免外部进程长输出填满 PIPE。`vega stop --run <run> --reason "..."` 会先在指定 run 根目录建立永久 `stop-latch.json`，再向该 run 的全部 active execution 广播各自的 `stop-request.json`；它不是只停止当前或最新 execution。latch 建立后，同一 run 后续新建的 execution 也会在启动外部进程前 fail-closed，即使广播部分失败或 stop 时暂时没有 active execution，停止意图也不会自动撤销。runner 只终止每条 execution 绑定的 owned process tree，不枚举或 kill 用户的其他 run、Codex/Node 进程。每条 verification 命令也写入独立 execution 目录，并在墙钟 deadline 到达时终止对应 owned process tree，避免后代进程继续写入。
 
 worker `stopped/timed_out` 后立即停止 verification/review，并把 loop 交给人工。reviewer `stopped/timed_out` 不会被解析成 approve，同样进入 `needs_human`。verification 的非零退出、stop 或 timeout 会保留 verification artifacts，并阻止后续结果被当作可交付成功。
 
 外部 runner 返回非零退出码时同样采用保守语义：worker 会先记录 workspace check 和 `runner-error-report.md`，然后进入 `needs_human`，因为 provider/网络错误发生前可能已经修改工作区；reviewer runner 错误也进入 `needs_human`，不能被当作有效 verdict。这里不自动重试，避免在未知部分改动上叠加第二个 worker。
 
-如果 CLI 被关闭或状态半完成，可以运行 `vega recover --run <loop_run_id> --reason "..."`。recover 会检查 run 下的全部 execution 记录，而不是只看最新记录；任一 active execution 的 owned/child PID 仍存活时都会拒绝接管，较旧 active execution 不能被较新的 terminal execution 掩盖。只有没有存活执行主体时，缺失、终态或 stale execution 才允许把 `running` 状态交还为 `needs_human` 并写入 `recovery-report.md`。recover 不清理工作区、不杀进程、不继续执行。
+如果 CLI 被关闭或状态半完成，可以运行 `vega recover --run <loop_run_id> --reason "..."`。recover 会检查 run 下的全部 execution 记录，而不是只看最新记录；任一 active execution 的 owned/child PID 仍存活时都会拒绝接管，较旧 active execution 不能被较新的 terminal execution 掩盖。terminal child 仍存活时同样拒绝；terminal worker 的 owner 仍存活时，只有 run 级 Graph operation lock 已释放，且可信 Step Result 已完整绑定文件名、execution 与 attempt identity，才允许继续 HITL resume。缺少提交证据或任一 identity 不一致仍 fail-closed。recover 不清理工作区、不杀进程、不继续执行。
 
 v0.1.0 假设同一个 run 同一时间只有一个 CLI 写入者，不支持并发执行多个 `loop continue`。
 需要并发调度和跨进程 run lock 时，应作为后续真实需求单独设计，不在当前本地单用户范围内扩建。
@@ -472,11 +522,10 @@ Tool Broker 的 Git allowlist 只声明：
 
 ## OpenAI-compatible Provider 边界
 
-Vega 不内置 provider alias。使用 OpenAI-compatible endpoint 前，必须通过环境变量
-`VEGA_PROVIDER_ALIAS` 显式设置一个不包含内部基础设施信息的公开别名。请求会把 API key
-放在认证头中，并发送脱敏后的 task 文本与 tool evidence。使用者必须先确认第三方服务可信，
-并确认数据出站、留存和合规政策允许发送这些内容。本地代理可能继续转发到上游服务，因此
-同样需要核对完整请求路径。文档、测试、trace 和仓库中不得出现真实 key。
+配置 `sandbox-direct` 或任何非本地 OpenAI-compatible endpoint 时，请求会把 API key 放在认证
+头中，并发送脱敏后的 task 文本与 tool evidence。使用者必须先确认第三方服务可信，并确认
+数据出站、留存和合规政策允许发送这些内容。本地代理可能继续转发到上游服务，因此同样需要
+核对完整请求路径。文档、测试、trace 和仓库中不得出现真实 key。
 
 ## Runtime Artifacts
 

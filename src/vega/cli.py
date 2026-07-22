@@ -11,7 +11,7 @@ from .adapter_runtime import init_adapter, render_adapter_init_summary
 from .brief_runtime import BriefRuntime
 from .change_plan_runtime import ChangePlanRuntime
 from .decision import append_run_decision, list_run_decisions
-from .execution_control import request_stop_for_run
+from .execution_control import request_stop_for_active_executions
 from .finish_runtime import FinishRuntime
 from .gate_runtime import GateRuntime
 from .goal_runtime import GoalRuntime
@@ -258,11 +258,12 @@ def config_check(
 @app.command("finish")
 def finish(
     run: str = typer.Option(..., "--run", help="loop run_id 或 runs/<run_id>。"),
+    engine: str | None = typer.Option(None, "--engine", help="校验 run 创建时固定的编排引擎。"),
     json_output: bool = typer.Option(False, "--json", help="输出机器可读 finish-summary.json。"),
 ) -> None:
     """汇总 loop 交付结论、review verdict、测试摘要和提交前 checklist。"""
     try:
-        run_dir = FinishRuntime(workspace=Path.cwd()).run(run)
+        run_dir = FinishRuntime(workspace=Path.cwd()).run(run, engine=engine)
     except FileNotFoundError as exc:
         raise typer.BadParameter(str(exc)) from exc
     except ValueError as exc:
@@ -280,17 +281,61 @@ def finish(
 
 @app.command("recover")
 def recover(
-    run: str = typer.Option(..., "--run", help="处于 running 的 loop run_id 或 runs/<run_id>。"),
+    run: str = typer.Option(..., "--run", help="需要恢复的 loop run_id 或 runs/<run_id>。"),
     reason: str = typer.Option(..., "--reason", help="恢复原因，例如 worker 超时、CLI 中断或半完成。"),
+    engine: str | None = typer.Option(None, "--engine", help="校验 run 创建时固定的编排引擎。"),
 ) -> None:
-    """把卡在 running 的 loop 标记为 needs_human，保留现场并允许人工继续。"""
+    """Linear run 安全停到人工；LangGraph run 按 checkpoint 与外部证据对账恢复。"""
     try:
-        run_dir = RecoveryRuntime(workspace=Path.cwd()).recover_loop(run, reason)
+        run_dir = RecoveryRuntime(workspace=Path.cwd()).recover_loop(run, reason, engine=engine)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    typer.echo(f"recover 完成：{run_dir}")
+    status, _, _ = _read_loop_outcome(run_dir)
+    if status == "needs_human":
+        typer.echo(
+            f"recover 已安全停止，未恢复为成功：{run_dir}"
+        )
+    else:
+        typer.echo(f"recover 完成：{run_dir}")
     typer.echo("")
     typer.echo(render_run_status(Path.cwd(), run_dir.name))
+    _exit_for_loop_result(
+        run_dir,
+        allow_initial_assist_wait=False,
+    )
+
+
+@app.command("resume")
+def resume(
+    run: str = typer.Option(..., "--run", help="等待 HITL decision 的 LangGraph loop run。"),
+    decision_id: str = typer.Option(..., "--decision-id", help="已写入 decisions.jsonl 的 decision id。"),
+    engine: str = typer.Option("langgraph", "--engine", help="必须与 run 固定的编排引擎一致。"),
+) -> None:
+    """消费一次已落盘 decision id，恢复结构化 LangGraph interrupt。"""
+
+    try:
+        run_dir = LoopAutomationRuntime(
+            workspace=Path.cwd()
+        ).resume_langgraph_decision(
+            run,
+            decision_id,
+            engine=engine,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    status, _, _ = _read_loop_outcome(run_dir)
+    if status == "needs_human":
+        typer.echo(
+            f"resume 已安全停止，未恢复为成功：{run_dir}"
+        )
+    else:
+        typer.echo(f"resume 完成：{run_dir}")
+    typer.echo("")
+    typer.echo(render_run_status(Path.cwd(), run_dir.name))
+    _exit_for_loop_result(
+        run_dir,
+        allow_initial_assist_wait=False,
+    )
 
 
 @app.command("stop")
@@ -298,25 +343,39 @@ def stop(
     run: str = typer.Option(..., "--run", help="正在执行 worker/reviewer 的 run_id 或 runs/<run_id>。"),
     reason: str = typer.Option(..., "--reason", help="停止原因。"),
 ) -> None:
-    """请求当前 owned process 在安全边界停止，不扫描或终止无关进程。"""
+    """建立 run 级停止闩锁，并向全部 active execution 广播。"""
+    if not reason.strip():
+        raise typer.BadParameter("stop 必须提供原因，方便后续追溯。")
     try:
         run_dir = resolve_run_dir(Path.cwd(), run)
-        record = request_stop_for_run(run_dir, reason)
-    except (FileNotFoundError, ValueError) as exc:
+    except FileNotFoundError as exc:
         raise typer.BadParameter(str(exc)) from exc
+    try:
+        records = request_stop_for_active_executions(run_dir, reason)
+    except ValueError as exc:
+        typer.echo(f"stop 广播未完整确认：{exc}", err=True)
+        raise typer.Exit(code=1) from exc
     trace_path = run_dir / "trace.jsonl"
     if trace_path.exists():
         TraceWriter(trace_path).write(
-            "execution_stop_requested",
-            step=record.lease.step,
-            iteration=record.lease.iteration,
-            child_pid=record.lease.child_pid,
+            "execution_stop_broadcast_requested",
+            execution_count=len(records),
+            execution_refs=[
+                record.path.relative_to(run_dir).as_posix()
+                for record in records
+            ],
             reason=reason,
         )
-    typer.echo(f"stop request 已写入：{record.path.parent / 'stop-request.json'}")
-    typer.echo(f"- 步骤：{record.lease.step}")
-    typer.echo(f"- owned child PID：{record.lease.child_pid or '尚未启动'}")
-    typer.echo("- Vega runner 将负责安全停止；本命令不会扫描或 kill 其他进程。")
+    typer.echo(f"stop 广播已建立：{run_dir / 'stop-latch.json'}")
+    typer.echo(f"- active execution 数：{len(records)}")
+    for record in records:
+        typer.echo(
+            "- "
+            f"{record.path.relative_to(run_dir).as_posix()}："
+            f"step={record.lease.step}，"
+            f"child_pid={record.lease.child_pid or '尚未启动'}"
+        )
+    typer.echo("- Vega runner 将负责安全停止；本命令不会扫描或 kill 无关进程。")
 
 
 @goal_app.command("start")
@@ -420,6 +479,74 @@ def goal_checkpoint_done(
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"checkpoint 已完成：{run_dir}")
+    typer.echo("")
+    typer.echo(render_run_status(Path.cwd(), run_dir.name))
+
+
+@goal_app.command("handoff")
+def goal_handoff(
+    run: str = typer.Option(..., "--run", help="goal run_id 或 runs/<run_id>。"),
+    checkpoint: str = typer.Option(..., "--checkpoint", help="已完成 checkpoint 编号，例如 01。"),
+    input_path: Path = typer.Option(
+        ...,
+        "--input",
+        help="versioned handoff 输入 JSON 文件。",
+    ),
+) -> None:
+    """为已完成 checkpoint 创建不可覆盖的 versioned handoff。"""
+    if not input_path.is_file():
+        raise typer.BadParameter(f"handoff input 文件不存在：{_safe_path_display(input_path)}")
+    try:
+        run_dir = GoalRuntime(workspace=Path.cwd()).handoff(
+            run,
+            checkpoint=checkpoint,
+            input_path=str(input_path),
+        )
+    except (FileNotFoundError, ValueError, TypeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"goal handoff 创建完成：{run_dir}")
+    typer.echo("")
+    typer.echo(render_run_status(Path.cwd(), run_dir.name))
+
+
+@goal_app.command("handoff-context")
+def goal_handoff_context(
+    run: str = typer.Option(..., "--run", help="goal run_id 或 runs/<run_id>。"),
+    checkpoint: str = typer.Option(..., "--checkpoint", help="已完成 checkpoint 编号，例如 01。"),
+    version: str = typer.Option(..., "--version", help="handoff 版本，例如 v0001。"),
+    consumer_session_id: str = typer.Option(
+        ...,
+        "--consumer-session-id",
+        "--consumer-session",
+        help="全新 consumer session identity，不能与 source session 相同。",
+    ),
+    consumer_worker_epoch: str = typer.Option(
+        ...,
+        "--consumer-worker-epoch",
+        "--worker-epoch",
+        help="consumer worker epoch identity。",
+    ),
+    max_chars: int = typer.Option(
+        12000,
+        "--max-chars",
+        min=1,
+        max=1_000_000,
+        help="compiled context 最大字符数。",
+    ),
+) -> None:
+    """用 fresh workspace/policy/evidence 编译 consumer context。"""
+    try:
+        run_dir = GoalRuntime(workspace=Path.cwd()).handoff_context(
+            run,
+            checkpoint=checkpoint,
+            version=version,
+            consumer_session_id=consumer_session_id,
+            consumer_worker_epoch=consumer_worker_epoch,
+            max_chars=max_chars,
+        )
+    except (FileNotFoundError, ValueError, TypeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"goal handoff context 编译完成：{run_dir}")
     typer.echo("")
     typer.echo(render_run_status(Path.cwd(), run_dir.name))
 
@@ -661,6 +788,7 @@ def loop_bug(
     mode: str = typer.Option("assist", "--mode", help="自动化模式：assist 或 auto。"),
     worker: str = typer.Option("codex-exec", "--worker", help="auto 模式 worker runner。"),
     reviewer: str = typer.Option("codex-exec", "--reviewer", help="隔离 reviewer runner。"),
+    engine: str = typer.Option("linear", "--engine", help="编排引擎：linear 或 langgraph。"),
     max_iterations: int = typer.Option(2, "--max-iterations", min=1, max=5, help="最大自动迭代轮数。"),
     verify: bool = typer.Option(True, "--verify/--no-verify", help="worker 后自动执行项目画像识别出的验证命令。"),
 ) -> None:
@@ -673,6 +801,7 @@ def loop_bug(
         mode,
         worker,
         reviewer,
+        engine,
         max_iterations,
         verify,
         allow_initial_assist_wait=True,
@@ -687,6 +816,7 @@ def loop_feature(
     mode: str = typer.Option("assist", "--mode", help="自动化模式：assist 或 auto。"),
     worker: str = typer.Option("codex-exec", "--worker", help="auto 模式 worker runner。"),
     reviewer: str = typer.Option("codex-exec", "--reviewer", help="隔离 reviewer runner。"),
+    engine: str = typer.Option("linear", "--engine", help="编排引擎：linear 或 langgraph。"),
     max_iterations: int = typer.Option(2, "--max-iterations", min=1, max=5, help="最大自动迭代轮数。"),
     verify: bool = typer.Option(True, "--verify/--no-verify", help="worker 后自动执行项目画像识别出的验证命令。"),
 ) -> None:
@@ -699,6 +829,7 @@ def loop_feature(
         mode,
         worker,
         reviewer,
+        engine,
         max_iterations,
         verify,
         allow_initial_assist_wait=True,
@@ -713,6 +844,7 @@ def do_bug(
     mode: str = typer.Option("auto", "--mode", help="自动化模式：auto 或 assist。"),
     worker: str = typer.Option("codex-exec", "--worker", help="auto 模式 worker runner。"),
     reviewer: str = typer.Option("codex-exec", "--reviewer", help="隔离 reviewer runner。"),
+    engine: str = typer.Option("linear", "--engine", help="编排引擎：linear 或 langgraph。"),
     max_iterations: int = typer.Option(2, "--max-iterations", min=1, max=5, help="最大自动迭代轮数。"),
     verify: bool = typer.Option(True, "--verify/--no-verify", help="worker 后自动执行项目画像识别出的验证命令。"),
 ) -> None:
@@ -725,6 +857,7 @@ def do_bug(
         mode,
         worker,
         reviewer,
+        engine,
         max_iterations,
         verify,
         allow_initial_assist_wait=True,
@@ -739,6 +872,7 @@ def do_feature(
     mode: str = typer.Option("auto", "--mode", help="自动化模式：auto 或 assist。"),
     worker: str = typer.Option("codex-exec", "--worker", help="auto 模式 worker runner。"),
     reviewer: str = typer.Option("codex-exec", "--reviewer", help="隔离 reviewer runner。"),
+    engine: str = typer.Option("linear", "--engine", help="编排引擎：linear 或 langgraph。"),
     max_iterations: int = typer.Option(2, "--max-iterations", min=1, max=5, help="最大自动迭代轮数。"),
     verify: bool = typer.Option(True, "--verify/--no-verify", help="worker 后自动执行项目画像识别出的验证命令。"),
 ) -> None:
@@ -751,6 +885,7 @@ def do_feature(
         mode,
         worker,
         reviewer,
+        engine,
         max_iterations,
         verify,
         allow_initial_assist_wait=True,
@@ -762,6 +897,7 @@ def loop_continue(
     run: str = typer.Option(..., "--run", help="assist loop run_id 或 runs/<run_id>。"),
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
     reviewer: str = typer.Option("codex-exec", "--reviewer", help="隔离 reviewer runner。"),
+    engine: str | None = typer.Option(None, "--engine", help="校验 run 创建时固定的编排引擎。"),
     test_log: Path | None = typer.Option(None, "--test-log", help="测试输出日志文件。"),
     note: str | None = typer.Option(None, "--note", help="本轮复盘备注。"),
     verify: bool = typer.Option(True, "--verify/--no-verify", help="未提供 --test-log 时自动执行验证命令。"),
@@ -778,6 +914,7 @@ def loop_continue(
             run,
             repo.resolve(),
             reviewer_name=reviewer,
+            engine=engine,
             test_log=test_log.resolve() if test_log else None,
             note=note,
             verify=verify,
@@ -816,6 +953,7 @@ def _run_loop(
     automation_mode: str,
     worker: str,
     reviewer: str,
+    engine: str,
     max_iterations: int,
     verify: bool,
     *,
@@ -844,6 +982,7 @@ def _run_loop(
             automation_mode=automation_mode,  # type: ignore[arg-type]
             worker_name=worker,
             reviewer_name=reviewer,
+            engine=engine,
             max_iterations=max_iterations,
             verify=verify,
         )
@@ -943,6 +1082,8 @@ def _exit_for_loop_result(
 ) -> None:
     status, current_step, automation_mode = _read_loop_outcome(run_dir)
     if status == "success":
+        return
+    if status == "running" and current_step == "human_decision":
         return
     if (
         allow_initial_assist_wait

@@ -1,0 +1,73 @@
+version: 1
+
+verification:
+  commands:
+    - python -m ruff check .
+    - python -m pytest -q
+  max_commands: 2
+  timeout_seconds: 180
+
+risk:
+  high_paths:
+    - src/vega/runner.py
+    - src/vega/decision.py
+    - src/vega/memory.py
+  medium_paths:
+    - docs/
+    - .github/
+  require_human_review:
+    - 自动提交
+    - 删除文件
+
+budget:
+  max_changed_files: 8
+  max_diff_lines: 500
+  max_new_files: 4
+  max_file_bytes: 200000
+  forbid_new_dependencies: true
+  forbid_large_generated_files: true
+
+budget_profiles:
+  small:
+    max_changed_files: 5
+    max_diff_lines: 300
+    max_new_files: 2
+    max_file_bytes: 200000
+    forbid_new_dependencies: true
+    forbid_large_generated_files: true
+  refactor:
+    max_changed_files: 25
+    max_diff_lines: 2000
+    max_new_files: 10
+    max_file_bytes: 200000
+    forbid_new_dependencies: true
+    forbid_large_generated_files: true
+  migration:
+    max_changed_files: 50
+    max_diff_lines: 5000
+    max_new_files: 20
+    max_file_bytes: 300000
+    forbid_new_dependencies: false
+    forbid_large_generated_files: true
+
+prompt_budget:
+  worker_max_chars: 40000
+  reviewer_max_chars: 60000
+  reviewer_diff_max_chars: 30000
+  reviewer_acceptance_max_chars: 20000
+
+runner:
+  worker: codex-exec
+  reviewer: codex-exec
+  codex_exec:
+    worker:
+      reasoning_effort: medium
+      ephemeral: true
+    reviewer:
+      reasoning_effort: high
+      ephemeral: true
+
+memory:
+  default_tags:
+    - Vega
+    - vega-runtime

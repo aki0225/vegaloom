@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "gate": "gate-7",
+  "revision": "r3-v1",
+  "status": "failed",
+  "conclusion": "failed",
+  "terminal": true,
+  "started": true,
+  "date": "2026-07-19",
+  "branch": "experiment/langgraph-comparison",
+  "baseline_commit": "private-gate-7-r3-baseline-redacted",
+  "case_path": "eval/gate-7/flask-teardown-case-r3.json",
+  "case_sha256": "e244483bb294b2d99cf934f8619729808763c791b5e0b7b6c4ce83bbbd4c5e81",
+  "plan_sha256": "5c6ae968bfd0378c8eb0643aea16e0e3956c708d9a15c2df805436788abbe2ab",
+  "case_hash_mode": "canonical-json",
+  "baseline_tags": {
+    "gate_7a": "gate-7a-pre-run-r3-v1",
+    "gate_7c": "gate-7c-langgraph-pre-run-r3-v1"
+  },
+  "consumed_tags": {
+    "gate_7a": "gate-7a-consumed-r3-v1",
+    "gate_7c": null
+  },
+  "arm_a": {
+    "status": "failed",
+    "engine": "linear",
+    "session": "gate7a-flask-5928-real-r3-v1",
+    "checkpoint_started": [
+      "CP01"
+    ],
+    "checkpoint_completed": [],
+    "checkpoint_failed": "CP01",
+    "checkpoint_2_started": false,
+    "checkpoint_3_started": false,
+    "provider_sessions_used": 1,
+    "tokens_used": 67804,
+    "automatic_retry_count": 0,
+    "request_max_retries": 0,
+    "stream_max_retries": 0,
+    "multi_agent_disabled": true,
+    "planned_migration_count": 0,
+    "final_identity_verified": false,
+    "artifact_scan_completed": false,
+    "workspace_changes_after_failure": [],
+    "terminal_state": ".local-validation/gate-7/gate7a-flask-5928-real-r3-v1/terminal-state.json"
+  },
+  "arm_c": {
+    "status": "not-triggered",
+    "engine": "langgraph",
+    "session": "gate7c-flask-5928-real-r3-v1",
+    "reason": "Gate 7A R3 did not succeed",
+    "provider_sessions_used": 0,
+    "consumed_tag": null
+  },
+  "repair_verification": {
+    "worker_git_config": "project-local-safe-directory",
+    "dubious_ownership_count": 0,
+    "git_status_exit_code": 0,
+    "fixture_head_after_failure": "7b0088693ece1bd3a9238a6fdf56ed8df7a4d43b",
+    "fixture_tree_after_failure": "b81ba34c3e9ca3dad29dab80ce2d148bf72a7576",
+    "global_git_config_modified": false,
+    "acl_modified": false
+  },
+  "failure": {
+    "checkpoint": "CP01",
+    "worker_exit_code": 1,
+    "provider_error_count": 2,
+    "provider_error": "stream disconnected before completion: Transport error: network error: error decoding response body",
+    "bad_gateway_count": 0,
+    "process_output_sha256": "581906ae3612927b1f70b440e598118f6587dd7547cc91ccac242424d56f3cc2",
+    "process_output_bytes": 86721,
+    "recovery_policy": "No retry, provider change, model change, or session reuse is allowed after the consumed tag."
+  },
+  "evidence": {
+    "coordinator_events": ".local-validation/gate-7/gate7a-flask-5928-real-r3-v1/coordinator-events.jsonl",
+    "machine_e_events": ".local-validation/gate-7/gate7a-flask-5928-real-r3-v1/machine-e/events.jsonl",
+    "worker_execution": ".local-validation/gate-7/gate7a-flask-5928-real-r3-v1/machine-e/executions/cp01/execution.json",
+    "worker_output": ".local-validation/gate-7/gate7a-flask-5928-real-r3-v1/machine-e/executions/cp01/process-output.txt",
+    "worker_git_config": ".tmp/gate-7/gate7a-flask-5928-real-r3-v1/machine-e/worker-gitconfig"
+  }
+}

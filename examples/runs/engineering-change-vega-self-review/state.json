@@ -1,0 +1,191 @@
+{
+  "run_id": "20260712-001835-engineering-change",
+  "loop_name": "engineering-change",
+  "status": "failed",
+  "repo_path": "<repo>",
+  "task_file": "<repo>\\examples\\tasks\\check-vega-runtime-docs.md",
+  "current_step": "done",
+  "created_at": "2026-07-11T16:18:35.414005+00:00",
+  "findings": [],
+  "tool_results": [
+    {
+      "tool": "file.read",
+      "status": "ok",
+      "output": {
+        "path": "README.md",
+        "kind": "file",
+        "content": "# Vega\n\nVega 是一个本地优先的轻量 AI Coding Harness，用来把日常研发任务整理成可运行、可验证、可复盘的闭环。\n\n它关注的是 Agent Runtime 的基本构件，而不是做通用 Agent 框架：\n\n```text\nbug / feature -> context -> worker -> verification -> isolated review -> report -> trace/recovery\n```\n\n## 项目定位\n\nVega 适合做这些事：\n\n- 对一个仓库执行受控研发任务或只读变更审查。\n- 把任务、上下文、执行、验证、复核、状态和报告落成可追溯文件。\n- 让每次运行都能被追踪、复盘，并为人工重放提供完整证据。\n- 在同一主会话外启动隔离 worker/reviewer，同时保留人工接管边界。\n\nVega 不做这些事：\n\n- 不替代 Codex、Claude Code、Cursor 或 Aider。\n- 不替代 LangGraph / Letta。\n- 不做复杂多 Agent 平台。\n- `loop` 默认使用 assist；只有显式 `loop --mode auto`，或选择明确的自动入口 `do`，\n  才会调用外部 worker。\n- 不自动 commit。\n- 不自动 release。\n- 不自动写长期 memory。\n- 不做 Web UI。\n\n完整的核心边界、能力分层和增长约束见 `docs/PRODUCT-CONTRACT.md`。\n\n## 当前能力\n\n当前主线 loop 是：\n\n```text\nengineering-change\n```\n\n它由 `loops/engineering-change.loop.yaml` 驱动，支持：\n\n- 从任务文件解析目标文件。\n- 按 YAML 配置执行文件读取、关键词搜索和 allowlisted git check。\n- 生成 `plan.md`、`report.md`、`review.md`、`eval.md`。\n- 持续写入 `state.json` 和 `trace.jsonl`。\n- 可选生成并显式接受、拒绝和检索经验 proposal，但 Memory 不属于主流程成功条件。\n- 生成隔离 `review-pack`，并可选调用 `codex exec` 做只读 reviewer。\n- 提供 `assist` / `auto` 两种轻量自动化 loop。\n- 提供人工驱动的 `goal` 状态层，用 goal contract 和 checkpoint plan 管理长任务边界。\n\n## 目录结构\n\n```text\nVega/\n  docs/\n    PRODUCT-CONTRACT.md\n    MVP-SCOPE.md\n    ARCHITECTURE.md\n    USAGE-WALKTHROUGH.md\n    LONG-RUNNING-GOALS.md\n  src/vega/\n  loops/\n    engineering-change.loop.yaml\n  examples/\n    tasks/\n    runs/\n  eval/\n  memory/\n  runs/\n```\n\n`runs/` 和 `memory/` 是本地运行目录，默认不提交。脱敏样例输出放在 `examples/runs/`。\n\n完整 dogfood 示例见 `docs/USAGE-WALKTHROUGH.md`，里面记录了一次 auto worker、自动验证、隔离 reviewer、人工修复、finish 和 decision 的闭环。长任务 P0 状态层和后续 checkpoint 设计见 `docs/LONG-RUNNING-GOALS.md`。\n\n## 快速开始\n\n前置条件：\n\n- Python `>=3.11`\n- Git\n- 仅在使用 `auto` 或隔离 reviewer 时需要已安装并登录的 Codex CLI\n\n```powershell\ncd <你的 Vega 仓库路径>\npython -m venv .venv\n.\\.venv\\Scripts\\python -m pip install -e \".[dev]\"\n.\\.venv\\Scripts\\vega.exe --version\n.\\.venv\\Scripts\\vega.exe list-loops\n.\\.venv\\Scripts\\vega.exe run engineering-change --task examples\\tasks\\check-vega-runtime-docs.md --repo .\n```\n\n上述写法不要求先激活虚拟环境。激活 `.venv` 后，也可以直接使用 `vega`。\n\nVega 当前把 `Path.cwd()` 作为本地 workspace，`runs/`、`memory/` 和 loop 配置都从该目录\n读取或写入。请从同一个 workspace 执行 `run/status/finish/stop/recover`；如果切换目录，\nCLI 会明确提示当前 workspace 中找不到对应 run。\n\n运行产物会写入：\n\n```text\nruns/<run_id>/\n  state.json\n  trace.jsonl\n  plan.md\n  report.md\n  review.md\n  eval.md\n```\n\n\n## Agent Brief 工作流\n\n日常开发不一定要先写标准 task。对于最常见的两类工作，可以直接生成给编码 AI 使用的 brief：\n\n```powershell\nvega brief bug --repo . --text \"用户反馈导出按钮点击后无响应\"\nvega brief bug --repo . --input examples\\briefs\\bug-export-button.md\n\nvega brief feature --repo . --text \"新增批量导入用户功能\"\nvega brief feature --repo . --input examples\\briefs\\feature-bulk-import-users.md\n```\n\nbrief runtime 会读取目标仓库的 `AGENTS.md`、检索已接受 memory，并输出：\n\n```text\nruns/<run_id>/\n  state.json\n  trace.jsonl\n  knowledge-context.md\n  agent-brief.md\n  agents-md-proposals.md\n  eval.md\n```\n\nBug 模式额外输出：\n\n```text\nrepro-plan.md\nroot-cause-hypotheses.md\nregression-check.md\n```\n\nFeature 模式额外输出：\n\n```text\nfeature-spec.md\nimplementation-plan.md\nacceptance-criteria.md\nrisk.md\n```\n\n`agents-md-proposals.md` 只提出如何改进项目 `AGENTS.md` 的建议，不会自动修改目标仓库。\n\n## 项目级 `.vega.yaml`\n\n`AGENTS.md` 适合写给 AI 看的自然语言规范，`.vega.yaml` 适合写给 runtime 看的机器策略。目标仓库可以配置验证命令、风险路径、变更预算和默认 runner：\n\n```yaml\nversion: 1\n\nverification:\n  commands:\n    - python -m ruff check .\n    - python -m pytest -q\n  max_commands: 2\n  timeout_seconds: 180\n\nrisk:\n  high_paths:\n    - src/auth/\n    - migrations/\n  require_human_review:\n    - 删除文件\n\nbudget:\n  max_changed_files: 5\n  max_diff_lines: 300\n  max_new_files: 3\n  forbid_new_dependencies: true\n  forbid_large_generated_files: true\n\nbudget_profiles:\n  refactor:\n    max_changed_files: 25\n    max_diff_lines: 2000\n    max_new_files: 10\n    forbid_new_dependencies: true\n\nprompt_budget:\n  worker_max_chars: 40000\n  reviewer_max_chars: 60000\n  reviewer_diff_max_chars: 30000\n\nrunner:\n  worker: codex-exec\n  reviewer: codex-exec\n  codex_exec:\n    worker:\n      # profile/model 不填时继承用户 Codex 配置。\n      reasoning_effort: medium\n      ephemeral: true\n    reviewer:\n      reasoning_effort: high\n      ephemeral: true\n```\n\n如果没有 `.vega.yaml`，Vega 会继续使用 project profile 自动识别策略。配置文件里的验证命令只在用户显式运行 loop/continue 时执行，不会自动 commit、push 或发布。改配置后可以先做只读预检：\n\n```powershell\nvega config check --repo .\nvega config check --repo . --json\n```\n\n预检会拦截 YAML/schema 错误、截断的验证命令、未知 runner、非法推理强度和未开放的 Codex 参数；不会真正执行验证命令。\n\n`runner.codex_exec.worker` 和 `runner.codex_exec.reviewer` 是两套独立策略。当前只允许配置：\n\n- `profile`：本机已有的 Codex profile 名称。\n- `model`：显式模型；不填则继承用户 Codex 配置。\n- `reasoning_effort`：`minimal / low / medium / high / xhigh`。\n- `ephemeral`：是否使用不持久化 session 文件的短生命周期执行。\n\nVega 不接受任意 CLI args，也不开放 bypass sandbox/approval。worker 始终由 runtime 指定\n`workspace-write`，reviewer 始终指定 `read-only`。最终命令会记录在\n`executions/*/execution.json`，而有效角色策略会写入 `project-context.md`，便于复盘成本和行为差异。\n\n`prompt_budget` 是外部 runner 启动前的硬门禁：\n\n- `worker_max_chars`：实际 worker prompt 的最大字符数。\n- `reviewer_max_chars`：实际 reviewer prompt 的最大字符数。\n- `reviewer_diff_max_chars`：进入 review pack 的完整 diff 最大字符数。\n\nVega 会为两种角色写 `worker-prompt-metrics.*` / `review-prompt-metrics.*`，记录字符数、\nUTF-8 字节数、行数和分段规模。总 prompt 超预算时进入 `needs_human`，不会启动外部 runner，\n也不会静默裁掉需求、AGENTS.md、测试证据或 diff 后继续执行。单个 review section 因显式上限\n被截断时会在 `review-context.json` 留痕；reviewer 仍可指出已发现的问题，但不能返回有效 approve。\n\n大目标或重构可以先生成 scope 计划，不直接修改代码：\n\n```powershell\nvega plan --repo . --input goal.md --scope refactor\nvega gate --repo . --run <reflect_run_id> --scope refactor\n```\n\n`scope` 不会取消审查，只是把“这次确实是大改”显式声明成可追溯的 scope contract。\n\n## 长任务 Goal P0\n\n对于跨多个 checkpoint 的长任务，先创建 goal contract，再由人工决定每一步怎么执行。Goal P0 只维护状态、checkpoint plan 和人工证据引用，不调用 worker、不自动改代码、不自动提交、不写长期 memory：\n\n```powershell\nvega goal start --repo . --input goal.md --scope refactor\nvega goal status --run <goal_run>\nvega goal step --run <goal_run>\nvega goal attach --run <goal_run> --checkpoint 01 --ref <child_run> --type loop --note \"子 loop 已通过"
+      },
+      "error": null
+    },
+    {
+      "tool": "file.read",
+      "status": "ok",
+      "output": {
+        "path": "docs/MVP-SCOPE.md",
+        "kind": "file",
+        "content": "# MVP 范围\n\n## 产品名\n\n`Vega`\n\n## 定位\n\nVega 是一个本地优先的轻量 AI Coding Harness，内部使用 Agent Loop Runtime，把真实\n研发任务变成可运行、可复盘、可评估的闭环。\n\n它要证明的是这些基础能力：\n\n- 显式 task intake。\n- YAML 驱动的 loop policy。\n- 显式 state。\n- 窄 Tool Broker。\n- reviewer pass。\n- 本地 eval。\n- trace/replay artifacts。\n\n## v0.1 目标\n\n跑通一个真实可用的研发任务审查 loop：\n\n```text\nengineering-change\n```\n\n它读取任务文件和目标仓库，按 YAML 配置收集上下文，生成计划、报告、复核和评估。\n\n## 范围分层\n\n为避免 v0.1 继续膨胀，当前范围分成三层：\n\n- `v0.1 baseline`：必须保持稳定的最小闭环。\n- `v0.1.x extensions`：已经在主线中落地的日常研发 harness 能力，但不反向扩大 v0.1 baseline。\n- `goal P0`：人工驱动的长任务状态层，只生成 contract、状态和 checkpoint plan。\n\n## v0.1 baseline 必须有\n\n- CLI：`vega run engineering-change --task <task.md> --repo <repo>`\n- CLI：`vega list-loops`\n- `loops/engineering-change.loop.yaml` 作为真实配置源\n- run 目录：`runs/<run_id>/`\n- `state.json`\n- `trace.jsonl`\n- `plan.md`\n- `report.md`\n- `review.md`\n- `eval.md`\n- 只读 file search/read\n- `git status`、`git diff --stat`、`git diff --check` 的 allowlisted check\n- reviewer pass\n- spec-driven eval\n\n## v0.1.x extensions 已落地能力\n\n这些能力已经在主线中出现，用来把 baseline 扩展成日常研发 harness。它们需要继续维护，但不应反向改写 v0.1 baseline 的最小验收定义。\n\n- CLI：`vega brief bug --repo <repo> (--input <file> | --text <text>)`\n- CLI：`vega brief feature --repo <repo> (--input <file> | --text <text>)`\n- CLI：`vega profile --repo <repo>`\n- CLI：`vega plan --repo <repo> (--input <goal.md> | --text <text>) [--scope <profile>]`\n- CLI：`vega config check --repo <repo> [--json]`\n- CLI：`vega reflect --repo <repo> [--run <run_id>] [--test-log <file>] [--note <text>]`\n- CLI：`vega gate --repo <repo> --run <reflect_run_id> [--json]`\n- CLI：`vega review-pack --repo <repo> --run <reflect_run_id>`\n- CLI：`vega review --repo <repo> --run <reflect_run_id> [--runner codex-exec|none]`\n- CLI：`vega loop bug|feature --repo <repo> (--input <file> | --text <text>) [--mode assist|auto]`\n- CLI：`vega loop continue --repo <repo> --run <loop_run_id> [--test-log <file>] [--no-verify]`\n- CLI：`vega do bug|feature --repo <repo> (--input <file> | --text <text>) [--mode auto|assist]`\n- CLI：`vega latest [--kind <kind>] [--json]`\n- CLI：`vega status --run <run_id> [--json]`\n- CLI：`vega finish --run <loop_run_id> [--json]`\n- CLI：`vega stop --run <loop_run_id> --reason <reason>`\n- CLI：`vega recover --run <loop_run_id> --reason <reason>`\n- CLI：`vega decision approve|reject --run <run_id> --type <type> --reason <reason>`\n- CLI：`vega decision list --run <run_id> [--json]`\n- CLI：`vega adapters init codex [--repo <repo>] [--force]`\n- CLI：`vega goal start --repo <repo> (--input <goal.md> | --text <text>) [--scope <profile>]`\n- CLI：`vega goal status --run <goal_run> [--json]`\n- CLI：`vega goal step --run <goal_run>`\n- CLI：`vega goal attach --run <goal_run> --checkpoint <n> --ref <child_run> --type <type> [--note <text>]`\n- CLI：`vega goal checkpoint-done --run <goal_run> --checkpoint <n> [--note <text>]`\n- CLI：`vega goal complete --run <goal_run> --note <text>`\n- CLI：`vega goal pause --run <goal_run> --reason <reason>`\n- CLI：`vega goal resume --run <goal_run>`\n- CLI：`vega goal stop --run <goal_run> --reason <reason>`\n- CLI：`vega goal recover --run <goal_run> --reason <reason>`\n- 目标仓库可选 `.vega.yaml` 项目级机器策略\n- `agent-brief.md`、`knowledge-context.md`、`project-context.md`、`agents-md-proposals.md`\n- Change plan 的 `change-plan.md`、`scope-profile.md`、`phase-plan.md`、`risk.md`\n- Bug brief 的 `repro-plan.md`、`root-cause-hypotheses.md`、`regression-check.md`\n- Feature brief 的 `feature-spec.md`、`implementation-plan.md`、`acceptance-criteria.md`、`risk.md`\n- Project profile 的 `project-profile.json`、`project-profile.md`\n- Reflect 的 `diff-summary.md`、`full-diff.patch`、`test-summary.md`、\n  `review-evidence.json`、`project-context.md`、`reflection.md`\n- Risk gate 的 `gate-report.md`、`gate-result.json`，并读取 `.vega.yaml` 中的风险路径策略\n- Change budget gate：变更文件数、diff 行数、新增文件数、依赖变更和大文件预算\n- Scope profile：为 refactor / migration 等大目标显式放宽预算，但保留人工确认和审查证据\n- Config check：只读预检 `.vega.yaml`，拦截 schema、验证命令截断和未知 runner\n- Review pack 的 `review-pack.md`、`review-prompt.md`、`review-checklist.md`、`project-context.md`、`review-context.json`、`review-prompt-metrics.json/md`\n- 隔离 review 的 `review-findings.md`、`review-verdict.json`、`review-runner-output.txt`\n- 自动化 loop 的 `loop-plan.md`、`worker-prompt.md`、`worker-prompt-metrics.json/md`、`project-context.md`、`iterations/*/workspace-check.md`、`iterations/*/workspace-check.json`、`iterations/*/verification-summary.md`、`iterations/*/verification-result.json`、`final-report.md`\n- Worker/reviewer execution lease：`execution.json`、`process-output.txt`、可选 `stop-request.json`\n- Stop/timeout report：中断 attempt 后进入 `needs_human`，不继续后续自动步骤\n- Runner error handoff：provider/网络/CLI 错误后写 `runner-error-report.md`，保留可能存在的部分改动并交还人工\n- Owned process 边界：只终止 Vega 自己启动并记录 PID 的进程，不扫描用户其他 Codex/Node 进程\n- Worker 污染门禁：auto worker 新增未跟踪文件超过 `budget.max_new_files` 时停止在 `needs_human`\n- Prompt 预算门禁：记录实际 prompt 规模，worker/reviewer 超预算时不启动外部 runner\n- Review 快照门禁：Reflect 固化工作区指纹和完整 diff；工作区变化或证据 artifact 被改写时，\n  reviewer 不启动并进入 `needs_human`\n- Recovery report：仅在 execution 缺失、终态、lease/deadline 过期或 PID 消失时，把半完成的 running loop 安全交还给人工\n- 验证失败不能被 reviewer approve 覆盖，必须进入修复或人工判断\n- `loop continue` 只允许同一仓库中处于 `needs_human` 的 run\n- `--max-iterations` 只限制 auto worker 自动重试，不阻止人工修复后的 `loop continue`\n- Finish 的 `finish-report.md`、`finish-summary.json`\n- Run status 的状态摘要、关键产物和下一步指引\n- Decision ledger 的 `decisions.jsonl`\n- Codex adapter 的 `.codex/skills/vega-loop/SKILL.md` 与 `.codex/skills/vega-review/SKILL.md`\n- Goal P0 的 `goal-contract.md/json`\n- `goal-state.json`\n- `goal-trace.jsonl`\n- `progress.md`\n- `checkpoint-evidence.json` 和 `checkpoint-report.md`\n- `goal-final-report.md` 和 `goal-eval.md`\n- `goal step` 只生成 checkpoint plan，同一时间只允许一个 active checkpoint\n- `goal attach` 校验 child run 的存在性、kind、repo 和完成资格，不自动执行 child run\n- `goal checkpoint-done` 需要可完成证据；manual evidence 必须显式 override\n- `goal checkpoint-done`"
+      },
+      "error": null
+    },
+    {
+      "tool": "file.read",
+      "status": "ok",
+      "output": {
+        "path": "docs/ARCHITECTURE.md",
+        "kind": "file",
+        "content": "# 架构说明\n\n## 总览\n\nVega v0.1 是一个本地文件系统优先的 AI Coding Harness，内部核心执行引擎是线性的\nAgent Loop Runtime。它不追求复杂编排，而是把研发任务拆成一条可检查的链路：\n\n```text\nCLI\n  -> Task Intake\n  -> LoopSpec(YAML)\n  -> Runtime\n  -> Context Loader\n  -> Tool Broker\n  -> Report\n  -> Reviewer\n  -> Eval\n  -> State / Trace / Replay\n```\n\n当前主线 loop 是 `engineering-change`，配置来自 `loops/engineering-change.loop.yaml`。\n\n长任务 P0 已提供人工驱动状态层：`goal start/status/step/attach/checkpoint-done/pause/resume/stop/recover`。它只写 goal contract、状态、trace、progress、checkpoint plan 和人工证据报告，不调用 worker。有限自动 checkpoint 推进仍处于设计阶段，详见 `docs/LONG-RUNNING-GOALS.md`。\n\n## 核心流程\n\n```text\ntask.md\n  -> 读取 loop YAML\n  -> 创建 run_id\n  -> 初始化 state.json\n  -> 解析目标文件\n  -> 生成 plan.md\n  -> 按 YAML 配置执行只读工具\n  -> 生成 report.md\n  -> 生成 review.md\n  -> 运行 eval 并写 eval.md\n  -> 更新 state.json\n  -> 写 trace.jsonl\n```\n\n## LoopSpec 边界\n\nYAML 负责配置策略，不负责执行任意代码。\n\n当前允许 YAML 配置：\n\n- 允许和禁用的工具名。\n- 目标文件区块名。\n- 搜索关键词。\n- allowlisted git check。\n- 报告必需章节。\n- reviewer 检查项和禁用动作表述。\n- eval artifact 和 trace event 检查。\n\nYAML 不允许配置：\n\n- 任意 shell 命令。\n- 任意 Python hook。\n- 自动 patch。\n- 自动 commit。\n- 自动 release。\n- 自动长期 memory 写入。\n- 多 Agent 编排。\n\n\n## 产品能力分层\n\n核心主线是上下文编译、受控 worker、确定性验证、隔离 reviewer 和证据化恢复。`brief`、\n`reflect`、`gate`、`review-pack`、`review` 属于可单独观察的流水线阶段；Memory、Goal P0\n和 adapter 属于实验能力。完整契约见 `docs/PRODUCT-CONTRACT.md`。\n\n实验能力不得成为核心 run 的必需 artifact 或成功条件。\n\n## Project Knowledge Layer\n\nv0.1.x 已落地项目知识层，用来把项目长期规则和可选历史经验编译成一次运行可用的上下文。\n\n输入来源：\n\n- 目标仓库 `AGENTS.md`。\n- 相关子目录 `AGENTS.md`。\n- Vega `memory/ledger.jsonl` 中已接受的 memory。\n- 当前 bug 或 feature 描述。\n\n输出产物：\n\n```text\nknowledge-context.md\nagent-brief.md\nagents-md-proposals.md\n```\n\n`agent-brief.md` 是给真实编码 AI 使用的主要上下文；`agents-md-proposals.md` 只提出项目规则改进建议，不自动修改目标仓库。\n\n## Bug / Feature Brief Runtime\n\nBrief Runtime 是一个轻量横向能力，不替代 `engineering-change`。它面向开发者最常见的两类工作：修 bug 和拆需求。\n\n```text\nvega brief bug --repo <repo> (--input <file> | --text <text>)\nvega brief feature --repo <repo> (--input <file> | --text <text>)\n```\n\nBug 模式额外生成复现计划、根因假设和回归检查。Feature 模式额外生成功能规格、实现计划、验收标准和风险清单。\n\n\n## Project Profile\n\nProject Profile 是项目画像命令，负责在开发前识别仓库基本结构：\n\n- 技术栈。\n- 包管理器或构建工具。\n- 推荐测试命令。\n- 推荐静态检查命令。\n- 入口文件。\n- 关键目录。\n- 配置文件。\n- AGENTS.md 文件。\n- 已接受 memory 命中数。\n\n```text\nvega profile --repo <repo>\n```\n\n它生成 `project-profile.json` 和 `project-profile.md`，供 brief、人工判断和后续复盘参考。brief、reflect、review 和 loop 还会生成 `project-context.md`，把项目画像、推荐验证命令、AGENTS.md 和 accepted memory 合成稳定上下文，但不包含 worker 聊天记录。\n\n## Project Config\n\n`.vega.yaml` 是给 runtime 读取的项目级机器策略，和面向 AI 的 `AGENTS.md` 分工不同：\n\n- `AGENTS.md`：自然语言规则、编码规范、踩坑说明。\n- `.vega.yaml`：验证命令、超时、风险路径、变更预算、默认 runner 等可执行策略。\n\n示例：\n\n```yaml\nversion: 1\nverification:\n  commands:\n    - python -m ruff check .\n    - python -m pytest -q\n  max_commands: 2\n  timeout_seconds: 180\nrisk:\n  high_paths:\n    - src/auth/\n  require_human_review:\n    - 删除文件\nbudget:\n  max_changed_files: 5\n  max_diff_lines: 300\n  max_new_files: 3\n  forbid_new_dependencies: true\n  forbid_large_generated_files: true\nbudget_profiles:\n  refactor:\n    max_changed_files: 25\n    max_diff_lines: 2000\n    max_new_files: 10\nprompt_budget:\n  worker_max_chars: 40000\n  reviewer_max_chars: 60000\n  reviewer_diff_max_chars: 30000\nrunner:\n  worker: codex-exec\n  reviewer: codex-exec\n  codex_exec:\n    worker:\n      reasoning_effort: medium\n      ephemeral: true\n    reviewer:\n      reasoning_effort: high\n      ephemeral: true\n```\n\n如果配置不存在，Vega 使用 project profile 自动识别。配置存在时，verification、change budget、workspace check 和 risk gate 优先使用显式策略。`vega config check --repo <repo>` 是只读预检：它只检查 YAML/schema、验证命令形态和 runner 名称，不执行命令，用来在 auto loop 前提前发现“命令被截断”这类问题。\n\nCodex runner 采用“角色策略 + 固定安全边界”：\n\n- worker/reviewer 可以分别选择 `profile`、`model`、`reasoning_effort` 和 `ephemeral`。\n- 空的 `profile/model/reasoning_effort` 继承用户 Codex 配置，避免 Vega 复制一套全局模型配置。\n- runtime 只把白名单字段编译成 `codex exec` 参数，不接受 YAML 传入任意 args。\n- worker 的 sandbox 固定为 `workspace-write`，reviewer 固定为 `read-only`，不开放 bypass 参数。\n- `execution.json` 记录最终命令；`project-context.md` 记录有效角色策略。\n\n这样可以让高频 worker 使用中等推理成本，让 reviewer 保持更高审查强度，同时不把 Vega\n扩张成新的模型配置中心。`ephemeral: true` 只控制 Codex session 是否持久化，不代表 run\n证据会消失；Vega 自己的 prompt、输出、diff、verdict、trace 和 execution 记录仍保留在\n项目 `runs/`。\n\nPrompt 预算采用“先度量、再门禁、不静默丢证据”的策略：\n\n- worker/reviewer 在调用外部 runner 前记录精确字符数、UTF-8 字节数、行数和分段规模。\n- `worker_max_chars` / `reviewer_max_chars` 约束最终实际 prompt，而不是单个来源文件。\n- reviewer 的 full diff 先按 `reviewer_diff_max_chars` 显式截断并留下截断标记。\n- 任一 review evidence section 被截断后，即使模型输出 approve，也会被 runtime 改为 `needs_human`。\n- 最终 prompt 仍超预算时进入 `needs_human`，不启动外部 runner。\n- 不通过静默删除需求、AGENTS.md、验证失败或关键 diff 来“强行塞进上下文”。\n- auto loop 把启动时的 reviewer runner/prompt 策略传到 review 阶段，worker 中途修改\n  `.vega.yaml` 不能关闭本轮 reviewer 或临时缩小其预算。\n\nreview pack 不再分别重复注入 Project Profile 和 Project Knowledge。两者连同 runtime 策略统一由\n`project-context.md` 提供；review pack 只保留需求、复盘、diff 摘要、测试摘要、项目上下文和\nfull diff 六类事实材料。\n\n大目标不应该直接让 auto worker 一口气执行。`vega plan --repo <repo> --input <goal.md> --scope refactor` 会先生成 `change-plan.md`、`scope-profile.md` 和 `phase-plan.md`，供人工确认 scope 后再拆 phase 执行。`vega gate --scope <profile>` 会使用对应 budget profile，表示“这是经过声明的大范围变更”，而不是悄悄放宽默认小任务预算。\n\n## Reflect / Post-run\n\nReflect 是执行后复盘命令，用于在 AI 或人工完成修改后分析当前工作区 diff，并生成可沉淀的复盘材料。\n\n```text\nvega reflect --repo <repo> [--run <run_id>] [--test-log <file>] [--note <text>] [--lesson <text>]\n```\n\n它读取：\n\n- `git status --short`\n- `git diff --stat`\n- `git diff --check`\n- `git diff --name-only`\n- 可选测试日志\n- 可选上游 run 的 `agent-brief.md`\n- 相关 AGENTS.md 与 memory\n\n输出：\n\n```text\ndiff-summary.md\ntest-summary.md\nproject-context.md\nreflection.md\nagents-md-proposals.md\neval.md\n```\n\nReflect 不修改目标仓库，也不自动接受 memory。普通复盘只输出事实与规则建议；只有用户显式\n提供 `--lesson` 时，才额外生成 `memory-proposals.jsonl`。\n\n## Isolated Review Pack\n\nReview Pack 是执行后复盘和隔离审查之间的上下文编译层：\n\n```text\nvega gate --repo <repo> --run <reflect_run_id>\nvega review-pack --repo <repo> --run <reflect_run_id>\nvega review --repo <repo> --run <reflect_run_id> --runner codex-exec\n```\n\nRisk Gate 会读取 reflect run、当前 diff、测试摘要、变更路径、`.lo"
+      },
+      "error": null
+    },
+    {
+      "tool": "file.read",
+      "status": "ok",
+      "output": {
+        "path": "loops/engineering-change.loop.yaml",
+        "kind": "file",
+        "content": "name: engineering-change\ndescription: \"本地研发变更审查 loop：读取任务和仓库，受控收集上下文，生成报告、复核和评估。\"\n\ninput:\n  task_file: required\n  repo_path: required\n\ntools:\n  allowed:\n    - file.search\n    - file.read\n    - repo.run_check\n    - report.write\n    - review.write\n  disabled:\n    - patch.apply\n    - shell.run\n    - memory.write\n\nbudget:\n  max_steps: 8\n  max_tool_calls: 16\n  max_minutes: 10\n\ninspect:\n  target_section_names:\n    - Target files\n    - Target files to search\n    - 目标文件\n    - 目标文件：\n  search_queries:\n    - TODO\n    - FIXME\n    - risk\n    - 风险\n    - breaking change\n    - 兼容性\n  git_checks:\n    - git.status\n    - git.diff\n    - git.diff_check\n\nreport:\n  title: 工程变更报告\n  required_sections:\n    - 摘要\n    - 上下文\n    - 证据\n    - 发现\n    - 风险\n    - 建议修改\n    - 验证\n\nreview:\n  enabled: true\n  checks:\n    - report_answers_task\n    - no_unsupported_file_changes\n    - no_forbidden_actions\n    - tool_policy_respected\n  forbidden_phrases:\n    - git commit\n    - git push\n    - 自动提交\n    - 自动发布\n    - 自动应用补丁\n    - 已经修改文件\n    - 已修改文件\n    - applied patch\n    - committed changes\n    - pushed changes\n\neval:\n  artifact_checks:\n    - state.json\n    - trace.jsonl\n    - plan.md\n    - report.md\n    - review.md\n    - eval.md\n  trace_events:\n    - task_loaded\n    - plan_written\n    - tool_call\n    - report_written\n    - review_written\n  require_report_sections: true\n  require_tool_policy: true\n  require_no_automatic_memory_write: true\n  require_review_pass: true\n"
+      },
+      "error": null
+    },
+    {
+      "tool": "file.search",
+      "status": "ok",
+      "output": {
+        "query": "TODO",
+        "matches": [
+          "<repo>\\loops\\engineering-change.loop.yaml:32:    - TODO"
+        ]
+      },
+      "error": null
+    },
+    {
+      "tool": "file.search",
+      "status": "ok",
+      "output": {
+        "query": "FIXME",
+        "matches": [
+          "<repo>\\loops\\engineering-change.loop.yaml:33:    - FIXME"
+        ]
+      },
+      "error": null
+    },
+    {
+      "tool": "file.search",
+      "status": "ok",
+      "output": {
+        "query": "risk",
+        "matches": [
+          "<repo>\\README.md:152:risk.md",
+          "<repo>\\README.md:171:risk:",
+          "<repo>\\loops\\engineering-change.loop.yaml:34:    - risk",
+          "<repo>\\docs\\MVP-SCOPE.md:93:- Change plan 的 `change-plan.md`、`scope-profile.md`、`phase-plan.md`、`risk.md`",
+          "<repo>\\docs\\MVP-SCOPE.md:95:- Feature brief 的 `feature-spec.md`、`implementation-plan.md`、`acceptance-criteria.md`、`risk.md`",
+          "<repo>\\docs\\ARCHITECTURE.md:145:risk:",
+          "<repo>\\docs\\ARCHITECTURE.md:177:如果配置不存在，Vega 使用 project profile 自动识别。配置存在时，verification、change budget、workspace check 和 risk gate 优先使用显式策略。`vega config check --repo <repo>` 是只读预检：它只检查 YAML/schema、验证命令形态和 runner 名称，不执行命令，用来在 auto loop 前提前发现“命令被截断”这类问题。"
+        ]
+      },
+      "error": null
+    },
+    {
+      "tool": "file.search",
+      "status": "ok",
+      "output": {
+        "query": "风险",
+        "matches": [
+          "<repo>\\README.md:159:`AGENTS.md` 适合写给 AI 看的自然语言规范，`.vega.yaml` 适合写给 runtime 看的机器策略。目标仓库可以配置验证命令、风险路径、变更预算和默认 runner：",
+          "<repo>\\README.md:321:这一步用于回答：改了什么、测试了什么、还剩什么风险、哪些长期规则应该手动同步到",
+          "<repo>\\README.md:335:`gate` 会根据 diff、测试日志、路径风险和历史 memory 输出 `low | medium | high` 风险，以及 `self-check | isolated-review | human-review` 建议。`review-pack` 会汇总原始 brief、diff、测试日志、checklist 和已经合并 AGENTS.md、accepted memory、project profile、runtime 策略的 `project-context.md`，避免重复注入相同项目知识。`review` 会用 `codex exec --sandbox read-only` 启动一个短生命周期隔离 reviewer，并输出：",
+          "<repo>\\README.md:452:vega decision approve --run <run_id> --type gate --reason \"确认风险可接受\" --ref gate-result.json",
+          "<repo>\\docs\\MVP-SCOPE.md:99:- Risk gate 的 `gate-report.md`、`gate-result.json`，并读取 `.vega.yaml` 中的风险路径策略",
+          "<repo>\\docs\\ARCHITECTURE.md:105:Bug 模式额外生成复现计划、根因假设和回归检查。Feature 模式额外生成功能规格、实现计划、验收标准和风险清单。",
+          "<repo>\\docs\\ARCHITECTURE.md:133:- `.vega.yaml`：验证命令、超时、风险路径、变更预算、默认 runner 等可执行策略。",
+          "<repo>\\docs\\ARCHITECTURE.md:251:Risk Gate 会读取 reflect run、当前 diff、测试摘要、变更路径、`.vega.yaml` 风险策略和已接受 memory，输出 `gate-result.json` 与 `gate-report.md`。它不阻止用户继续执行，而是给出 `self-check`、`isolated-review` 或 `human-review` 建议，避免 `auto` 模式在高风险 diff 上失控。",
+          "<repo>\\docs\\ARCHITECTURE.md:425:| 工具 | 风险 | 行为 |",
+          "<repo>\\examples\\tasks\\check-vega-runtime-docs.md:23:- 风险",
+          "<repo>\\loops\\engineering-change.loop.yaml:35:    - 风险",
+          "<repo>\\loops\\engineering-change.loop.yaml:50:    - 风险"
+        ]
+      },
+      "error": null
+    },
+    {
+      "tool": "file.search",
+      "status": "ok",
+      "output": {
+        "query": "breaking change",
+        "matches": [
+          "<repo>\\loops\\engineering-change.loop.yaml:36:    - breaking change"
+        ]
+      },
+      "error": null
+    },
+    {
+      "tool": "file.search",
+      "status": "ok",
+      "output": {
+        "query": "兼容性",
+        "matches": [
+          "<repo>\\loops\\engineering-change.loop.yaml:37:    - 兼容性"
+        ]
+      },
+      "error": null
+    },
+    {
+      "tool": "repo.run_check",
+      "status": "ok",
+      "output": {
+        "check_id": "git.status",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "error": null
+    },
+    {
+      "tool": "repo.run_check",
+      "status": "ok",
+      "output": {
+        "check_id": "git.diff",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "error": null
+    },
+    {
+      "tool": "repo.run_check",
+      "status": "ok",
+      "output": {
+        "check_id": "git.diff_check",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "error": null
+    }
+  ],
+  "eval_results": [
+    "PASS: artifact 存在：state.json",
+    "PASS: artifact 存在：trace.jsonl",
+    "PASS: artifact 存在：plan.md",
+    "PASS: artifact 存在：report.md",
+    "PASS: artifact 存在：review.md",
+    "PASS: artifact 存在：eval.md",
+    "PASS: state.json schema 合法",
+    "PASS: report.md 包含必需章节",
+    "PASS: trace.jsonl 包含必需事件",
+    "PASS: 工具调用符合 allowlist",
+    "PASS: 必需 Git 检查全部通过",
+    "FAIL: reviewer pass 存在失败项",
+    "PASS: 未自动生成 Memory Proposal"
+  ],
+  "review_results": [
+    "FAIL: 报告没有覆盖 3 个任务问题",
+    "PASS: 未发现自动修改文件声明",
+    "PASS: 未发现自动提交、发布或补丁动作表述",
+    "PASS: 工具调用符合 allowlist",
+    "PASS: engineering-change 未自动生成 Memory Proposal"
+  ],
+  "memory_proposals": []
+}

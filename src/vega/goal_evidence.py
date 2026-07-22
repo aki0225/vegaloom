@@ -6,10 +6,11 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from .loop_graph_state import GraphStateValidationError, read_graph_state
 from .models import (
     GateResult,
     GateState,
@@ -189,6 +190,9 @@ def validate_review_evidence_freshness(
     review_run: str,
     *,
     current_workspace_fingerprint: str | None = None,
+    expected_source_run: str | None = None,
+    expected_review_kind: str | None = None,
+    expected_binding_sha256: str | None = None,
 ) -> EvidenceFreshness:
     repo = repo_path.resolve()
     review_dir = resolve_run_dir(workspace, review_run)
@@ -220,10 +224,13 @@ def validate_review_evidence_freshness(
     source_run = str(state_payload.get("source_run") or "")
     if not source_run or context.get("source_run") != source_run:
         issues.append("review_source_mismatch")
+    if expected_source_run is not None and source_run != expected_source_run:
+        issues.append("review_attached_source_mismatch")
     if not context.get("evidence_consistent"):
         issues.append("review_evidence_inconsistent")
     if context.get("workspace_changed_during_review"):
         issues.append("workspace_changed_during_review")
+    _validate_review_acceptance_evidence(review_dir, context, issues)
     if source_run:
         try:
             reflect_freshness = validate_reflect_evidence_freshness(
@@ -263,6 +270,45 @@ def validate_review_evidence_freshness(
         issues.append("workspace_changed_since_review")
     if context.get("source_snapshot_id") != snapshot_id:
         issues.append("review_snapshot_id_invalid")
+    parallel_review_issues: tuple[str, ...] | None = None
+    try:
+        from .parallel_review_runtime import (
+            validate_parallel_review_compatibility_source,
+        )
+
+        parallel_review_issues = (
+            validate_parallel_review_compatibility_source(
+                review_dir,
+                expected_source_run=expected_source_run or source_run,
+            )
+        )
+    except Exception:  # noqa: BLE001 - 来源无法重放时必须 fail-closed
+        issues.append("parallel_review_source_validation_failed")
+    else:
+        if parallel_review_issues is not None:
+            issues.extend(parallel_review_issues)
+    review_kind = (
+        "parallel_review"
+        if parallel_review_issues is not None
+        else "ordinary"
+    )
+    binding_payload = context.get("parallel_review_source")
+    binding_sha256 = (
+        _sha256_json(binding_payload)
+        if review_kind == "parallel_review"
+        and isinstance(binding_payload, dict)
+        else None
+    )
+    if (
+        expected_review_kind is not None
+        and review_kind != expected_review_kind
+    ):
+        issues.append("review_attached_kind_mismatch")
+    if (
+        expected_binding_sha256 is not None
+        and binding_sha256 != expected_binding_sha256
+    ):
+        issues.append("review_attached_binding_mismatch")
     return _freshness(
         issues,
         current_fingerprint,
@@ -271,6 +317,90 @@ def validate_review_evidence_freshness(
         review_run=review_dir.name,
         snapshot_id=snapshot_id,
     )
+
+
+def _validate_review_acceptance_evidence(
+    review_dir: Path,
+    context: dict[str, Any],
+    issues: list[str],
+) -> None:
+    expected_manifest = context.get("acceptance_evidence")
+    if expected_manifest is None:
+        # 兼容引入验收证据包之前创建的历史 review run。
+        return
+    if not isinstance(expected_manifest, dict):
+        issues.append("review_acceptance_evidence_manifest_invalid")
+        return
+    payload, payload_issue = _load_json_object(
+        review_dir / "acceptance-evidence.json"
+    )
+    if payload_issue or payload is None:
+        issues.append(
+            f"review_acceptance_evidence_{payload_issue or 'missing'}"
+        )
+        return
+    items = payload.get("items")
+    if not isinstance(items, list):
+        issues.append("review_acceptance_evidence_items_invalid")
+        return
+    actual_manifest = {
+        **{
+            key: value
+            for key, value in payload.items()
+            if key != "items"
+        },
+        "items": [
+            {
+                key: value
+                for key, value in item.items()
+                if key != "content"
+            }
+            if isinstance(item, dict)
+            else item
+            for item in items
+        ],
+    }
+    if actual_manifest != expected_manifest:
+        issues.append("review_acceptance_evidence_manifest_mismatch")
+        return
+    used_chars = payload.get("used_chars")
+    max_chars = payload.get("max_chars")
+    if (
+        not isinstance(used_chars, int)
+        or not isinstance(max_chars, int)
+        or used_chars < 0
+        or used_chars > max_chars
+    ):
+        issues.append("review_acceptance_evidence_budget_invalid")
+        return
+    calculated_chars = 0
+    for item in items:
+        if not isinstance(item, dict):
+            issues.append("review_acceptance_evidence_item_invalid")
+            return
+        content = item.get("content")
+        included_chars = item.get("included_chars")
+        included_sha256 = item.get("included_sha256")
+        if (
+            not isinstance(content, str)
+            or not isinstance(included_chars, int)
+            or included_chars != len(content)
+            or included_sha256 != _sha256_text(content)
+        ):
+            issues.append("review_acceptance_evidence_content_invalid")
+            return
+        if (
+            item.get("truncated") is False
+            and (
+                item.get("source_chars") != included_chars
+                or item.get("source_sha256") != included_sha256
+            )
+        ):
+            issues.append("review_acceptance_evidence_source_hash_invalid")
+            return
+        calculated_chars += included_chars
+    if calculated_chars != used_chars:
+        issues.append("review_acceptance_evidence_used_chars_invalid")
 
 
 def _validate_review_risk_gate(
@@ -306,8 +436,70 @@ def _validate_review_risk_gate(
         return
     if _gate_result_semantics(recorded_result) != _gate_result_semantics(expected_result):
         issues.append("review_risk_gate_result_mismatch")
-    if expected_result.recommendation == "human-review":
+    if (
+        expected_result.recommendation == "human-review"
+        and not _has_valid_review_human_approval(
+            workspace,
+            repo_path,
+            source_run,
+            context,
+        )
+    ):
         issues.append("review_risk_gate_requires_human")
+
+
+def _has_valid_review_human_approval(
+    workspace: Path,
+    repo_path: Path,
+    source_run: str,
+    context: dict[str, Any],
+) -> bool:
+    """重新校验 reviewer 声明的人工批准，而不是信任可编辑的 context 状态。
+
+    Review Runtime 会把父 loop 的 consumption 引用写入 review-context.json。
+    证据新鲜度检查必须沿引用回到 pending、decision ledger 和 consumption，
+    同时确认该批准绑定的正是当前 Reflect；否则复制一段 ``status=valid``
+    就可能把另一个高风险审查错误升级为可信证据。
+    """
+
+    approval = context.get("human_approval")
+    if not isinstance(approval, dict) or approval.get("status") != "valid":
+        return False
+    parent_run_id = approval.get("parent_run_id")
+    iteration = approval.get("iteration")
+    consumption_ref = approval.get("consumption_ref")
+    if (
+        not isinstance(parent_run_id, str)
+        or not parent_run_id
+        or not isinstance(iteration, int)
+        or isinstance(iteration, bool)
+        or iteration < 1
+        or not isinstance(consumption_ref, str)
+        or not consumption_ref
+    ):
+        return False
+    try:
+        from .loop_graph_decision import (
+            read_pending_decision,
+            validate_consumed_approval,
+        )
+
+        parent_run_dir = resolve_run_dir(workspace, parent_run_id)
+        pending_id = Path(consumption_ref).stem
+        pending = read_pending_decision(parent_run_dir, pending_id)
+        if (
+            pending.iteration != iteration
+            or pending.reflect_run_id != source_run
+        ):
+            return False
+        return validate_consumed_approval(
+            parent_run_dir,
+            iteration=iteration,
+            repo_path=repo_path,
+            consumption_ref=consumption_ref,
+        )
+    except Exception:  # noqa: BLE001 - 批准证据无法完整重放时必须 fail-closed
+        return False
 
 
 def _gate_result_semantics(result: GateResult) -> tuple[object, ...]:
@@ -343,6 +535,11 @@ def validate_loop_artifact_integrity(
         issues.append("loop_repo_mismatch")
     if state.run_id != loop_dir.name:
         issues.append("loop_run_id_mismatch")
+    if state.engine == "langgraph" and state.status == "success":
+        try:
+            read_graph_state(loop_dir)
+        except GraphStateValidationError:
+            issues.append("loop_graph_state_untrusted")
 
     verdicts: list[ReviewVerdict] = []
     verification_results: list[dict[str, Any]] = []
@@ -489,6 +686,8 @@ def validate_goal_evidence(
     reference: str,
     evidence_type: GoalCheckpointEvidenceType,
     note: str | None,
+    *,
+    expected_ref: GoalCheckpointRef | None = None,
 ) -> GoalCheckpointRef:
     """解析并校验 checkpoint 证据，避免把任意字符串当作已完成证明。
 
@@ -497,7 +696,14 @@ def validate_goal_evidence(
     """
     if evidence_type == "manual":
         return _validate_manual_evidence(workspace, goal_repo_path, reference, note)
-    return _validate_run_evidence(workspace, goal_repo_path, reference, evidence_type, note)
+    return _validate_run_evidence(
+        workspace,
+        goal_repo_path,
+        reference,
+        evidence_type,
+        note,
+        expected_ref=expected_ref,
+    )
 
 
 def _validate_run_evidence(
@@ -506,6 +712,8 @@ def _validate_run_evidence(
     reference: str,
     evidence_type: GoalCheckpointEvidenceType,
     note: str | None,
+    *,
+    expected_ref: GoalCheckpointRef | None,
 ) -> GoalCheckpointRef:
     child_dir = resolve_run_dir(workspace, reference)
     runs_root = (workspace / "runs").resolve()
@@ -536,7 +744,50 @@ def _validate_run_evidence(
         child_dir,
         evidence_type,
         status,
+        expected_ref=expected_ref,
     )
+    review_source_run: str | None = None
+    review_kind: str | None = None
+    review_binding_sha256: str | None = None
+    if evidence_type == "review":
+        (
+            review_source_run,
+            review_kind,
+            review_binding_sha256,
+        ) = _review_attachment_binding(child_dir)
+        if expected_ref is not None:
+            if (
+                expected_ref.review_source_run is None
+                or expected_ref.review_kind is None
+                or (
+                    expected_ref.review_kind == "parallel_review"
+                    and expected_ref.review_binding_sha256 is None
+                )
+            ):
+                raise ValueError(
+                    "历史 Review Goal attachment 缺少外部绑定，"
+                    "必须重新 attach 后再完成 checkpoint"
+                )
+            if (
+                review_source_run != expected_ref.review_source_run
+            ):
+                raise ValueError(
+                    "Review Goal attachment 的 source_run 已发生变化"
+                )
+            if (
+                review_kind != expected_ref.review_kind
+            ):
+                raise ValueError(
+                    "Review Goal attachment 的 review kind 已发生变化"
+                )
+            if (
+                expected_ref.review_binding_sha256 is not None
+                and review_binding_sha256
+                != expected_ref.review_binding_sha256
+            ):
+                raise ValueError(
+                    "Review Goal attachment 的 binding 已发生变化"
+                )
     return GoalCheckpointRef(
         run=child_dir.name,
         type=evidence_type,
@@ -548,6 +799,9 @@ def _validate_run_evidence(
         completion_eligible=eligible,
         validation_summary=summary,
         artifacts=list(payload.get("key_artifacts") or []),
+        review_source_run=review_source_run,
+        review_kind=review_kind,  # type: ignore[arg-type]
+        review_binding_sha256=review_binding_sha256,
     )
 
 
@@ -591,12 +845,15 @@ def _completion_eligibility(
     child_dir: Path,
     evidence_type: GoalCheckpointEvidenceType,
     status: str,
+    *,
+    expected_ref: GoalCheckpointRef | None,
 ) -> tuple[bool, str]:
     freshness = _run_evidence_freshness(
         workspace,
         goal_repo_path,
         child_dir,
         evidence_type,
+        expected_ref=expected_ref,
     )
     freshness_summary = (
         "fresh"
@@ -674,6 +931,8 @@ def _run_evidence_freshness(
     goal_repo_path: Path,
     child_dir: Path,
     evidence_type: GoalCheckpointEvidenceType,
+    *,
+    expected_ref: GoalCheckpointRef | None,
 ) -> EvidenceFreshness:
     if evidence_type in {"loop", "finish"}:
         return validate_loop_evidence_freshness(
@@ -686,6 +945,21 @@ def _run_evidence_freshness(
             workspace,
             goal_repo_path,
             child_dir.name,
+            expected_source_run=(
+                expected_ref.review_source_run
+                if expected_ref is not None
+                else None
+            ),
+            expected_review_kind=(
+                expected_ref.review_kind
+                if expected_ref is not None
+                else None
+            ),
+            expected_binding_sha256=(
+                expected_ref.review_binding_sha256
+                if expected_ref is not None
+                else None
+            ),
         )
     if evidence_type == "reflect":
         return validate_reflect_evidence_freshness(
@@ -717,6 +991,43 @@ def _run_evidence_freshness(
             snapshot_id=source_freshness.snapshot_id,
         )
     return _freshness(["unsupported_evidence_type"], "")
+
+
+def _review_attachment_binding(
+    review_dir: Path,
+) -> tuple[
+    str,
+    Literal["ordinary", "parallel_review"],
+    str | None,
+]:
+    state, state_issue = _load_review_state(review_dir / "state.json")
+    context, context_issue = _load_json_object(
+        review_dir / "review-context.json"
+    )
+    if state_issue or state is None:
+        raise ValueError("Review Goal attachment 缺少可信 state")
+    if context_issue or context is None:
+        raise ValueError("Review Goal attachment 缺少可信 context")
+    from .parallel_review_runtime import (
+        validate_parallel_review_compatibility_source,
+    )
+
+    parallel_review_issues = validate_parallel_review_compatibility_source(
+        review_dir,
+        expected_source_run=state.source_run,
+    )
+    kind: Literal["ordinary", "parallel_review"] = (
+        "parallel_review"
+        if parallel_review_issues is not None
+        else "ordinary"
+    )
+    binding = context.get("parallel_review_source")
+    binding_sha256 = (
+        _sha256_json(binding)
+        if kind == "parallel_review" and isinstance(binding, dict)
+        else None
+    )
+    return state.source_run, kind, binding_sha256
 
 
 def _gate_artifact_integrity(
@@ -796,6 +1107,30 @@ def _finish_summary_integrity(
         issues.append("finish_run_dir_mismatch")
     if str(payload.get("loop_status") or "") != loop_status:
         issues.append("finish_loop_status_mismatch")
+    finish_report_ref = payload.get("finish_report_ref")
+    finish_report_sha256 = payload.get("finish_report_sha256")
+    if finish_report_ref != "finish-report.md":
+        issues.append("finish_report_ref_mismatch")
+    elif (
+        not isinstance(finish_report_sha256, str)
+        or len(finish_report_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in finish_report_sha256
+        )
+    ):
+        issues.append("finish_report_sha256_invalid")
+    else:
+        finish_report_path = loop_dir / finish_report_ref
+        try:
+            current_report_sha256 = hashlib.sha256(
+                finish_report_path.read_bytes()
+            ).hexdigest()
+        except OSError:
+            issues.append("finish_report_missing")
+        else:
+            if current_report_sha256 != finish_report_sha256:
+                issues.append("finish_report_hash_mismatch")
     state, state_issue = _load_loop_state(loop_dir / "state.json")
     if state_issue:
         issues.append(f"finish_loop_state_{state_issue}")
@@ -991,12 +1326,43 @@ def _validate_iteration_review(
             issues.append(f"{prefix}_child_review_context_repo_mismatch")
     if child_verdict and child_verdict.verdict != iteration.verdict:
         issues.append(f"{prefix}_child_review_verdict_mismatch")
+    try:
+        from .parallel_review_runtime import (
+            validate_parallel_review_compatibility_source,
+        )
 
-    for local_name, child_path, issue_name in (
+        parallel_review_issues = (
+            validate_parallel_review_compatibility_source(
+                review_dir,
+                expected_source_run=iteration.reflect_run,
+            )
+        )
+    except Exception:  # noqa: BLE001 - 来源无法重放时必须 fail-closed
+        issues.append(f"{prefix}_parallel_review_source_validation_failed")
+    else:
+        if parallel_review_issues is not None:
+            issues.extend(
+                f"{prefix}_{issue}"
+                for issue in parallel_review_issues
+            )
+
+    comparison_artifacts = [
         ("review-state.json", child_state_path, "review_state_hash_mismatch"),
         ("review-context.json", child_context_path, "review_context_hash_mismatch"),
         ("review-verdict.json", child_verdict_path, "review_verdict_hash_mismatch"),
+    ]
+    if child_context and isinstance(
+        child_context.get("acceptance_evidence"),
+        dict,
     ):
+        comparison_artifacts.append(
+            (
+                "acceptance-evidence.json",
+                review_dir / "acceptance-evidence.json",
+                "acceptance_evidence_hash_mismatch",
+            )
+        )
+    for local_name, child_path, issue_name in comparison_artifacts:
         local_path = iteration_dir / local_name
         if not local_path.exists():
             issues.append(f"{prefix}_local_{local_name.replace('.', '_')}_missing")

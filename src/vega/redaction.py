@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
+import tempfile
+import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, TypeVar
 
 
 REDACTION_TEXT = "[REDACTED]"
+_ATOMIC_REPLACE_MAX_ATTEMPTS = 3
+_ATOMIC_REPLACE_RETRY_SECONDS = 0.01
 
 _SENSITIVE_TEXT_FIELD_NAMES = (
     "api_key",
@@ -135,6 +140,18 @@ _DATABASE_CREDENTIAL_PATTERN = re.compile(
     r"(?P<password>[^@\s/]+)"
     r"(?=@)"
 )
+_PROVIDER_CREDENTIAL_DIAGNOSTIC_PATTERN = re.compile(
+    r"(?im)(?P<prefix>\b(?:"
+    r"(?:incorrect|invalid)\s+api\s+key(?:\s+provided)?"
+    r"|api\s+key\s+provided"
+    r")\s*:\s*)"
+    r"(?P<value>.*?)"
+    r"(?=(?:,\s*(?:url|cf-ray|request id|x-request-id)\s*:)|$)"
+)
+_REQUEST_CORRELATION_PATTERN = re.compile(
+    r"(?im)(?P<prefix>\b(?:cf-ray|request id|x-request-id)\s*:\s*)"
+    r"(?P<value>[^,\r\n]+)"
+)
 _ENV_REFERENCE_PATTERN = re.compile(
     r"(?:\$[A-Za-z_][A-Za-z0-9_]*|\$\{[A-Za-z_][A-Za-z0-9_]*\}|"
     r"%[A-Za-z_][A-Za-z0-9_]*%)"
@@ -206,6 +223,14 @@ def redact_text(text: str, *, placeholder: str = REDACTION_TEXT) -> str:
         redacted,
     )
     redacted = _DATABASE_CREDENTIAL_PATTERN.sub(
+        lambda match: f"{match.group('prefix')}{placeholder}",
+        redacted,
+    )
+    redacted = _PROVIDER_CREDENTIAL_DIAGNOSTIC_PATTERN.sub(
+        lambda match: f"{match.group('prefix')}{placeholder}",
+        redacted,
+    )
+    redacted = _REQUEST_CORRELATION_PATTERN.sub(
         lambda match: f"{match.group('prefix')}{placeholder}",
         redacted,
     )
@@ -298,6 +323,22 @@ def write_redacted_json(path: Path, payload: Any, *, indent: int = 2) -> None:
     )
 
 
+def write_redacted_text_atomic(path: Path, text: str) -> None:
+    """以同目录临时文件原子发布脱敏文本 artifact。"""
+    _write_text_atomic(path, redact_text(text))
+
+
+def write_redacted_text_create_once_atomic(path: Path, text: str) -> None:
+    """原子创建脱敏文本 artifact；目标已存在时绝不覆盖。"""
+    _write_text_create_once_atomic(path, redact_text(text))
+
+
+def write_redacted_json_atomic(path: Path, payload: Any, *, indent: int = 2) -> None:
+    """以同目录临时文件原子发布脱敏 JSON artifact。"""
+    content = json.dumps(redact_value(payload), ensure_ascii=False, indent=indent) + "\n"
+    _write_text_atomic(path, content)
+
+
 def append_redacted_jsonl(path: Path, payload: Any) -> None:
     """统一 JSONL artifact 追加边界。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -342,6 +383,77 @@ def _redact_mapping_key(key: object, placeholder: str) -> object:
     if isinstance(key, str):
         return redact_text(key, placeholder=placeholder)
     return key
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temp_path = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        for attempt in range(_ATOMIC_REPLACE_MAX_ATTEMPTS):
+            try:
+                os.replace(temp_path, path)
+            except PermissionError:
+                if attempt + 1 == _ATOMIC_REPLACE_MAX_ATTEMPTS:
+                    raise
+                time.sleep(_ATOMIC_REPLACE_RETRY_SECONDS)
+            else:
+                temp_path = None
+                return
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _write_text_create_once_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temp_path = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        for attempt in range(_ATOMIC_REPLACE_MAX_ATTEMPTS):
+            try:
+                os.link(temp_path, path)
+            except PermissionError:
+                if attempt + 1 == _ATOMIC_REPLACE_MAX_ATTEMPTS:
+                    raise
+                time.sleep(_ATOMIC_REPLACE_RETRY_SECONDS)
+            else:
+                return
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _replace_unquoted_key_value(match: re.Match[str], placeholder: str) -> str:
@@ -457,6 +569,9 @@ __all__ = [
     "sensitive_search_exclude_globs",
     "sensitive_path_reason",
     "should_include_memory_entry",
+    "write_redacted_json_atomic",
     "write_redacted_json",
+    "write_redacted_text_create_once_atomic",
+    "write_redacted_text_atomic",
     "write_redacted_text",
 ]

@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "case_id": "gate6-goal-handoff-labels-v1",
+  "goal": {
+    "objective": "分两个 checkpoint 完成稳定的标签规范化与批量去重能力。",
+    "non_goals": [
+      "不新增第三方依赖。",
+      "不修改 Python 之外的项目配置。",
+      "不自动 commit、push 或发布。"
+    ],
+    "success_conditions": [
+      "单值标签规范化满足 checkpoint 01 的全部测试。",
+      "批量标签规范化与去重满足 checkpoint 02 的全部测试。",
+      "Session B 不依赖 Session A 完整聊天。",
+      "handoff、workspace、policy 和 evidence identity 全部一致。",
+      "不写 accepted memory。"
+    ]
+  },
+  "initial_files": {
+    "src/labels.py": "def normalize_label(value: str) -> str:\n    return value.strip().lower().replace(\" \", \"-\")\n",
+    "tests/test_labels.py": "from src.labels import normalize_label\n\n\ndef test_normalize_label_basic() -> None:\n    assert normalize_label(\" Release Candidate \") == \"release-candidate\"\n"
+  },
+  "checkpoint_01": {
+    "task": "完善 normalize_label：连续空格或连字符折叠为单个连字符，空字符串抛出 ValueError。",
+    "acceptance": [
+      "去除首尾空白并转为小写。",
+      "连续空格或连字符折叠为单个连字符。",
+      "空字符串或全空白字符串抛出 ValueError。",
+      "不新增第三方依赖。"
+    ],
+    "verification_command": "python -m pytest -q"
+  },
+  "handoff": {
+    "source_session_id": "gate6-session-a",
+    "consumer_session_id": "gate6-session-b",
+    "next_action": "新增 normalize_labels(values)，复用 normalize_label，按首次出现顺序去重。",
+    "hard_constraints": [
+      "必须复用 normalize_label，不能复制第二套规范化逻辑。",
+      "批量结果必须保留规范化后首次出现的顺序。",
+      "不新增第三方依赖。",
+      "不自动 commit、push 或发布。"
+    ],
+    "verified_facts": [
+      "checkpoint 01 的单值标签规范化测试已通过。",
+      "normalize_label 已拒绝空字符串并折叠连续空格或连字符。"
+    ],
+    "failed_approaches": [
+      "直接使用 str.replace(\" \", \"-\") 不能处理连续空格和连续连字符。"
+    ],
+    "open_questions": [
+      "输入中出现多个等价标签时，输出应保留哪一个位置？验收固定为首次出现。"
+    ],
+    "source_chat_canary": "GATE6_SOURCE_CHAT_PRIVATE_CANARY_7f2a9d4c"
+  },
+  "checkpoint_02": {
+    "task": "新增 normalize_labels(values)：逐项调用 normalize_label，并按首次出现顺序去重。",
+    "acceptance": [
+      "逐项复用 normalize_label。",
+      "规范化后的重复标签只保留第一次。",
+      "输出顺序与规范化后首次出现顺序一致。",
+      "任一非法空标签沿用 normalize_label 的 ValueError。",
+      "不新增第三方依赖。"
+    ],
+    "verification_command": "python -m pytest -q"
+  },
+  "final_expected_api": [
+    "src.labels.normalize_label",
+    "src.labels.normalize_labels"
+  ],
+  "provider_budget": {
+    "preflight": 1,
+    "session_a": 1,
+    "session_b": 1,
+    "hard_limit": 3,
+    "automatic_retries": 0
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "schema_version": 2,
+  "base_case": "flask-teardown-case.json",
+  "case_identity": {
+    "case_id": "gate7-flask-teardown-goal-handoff-r4-v1",
+    "real_session": "gate7a-flask-5928-real-r4-v1",
+    "langgraph_session": "gate7c-flask-5928-real-r4-v1",
+    "date": "2026-07-19"
+  },
+  "provider_budget": {
+    "multi_agent": "disabled",
+    "preflight_sessions": 0
+  },
+  "topology": {
+    "gate_7a": {
+      "execution_name": "gate-7a-pre-run-r4-v1",
+      "consumed_name": "gate-7a-consumed-r4-v1"
+    },
+    "gate_7c": {
+      "execution_name": "gate-7c-langgraph-pre-run-r4-v1",
+      "consumed_name": "gate-7c-langgraph-consumed-r4-v1"
+    },
+    "worker_isolation": {
+      "multi_agent": "disabled-by-cli",
+      "worker_cli": [
+        "--disable",
+        "multi_agent"
+      ],
+      "git_config": "project-local-safe-directory",
+      "inspection": "bounded-transcript-audit"
+    }
+  },
+  "r2_contract": {
+    "v1_case_immutable": true,
+    "case_hash_mode": "canonical-json",
+    "graph_schema_version": "gate7-r4-v1",
+    "worker_multi_agent": "disabled-by-cli",
+    "provider_calls_before_consumed_claim": 0,
+    "repair_revision": "r4-bounded-inspection",
+    "inspection_contract": {
+      "schema_version": 1,
+      "parser_version": "gate7-r4-v1",
+      "worker_timeout_seconds": 600,
+      "max_tool_waves": 2,
+      "max_exec_commands": 8,
+      "max_read_lines": 60,
+      "max_rg_matches_per_file": 20,
+      "max_single_command_output_bytes": 8192,
+      "max_cumulative_command_output_bytes": 32768,
+      "max_transcript_bytes": 65536,
+      "max_tokens_used": 45000,
+      "max_duplicate_commands": 0,
+      "cli": {
+        "tool_output_token_limit": 2048,
+        "model_verbosity": "low",
+        "model_reasoning_summary": "none"
+      },
+      "checkpoint_hints": {
+        "CP01": [
+          "tests/test_appctx.py：优先定位现有 teardown_request、teardown_appcontext 和 signal 测试；只读 imports 与相关测试附近片段。",
+          "tests/test_basic.py：资源关闭候选集中在约 1400-1505 行，先用带 --max-count 20 的 rg 定位，再读不超过 60 行。",
+          "tests/test_blueprints.py：资源关闭候选集中在约 170-215 行，只读命中附近片段。",
+          "tests/test_helpers.py：资源关闭候选集中在约 30-105、230-335 行；根据 rg 命中选择必要片段，不得顺序扫完整文件。",
+          "tests/test_testing.py：builder、response 和 stream 候选集中在约 65-125、285-390 行；只读命中附近片段。",
+          "如需确认 teardown 调用语义，只定位 src/flask/app.py 的 do_teardown_request、do_teardown_appcontext 和 src/flask/ctx.py 的 pop，不扩展到其他生产代码。"
+        ],
+        "CP02": [
+          "src/flask/app.py：只定位 do_teardown_request 与 do_teardown_appcontext，每个函数读取不超过 60 行。",
+          "src/flask/helpers.py：先用带 --max-count 20 的 rg 定位现有内部 helper、BaseException 或 ExceptionGroup 相关位置，再选择一个不超过 60 行的片段。",
+          "直接行为合同已经由 coordinator 的 CP02 probe 冻结，不需要读取测试全集或运行本地 introspection。"
+        ],
+        "CP03": [
+          "src/flask/ctx.py：只定位 AppContext.pop 及其直接相邻上下文清理逻辑，读取不超过 60 行。",
+          "docs/appcontext.rst：只用带 --max-count 20 的 rg 定位 teardown、context 或 pop 相关段落，再读取一个不超过 60 行的片段。",
+          "CHANGES.rst：只读取顶部不超过 60 行，按既有版本条目格式补充说明。",
+          "CP01 与 CP02 的实现和已验证 Git 状态是本阶段唯一代码输入，不重新探索已完成文件。"
+        ]
+      },
+      "checkpoint_read_paths": {
+        "CP01": [
+          "tests/test_appctx.py",
+          "tests/test_basic.py",
+          "tests/test_blueprints.py",
+          "tests/test_helpers.py",
+          "tests/test_testing.py",
+          "src/flask/app.py",
+          "src/flask/ctx.py"
+        ],
+        "CP02": [
+          "src/flask/helpers.py",
+          "src/flask/app.py"
+        ],
+        "CP03": [
+          "src/flask/ctx.py",
+          "docs/appcontext.rst",
+          "CHANGES.rst"
+        ]
+      }
+    }
+  }
+}

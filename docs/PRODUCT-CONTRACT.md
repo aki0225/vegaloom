@@ -44,6 +44,10 @@ vega recover
 
 - `AGENTS.md`、项目画像和任务输入的上下文编译。
 - worker/reviewer 角色隔离和固定 sandbox。
+- Codex 配置只允许强类型白名单字段；Windows sandbox session override 仅允许固定值
+  `elevated`，且必须与 `ignore_user_config: true` 配合。
+- 显式 provider 只允许不含凭证的 `http` loopback descriptor，并且必须与
+  `ignore_user_config: true` 配合；任意外部 endpoint 和任意 CLI/TOML 透传仍然禁止。
 - 验证命令、变更预算、Prompt 预算与工作区污染门禁。
 - auto 首轮拒绝已有 tracked diff；同一 run 的后续轮次保留上一轮 diff 作为基线。
 - iteration-local risk gate 的结果与报告绑定 source reflect、iteration、结果哈希、风险和建议；Finish 会结合 trace、连续 iteration 与 Reflect 重算复核。缺失、篡改、语义不一致或绕过 `human-review` 时，不得给出 `ready_to_commit`。
@@ -101,6 +105,57 @@ Memory 是可选经验账本，不是每轮必须生成的流水线产物：
 - accepted memory 可以参与后续上下文编译，但不能覆盖代码、测试、`AGENTS.md` 或当前任务事实。
 
 当前不引入向量数据库、embedding、自动学习、自动冲突合并或自动长期写入。
+
+## 外部 Runner 配置边界
+
+Vega 不是 Codex CLI 配置代理，也不开放任意命令行透传。项目配置只能选择 schema 明确列出的
+角色字段，runtime 再将其编译为稳定命令并写入 Runner identity。
+
+Codex CLI `0.144.4` 在 `--ignore-user-config` 后会丢失用户
+`[windows] sandbox="elevated"`。在 Windows sandbox level 为 `Disabled` 的环境中，这会使
+显式请求的 `workspace-write` 在真实 session 中降为 `read-only`。为恢复这一项已确认的
+session 前置条件，Vega 只增加：
+
+```yaml
+ignore_user_config: true
+windows_sandbox_session_override: elevated
+```
+
+其产品合同固定为：
+
+- 只生成 `--config windows.sandbox="elevated"`，不接受其他值。
+- 只在 `ignore_user_config: true` 时合法，不能与 `profile` 同时使用。
+- 值必须写入 Runner identity，并参与命令与 attempt 证据绑定。
+- 不修改用户 `config.toml`，不读取认证存储，不记录凭证。
+- 不开放任意 dotted config、任意 CLI 参数或
+  `--dangerously-bypass-approvals-and-sandbox`。
+- worker/reviewer 的 `workspace-write` / `read-only` 角色 sandbox 合同保持不变。
+
+请求参数不是成功证据。真实调用仍必须从非敏感 live header 验证实际 sandbox；观测值与合同
+不一致时必须停止并交还人工。
+
+同样地，`--ignore-user-config` 会丢失用户 `config.toml` 中的自定义 provider。为支持
+“认证仍由 Codex 管理、endpoint 必须显式冻结”的场景，Vega 允许：
+
+```yaml
+ignore_user_config: true
+provider:
+  name: sandboxproxy
+  base_url: http://127.0.0.1:18080/v1
+  wire_api: responses
+  requires_openai_auth: true
+  supports_websockets: false
+```
+
+该能力的产品合同固定为：
+
+- `base_url` 只能使用 `http` loopback host 和显式非零端口；
+- 禁止 userinfo、query、fragment、空白、反斜杠和外部 host；
+- provider name 只能进入受限 dotted key，不允许点号或任意 TOML 路径；
+- descriptor、规范化 endpoint 和 SHA-256 必须进入 Runner identity；
+- 命令启动前必须严格重验证 descriptor，不能信任绕过 Pydantic 校验产生的模型实例；
+- Vega 不读取、不复制、不输出 API key 或 Codex credential store；
+- live provider/model/auth identity 不匹配时必须 fail-fast，不能自动切换或重试。
 
 ## 增长约束
 

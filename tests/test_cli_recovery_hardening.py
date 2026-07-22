@@ -502,12 +502,12 @@ def test_initial_assist_waiting_for_worker_keeps_zero_exit_code(
 
 
 @pytest.mark.parametrize(
-    ("status", "expected_exit_code"),
+    ("status", "expected_exit_code", "expected_message"),
     [
-        ("success", 0),
-        ("needs_human", 1),
-        ("failed", 1),
-        ("unknown", 1),
+        ("success", 0, "状态：`success`"),
+        ("needs_human", 1, "状态：`needs_human`"),
+        ("failed", 1, "状态：`failed`"),
+        ("unknown", 2, "schema 不合法"),
     ],
 )
 def test_auto_loop_cli_only_returns_zero_for_success(
@@ -515,6 +515,7 @@ def test_auto_loop_cli_only_returns_zero_for_success(
     monkeypatch: pytest.MonkeyPatch,
     status: str,
     expected_exit_code: int,
+    expected_message: str,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -558,7 +559,7 @@ def test_auto_loop_cli_only_returns_zero_for_success(
     )
 
     assert result.exit_code == expected_exit_code, result.output
-    assert f"状态：`{status}`" in result.output
+    assert expected_message in result.output
 
 
 def test_do_assist_waiting_for_worker_keeps_zero_exit_code(
@@ -644,6 +645,151 @@ def test_loop_continue_only_returns_zero_for_success(
 
     assert result.exit_code == expected_exit_code, result.output
     assert f"状态：`{status}`" in result.output
+
+
+@pytest.mark.parametrize(
+    ("status", "current_step", "expected_exit_code", "expected_message"),
+    [
+        ("success", "done", 0, "recover 完成"),
+        (
+            "needs_human",
+            "graph_recovery_needs_human",
+            1,
+            "recover 已安全停止，未恢复为成功",
+        ),
+        ("failed", "done", 1, "recover 完成"),
+    ],
+)
+def test_recover_cli_uses_recovered_state_for_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    current_step: str,
+    expected_exit_code: int,
+    expected_message: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "runs" / "recover-loop"
+    run_dir.mkdir(parents=True)
+    state = _loop_state(repo, run_dir.name)
+    state.status = status
+    state.current_step = current_step
+    state.save(run_dir / "state.json")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "vega.cli.RecoveryRuntime",
+        lambda workspace: SimpleNamespace(
+            recover_loop=lambda *args, **kwargs: run_dir
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "recover",
+            "--run",
+            run_dir.name,
+            "--reason",
+            "CLI exit code fixture",
+        ],
+    )
+
+    assert result.exit_code == expected_exit_code, result.output
+    assert expected_message in result.output
+    assert f"状态：`{status}`" in result.output
+
+
+def test_resume_cli_returns_nonzero_after_checkpoint_safe_stop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "runs" / "resume-loop"
+    run_dir.mkdir(parents=True)
+    state = _loop_state(repo, run_dir.name)
+    state.engine = "langgraph"
+    state.status = "needs_human"
+    state.current_step = "graph_recovery_needs_human"
+    state.save(run_dir / "state.json")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "vega.cli.LoopAutomationRuntime",
+        lambda workspace: SimpleNamespace(
+            resume_langgraph_decision=lambda *args, **kwargs: run_dir
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "resume",
+            "--run",
+            run_dir.name,
+            "--decision-id",
+            "dec-safe-stop",
+            "--engine",
+            "langgraph",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "resume 已安全停止，未恢复为成功" in result.output
+    assert "状态：`needs_human`" in result.output
+
+
+def test_stop_cli_broadcasts_to_all_active_executions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "multi-stop-loop"
+    run_dir.mkdir(parents=True)
+    now = datetime.now(UTC).isoformat()
+    _write_execution(
+        run_dir,
+        "worker",
+        step="worker",
+        status="running",
+        last_heartbeat=now,
+    )
+    _write_execution(
+        run_dir,
+        "reviewer",
+        step="reviewer",
+        status="running",
+        last_heartbeat=now,
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "stop",
+            "--run",
+            run_dir.name,
+            "--reason",
+            "停止全部 active execution",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "active execution 数：2" in result.output
+    assert run_dir.joinpath("stop-latch.json").is_file()
+    assert run_dir.joinpath(
+        "executions",
+        "worker",
+        "stop-request.json",
+    ).is_file()
+    assert run_dir.joinpath(
+        "executions",
+        "reviewer",
+        "stop-request.json",
+    ).is_file()
+    audit = run_dir.joinpath("stop-latch-audit.jsonl").read_text(
+        encoding="utf-8"
+    )
+    assert "broadcast_completed" in audit
 
 
 def test_auto_loop_cli_reports_corrupt_result_state(

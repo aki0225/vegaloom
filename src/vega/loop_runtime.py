@@ -1,14 +1,46 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
+
+from pydantic import PrivateAttr
 
 from .brief_runtime import BriefRuntime
 from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk, render_gate_report
+from .loop_engine import (
+    DEFAULT_LOOP_ENGINE,
+    LoopEngineName,
+    normalize_loop_engine,
+    preflight_persisted_linear_engine,
+    require_persisted_linear_engine,
+)
+from .loop_graph_state import GraphStateValidationError, read_graph_state
+from .loop_recovery_replay import (
+    guard_recovery_artifacts,
+    recovery_artifact_guard,
+)
+from .loop_steps import (
+    CaptureWorkspaceStepRequest,
+    FinalizeRunStepRequest,
+    HumanDecisionStepRequest,
+    HumanDecisionStepResult,
+    LoopStepInstruction,
+    LoopStepProgram,
+    LoopStepProgramDriver,
+    LoopStepServices,
+    PrepareRunStepRequest,
+    ReflectStepRequest,
+    ReviewStepRequest,
+    RiskStepRequest,
+    VerificationStepRequest,
+    WorkerEpochStepRequest,
+    WorkspaceReconcileStepRequest,
+)
 from .models import (
     BriefInput,
     GateResult,
@@ -27,10 +59,15 @@ from .risk_gate_evidence import (
     validate_iteration_risk_gate_artifacts,
 )
 from .run_utils import create_run_dir, resolve_run_dir, run_name
-from .runner import Runner, RunnerStatus, make_runner
-from .trace import TraceWriter
+from .runner import Runner, RunnerResult, RunnerStatus, make_runner
+from .trace import RecoveryTraceWriter, TraceWriter
 from .verification import VerificationRunResult, run_project_verification
-from .workspace_check import run_workspace_check, snapshot_workspace
+from .workspace_check import (
+    WorkspaceCheckResult,
+    WorkspaceSnapshot,
+    run_workspace_check,
+    snapshot_workspace,
+)
 
 LOOP_ARTIFACTS = [
     "state.json",
@@ -46,6 +83,8 @@ LOOP_ARTIFACTS = [
 FINAL_LOOP_ARTIFACTS = [*LOOP_ARTIFACTS, "final-report.md"]
 RISK_GATE_RESULT_ARTIFACT = "risk-gate-result.json"
 RISK_GATE_REPORT_ARTIFACT = "risk-gate-report.md"
+RUN_TERMINAL_STATE_REVOKED_EVENT = "run_terminal_state_revoked"
+RUN_TERMINAL_REVOKED_EVENT = "run_terminal_revoked"
 
 
 @dataclass(frozen=True)
@@ -61,6 +100,19 @@ class LoopRiskGateEvidence:
         return "failed" if self.error else "success"
 
 
+class _RecoveryLoopAutomationState(LoopAutomationState):
+    """恢复时先静默重建生成器，和 checkpoint 对齐后才允许写权威状态。"""
+
+    _persistence_enabled: bool = PrivateAttr(default=False)
+
+    def enable_persistence(self) -> None:
+        self._persistence_enabled = True
+
+    def save(self, path: Path) -> None:
+        if self._persistence_enabled:
+            super().save(path)
+
+
 class LoopAutomationRuntime:
     def __init__(
         self,
@@ -68,11 +120,95 @@ class LoopAutomationRuntime:
         worker_runner: Runner | None = None,
         reviewer_runner: Runner | None = None,
         timeout_seconds: int = 900,
+        step_services: LoopStepServices | None = None,
+        graph_fault_injector: Callable[[str], None] | None = None,
     ) -> None:
         self.workspace = workspace
         self.worker_runner = worker_runner
         self.reviewer_runner = reviewer_runner
         self.timeout_seconds = timeout_seconds
+        self.step_services = step_services or self._default_step_services()
+        self.graph_fault_injector = graph_fault_injector
+
+    def _default_step_services(self) -> LoopStepServices:
+        def dispatch_review(request: ReviewStepRequest) -> Path:
+            return ReviewRuntime(
+                request.workspace,
+                runner=self.reviewer_runner,
+                timeout_seconds=self.timeout_seconds,
+            ).run(
+                request.repo_path,
+                run_name(request.reflect_run),
+                runner_name=request.reviewer_name,
+                execution_context=RunnerExecutionContext(
+                    execution_dir=_iteration_dir(
+                        request.loop_run_dir,
+                        request.iteration,
+                    )
+                    / "executions"
+                    / "reviewer",
+                    run_id=request.loop_run_dir.name,
+                    step="reviewer",
+                    iteration=request.iteration,
+                ),
+                project_config=request.config,
+                human_approval_run_dir=request.loop_run_dir,
+                human_approval_iteration=request.iteration,
+                human_approval_ref=request.human_approval_ref,
+            )
+
+        def finalize_run(request: FinalizeRunStepRequest) -> None:
+            self._persist_loop_done(
+                request.run_dir,
+                request.state,
+                request.status,
+                request.trace,
+                current_step=request.current_step,
+            )
+
+        return LoopStepServices(
+            prepare_run=lambda request: BriefRuntime(request.workspace).run(
+                request.brief_input
+            ),
+            capture_workspace=lambda request: snapshot_workspace(
+                request.repo_path
+            ),
+            execute_worker_epoch=lambda request: request.runner.run(
+                request.prompt,
+                request.repo_path,
+                sandbox=request.sandbox,
+                timeout_seconds=request.timeout_seconds,
+                execution_context=request.execution_context,
+            ),
+            reconcile_workspace=lambda request: run_workspace_check(
+                request.repo_path,
+                request.output_dir,
+                baseline=request.baseline,
+                allow_existing_tracked_diff=request.allow_existing_tracked_diff,
+                require_clean_untracked=request.require_clean_untracked,
+            ),
+            run_verification=lambda request: run_project_verification(
+                request.workspace,
+                request.repo_path,
+                request.output_dir,
+            ),
+            run_reflect=lambda request: ReflectRuntime(request.workspace).run(
+                request.repo_path,
+                source_run=request.source_run,
+                test_log=request.test_log,
+                note=request.note,
+            ),
+            evaluate_risk=lambda request: evaluate_risk(
+                request.workspace,
+                request.repo_path,
+                request.source_run,
+            ),
+            request_human_decision=lambda _request: HumanDecisionStepResult(
+                decision="not_provided",
+            ),
+            dispatch_review=dispatch_review,
+            finalize_run=finalize_run,
+        )
 
     def start(
         self,
@@ -82,13 +218,27 @@ class LoopAutomationRuntime:
         reviewer_name: str = "codex-exec",
         max_iterations: int = 2,
         verify: bool = True,
+        engine: LoopEngineName | str = DEFAULT_LOOP_ENGINE,
     ) -> Path:
+        engine_name = normalize_loop_engine(engine)
         config = load_project_config(Path(brief_input.repo_path))
         worker_name, reviewer_name = _apply_runner_defaults(
             config,
             worker_name,
             reviewer_name,
         )
+        program_executor = self._load_program_executor(
+            engine_name,
+            automation_mode=automation_mode,
+            worker_name=worker_name,
+            reviewer_name=reviewer_name,
+            verify=verify,
+        )
+        if engine_name == "langgraph":
+            _require_graph_control_isolation(
+                self.workspace,
+                Path(brief_input.repo_path),
+            )
         run_id, run_dir = create_run_dir(
             self.workspace,
             _new_loop_run_id(brief_input.mode),
@@ -98,6 +248,7 @@ class LoopAutomationRuntime:
             run_id=run_id,
             task_mode=brief_input.mode,
             automation_mode=automation_mode,
+            engine=engine_name,
             repo_path=brief_input.repo_path,
             input_source=brief_input.source,
             status="running",
@@ -110,18 +261,277 @@ class LoopAutomationRuntime:
             "loop_started",
             task_mode=brief_input.mode,
             automation_mode=automation_mode,
+            engine=engine_name,
             repo_path=brief_input.repo_path,
         )
         _write_project_policy_snapshot(run_dir, state.project_policy_snapshot)
 
-        brief_run = BriefRuntime(self.workspace).run(brief_input)
+        program = self._start_step_program(
+            run_dir,
+            state,
+            trace,
+            brief_input,
+            automation_mode,
+            worker_name,
+            reviewer_name,
+            verify,
+            config,
+        )
+        driver = LoopStepProgramDriver(program, self.step_services)
+        return program_executor(run_dir, driver)
+
+    def _load_program_executor(
+        self,
+        engine: LoopEngineName,
+        *,
+        automation_mode: Literal["assist", "auto"],
+        worker_name: str,
+        reviewer_name: str,
+        verify: bool,
+    ) -> Callable[[Path, LoopStepProgramDriver], Path]:
+        if engine == "linear":
+            return lambda _run_dir, driver: driver.run_linear()
+        try:
+            from .loop_graph_runtime import execute_langgraph_program
+        except ModuleNotFoundError as exc:
+            if exc.name == "langgraph" or (
+                exc.name is not None and exc.name.startswith("langgraph.")
+            ):
+                raise ValueError(
+                    "langgraph engine 需要可选依赖；"
+                    "请在项目隔离环境中安装 `vegaloom[langgraph]`"
+                ) from exc
+            raise
+        return lambda run_dir, driver: execute_langgraph_program(
+            run_dir,
+            driver,
+            automation_mode=automation_mode,
+            worker_name=worker_name,
+            reviewer_name=reviewer_name,
+            verify=verify,
+            timeout_seconds=self.timeout_seconds,
+            fault_injector=cast(Callable, self.graph_fault_injector),
+        )
+
+    def recover_langgraph(
+        self,
+        run: str,
+        reason: str,
+        *,
+        engine: str | None = None,
+    ) -> Path:
+        """按 Gate 3 reconciliation 恢复 graph，而不是盲目重放外部节点。"""
+
+        from .loop_graph_recovery import hold_graph_operation_lease
+
+        if not reason.strip():
+            raise ValueError("recover 必须提供原因，方便后续追溯。")
+        run_dir = resolve_run_dir(self.workspace, run)
+        with hold_graph_operation_lease(run_dir, "recover"):
+            return self._recover_langgraph_with_lease(
+                run_dir,
+                reason.strip(),
+                engine=engine,
+            )
+
+    def _recover_langgraph_with_lease(
+        self,
+        run_dir: Path,
+        reason: str,
+        *,
+        engine: str | None,
+    ) -> Path:
+        from .loop_engine import ensure_loop_engine_matches
+        from .loop_graph_recovery import read_graph_run_config
+        from .loop_graph_runtime import resume_langgraph_program
+
+        state_path = run_dir / "state.json"
+        state = _RecoveryLoopAutomationState.model_validate_json(
+            state_path.read_text(encoding="utf-8")
+        )
+        if state.run_id != run_dir.name:
+            raise ValueError(
+                "loop state.run_id 与 run 目录身份不一致；"
+                "为避免串用 checkpoint，已拒绝 graph recovery。"
+            )
+        persisted_engine = ensure_loop_engine_matches(state.engine, engine)
+        if persisted_engine != "langgraph":
+            raise ValueError("只有 langgraph run 可以使用 graph recovery")
+        if state.status == "running" and state.current_step == "human_decision":
+            raise ValueError(
+                "当前 LangGraph run 正在等待 human_decision；"
+                "普通 recover 不得替代人工决策消费，"
+                "请先写入 decision ledger，再使用 "
+                "`vega resume --decision-id <dec-id> --engine langgraph`。"
+            )
+        run_config = read_graph_run_config(run_dir)
+        if self.timeout_seconds != run_config.timeout_seconds:
+            raise ValueError(
+                "graph run 的 timeout_seconds 已固定为 "
+                f"{run_config.timeout_seconds}，当前 Runtime 为 "
+                f"{self.timeout_seconds}；为避免 attempt 输入身份漂移，"
+                "已拒绝恢复。"
+            )
+        repo_path = Path(state.repo_path).resolve()
+        _require_graph_control_isolation(self.workspace, repo_path)
+        config = load_project_config(repo_path)
+        brief_input = BriefInput(
+            mode=state.task_mode,
+            text="",
+            source=state.input_source,
+            repo_path=str(repo_path),
+        )
+        recovery_trace = RecoveryTraceWriter(run_dir / "trace.jsonl")
+        with guard_recovery_artifacts(run_dir) as artifact_guard:
+            program = self._start_step_program(
+                run_dir,
+                state,
+                recovery_trace,
+                brief_input,
+                run_config.automation_mode,
+                run_config.worker_name,
+                run_config.reviewer_name,
+                run_config.verify,
+                config,
+            )
+            driver = LoopStepProgramDriver(program, self.step_services)
+
+            def enable_business_writes() -> None:
+                state.enable_persistence()
+                artifact_guard.enable_new_writes()
+                recovery_trace.enable()
+
+            return resume_langgraph_program(
+                run_dir,
+                driver,
+                business_state=state,
+                request_reason=reason,
+                enable_state_persistence=enable_business_writes,
+                fault_injector=cast(Callable, self.graph_fault_injector),
+            )
+
+    def resume_langgraph_decision(
+        self,
+        run: str,
+        decision_id: str,
+        *,
+        engine: str | None = None,
+    ) -> Path:
+        """只用已写入 ledger 的 decision id 恢复 HITL interrupt。"""
+
+        from .loop_graph_recovery import hold_graph_operation_lease
+
+        normalized_decision_id = decision_id.strip()
+        if not normalized_decision_id:
+            raise ValueError("resume 必须提供 decision id")
+        run_dir = resolve_run_dir(self.workspace, run)
+        with hold_graph_operation_lease(run_dir, "resume_decision"):
+            return self._resume_langgraph_decision_with_lease(
+                run_dir,
+                normalized_decision_id,
+                engine=engine,
+            )
+
+    def _resume_langgraph_decision_with_lease(
+        self,
+        run_dir: Path,
+        decision_id: str,
+        *,
+        engine: str | None,
+    ) -> Path:
+        from .loop_engine import ensure_loop_engine_matches
+        from .loop_graph_recovery import read_graph_run_config
+        from .loop_graph_runtime import resume_langgraph_decision
+
+        state = _RecoveryLoopAutomationState.model_validate_json(
+            run_dir.joinpath("state.json").read_text(encoding="utf-8")
+        )
+        if state.run_id != run_dir.name:
+            raise ValueError(
+                "loop state.run_id 与 run 目录身份不一致；"
+                "为避免串用 HITL checkpoint，已拒绝 resume。"
+            )
+        persisted_engine = ensure_loop_engine_matches(state.engine, engine)
+        if persisted_engine != "langgraph":
+            raise ValueError("只有 langgraph run 可以消费 HITL decision")
+        if state.status != "running" or state.current_step != "human_decision":
+            raise ValueError(
+                "只有停在 human_decision 的 running run 可以 resume"
+            )
+        run_config = read_graph_run_config(run_dir)
+        if self.timeout_seconds != run_config.timeout_seconds:
+            raise ValueError(
+                "graph run 的 timeout_seconds 已固定为 "
+                f"{run_config.timeout_seconds}，当前 Runtime 为 "
+                f"{self.timeout_seconds}；已拒绝 resume。"
+            )
+        repo_path = Path(state.repo_path).resolve()
+        _require_graph_control_isolation(self.workspace, repo_path)
+        config = load_project_config(repo_path)
+        brief_input = BriefInput(
+            mode=state.task_mode,
+            text="",
+            source=state.input_source,
+            repo_path=str(repo_path),
+        )
+        recovery_trace = RecoveryTraceWriter(run_dir / "trace.jsonl")
+        with guard_recovery_artifacts(run_dir) as artifact_guard:
+            program = self._start_step_program(
+                run_dir,
+                state,
+                recovery_trace,
+                brief_input,
+                run_config.automation_mode,
+                run_config.worker_name,
+                run_config.reviewer_name,
+                run_config.verify,
+                config,
+            )
+            driver = LoopStepProgramDriver(program, self.step_services)
+
+            def enable_business_writes() -> None:
+                state.enable_persistence()
+                artifact_guard.enable_new_writes()
+                recovery_trace.enable()
+
+            return resume_langgraph_decision(
+                run_dir,
+                driver,
+                business_state=state,
+                decision_id=decision_id,
+                enable_state_persistence=enable_business_writes,
+                fault_injector=cast(Callable, self.graph_fault_injector),
+            )
+
+    def _start_step_program(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        trace: TraceWriter,
+        brief_input: BriefInput,
+        automation_mode: Literal["assist", "auto"],
+        worker_name: str,
+        reviewer_name: str,
+        verify: bool,
+        config: ProjectConfig,
+    ) -> LoopStepProgram:
+        brief_run = cast(
+            Path,
+            (yield LoopStepInstruction(
+                "prepare_run",
+                PrepareRunStepRequest(
+                    workspace=self.workspace,
+                    brief_input=brief_input,
+                ),
+            )),
+        )
         state.brief_run = run_name(brief_run)
         _copy_if_exists(brief_run / "agent-brief.md", run_dir / "agent-brief.md")
         _copy_if_exists(brief_run / "project-context.md", run_dir / "project-context.md")
         trace.write("brief_finished", brief_run=state.brief_run)
         _write_text_artifact(
             run_dir / "loop-plan.md",
-            render_loop_plan(brief_input, automation_mode, max_iterations),
+            render_loop_plan(brief_input, automation_mode, state.max_iterations),
         )
         worker_prompt, worker_sections = build_worker_prompt(
             brief_input,
@@ -136,7 +546,12 @@ class LoopAutomationRuntime:
             max_chars=config.prompt_budget.worker_max_chars,
             sections=worker_sections,
         )
-        write_prompt_metrics(run_dir, "worker-prompt", worker_metrics)
+        write_prompt_metrics(
+            run_dir,
+            "worker-prompt",
+            worker_metrics,
+            write_text=_write_text_artifact,
+        )
         trace.write("worker_prompt_measured", metrics=worker_metrics.model_dump())
         if automation_mode == "assist":
             root_budget_artifact: str | None = None
@@ -153,25 +568,95 @@ class LoopAutomationRuntime:
                 *([root_budget_artifact] if root_budget_artifact else []),
             ]
             trace.write("loop_waiting_for_worker", worker_prompt="worker-prompt.md")
-            _finalize_loop_eval(
+            yield self._finalize_instruction(
                 run_dir,
                 state,
                 "needs_human",
-                state.artifacts,
                 trace,
+                current_step="waiting_for_worker",
             )
             return run_dir
 
-        run_dir = self._run_auto_iterations(
-            run_dir,
-            state,
-            brief_input,
-            worker_name,
-            reviewer_name,
-            verify,
-            config,
+        return (
+            yield from self._auto_step_program(
+                run_dir,
+                state,
+                brief_input,
+                worker_name,
+                reviewer_name,
+                verify,
+                config,
+                trace,
+            )
         )
-        return run_dir
+
+    def _finalize_instruction(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        status: Literal["success", "failed", "needs_human"],
+        trace: TraceWriter,
+        *,
+        current_step: str = "done",
+    ) -> LoopStepInstruction:
+        return LoopStepInstruction(
+            "finalize_run",
+            FinalizeRunStepRequest(
+                run_dir=run_dir,
+                state=state,
+                status=status,
+                trace=trace,
+                current_step=current_step,
+            ),
+        )
+
+    def _run_auto_iterations(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        brief_input: BriefInput,
+        worker_name: str,
+        reviewer_name: str,
+        verify: bool,
+        config: ProjectConfig,
+    ) -> Path:
+        return LoopStepProgramDriver(
+            self._auto_step_program(
+                run_dir,
+                state,
+                brief_input,
+                worker_name,
+                reviewer_name,
+                verify,
+                config,
+                TraceWriter(run_dir / "trace.jsonl"),
+            ),
+            self.step_services,
+        ).run_linear()
+
+    def _auto_step_program(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        brief_input: BriefInput,
+        worker_name: str,
+        reviewer_name: str,
+        verify: bool,
+        config: ProjectConfig,
+        trace: TraceWriter,
+    ) -> LoopStepProgram:
+        return (
+            yield from self._auto_iterations_program(
+                run_dir,
+                state,
+                brief_input,
+                worker_name,
+                reviewer_name,
+                verify,
+                config,
+                trace,
+            )
+        )
 
     def continue_assist(
         self,
@@ -181,8 +666,10 @@ class LoopAutomationRuntime:
         test_log: Path | None = None,
         note: str | None = None,
         verify: bool = True,
+        engine: str | None = None,
     ) -> Path:
         run_dir = resolve_run_dir(self.workspace, run)
+        preflight_persisted_linear_engine(run_dir / "state.json", engine)
         state = LoopAutomationState.model_validate_json(
             run_dir.joinpath("state.json").read_text(encoding="utf-8")
         )
@@ -191,6 +678,7 @@ class LoopAutomationRuntime:
                 "loop state.run_id 与 run 目录身份不一致；"
                 "为避免在错误证据链上继续，已拒绝 continue。"
             )
+        require_persisted_linear_engine(state.engine, engine)
         if state.automation_mode not in {"assist", "auto"}:
             raise ValueError("只有 assist/auto loop 可以使用 continue")
         repo = repo_path.resolve()
@@ -247,10 +735,12 @@ class LoopAutomationRuntime:
             iteration_dir / "worker-output.txt",
             f"{state.automation_mode} continue 模式下，worker 是主会话或人工；Vega 只记录当前工作区 diff。\n",
         )
-        workspace_check = run_workspace_check(
-            repo,
-            iteration_dir,
-            require_clean_untracked=True,
+        workspace_check = self.step_services.reconcile_workspace(
+            WorkspaceReconcileStepRequest(
+                repo_path=repo,
+                output_dir=iteration_dir,
+                require_clean_untracked=True,
+            )
         )
         trace.write(
             "workspace_check_finished",
@@ -309,7 +799,13 @@ class LoopAutomationRuntime:
         if verify and auto_test_log is None:
             state.current_step = "verify"
             state.save(run_dir / "state.json")
-            verification = run_project_verification(self.workspace, repo, iteration_dir)
+            verification = self.step_services.run_verification(
+                VerificationStepRequest(
+                    workspace=self.workspace,
+                    repo_path=repo,
+                    output_dir=iteration_dir,
+                )
+            )
             verification_status = _verification_status(verification.command_count, verification.failed_count)
             verification_failed_count = verification.failed_count
             trace.write(
@@ -337,11 +833,14 @@ class LoopAutomationRuntime:
 
         state.current_step = "reflect"
         state.save(run_dir / "state.json")
-        reflect_run = ReflectRuntime(self.workspace).run(
-            repo,
-            source_run=state.brief_run,
-            test_log=auto_test_log.resolve() if auto_test_log else None,
-            note=note,
+        reflect_run = self.step_services.run_reflect(
+            ReflectStepRequest(
+                workspace=self.workspace,
+                repo_path=repo,
+                source_run=state.brief_run,
+                test_log=auto_test_log.resolve() if auto_test_log else None,
+                note=note,
+            )
         )
         _record_reflect(iteration_dir, reflect_run)
         if not _reflect_run_succeeded(reflect_run):
@@ -411,6 +910,7 @@ class LoopAutomationRuntime:
             )
             return run_dir
         gate_evidence = _evaluate_loop_risk_gate(
+            self.step_services.evaluate_risk,
             self.workspace,
             repo,
             reflect_run,
@@ -465,13 +965,16 @@ class LoopAutomationRuntime:
             return run_dir
         state.current_step = "review"
         state.save(run_dir / "state.json")
-        review_run = self._run_review(
-            repo,
-            reflect_run,
-            reviewer_name,
-            run_dir,
-            iteration_number,
-            config,
+        review_run = self.step_services.dispatch_review(
+            ReviewStepRequest(
+                workspace=self.workspace,
+                repo_path=repo,
+                reflect_run=reflect_run,
+                reviewer_name=reviewer_name,
+                loop_run_dir=run_dir,
+                iteration=iteration_number,
+                config=config,
+            )
         )
         verdict = _read_verdict(review_run)
         reviewer_status = _read_review_runner_status(review_run)
@@ -514,7 +1017,7 @@ class LoopAutomationRuntime:
         self._finish_or_prepare_next(run_dir, state, verdict, iteration_dir, trace)
         return run_dir
 
-    def _run_auto_iterations(
+    def _auto_iterations_program(
         self,
         run_dir: Path,
         state: LoopAutomationState,
@@ -523,8 +1026,8 @@ class LoopAutomationRuntime:
         reviewer_name: str,
         verify: bool,
         config: ProjectConfig,
-    ) -> Path:
-        trace = TraceWriter(run_dir / "trace.jsonl")
+        trace: TraceWriter,
+    ) -> LoopStepProgram:
         repo_path = Path(brief_input.repo_path).resolve()
         previous_verdict: ReviewVerdict | None = None
         worker = self.worker_runner or make_runner(
@@ -550,7 +1053,12 @@ class LoopAutomationRuntime:
                 max_chars=config.prompt_budget.worker_max_chars,
                 sections=prompt_sections,
             )
-            write_prompt_metrics(iteration_dir, "worker-prompt", prompt_metrics)
+            write_prompt_metrics(
+                iteration_dir,
+                "worker-prompt",
+                prompt_metrics,
+                write_text=_write_text_artifact,
+            )
             trace.write(
                 "worker_prompt_measured",
                 iteration=iteration_number,
@@ -570,7 +1078,7 @@ class LoopAutomationRuntime:
                     previous_verdict,
                     "worker prompt 超过上下文预算，未启动外部 runner。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -578,15 +1086,27 @@ class LoopAutomationRuntime:
                     current_step="worker_context_budget",
                 )
                 return run_dir
-            workspace_baseline = snapshot_workspace(repo_path)
+            workspace_baseline = cast(
+                WorkspaceSnapshot,
+                (yield LoopStepInstruction(
+                    "capture_workspace",
+                    CaptureWorkspaceStepRequest(repo_path=repo_path),
+                )),
+            )
             if not workspace_baseline.capture_complete or (
                 iteration_number == 1 and workspace_baseline.has_tracked_changes
             ):
-                workspace_check = run_workspace_check(
-                    repo_path,
-                    iteration_dir,
-                    baseline=workspace_baseline,
-                    allow_existing_tracked_diff=iteration_number > 1,
+                workspace_check = cast(
+                    WorkspaceCheckResult,
+                    (yield LoopStepInstruction(
+                        "reconcile_workspace",
+                        WorkspaceReconcileStepRequest(
+                            repo_path=repo_path,
+                            output_dir=iteration_dir,
+                            baseline=workspace_baseline,
+                            allow_existing_tracked_diff=iteration_number > 1,
+                        ),
+                    )),
                 )
                 state.iterations.append(
                     LoopIterationState(
@@ -620,7 +1140,7 @@ class LoopAutomationRuntime:
                     tracked_files=len(workspace_baseline.tracked_files),
                 )
                 _write_final_report(run_dir, state, previous_verdict, conclusion)
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -629,17 +1149,24 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
             trace.write("worker_started", iteration=iteration_number, runner=worker_name)
-            worker_result = worker.run(
-                prompt,
-                repo_path,
-                sandbox="workspace-write",
-                timeout_seconds=self.timeout_seconds,
-                execution_context=RunnerExecutionContext(
-                    execution_dir=iteration_dir / "executions" / "worker",
-                    run_id=state.run_id,
-                    step="worker",
-                    iteration=iteration_number,
-                ),
+            worker_result = cast(
+                RunnerResult,
+                (yield LoopStepInstruction(
+                    "execute_worker_epoch",
+                    WorkerEpochStepRequest(
+                        runner=worker,
+                        prompt=prompt,
+                        repo_path=repo_path,
+                        sandbox="workspace-write",
+                        timeout_seconds=self.timeout_seconds,
+                        execution_context=RunnerExecutionContext(
+                            execution_dir=iteration_dir / "executions" / "worker",
+                            run_id=state.run_id,
+                            step="worker",
+                            iteration=iteration_number,
+                        ),
+                    ),
+                )),
             )
             _write_text_artifact(
                 iteration_dir / "worker-output.txt",
@@ -665,7 +1192,7 @@ class LoopAutomationRuntime:
                     else "worker 已按 stop request 停止，已停止后续验证和审查。"
                 )
                 _write_final_report(run_dir, state, None, conclusion)
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -674,11 +1201,17 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
             if worker_result.status != "success":
-                workspace_check = run_workspace_check(
-                    repo_path,
-                    iteration_dir,
-                    baseline=workspace_baseline,
-                    allow_existing_tracked_diff=iteration_number > 1,
+                workspace_check = cast(
+                    WorkspaceCheckResult,
+                    (yield LoopStepInstruction(
+                        "reconcile_workspace",
+                        WorkspaceReconcileStepRequest(
+                            repo_path=repo_path,
+                            output_dir=iteration_dir,
+                            baseline=workspace_baseline,
+                            allow_existing_tracked_diff=iteration_number > 1,
+                        ),
+                    )),
                 )
                 trace.write(
                     "workspace_check_finished",
@@ -707,7 +1240,7 @@ class LoopAutomationRuntime:
                     None,
                     "worker runner 异常退出，可能已留下部分改动；未继续验证和审查。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -736,7 +1269,7 @@ class LoopAutomationRuntime:
                     None,
                     "worker 修改了项目策略文件，已停止自动验证和审查。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -745,11 +1278,17 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
 
-            workspace_check = run_workspace_check(
-                repo_path,
-                iteration_dir,
-                baseline=workspace_baseline,
-                allow_existing_tracked_diff=iteration_number > 1,
+            workspace_check = cast(
+                WorkspaceCheckResult,
+                (yield LoopStepInstruction(
+                    "reconcile_workspace",
+                    WorkspaceReconcileStepRequest(
+                        repo_path=repo_path,
+                        output_dir=iteration_dir,
+                        baseline=workspace_baseline,
+                        allow_existing_tracked_diff=iteration_number > 1,
+                    ),
+                )),
             )
             trace.write(
                 "workspace_check_finished",
@@ -777,7 +1316,7 @@ class LoopAutomationRuntime:
                     None,
                     "worker 结束后工作区污染检查失败，已停止自动验证和审查。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -814,7 +1353,7 @@ class LoopAutomationRuntime:
                     None,
                     "worker 新增了未跟踪文件；reviewer 不读取其内容，已转人工确认。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -824,13 +1363,27 @@ class LoopAutomationRuntime:
                 return run_dir
 
             verification_log: Path | None = None
+            verification_result_path: Path | None = None
+            verification_summary_path: Path | None = None
             verification_status = "skipped"
             verification_failed_count = 0
             if verify:
                 state.current_step = "verify"
                 state.save(run_dir / "state.json")
-                verification = run_project_verification(self.workspace, repo_path, iteration_dir)
+                verification = cast(
+                    VerificationRunResult,
+                    (yield LoopStepInstruction(
+                        "run_verification",
+                        VerificationStepRequest(
+                            workspace=self.workspace,
+                            repo_path=repo_path,
+                            output_dir=iteration_dir,
+                        ),
+                    )),
+                )
                 verification_log = verification.summary_path
+                verification_result_path = verification.result_path
+                verification_summary_path = verification.summary_path
                 verification_status = _verification_status(verification.command_count, verification.failed_count)
                 verification_failed_count = verification.failed_count
                 trace.write(
@@ -841,7 +1394,7 @@ class LoopAutomationRuntime:
                     interruption_status=verification.interruption_status,
                 )
                 if verification.was_interrupted:
-                    self._pause_for_verification_interruption(
+                    current_step = self._prepare_verification_interruption(
                         run_dir,
                         state,
                         iteration_dir,
@@ -852,15 +1405,29 @@ class LoopAutomationRuntime:
                         workspace_status=workspace_check.status,
                         workspace_new_files_count=workspace_check.new_untracked_count,
                     )
+                    yield self._finalize_instruction(
+                        run_dir,
+                        state,
+                        "needs_human",
+                        trace,
+                        current_step=current_step,
+                    )
                     return run_dir
 
             state.current_step = "reflect"
             state.save(run_dir / "state.json")
-            reflect_run = ReflectRuntime(self.workspace).run(
-                repo_path,
-                source_run=state.brief_run,
-                test_log=verification_log,
-                note=f"auto loop 第 {iteration_number} 轮执行后复盘",
+            reflect_run = cast(
+                Path,
+                (yield LoopStepInstruction(
+                    "run_reflect",
+                    ReflectStepRequest(
+                        workspace=self.workspace,
+                        repo_path=repo_path,
+                        source_run=state.brief_run,
+                        test_log=verification_log,
+                        note=f"auto loop 第 {iteration_number} 轮执行后复盘",
+                    ),
+                )),
             )
             _record_reflect(iteration_dir, reflect_run)
             if not _reflect_run_succeeded(reflect_run):
@@ -888,7 +1455,7 @@ class LoopAutomationRuntime:
                     None,
                     "Reflect 的确定性证据检查失败，未启动隔离 reviewer。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -919,7 +1486,7 @@ class LoopAutomationRuntime:
                     None,
                     "本轮没有可审查的 tracked diff，不能自动判定成功。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -927,14 +1494,35 @@ class LoopAutomationRuntime:
                     current_step="no_diff",
                 )
                 return run_dir
-            gate_evidence = _evaluate_loop_risk_gate(
-                self.workspace,
-                repo_path,
-                reflect_run,
-                iteration_dir,
-                trace,
-                iteration_number,
-            )
+            source_run = run_name(reflect_run)
+            try:
+                gate_result = cast(
+                    GateResult,
+                    (yield LoopStepInstruction(
+                        "evaluate_risk",
+                        RiskStepRequest(
+                            workspace=self.workspace,
+                            repo_path=repo_path,
+                            source_run=source_run,
+                        ),
+                    )),
+                )
+            except Exception as exc:  # noqa: BLE001 - 风险判断错误必须 fail-closed
+                gate_evidence = _record_loop_risk_gate_failure(
+                    exc,
+                    source_run,
+                    iteration_dir,
+                    trace,
+                    iteration_number,
+                )
+            else:
+                gate_evidence = _record_loop_risk_gate_success(
+                    gate_result,
+                    source_run,
+                    iteration_dir,
+                    trace,
+                    iteration_number,
+                )
             gate_result = gate_evidence.result
             if gate_evidence.error or gate_result is None:
                 state.iterations.append(
@@ -959,7 +1547,7 @@ class LoopAutomationRuntime:
                     None,
                     "风险门禁评估失败，未启动隔离 reviewer。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -968,45 +1556,94 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
             if gate_result.recommendation == "human-review":
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        verification_status=verification_status,
-                        verification_failed_count=verification_failed_count,
-                        reflect_run=run_name(reflect_run),
-                        **_risk_gate_state_fields(gate_evidence),
+                state.current_step = "human_decision"
+                state.save(run_dir / "state.json")
+                human_decision = cast(
+                    HumanDecisionStepResult,
+                    (yield LoopStepInstruction(
+                        "request_human_decision",
+                        HumanDecisionStepRequest(
+                            repo_path=repo_path,
+                            iteration=iteration_number,
+                            reflect_run=reflect_run,
+                            verification_status=verification_status,
+                            verification_failed_count=verification_failed_count,
+                            verification_result_path=verification_result_path,
+                            verification_summary_path=verification_summary_path,
+                            risk_result_sha256=gate_evidence.result_sha256,
+                            risk_report_sha256=gate_evidence.report_sha256,
+                        ),
+                    )),
+                )
+                trace.write(
+                    "human_decision_finished",
+                    iteration=iteration_number,
+                    decision=human_decision.decision,
+                    decision_id=human_decision.decision_id,
+                )
+                if human_decision.decision != "approved":
+                    state.iterations.append(
+                        LoopIterationState(
+                            iteration=iteration_number,
+                            worker_status="success",
+                            workspace_status=workspace_check.status,
+                            workspace_new_files_count=workspace_check.new_untracked_count,
+                            verification_status=verification_status,
+                            verification_failed_count=verification_failed_count,
+                            reflect_run=run_name(reflect_run),
+                            **_risk_gate_state_fields(gate_evidence),
+                        )
                     )
-                )
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_risk_gate_fix_prompt(iteration_number + 1, gate_result),
-                )
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "风险门禁要求人工确认，未继续自动隔离审查。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="risk_gate_needs_human",
-                )
-                return run_dir
+                    _write_text_artifact(
+                        iteration_dir / "fix-prompt.md",
+                        render_risk_gate_fix_prompt(
+                            iteration_number + 1,
+                            gate_result,
+                        ),
+                    )
+                    conclusion = (
+                        "人工已拒绝风险门禁批准，未继续自动隔离审查。"
+                        if human_decision.decision == "rejected"
+                        else "风险门禁要求人工确认，未继续自动隔离审查。"
+                    )
+                    _write_final_report(
+                        run_dir,
+                        state,
+                        None,
+                        conclusion,
+                    )
+                    yield self._finalize_instruction(
+                        run_dir,
+                        state,
+                        "needs_human",
+                        trace,
+                        current_step=(
+                            "risk_gate_rejected"
+                            if human_decision.decision == "rejected"
+                            else "risk_gate_needs_human"
+                        ),
+                    )
+                    return run_dir
+                human_approval_ref = human_decision.consumption_ref
+            else:
+                human_approval_ref = None
             state.current_step = "review"
             state.save(run_dir / "state.json")
-            review_run = self._run_review(
-                repo_path,
-                reflect_run,
-                reviewer_name,
-                run_dir,
-                iteration_number,
-                config,
+            review_run = cast(
+                Path,
+                (yield LoopStepInstruction(
+                    "dispatch_review",
+                    ReviewStepRequest(
+                        workspace=self.workspace,
+                        repo_path=repo_path,
+                        reflect_run=reflect_run,
+                        reviewer_name=reviewer_name,
+                        loop_run_dir=run_dir,
+                        iteration=iteration_number,
+                        config=config,
+                        human_approval_ref=human_approval_ref,
+                    ),
+                )),
             )
             verdict = _read_verdict(review_run)
             reviewer_status = _read_review_runner_status(review_run)
@@ -1040,7 +1677,7 @@ class LoopAutomationRuntime:
                     verdict,
                     f"Review run 自身状态为 {review_run_status}，不能采用其 verdict。",
                 )
-                self._save_loop_done(
+                yield self._finalize_instruction(
                     run_dir,
                     state,
                     "needs_human",
@@ -1048,11 +1685,20 @@ class LoopAutomationRuntime:
                     current_step="review_run_failed",
                 )
                 return run_dir
-            if verdict.verdict == "approve":
-                self._finish_or_prepare_next(run_dir, state, verdict, iteration_dir, trace)
-                return run_dir
-            if verdict.verdict == "needs_human":
-                self._finish_or_prepare_next(run_dir, state, verdict, iteration_dir, trace)
+            if verdict.verdict in {"approve", "needs_human"}:
+                status, current_step = self._prepare_finish_or_next(
+                    run_dir,
+                    state,
+                    verdict,
+                    iteration_dir,
+                )
+                yield self._finalize_instruction(
+                    run_dir,
+                    state,
+                    status,
+                    trace,
+                    current_step=current_step,
+                )
                 return run_dir
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
@@ -1061,7 +1707,12 @@ class LoopAutomationRuntime:
             trace.write("fix_prompt_written", iteration=iteration_number)
 
         _write_final_report(run_dir, state, previous_verdict, "达到最大自动迭代轮数，需要人工接管。")
-        self._save_loop_done(run_dir, state, "needs_human", trace)
+        yield self._finalize_instruction(
+            run_dir,
+            state,
+            "needs_human",
+            trace,
+        )
         return run_dir
 
     def _pause_for_verification_interruption(
@@ -1077,6 +1728,38 @@ class LoopAutomationRuntime:
         workspace_status: Literal["skipped", "passed", "failed"] = "skipped",
         workspace_new_files_count: int = 0,
     ) -> None:
+        current_step = self._prepare_verification_interruption(
+            run_dir,
+            state,
+            iteration_dir,
+            iteration_number,
+            verification,
+            trace,
+            worker_status=worker_status,
+            workspace_status=workspace_status,
+            workspace_new_files_count=workspace_new_files_count,
+        )
+        self._save_loop_done(
+            run_dir,
+            state,
+            "needs_human",
+            trace,
+            current_step=current_step,
+        )
+
+    def _prepare_verification_interruption(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        iteration_dir: Path,
+        iteration_number: int,
+        verification: VerificationRunResult,
+        trace: TraceWriter,
+        *,
+        worker_status: Literal["skipped", "success"],
+        workspace_status: Literal["skipped", "passed", "failed"] = "skipped",
+        workspace_new_files_count: int = 0,
+    ) -> str:
         interruption_status = verification.interruption_status
         if interruption_status is None:
             raise ValueError("verification interruption 缺少中断状态")
@@ -1114,41 +1797,7 @@ class LoopAutomationRuntime:
             "stopped": "stopped",
             "termination-unconfirmed": "verification_termination_unconfirmed",
         }[interruption_status]
-        self._save_loop_done(
-            run_dir,
-            state,
-            "needs_human",
-            trace,
-            current_step=current_step,
-        )
-
-    def _run_review(
-        self,
-        repo_path: Path,
-        reflect_run: Path,
-        reviewer_name: str,
-        loop_run_dir: Path,
-        iteration: int,
-        config: ProjectConfig,
-    ) -> Path:
-        return ReviewRuntime(
-            self.workspace,
-            runner=self.reviewer_runner,
-            timeout_seconds=self.timeout_seconds,
-        ).run(
-            repo_path,
-            run_name(reflect_run),
-            runner_name=reviewer_name,
-            execution_context=RunnerExecutionContext(
-                execution_dir=_iteration_dir(loop_run_dir, iteration)
-                / "executions"
-                / "reviewer",
-                run_id=loop_run_dir.name,
-                step="reviewer",
-                iteration=iteration,
-            ),
-            project_config=config,
-        )
+        return current_step
 
     def _finish_or_prepare_next(
         self,
@@ -1158,6 +1807,27 @@ class LoopAutomationRuntime:
         iteration_dir: Path,
         trace: TraceWriter,
     ) -> None:
+        status, current_step = self._prepare_finish_or_next(
+            run_dir,
+            state,
+            verdict,
+            iteration_dir,
+        )
+        self._save_loop_done(
+            run_dir,
+            state,
+            status,
+            trace,
+            current_step=current_step,
+        )
+
+    def _prepare_finish_or_next(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        verdict: ReviewVerdict,
+        iteration_dir: Path,
+    ) -> tuple[Literal["success", "needs_human"], str]:
         if verdict.verdict == "approve":
             if _latest_verification_failed(state):
                 _write_text_artifact(
@@ -1165,19 +1835,16 @@ class LoopAutomationRuntime:
                     render_verification_fix_prompt(state.current_iteration),
                 )
                 _write_final_report(run_dir, state, verdict, "验证命令失败，不能自动通过。")
-                self._save_loop_done(run_dir, state, "needs_human", trace)
-                return
+                return "needs_human", "done"
             _write_final_report(run_dir, state, verdict, "隔离 reviewer 已通过。")
-            self._save_loop_done(run_dir, state, "success", trace)
-            return
+            return "success", "done"
         if verdict.verdict == "request_changes":
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
                 render_fix_prompt(verdict, state.current_iteration + 1),
             )
             _write_final_report(run_dir, state, verdict, "reviewer 要求修改，已生成 fix-prompt.md。")
-            self._save_loop_done(run_dir, state, "needs_human", trace)
-            return
+            return "needs_human", "done"
         latest = state.iterations[-1] if state.iterations else None
         if latest and latest.reviewer_status == "timed_out":
             conclusion = "reviewer 单次执行超时，需要人工判断或重新审查。"
@@ -1194,13 +1861,7 @@ class LoopAutomationRuntime:
             interruption_step = latest.reviewer_status
         else:
             interruption_step = "done"
-        self._save_loop_done(
-            run_dir,
-            state,
-            "needs_human",
-            trace,
-            current_step=interruption_step,
-        )
+        return "needs_human", interruption_step
 
     def _save_loop_done(
         self,
@@ -1210,7 +1871,30 @@ class LoopAutomationRuntime:
         trace: TraceWriter,
         current_step: str = "done",
     ) -> None:
-        artifacts = FINAL_LOOP_ARTIFACTS if (run_dir / "final-report.md").exists() else LOOP_ARTIFACTS
+        self.step_services.finalize_run(
+            FinalizeRunStepRequest(
+                run_dir=run_dir,
+                state=state,
+                status=status,
+                trace=trace,
+                current_step=current_step,
+            )
+        )
+
+    def _persist_loop_done(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        status: Literal["success", "failed", "needs_human"],
+        trace: TraceWriter,
+        current_step: str = "done",
+    ) -> None:
+        required_artifacts = (
+            FINAL_LOOP_ARTIFACTS
+            if (run_dir / "final-report.md").exists()
+            else LOOP_ARTIFACTS
+        )
+        artifacts = list(dict.fromkeys([*required_artifacts, *state.artifacts]))
         state.current_step = current_step
         state.status = status
         state.artifacts = artifacts
@@ -1468,7 +2152,25 @@ def run_loop_eval(
 
     effective_status = status_for_eval or state.status
     if require_terminal:
-        results.extend(_loop_terminal_eval_results(run_dir, state.status))
+        results.extend(
+            _loop_terminal_eval_results(
+                run_dir,
+                state.status,
+                state.engine,
+            )
+        )
+        if state.engine == "langgraph" and state.status == "success":
+            try:
+                read_graph_state(run_dir)
+            except GraphStateValidationError as exc:
+                results.append(
+                    "FAIL: LangGraph success 的 Graph State 终态证据不可信："
+                    f"{type(exc).__name__}"
+                )
+            else:
+                results.append(
+                    "PASS: LangGraph success 的 Graph State 终态证据可信"
+                )
 
     if effective_status == "success" and not state.iterations:
         results.append("FAIL: success loop 至少需要一轮 iteration")
@@ -1530,7 +2232,10 @@ def run_loop_eval(
     return results
 
 
-def _loop_trace_checks(run_dir: Path) -> tuple[list[str], str | None]:
+def _loop_trace_checks(
+    run_dir: Path,
+    engine: str,
+) -> tuple[list[str], str | None]:
     trace_path = run_dir / "trace.jsonl"
     if not trace_path.exists():
         return ["FAIL: trace.jsonl 不存在"], None
@@ -1554,16 +2259,77 @@ def _loop_trace_checks(run_dir: Path) -> tuple[list[str], str | None]:
     if len(terminal_indices) != 1:
         return ["FAIL: trace.jsonl 必须且只能包含一个 run_finished 终态事件"], None
     terminal_index = terminal_indices[0]
-    if terminal_index != len(items) - 1:
-        return ["FAIL: run_finished 必须是 trace.jsonl 最后一条事件"], None
     status = items[terminal_index].get("status")
     if not isinstance(status, str):
         return ["FAIL: run_finished 终态缺少 status"], None
-    return ["PASS: trace.jsonl 非空且包含 run_finished 终态事件"], status
+    if terminal_index == len(items) - 1:
+        return ["PASS: trace.jsonl 非空且包含 run_finished 终态事件"], status
+    if terminal_index < len(items) - 1 and engine == "langgraph":
+        suffix = items[terminal_index + 1 :]
+        completion = (
+            suffix[-1]
+            if isinstance(suffix[-1], dict)
+            and suffix[-1].get("event") == RUN_TERMINAL_REVOKED_EVENT
+            else None
+        )
+        evidence_end = -1 if completion is not None else len(suffix)
+        evidence_items = suffix[:evidence_end]
+        state_revocation = (
+            evidence_items[-1]
+            if evidence_items
+            and isinstance(evidence_items[-1], dict)
+            and evidence_items[-1].get("event")
+            == RUN_TERMINAL_STATE_REVOKED_EVENT
+            else None
+        )
+        revocation = completion or state_revocation
+        diagnostic_events = (
+            evidence_items[:-1]
+            if state_revocation is not None
+            else evidence_items
+        )
+        if (
+            isinstance(revocation, dict)
+            and revocation.get("previous_status") == status
+            and revocation.get("status") == "needs_human"
+        ):
+            reason = revocation.get("reason")
+            events_consistent = (
+                completion is None
+                or state_revocation is None
+                or (
+                    state_revocation.get("reason") == reason
+                    and state_revocation.get("previous_status") == status
+                    and state_revocation.get("status") == "needs_human"
+                    and completion.get("reason") == reason
+                    and completion.get("previous_status") == status
+                    and completion.get("status") == "needs_human"
+                )
+            )
+            valid_diagnostics = (
+                reason == "graph_evidence_failed"
+                and not diagnostic_events
+            ) or (
+                reason == "checkpoint_validation_failed"
+                and len(diagnostic_events) == 1
+                and isinstance(diagnostic_events[0], dict)
+                and diagnostic_events[0].get("event")
+                == "graph_checkpoint_validation_failed"
+                and diagnostic_events[0].get("original_status") == status
+            )
+            if events_consistent and valid_diagnostics:
+                return [
+                    "PASS: run_finished 终态已由 append-only 撤销事实明确撤销"
+                ], "needs_human"
+    return ["FAIL: run_finished 必须是 trace.jsonl 最后一条事件"], None
 
 
-def _loop_terminal_eval_results(run_dir: Path, state_status: str) -> list[str]:
-    results, terminal_status = _loop_trace_checks(run_dir)
+def _loop_terminal_eval_results(
+    run_dir: Path,
+    state_status: str,
+    engine: str,
+) -> list[str]:
+    results, terminal_status = _loop_trace_checks(run_dir, engine)
     if terminal_status and terminal_status != state_status:
         results.append(
             f"FAIL: trace 终态与 state.status 不一致：{terminal_status} != {state_status}"
@@ -1641,7 +2407,79 @@ def _loop_iteration_evidence_checks(
         return results
     if iteration.reflect_run and context.get("source_run") != iteration.reflect_run:
         results.append("FAIL: review-context.json 与 iteration.reflect_run 不一致")
+    if isinstance(context.get("acceptance_evidence"), dict):
+        results.extend(
+            _validate_iteration_acceptance_evidence(
+                iteration_dir,
+                context["acceptance_evidence"],
+            )
+        )
     return results
+
+
+def _validate_iteration_acceptance_evidence(
+    iteration_dir: Path,
+    expected_manifest: dict[str, object],
+) -> list[str]:
+    markdown_path = iteration_dir / "acceptance-evidence.md"
+    json_path = iteration_dir / "acceptance-evidence.json"
+    if not markdown_path.is_file() or not json_path.is_file():
+        return ["FAIL: review 声明 acceptance evidence 但 iteration 副本不完整"]
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ["FAIL: iteration acceptance-evidence.json 不合法"]
+    if not isinstance(payload, dict):
+        return ["FAIL: iteration acceptance-evidence.json 顶层必须是 object"]
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return ["FAIL: iteration acceptance evidence items 不合法"]
+    actual_manifest = {
+        **{
+            key: value
+            for key, value in payload.items()
+            if key != "items"
+        },
+        "items": [
+            {
+                key: value
+                for key, value in item.items()
+                if key != "content"
+            }
+            if isinstance(item, dict)
+            else item
+            for item in items
+        ],
+    }
+    if actual_manifest != expected_manifest:
+        return ["FAIL: iteration acceptance evidence 与 review-context 不一致"]
+    used_chars = payload.get("used_chars")
+    max_chars = payload.get("max_chars")
+    if (
+        not isinstance(used_chars, int)
+        or not isinstance(max_chars, int)
+        or used_chars < 0
+        or used_chars > max_chars
+    ):
+        return ["FAIL: iteration acceptance evidence 预算字段不合法"]
+    calculated_chars = 0
+    for item in items:
+        if not isinstance(item, dict):
+            return ["FAIL: iteration acceptance evidence item 不合法"]
+        content = item.get("content")
+        included_chars = item.get("included_chars")
+        included_sha256 = item.get("included_sha256")
+        if (
+            not isinstance(content, str)
+            or not isinstance(included_chars, int)
+            or included_chars != len(content)
+            or included_sha256 != sha256_text(content)
+        ):
+            return ["FAIL: iteration acceptance evidence 内容哈希不合法"]
+        calculated_chars += included_chars
+    if calculated_chars != used_chars:
+        return ["FAIL: iteration acceptance evidence used_chars 不一致"]
+    return ["PASS: iteration acceptance evidence 与 review-context 一致"]
 
 
 def render_eval(results: list[str]) -> str:
@@ -1697,6 +2535,7 @@ def _write_reflect_failure_report(iteration_dir: Path, reflect_run: Path) -> Pat
 
 
 def _evaluate_loop_risk_gate(
+    evaluate_risk_step: Callable[[RiskStepRequest], GateResult],
     workspace: Path,
     repo_path: Path,
     reflect_run: Path,
@@ -1710,79 +2549,116 @@ def _evaluate_loop_risk_gate(
     `vega gate` 仍保留给人工排障和单独观察。这里的本地 artifact 绑定当前
     iteration，避免把高风险结果只留在内存中。
     """
-    result_path = iteration_dir / RISK_GATE_RESULT_ARTIFACT
-    report_path = iteration_dir / RISK_GATE_REPORT_ARTIFACT
     source_run = run_name(reflect_run)
     try:
-        result = evaluate_risk(workspace, repo_path, source_run)
-    except Exception as exc:  # noqa: BLE001 - 风险判断错误必须 fail-closed
-        diagnostic = redact_text(f"{type(exc).__name__}: {exc}")[:1000]
-        payload = {
-            "schema_version": 1,
-            "status": "failed",
-            "iteration": iteration,
-            "source_run": source_run,
-            "code": "risk_evaluation_failed",
-            "message": "风险门禁评估失败，未生成可信自动放行结论。",
-            "diagnostic": diagnostic,
-        }
-        result_text = json.dumps(
-            redact_value(payload),
-            ensure_ascii=False,
-            indent=2,
-        ) + "\n"
-        result_path.write_text(
-            result_text,
-            encoding="utf-8",
-        )
-        result_sha256 = sha256_text(result_text)
-        report_body = redact_text(
-            "\n".join(
-                [
-                    "# 本轮风险门禁报告",
-                    "",
-                    f"- source reflect：`{source_run}`",
-                    f"- iteration：`{iteration:02d}`",
-                    "- 状态：`failed`",
-                    "",
-                    "## 结论",
-                    "",
-                    "- 风险门禁未能完成评估，Vega 不会继续自动隔离审查。",
-                    f"- 诊断：{diagnostic or '未提供'}",
-                ]
-            ).rstrip()
-            + "\n"
-        )
-        report_text = (
-            report_body.rstrip()
-            + "\n\n"
-            + render_risk_gate_report_binding(
-                status="failed",
-                iteration=iteration,
+        result = evaluate_risk_step(
+            RiskStepRequest(
+                workspace=workspace,
+                repo_path=repo_path,
                 source_run=source_run,
-                result_sha256=result_sha256,
-                risk=None,
-                recommendation=None,
             )
         )
-        report_path.write_text(report_text, encoding="utf-8")
-        trace.write(
-            "risk_gate_failed",
+    except Exception as exc:  # noqa: BLE001 - 风险判断错误必须 fail-closed
+        return _record_loop_risk_gate_failure(
+            exc,
+            source_run,
+            iteration_dir,
+            trace,
+            iteration,
+        )
+    return _record_loop_risk_gate_success(
+        result,
+        source_run,
+        iteration_dir,
+        trace,
+        iteration,
+    )
+
+
+def _record_loop_risk_gate_failure(
+    error: Exception,
+    source_run: str,
+    iteration_dir: Path,
+    trace: TraceWriter,
+    iteration: int,
+) -> LoopRiskGateEvidence:
+    result_path = iteration_dir / RISK_GATE_RESULT_ARTIFACT
+    report_path = iteration_dir / RISK_GATE_REPORT_ARTIFACT
+    diagnostic = redact_text(f"{type(error).__name__}: {error}")[:1000]
+    payload = {
+        "schema_version": 1,
+        "status": "failed",
+        "iteration": iteration,
+        "source_run": source_run,
+        "code": "risk_evaluation_failed",
+        "message": "风险门禁评估失败，未生成可信自动放行结论。",
+        "diagnostic": diagnostic,
+    }
+    result_text = json.dumps(
+        redact_value(payload),
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
+    _write_text_artifact(result_path, result_text)
+    result_sha256 = sha256_text(result_text)
+    report_body = redact_text(
+        "\n".join(
+            [
+                "# 本轮风险门禁报告",
+                "",
+                f"- source reflect：`{source_run}`",
+                f"- iteration：`{iteration:02d}`",
+                "- 状态：`failed`",
+                "",
+                "## 结论",
+                "",
+                "- 风险门禁未能完成评估，Vega 不会继续自动隔离审查。",
+                f"- 诊断：{diagnostic or '未提供'}",
+            ]
+        ).rstrip()
+        + "\n"
+    )
+    report_text = (
+        report_body.rstrip()
+        + "\n\n"
+        + render_risk_gate_report_binding(
+            status="failed",
             iteration=iteration,
             source_run=source_run,
-            status="failed",
             result_sha256=result_sha256,
-            report_sha256=sha256_text(report_text),
-            diagnostic=diagnostic,
+            risk=None,
+            recommendation=None,
         )
-        return LoopRiskGateEvidence(
-            result=None,
-            error=diagnostic or "risk_evaluation_failed",
-            source_run=source_run,
-            result_sha256=result_sha256,
-            report_sha256=sha256_text(report_text),
-        )
+    )
+    _write_text_artifact(report_path, report_text)
+    report_sha256 = sha256_text(report_text)
+    trace.write(
+        "risk_gate_failed",
+        iteration=iteration,
+        source_run=source_run,
+        status="failed",
+        result_sha256=result_sha256,
+        report_sha256=report_sha256,
+        diagnostic=diagnostic,
+    )
+    return LoopRiskGateEvidence(
+        result=None,
+        error=diagnostic or "risk_evaluation_failed",
+        source_run=source_run,
+        result_sha256=result_sha256,
+        report_sha256=report_sha256,
+    )
 
+
+def _record_loop_risk_gate_success(
+    result: GateResult,
+    source_run: str,
+    iteration_dir: Path,
+    trace: TraceWriter,
+    iteration: int,
+) -> LoopRiskGateEvidence:
+    result_path = iteration_dir / RISK_GATE_RESULT_ARTIFACT
+    report_path = iteration_dir / RISK_GATE_REPORT_ARTIFACT
     payload = {
         "schema_version": 1,
         "status": "success",
@@ -1795,10 +2671,7 @@ def _evaluate_loop_risk_gate(
         ensure_ascii=False,
         indent=2,
     ) + "\n"
-    result_path.write_text(
-        result_text,
-        encoding="utf-8",
-    )
+    _write_text_artifact(result_path, result_text)
     result_sha256 = sha256_text(result_text)
     report_body = redact_text(
         render_gate_report(result)
@@ -1826,7 +2699,8 @@ def _evaluate_loop_risk_gate(
             recommendation=result.recommendation,
         )
     )
-    report_path.write_text(report_text, encoding="utf-8")
+    _write_text_artifact(report_path, report_text)
+    report_sha256 = sha256_text(report_text)
     trace.write(
         "risk_gate_finished",
         iteration=iteration,
@@ -1836,14 +2710,14 @@ def _evaluate_loop_risk_gate(
         recommendation=result.recommendation,
         reasons=[reason.code for reason in result.reasons],
         result_sha256=result_sha256,
-        report_sha256=sha256_text(report_text),
+        report_sha256=report_sha256,
     )
     return LoopRiskGateEvidence(
         result=result,
         error=None,
         source_run=source_run,
         result_sha256=result_sha256,
-        report_sha256=sha256_text(report_text),
+        report_sha256=report_sha256,
     )
 
 
@@ -1865,6 +2739,8 @@ def _record_review(iteration_dir: Path, review_run: Path) -> None:
         "review-prompt.md",
         "review-checklist.md",
         "review-context.json",
+        "acceptance-evidence.md",
+        "acceptance-evidence.json",
         "review-prompt-metrics.json",
         "review-prompt-metrics.md",
         "project-context.md",
@@ -2112,8 +2988,12 @@ def _reflect_has_tracked_diff(reflect_run: Path) -> bool:
 
 
 def _write_text_artifact(path: Path, text: str) -> None:
+    redacted = redact_text(text)
+    guard = recovery_artifact_guard()
+    if guard is not None and guard.write_text(path, redacted):
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(redact_text(text), encoding="utf-8")
+    path.write_text(redacted, encoding="utf-8")
 
 
 def _finalize_loop_eval(
@@ -2149,7 +3029,11 @@ def _finalize_loop_eval(
         return
 
     trace.write("run_finished", status=final_status)
-    terminal_results = _loop_terminal_eval_results(run_dir, final_status)
+    terminal_results = _loop_terminal_eval_results(
+        run_dir,
+        final_status,
+        state.engine,
+    )
     if any(result.startswith("FAIL:") for result in terminal_results):
         raise RuntimeError("loop 终态 trace 审计失败，state 保持 running 以阻止误判成功")
     state.status = final_status
@@ -2252,3 +3136,22 @@ def _apply_runner_defaults(
     if reviewer_name == "codex-exec" and config.runner.reviewer:
         reviewer_name = config.runner.reviewer
     return worker_name, reviewer_name
+
+
+def _require_graph_control_isolation(
+    workspace: Path,
+    repo_path: Path,
+) -> None:
+    """Gate 3 第一轮禁止目标仓库观察 Vega 自己的 Graph 控制面。"""
+
+    control_root = (workspace.resolve() / "runs").resolve()
+    repo_root = repo_path.resolve()
+    if (
+        control_root == repo_root
+        or control_root in repo_root.parents
+        or repo_root in control_root.parents
+    ):
+        raise ValueError(
+            "Gate 3 要求 Graph control root 与目标 Git 仓库互不包含；"
+            "请把目标 fixture 放到 workspace/runs 之外的独立仓库。"
+        )

@@ -12,6 +12,9 @@ from vega.redaction import (
     redact_text,
     redact_value,
     sensitive_path_reason,
+    write_redacted_json_atomic,
+    write_redacted_text_create_once_atomic,
+    write_redacted_text_atomic,
 )
 
 
@@ -133,6 +136,30 @@ def test_redact_text_is_idempotent_for_unquoted_placeholders() -> None:
     assert redact_text(text) == text
 
 
+def test_redact_text_removes_provider_masked_key_and_request_correlation() -> None:
+    masked_key = "PROXY_MA*AGED"
+    request_id = "req_fake_provider_request_123"
+    cf_ray = "fake-ray-DFW"
+    text = (
+        "ERROR: unexpected status 401 Unauthorized: "
+        f"Incorrect API key provided: {masked_key}. "
+        "You can find your API key in the provider console., "
+        "url: https://api.openai.com/v1/responses, "
+        f"cf-ray: {cf_ray}, request id: {request_id}"
+    )
+
+    redacted = redact_text(text)
+
+    assert masked_key not in redacted
+    assert request_id not in redacted
+    assert cf_ray not in redacted
+    assert "401 Unauthorized" in redacted
+    assert "Incorrect API key provided: [REDACTED]" in redacted
+    assert "url: https://api.openai.com/v1/responses" in redacted
+    assert "cf-ray: [REDACTED]" in redacted
+    assert "request id: [REDACTED]" in redacted
+
+
 def test_redact_value_recurses_without_mutating_original_payload() -> None:
     payload = {
         "message": f"runner failed with {FAKE_SECRET}",
@@ -156,6 +183,55 @@ def test_redact_value_recurses_without_mutating_original_payload() -> None:
     assert redacted["none_secret"] is None
     assert all(FAKE_SECRET not in str(key) for key in redacted)
     assert FAKE_SECRET not in repr(redacted)
+
+
+@pytest.mark.parametrize(
+    ("filename", "writer", "new_value"),
+    [
+        ("artifact.md", write_redacted_text_atomic, "new text"),
+        ("artifact.json", write_redacted_json_atomic, {"status": "new"}),
+    ],
+)
+def test_atomic_redacted_writer_preserves_old_file_and_cleans_temp_on_replace_failure(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename,
+    writer,
+    new_value,
+) -> None:
+    path = tmp_path / filename
+    old_content = "old content\n"
+    path.write_text(old_content, encoding="utf-8")
+    replace_calls = 0
+
+    def fail_replace(source, destination) -> None:
+        nonlocal replace_calls
+        del source, destination
+        replace_calls += 1
+        raise PermissionError("文件暂时被占用")
+
+    monkeypatch.setattr("vega.redaction.os.replace", fail_replace)
+    monkeypatch.setattr("vega.redaction.time.sleep", lambda _: None)
+
+    with pytest.raises(PermissionError, match="文件暂时被占用"):
+        writer(path, new_value)
+
+    assert replace_calls == 3
+    assert path.read_text(encoding="utf-8") == old_content
+    assert list(tmp_path.glob(f".{filename}.*.tmp")) == []
+
+
+def test_atomic_create_once_writer_never_overwrites_existing_file(
+    tmp_path,
+) -> None:
+    path = tmp_path / "archive.md"
+    path.write_text("existing archive\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        write_redacted_text_create_once_atomic(path, "replacement archive\n")
+
+    assert path.read_text(encoding="utf-8") == "existing archive\n"
+    assert list(tmp_path.glob(".archive.md.*.tmp")) == []
 
 
 @pytest.mark.parametrize(

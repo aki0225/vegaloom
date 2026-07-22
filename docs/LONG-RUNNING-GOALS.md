@@ -268,10 +268,15 @@ state.json 仍是 running，但 trace.jsonl 长时间没有新事件，且当前
 普通 loop 的运行中停止使用：
 
 ```powershell
-vega stop --run <loop_run> --reason "方向变化，停止当前 attempt"
+vega stop --run <loop_run> --reason "方向变化，停止整个 run"
 ```
 
-该命令只写 `stop-request.json`，由仍在运行的 runner 停止 execution.json 中记录的 child PID；不会扫描或终止其他 Codex/Node 进程。若 runner 已断开，则等待 lease 过期或 PID 消失后使用 `vega recover`，recover 本身不 kill 进程。
+该命令先在 run 根目录建立永久 `stop-latch.json`，再向该 run 的全部 active execution 广播
+各自的 `stop-request.json`，不是只处理当前或最新 execution。latch 建立后，同一 run 后续
+execution 也会在启动外部进程前 fail-closed；广播部分失败或当时没有 active execution 都不
+会自动撤销停止意图。runner 只停止每条 execution 绑定的 owned process tree，不扫描或终止
+其他 run、其他 Codex/Node 进程。若 runner 已断开，则等待 lease 过期或 PID 消失后使用
+`vega recover`；recover 本身不 kill 进程，也不会清除该 run 的永久 stop latch。
 
 ## 9. 与现有能力的关系
 

@@ -1,0 +1,393 @@
+{
+  "schema_version": 1,
+  "dataset_id": "gate-5.5-reviewer-topology-v1",
+  "cases": [
+    {
+      "case_id": "clean_project_key_normalization",
+      "expected_verdict": "approve",
+      "findings": [],
+      "forbidden_false_blocker_conditions": [
+        "any blocker finding",
+        "any major finding"
+      ]
+    },
+    {
+      "case_id": "clean_endpoint_default_port",
+      "expected_verdict": "approve",
+      "findings": [],
+      "forbidden_false_blocker_conditions": [
+        "any blocker finding",
+        "any major finding"
+      ]
+    },
+    {
+      "case_id": "clean_stable_metric_summary",
+      "expected_verdict": "approve",
+      "findings": [],
+      "forbidden_false_blocker_conditions": [
+        "any blocker finding",
+        "any major finding"
+      ]
+    },
+    {
+      "case_id": "correctness_pagination_page_size",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "major",
+          "severity_aliases": [
+            "major",
+            "blocker",
+            "high",
+            "error"
+          ],
+          "category": "correctness",
+          "category_aliases": [
+            "correctness",
+            "logic",
+            "behavior"
+          ],
+          "rule": "correctness.off_by_one",
+          "rule_aliases": [
+            "correctness.off_by_one",
+            "off_by_one",
+            "pagination_boundary"
+          ],
+          "path": "src/pagination.py",
+          "path_aliases": [
+            "src/pagination.py",
+            "pagination.py"
+          ],
+          "location": "page:end",
+          "location_aliases": [
+            "page:end",
+            "page function",
+            "end calculation",
+            "slice upper bound"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    },
+    {
+      "case_id": "correctness_expiry_exact_boundary",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "major",
+          "severity_aliases": [
+            "major",
+            "blocker",
+            "high",
+            "error"
+          ],
+          "category": "correctness",
+          "category_aliases": [
+            "correctness",
+            "logic",
+            "boundary"
+          ],
+          "rule": "correctness.expiry_boundary",
+          "rule_aliases": [
+            "correctness.expiry_boundary",
+            "expiry_boundary",
+            "inclusive_expiry"
+          ],
+          "path": "src/tokens.py",
+          "path_aliases": [
+            "src/tokens.py",
+            "tokens.py"
+          ],
+          "location": "is_token_active:return",
+          "location_aliases": [
+            "is_token_active:return",
+            "is_token_active",
+            "expires_at comparison",
+            "greater-than-or-equal comparison"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    },
+    {
+      "case_id": "correctness_unicode_tag_separator",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "major",
+          "severity_aliases": [
+            "major",
+            "blocker",
+            "high",
+            "error"
+          ],
+          "category": "correctness",
+          "category_aliases": [
+            "correctness",
+            "unicode",
+            "input_handling"
+          ],
+          "rule": "correctness.unicode_separator",
+          "rule_aliases": [
+            "correctness.unicode_separator",
+            "unicode_separator",
+            "fullwidth_separator"
+          ],
+          "path": "src/tags.py",
+          "path_aliases": [
+            "src/tags.py",
+            "tags.py"
+          ],
+          "location": "split_tags:normalization",
+          "location_aliases": [
+            "split_tags:normalization",
+            "split_tags",
+            "separator normalization",
+            "fullwidth semicolon handling"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    },
+    {
+      "case_id": "verification_webhook_mocked_persistence",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "major",
+          "severity_aliases": [
+            "major",
+            "blocker",
+            "high",
+            "error"
+          ],
+          "category": "verification",
+          "category_aliases": [
+            "verification",
+            "test_adequacy",
+            "testing"
+          ],
+          "rule": "verification.mocked_subject",
+          "rule_aliases": [
+            "verification.mocked_subject",
+            "mocked_subject",
+            "mocked_production_path"
+          ],
+          "path": "tests/test_webhook.py",
+          "path_aliases": [
+            "tests/test_webhook.py",
+            "test_webhook.py"
+          ],
+          "location": "test_handle_event:monkeypatch",
+          "location_aliases": [
+            "test_handle_event:monkeypatch",
+            "test_handle_event",
+            "mocked _persist_event",
+            "monkeypatch persistence"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    },
+    {
+      "case_id": "verification_receipt_side_effects",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "major",
+          "severity_aliases": [
+            "major",
+            "blocker",
+            "high",
+            "error"
+          ],
+          "category": "verification",
+          "category_aliases": [
+            "verification",
+            "test_adequacy",
+            "testing"
+          ],
+          "rule": "verification.missing_side_effect_assertion",
+          "rule_aliases": [
+            "verification.missing_side_effect_assertion",
+            "missing_side_effect_assertion",
+            "unasserted_side_effect"
+          ],
+          "path": "tests/test_receipts.py",
+          "path_aliases": [
+            "tests/test_receipts.py",
+            "test_receipts.py"
+          ],
+          "location": "test_issue_receipt:assertions",
+          "location_aliases": [
+            "test_issue_receipt:assertions",
+            "test_issue_receipt",
+            "missing mailer assertion",
+            "missing audit assertion"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    },
+    {
+      "case_id": "verification_discount_threshold_boundary",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "major",
+          "severity_aliases": [
+            "major",
+            "blocker",
+            "high",
+            "error"
+          ],
+          "category": "verification",
+          "category_aliases": [
+            "verification",
+            "test_adequacy",
+            "testing"
+          ],
+          "rule": "verification.missing_boundary_case",
+          "rule_aliases": [
+            "verification.missing_boundary_case",
+            "missing_boundary_case",
+            "threshold_not_tested"
+          ],
+          "path": "tests/test_discounts.py",
+          "path_aliases": [
+            "tests/test_discounts.py",
+            "test_discounts.py"
+          ],
+          "location": "test_discount_around_threshold:inputs",
+          "location_aliases": [
+            "test_discount_around_threshold:inputs",
+            "test_discount_around_threshold",
+            "missing amount 100",
+            "exact threshold case"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    },
+    {
+      "case_id": "security_report_output_path",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "blocker",
+          "severity_aliases": [
+            "blocker",
+            "major",
+            "critical",
+            "high"
+          ],
+          "category": "security",
+          "category_aliases": [
+            "security",
+            "trust_boundary",
+            "filesystem"
+          ],
+          "rule": "security.path_traversal",
+          "rule_aliases": [
+            "security.path_traversal",
+            "path_traversal",
+            "directory_escape"
+          ],
+          "path": "src/reports.py",
+          "path_aliases": [
+            "src/reports.py",
+            "reports.py"
+          ],
+          "location": "save_report:target",
+          "location_aliases": [
+            "save_report:target",
+            "save_report",
+            "output_dir / name",
+            "unvalidated report name"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    },
+    {
+      "case_id": "security_git_revision_command",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "blocker",
+          "severity_aliases": [
+            "blocker",
+            "major",
+            "critical",
+            "high"
+          ],
+          "category": "security",
+          "category_aliases": [
+            "security",
+            "command_execution",
+            "injection"
+          ],
+          "rule": "security.command_injection",
+          "rule_aliases": [
+            "security.command_injection",
+            "command_injection",
+            "shell_injection"
+          ],
+          "path": "src/git_title.py",
+          "path_aliases": [
+            "src/git_title.py",
+            "git_title.py"
+          ],
+          "location": "read_title:subprocess.run",
+          "location_aliases": [
+            "read_title:subprocess.run",
+            "read_title",
+            "shell=True",
+            "interpolated revision"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    },
+    {
+      "case_id": "design_atomic_settings_persistence",
+      "expected_verdict": "request_changes",
+      "findings": [
+        {
+          "severity": "major",
+          "severity_aliases": [
+            "major",
+            "blocker",
+            "high",
+            "error"
+          ],
+          "category": "design",
+          "category_aliases": [
+            "design",
+            "reliability",
+            "persistence"
+          ],
+          "rule": "design.non_atomic_persistence",
+          "rule_aliases": [
+            "design.non_atomic_persistence",
+            "non_atomic_persistence",
+            "partial_write_risk"
+          ],
+          "path": "src/settings_store.py",
+          "path_aliases": [
+            "src/settings_store.py",
+            "settings_store.py"
+          ],
+          "location": "save_settings:write_text",
+          "location_aliases": [
+            "save_settings:write_text",
+            "save_settings",
+            "direct write",
+            "missing temporary file replace"
+          ]
+        }
+      ],
+      "forbidden_false_blocker_conditions": []
+    }
+  ]
+}
