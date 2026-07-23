@@ -3,7 +3,7 @@
 > 日期：2026-07-23
 > 分支：`experiment/ma2-runtime-bridge`
 > 基线：`3f553e09328a1b52b76b07bd3bf89fe651a3fd6a`
-> 状态：本地实现与验证完成，等待远端 CI 最终确认
+> 状态：实现已推送，远端 CI 全绿，等待独立 MA-2A Gate 结论
 > 默认产品行为：未改变
 > 真实 Planner / Provider：未调用
 
@@ -104,13 +104,24 @@ git diff --check: passed
 Python 3.12 shard file coverage: 24/24
 ```
 
+远端 CI：
+
+```text
+实现提交：89c5c6d3825636f565c99413e2918a728d3b5e1d
+运行编号：30027054514
+结论：10/10 jobs success
+```
+
+远端已实际通过 Python 3.11 全量、全部 Python 3.12 分片、Windows 专项、POSIX
+专项、wheel 构建与静态检查。运行详情：
+`https://github.com/aki0225/vegaloom/actions/runs/30027054514`。
+
 ## 3. 明天接续
 
-1. 查看本分支手动触发的 GitHub Actions 结果，重点确认 Python 3.11 全量、Python 3.12
-   `semantics-evidence-review`、Windows 和 POSIX 专项全部通过。
-2. 若 CI 全绿，新增独立的 MA-2A Gate 结论记录，将结论限制为“单 Slice 运行时桥接具备进入
+1. 新增独立的 MA-2A Gate 结论记录，引用实现提交和远端 CI，将结论限制为“单 Slice
+   运行时桥接具备进入
    下一次预注册的条件”。
-3. 再决定是否建立 MA-2B 预注册；不得直接启动真实 Planner × Worker Pilot。
+2. 再决定是否建立 MA-2B 预注册；不得直接启动真实 Planner × Worker Pilot。
 
 ## 4. 停止线
 
