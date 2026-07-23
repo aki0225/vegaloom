@@ -15,9 +15,10 @@
 - 增量门禁：`1f20f64`，`工程：加入架构复杂度增量门禁`
 - 非核心隔离：`5056c0f`，`重构：隔离非核心能力并精简 Loop 状态`
 - Stage 2 实验：`5f62ad2`，`实验：加入 SQLite 迁移双生验证`
+- 空白门禁修正：`49cfc65`，`文档：修正轻量核心计划空白门禁`
 
-本文所在提交只负责远端接力说明。后续修复继续推送同一个
-`refactor/lean-core`，不要为每轮 CI 新建微型分支。
+本文所在提交负责补全远端接力记录。后续修复继续推送同一个 `refactor/lean-core`，不要为
+每轮 CI 新建微型分支。
 
 ## 2. 本轮完成范围
 
@@ -66,7 +67,7 @@ Windows 和 wheel/package CI。
 - `ruff check ... --no-cache`：通过。
 - `python scripts/check_architecture_growth.py --base-ref origin/main`：通过。
 - `python scripts/check_repository_hygiene.py`：通过。
-- Git diff whitespace 检查：通过。
+- `git diff --check origin/main...HEAD`：通过。
 - CI YAML 可解析。
 - 完整收集：`613 tests collected`。
 
@@ -86,6 +87,10 @@ CI 同构唯一分片覆盖全部 613 个节点：
 `tests/test_recovery_chaos.py` 已包含在 remaining 中，并另行复跑为 `10 passed`。第一次
 p0-cli-lock 分片暴露 `test_cli_recovery_hardening.py` 仍 monkeypatch 旧导入路径；修正后完整
 重跑为 `109 passed`。本地保留了第一次失败日志，没有把它计为通过。
+
+Draft PR 首个 head `5f62ad2` 的静态任务在全分支 whitespace 门禁失败，原因是计划文档顶部
+使用 Markdown 双空格换行。该问题由 `49cfc65` 修正。旧 head 的失败必须保留为失败记录，
+不能被后续重跑覆盖或描述为通过。
 
 本地日志位于 `.tmp/pytest/lean-core/`，该目录不提交；另一台机器应按本文命令重新生成。
 
@@ -152,7 +157,7 @@ ruff check src tests scripts/check_repository_hygiene.py scripts/check_architect
 python scripts/check_repository_hygiene.py
 python scripts/check_architecture_growth.py --base-ref origin/main
 python -m pytest --collect-only -q -p no:cacheprovider
-git diff --check
+git diff --check origin/main...HEAD
 ```
 
 重放 Stage 2：
