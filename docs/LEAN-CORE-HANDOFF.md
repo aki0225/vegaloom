@@ -6,7 +6,7 @@
 >
 > Draft PR：[#8](https://github.com/aki0225/vegaloom/pull/8)
 >
-> 当前裁决：`continue-on-same-branch / manual-merge-only`
+> 当前裁决：`continue-on-same-branch / do-not-merge`
 
 ## 1. 基线与提交
 
@@ -16,9 +16,15 @@
 - 非核心隔离：`5056c0f`，`重构：隔离非核心能力并精简 Loop 状态`
 - Stage 2 实验：`5f62ad2`，`实验：加入 SQLite 迁移双生验证`
 - 空白门禁修正：`49cfc65`，`文档：修正轻量核心计划空白门禁`
+- PR 门禁复盘：`00d390e`，`文档：补充轻量核心 PR 门禁复盘`
+- Python 接口边界：`48b7f37`，`工程：固定 CLI 稳定接口边界`
 
 本文所在提交负责补全远端接力记录。后续修复继续推送同一个 `refactor/lean-core`，不要为
 每轮 CI 新建微型分支。
+
+2026-07-23 的只读审查发现三个需要先修复的问题，完整证据和重放步骤见
+[`LEAN-CORE-REVIEW-HANDOFF.md`](LEAN-CORE-REVIEW-HANDOFF.md)。在这些问题关闭前，不要把
+Draft PR 转为 Ready，也不要合并。
 
 ## 2. 本轮完成范围
 
@@ -69,11 +75,11 @@ Windows 和 wheel/package CI。
 - `python scripts/check_repository_hygiene.py`：通过。
 - `git diff --check origin/main...HEAD`：通过。
 - CI YAML 可解析。
-- 完整收集：`613 tests collected`。
+- 完整收集：`615 tests collected`。
 
-CI 同构唯一分片覆盖全部 613 个节点：
+CI 同构唯一分片覆盖全部 615 个节点：
 
-- smoke：`102 passed`
+- smoke：`103 passed`
 - p0-cli-lock：`109 passed`
 - artifacts-runtime-security：`59 passed, 1 skipped`
 - semantics-evidence-review：`141 passed`
@@ -82,7 +88,7 @@ CI 同构唯一分片覆盖全部 613 个节点：
   - evidence freshness：`19 passed`
   - review artifact integrity：`18 passed`
   - success semantics：`29 passed`
-- remaining：`201 passed`
+- remaining：`202 passed`
 
 `tests/test_recovery_chaos.py` 已包含在 remaining 中，并另行复跑为 `10 passed`。第一次
 p0-cli-lock 分片暴露 `test_cli_recovery_hardening.py` 仍 monkeypatch 旧导入路径；修正后完整
@@ -124,8 +130,30 @@ Draft PR 首个 head `5f62ad2` 的静态任务在全分支 whitespace 门禁失�
 5. 实验模块仍由既有 CLI 命令延迟加载，当前是隔离依赖而非删除产品表面。
 6. SQLite 个案没有覆盖 PostgreSQL/MySQL、锁、在线索引、backfill、并发写、恢复、复制延迟
    或真实生产规模。
+7. 架构门禁目前可被 package shim 和两种常见 `ImportFrom` 写法绕过。
+8. SQLite 安全双生的通过判定没有把行内容不变量纳入 oracle，可能产生假阳性。
+9. `.local-validation/` 自身为符号链接或 Windows junction 时，输出边界校验会跟随链接写到
+   当前工作目录外。
 
-## 6. 另一台机器恢复
+## 6. 只读审查结论
+
+- 审查基线：`48b7f37ce56e35a7a86b0dbcfa46669593e3265e`。
+- 该基线的 GitHub checks 为 `10/10 success`；本次仅文档接力提交仍需等待自己的最新 CI。
+- 当前结论是 `request_changes`，不是对整体重构方向的否定。
+- 暂未发现 Loop/Finish/Goal 的 fail-closed 成功语义被放松，也未发现 `eval/` 历史被改写。
+- 已确认本次差异没有提交普通工作区绝对路径或真实环境文件；测试中的假 token/假 `.env`
+  属于脱敏回归 fixture。
+
+修复顺序：
+
+1. 先补齐架构门禁及其危险样例测试。
+2. 再把 SQLite 行内容、`external_id` 和 `schema_mode` 纳入确定性 oracle，并加入数据破坏负向
+   控制。
+3. 最后修复 `.local-validation/` symlink/junction 边界，并在 POSIX 与 Windows 都加回归。
+4. 三项修复完成后跑定向测试、完整收集、Python 3.11/3.12、Windows、POSIX 和 package CI。
+5. 最新 head 全绿且人工复核 findings 已关闭后，才重新讨论是否转 Ready。
+
+## 7. 另一台机器恢复
 
 ```powershell
 git fetch origin
@@ -171,22 +199,28 @@ python -m pytest -q -p no:cacheprovider `
   tests/test_assurance_stage2_sqlite_experiment.py
 ```
 
-## 7. PR 与主线门禁
+审查问题的最小复现、预期输出和建议测试名见
+[`LEAN-CORE-REVIEW-HANDOFF.md`](LEAN-CORE-REVIEW-HANDOFF.md)。
+
+## 8. PR 与主线门禁
 
 Draft PR #8 在最新 handoff 提交推送后会重新运行 CI。按以下顺序处理：
 
 1. 等待最新 head 的全部 required checks 完成。
 2. 任一检查失败时，在同一 `refactor/lean-core` 分支修复并重跑，不新建分支。
 3. 检查 Python 3.11/3.12、Windows、POSIX、wheel 安装和 package smoke 是否全部通过。
-4. 确认 Python 接口边界测试和“禁止恢复旧 shim”的架构门禁通过。
-5. 为下一次发布准备内部模块路径迁移说明。
-6. 只有上述条件满足后，才把 Draft 转为 Ready for review；仍不要自动合并。
-7. 最终人工合并后再删除远端分支；Draft 和验证阶段保留该分支用于接力。
+4. 逐项复核 `LEAN-CORE-REVIEW-HANDOFF.md` 的三个 findings 已由负向测试关闭。
+5. 确认 Python 接口边界测试和“禁止恢复旧 shim”的架构门禁通过。
+6. 为下一次发布准备内部模块路径迁移说明。
+7. 只有上述条件满足后，才把 Draft 转为 Ready for review；仍不要自动合并。
+8. 最终人工合并后再删除远端分支；Draft 和验证阶段保留该分支用于接力。
 
-## 8. 建议的下一步
+## 9. 建议的下一步
 
-先不要继续扩大 Stage 2 Threat Family。兼容性决策已经完成，下一步只做第二轮 Loop 精简设计：
+先不要继续扩大 Stage 2 Threat Family，也不要开始第二轮 Loop 拆分。优先关闭只读审查的三个
+findings：
 
-1. 画出 `loop_runtime.py` 的阶段边界和可提取纯函数清单。
-2. 先补 characterization tests，再拆一个最小阶段。
-3. 不立即重写整个状态机，不新增默认命令、状态或成功条件。
+1. 修复架构门禁绕过。
+2. 修复 SQLite 假阳性 oracle。
+3. 修复输出目录 symlink/junction 逃逸。
+4. 完成跨平台 CI 后，再画 `loop_runtime.py` 阶段边界和可提取纯函数清单。
