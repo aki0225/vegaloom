@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -53,6 +54,16 @@ REVIEW_ARTIFACTS = [
     "review-verdict.json",
 ]
 MAX_TEXT_CHARS = 20000
+DELEGATION_SUMMARY_FIELDS = (
+    "plan_id",
+    "slice_id",
+    "readiness_status",
+    "attempt_sha256",
+    "execution_sha256",
+)
+_DELEGATION_PLAN_ID = re.compile(r"^PLAN-[A-Z0-9][A-Z0-9._-]{0,99}$")
+_DELEGATION_SLICE_ID = re.compile(r"^S-[A-Z0-9][A-Z0-9._-]{0,99}$")
+_DELEGATION_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -630,7 +641,33 @@ def render_review_checklist() -> str:
     ).rstrip() + "\n"
 
 
+def _controlled_delegation_summary(inputs: dict[str, Any]) -> dict[str, Any]:
+    summary = inputs.get("delegation_summary")
+    if not isinstance(summary, dict):
+        return {}
+    controlled: dict[str, str] = {}
+    for field in DELEGATION_SUMMARY_FIELDS:
+        value = summary.get(field)
+        if not isinstance(value, str):
+            continue
+        if field == "plan_id" and not _DELEGATION_PLAN_ID.fullmatch(value):
+            continue
+        if field == "slice_id" and not _DELEGATION_SLICE_ID.fullmatch(value):
+            continue
+        if field == "readiness_status" and value not in {
+            "budget_eligible",
+            "premium_required",
+            "human_required",
+        }:
+            continue
+        if field.endswith("_sha256") and not _DELEGATION_SHA256.fullmatch(value):
+            continue
+        controlled[field] = redact_value(value)
+    return controlled
+
+
 def render_review_pack(inputs: dict[str, Any]) -> str:
+    delegation_summary = _controlled_delegation_summary(inputs)
     risk_gate = inputs.get("risk_gate")
     risk_gate_note: list[str] = []
     if isinstance(risk_gate, dict) and risk_gate.get("status") == "success":
@@ -682,6 +719,18 @@ def render_review_pack(inputs: dict[str, Any]) -> str:
                 else []
             ),
             *risk_gate_note,
+            *(
+                [
+                    "",
+                    "## 委派证据摘要",
+                    "",
+                    "```json",
+                    json.dumps(delegation_summary, ensure_ascii=False, indent=2),
+                    "```",
+                ]
+                if delegation_summary
+                else []
+            ),
             "",
             "## 原始需求 / Agent Brief",
             "",
@@ -739,6 +788,7 @@ def render_review_prompt(inputs: dict[str, Any]) -> str:
 
 
 def render_review_context(inputs: dict[str, Any]) -> dict[str, Any]:
+    delegation_summary = _controlled_delegation_summary(inputs)
     context = {
         "repo_path": inputs["repo_path"],
         "repo_name": inputs["repo_name"],
@@ -768,6 +818,7 @@ def render_review_context(inputs: dict[str, Any]) -> dict[str, Any]:
         "workspace_changed_during_review": inputs["workspace_changed_during_review"],
         "review_execution_issues": inputs["review_execution_issues"],
         "risk_gate": inputs.get("risk_gate"),
+        "delegation_summary": delegation_summary,
     }
     return redact_value(context)
 
