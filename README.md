@@ -22,6 +22,11 @@
 
 </div>
 
+> [!NOTE]
+> 当前为 `experiment/goal-handoff-integration` 公开实验分支，用于审计引擎无关的
+> Goal/Handoff 安全恢复能力，不代表该能力已经进入公开 `main`。范围、证据与剩余边界见
+> [`docs/experiments/goal-handoff/PUBLIC-ARCHIVE.md`](docs/experiments/goal-handoff/PUBLIC-ARCHIVE.md)。
+
 写代码的 AI 不该自己审自己写的东西。Vega 是一个本地优先的 AI 编码工作流 harness：worker 负责改代码，
 reviewer 使用独立会话，不继承 worker 的完整聊天记录，并在同一目标仓库的只读视图中结合项目规则、diff
 和验证证据进行审查；每次任务用项目自己的验证命令和风险门禁收口，失败、中断或证据不足时留好现场，

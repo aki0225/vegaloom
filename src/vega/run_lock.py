@@ -13,6 +13,16 @@ from uuid import uuid4
 
 _ALLOWED_OPERATIONS = {
     "decision.append",
+    "goal.attach",
+    "goal.checkpoint_done",
+    "goal.complete",
+    "goal.handoff",
+    "goal.handoff_context",
+    "goal.pause",
+    "goal.recover",
+    "goal.resume",
+    "goal.step",
+    "goal.stop",
     "loop.continue",
     "loop.finish",
     "loop.recover",

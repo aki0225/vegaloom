@@ -3,7 +3,7 @@ name: 持续集成
 "on":
   workflow_dispatch:
   push:
-    branches: [main, "release/**"]
+    branches: [main, "release/**", "experiment/goal-handoff-integration"]
   pull_request:
     branches: [main]
 
@@ -91,9 +91,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "541" ]]; then
+          if [[ "$node_count" != "591" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 541 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 591 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -173,6 +173,9 @@ jobs:
               tests/test_cli_recovery_hardening.py
               tests/test_run_mutation_lock.py
               tests/test_execution_control_safety.py
+          - name: goal-handoff
+            test_timeout: 58
+            files: tests/test_goal_handoff.py
           - name: artifacts-runtime-security
             test_timeout: 58
             files: >-
@@ -253,7 +256,8 @@ jobs:
             tests/test_adapter_realpath_boundary.py `
             tests/test_runtime_safety_integration.py::test_windows_verification_preserves_nested_python_quotes `
             tests/test_execution_control_safety.py `
-            tests/test_run_mutation_lock.py
+            tests/test_run_mutation_lock.py `
+            tests/test_goal_handoff.py
 
       - name: 构建并安装 Windows wheel
         shell: pwsh

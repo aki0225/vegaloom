@@ -414,6 +414,91 @@ def goal_checkpoint_done(
     typer.echo(render_run_status(Path.cwd(), run_dir.name))
 
 
+@goal_app.command("handoff")
+def goal_handoff(
+    run: str = typer.Option(..., "--run", help="goal run_id 或 runs/<run_id>。"),
+    checkpoint: str = typer.Option(
+        ...,
+        "--checkpoint",
+        help="已完成 checkpoint 编号，例如 01。",
+    ),
+    input_path: Path = typer.Option(
+        ...,
+        "--input",
+        help="versioned handoff 输入 JSON 文件。",
+    ),
+) -> None:
+    """为已完成 checkpoint 创建不可覆盖的 versioned handoff。"""
+    if not input_path.is_file():
+        raise typer.BadParameter(
+            f"handoff input 文件不存在：{_safe_path_display(input_path)}"
+        )
+    try:
+        run_dir = GoalRuntime(workspace=Path.cwd()).handoff(
+            run,
+            checkpoint=checkpoint,
+            input_path=str(input_path),
+        )
+    except (FileNotFoundError, ValueError, TypeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"goal handoff 创建完成：{run_dir}")
+    typer.echo("")
+    typer.echo(render_run_status(Path.cwd(), run_dir.name))
+
+
+@goal_app.command("handoff-context")
+def goal_handoff_context(
+    run: str = typer.Option(..., "--run", help="goal run_id 或 runs/<run_id>。"),
+    checkpoint: str = typer.Option(
+        ...,
+        "--checkpoint",
+        help="已完成 checkpoint 编号，例如 01。",
+    ),
+    version: str = typer.Option(
+        ...,
+        "--version",
+        help="handoff 版本，例如 v0001。",
+    ),
+    consumer_session_id: str = typer.Option(
+        ...,
+        "--consumer-session-id",
+        "--consumer-session",
+        help="全新 consumer session identity，不能与 source session 相同。",
+    ),
+    consumer_worker_epoch: str = typer.Option(
+        ...,
+        "--consumer-worker-epoch",
+        "--worker-epoch",
+        help="consumer worker epoch identity。",
+    ),
+    max_chars: int = typer.Option(
+        12_000,
+        "--max-chars",
+        min=1,
+        max=1_000_000,
+        help="compiled context 最大字符数。",
+    ),
+) -> None:
+    """用 fresh workspace、policy 和 evidence 编译 consumer context。"""
+    try:
+        run_dir = GoalRuntime(workspace=Path.cwd()).handoff_context(
+            run,
+            checkpoint=checkpoint,
+            version=version,
+            consumer_session_id=consumer_session_id,
+            consumer_worker_epoch=consumer_worker_epoch,
+            max_chars=max_chars,
+        )
+    except (FileNotFoundError, ValueError, TypeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"goal handoff context 编译完成：{run_dir}")
+    typer.echo("")
+    typer.echo(render_run_status(Path.cwd(), run_dir.name))
+    payload = run_status_payload(Path.cwd(), run_dir.name)
+    if payload.get("current_step") != "handoff_context_ready":
+        raise typer.Exit(code=1)
+
+
 @goal_app.command("complete")
 def goal_complete(
     run: str = typer.Option(..., "--run", help="goal run_id 或 runs/<run_id>。"),

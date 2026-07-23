@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,6 +15,12 @@ from .execution_control import (
     find_execution_records,
 )
 from .run_utils import resolve_run_dir, resolve_runs_root
+
+
+_REGISTERED_HANDOFF_PATTERN = re.compile(
+    r"^checkpoints/[A-Za-z0-9][A-Za-z0-9._-]{0,63}/"
+    r"handoffs/(v[0-9]{4})/checkpoint-handoff\.json$"
+)
 
 
 def latest_run_dir(workspace: Path, kind: str = "all") -> Path | None:
@@ -231,6 +240,8 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
             "progress.md",
             "goal-state.json",
             "goal-trace.jsonl",
+            "goal-handoff-report.md",
+            "goal-handoff-context-report.md",
             "goal-final-report.md",
             "goal-eval.md",
             "stop-report.md",
@@ -377,6 +388,7 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
 
 def _goal_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     status = state.get("status")
+    current_step = state.get("current_step")
     if status == "created":
         return [
             f"人工审查 `{run_dir / 'goal-contract.md'}`。",
@@ -389,6 +401,33 @@ def _goal_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
             f"证据挂载完成后运行：`vega goal checkpoint-done --run {run_dir.name} --checkpoint <n>`。",
         ]
     if status == "checkpoint_done":
+        if current_step == "handoff_created":
+            handoff_version = _latest_complete_handoff_version(
+                run_dir,
+                state,
+            )
+            return [
+                f"读取 `{run_dir / 'goal-handoff-report.md'}` 和最新 handoff artifact。",
+                (
+                    f"用 fresh consumer 编译 context：`vega goal handoff-context "
+                    f"--run {run_dir.name} --checkpoint <n> "
+                    f"--version {handoff_version} "
+                    "--consumer-session-id <session> --consumer-worker-epoch <epoch>`。"
+                ),
+                "只有 context status 为 ready 才能启动 consumer worker。",
+            ]
+        if current_step == "handoff_context_ready":
+            return [
+                "读取最新 `checkpoint-context.md`、`checkpoint-context.json` 和 context metrics。",
+                "关闭 source session 后，仅把 compiled context 与绑定 artifacts 交给 fresh consumer worker。",
+                "consumer worker 不得读取 source chat、accepted memory，也不得自动 commit、push 或 release。",
+            ]
+        if current_step == "handoff_split_required":
+            return [
+                "读取最新 `checkpoint-split-plan.md` 和 `context-metrics.json`。",
+                "当前 context 超出预算，禁止启动 provider；由人工决定新的 checkpoint 边界后再编译。",
+                "不得静默截断 objective、constraints、verified facts、失败原因或证据引用。",
+            ]
         return [
             f"读取 `{run_dir / 'progress.md'}` 和最新 `checkpoint-report.md`。",
             f"如继续推进，运行：`vega goal step --run {run_dir.name}` 生成下一个 checkpoint plan。",
@@ -399,6 +438,12 @@ def _goal_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
         return [
             f"如确认继续，运行：`vega goal resume --run {run_dir.name}`。",
             f"如方向变化，运行：`vega goal stop --run {run_dir.name} --reason \"...\"`。",
+        ]
+    if status == "blocked" and current_step == "handoff_blocked":
+        return [
+            f"读取 `{run_dir / 'goal-handoff-context-report.md'}` 和 handoff-blocked artifact。",
+            "当前 handoff 未通过身份、证据、workspace 或 policy 校验，禁止启动 consumer worker。",
+            "保留 blocked 证据，人工修复漂移后从新的 handoff version 或 session 重新编译。",
         ]
     if status == "needs_human":
         if state.get("current_step") == "completion_eval_failed":
@@ -623,7 +668,107 @@ def _latest_goal_artifacts(run_dir: Path) -> list[str]:
         matches = sorted(run_dir.glob(pattern))
         if matches:
             result.append(str(matches[-1].resolve()))
+    for pattern in [
+        "checkpoints/*/handoffs/*/checkpoint-handoff.json",
+        "checkpoints/*/handoffs/*/handoff-report.md",
+        "checkpoints/*/handoffs/*/consumers/*/checkpoint-context.md",
+        "checkpoints/*/handoffs/*/consumers/*/checkpoint-context.json",
+        "checkpoints/*/handoffs/*/consumers/*/context-metrics.json",
+        "checkpoints/*/handoffs/*/consumers/*/handoff-compile-result.json",
+        "checkpoints/*/handoffs/*/consumers/*/checkpoint-split-plan.md",
+        "checkpoints/*/handoffs/*/consumers/*/handoff-blocked.md",
+    ]:
+        matches = sorted(run_dir.glob(pattern))
+        if matches:
+            result.append(str(matches[-1].resolve()))
     return result
+
+
+def _latest_complete_handoff_version(
+    run_dir: Path,
+    state: dict[str, Any],
+) -> str:
+    artifacts = state.get("artifacts")
+    if not isinstance(artifacts, list):
+        return "<version>"
+    for artifact in reversed(artifacts):
+        if not isinstance(artifact, str):
+            continue
+        normalized = artifact.replace("\\", "/")
+        match = _REGISTERED_HANDOFF_PATTERN.fullmatch(normalized)
+        if match is None:
+            continue
+        version = match.group(1)
+        handoff_path = run_dir.joinpath(*normalized.split("/"))
+        report_path = handoff_path.parent / "handoff-report.md"
+        if not (
+            _is_safe_regular_file(handoff_path, run_dir)
+            and _is_safe_regular_file(report_path, run_dir)
+        ):
+            continue
+        try:
+            payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        handoff_version = payload.get("handoff_version")
+        handoff_sha256 = payload.get("handoff_sha256")
+        if (
+            not isinstance(handoff_version, int)
+            or f"v{handoff_version:04d}" != version
+            or not isinstance(handoff_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", handoff_sha256) is None
+        ):
+            continue
+        canonical = {
+            key: value
+            for key, value in payload.items()
+            if key != "handoff_sha256"
+        }
+        actual_hash = hashlib.sha256(
+            json.dumps(
+                canonical,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        if actual_hash == handoff_sha256:
+            return version
+    return "<version>"
+
+
+def _is_safe_regular_file(path: Path, root: Path) -> bool:
+    try:
+        root_resolved = root.resolve(strict=True)
+        relative = path.relative_to(root)
+        current = root
+        for part in relative.parts[:-1]:
+            current = current / part
+            directory_metadata = current.lstat()
+            if (
+                not stat.S_ISDIR(directory_metadata.st_mode)
+                or _is_link_or_reparse_metadata(directory_metadata)
+            ):
+                return False
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root_resolved)
+    except (OSError, ValueError):
+        return False
+    return (
+        stat.S_ISREG(metadata.st_mode)
+        and not _is_link_or_reparse_metadata(metadata)
+        and metadata.st_nlink == 1
+    )
+
+
+def _is_link_or_reparse_metadata(metadata: Any) -> bool:
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0) & reparse_flag
+    )
 
 
 def _latest_execution_payload(run_dir: Path) -> dict[str, Any] | None:

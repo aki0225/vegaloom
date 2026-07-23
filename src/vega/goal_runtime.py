@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
-from typing import cast
+from typing import Any, Callable, cast
 
 from pydantic import ValidationError
 
 from .goal_evidence import validate_goal_evidence
+from .goal_handoff import (
+    GoalHandoffCompileResult,
+    GoalHandoffInput,
+    GoalHandoffWriteResult,
+    compile_goal_handoff_context,
+    create_goal_handoff,
+)
 from .models import (
     GoalCheckpointEvidenceType,
     GoalCheckpointRecord,
@@ -16,8 +25,32 @@ from .models import (
     GoalState,
 )
 from .redaction import write_redacted_json, write_redacted_text
+from .run_lock import RunMutationLock
 from .run_utils import create_run_dir, resolve_run_dir
 from .trace import TraceWriter
+
+
+GoalMutationMethod = Callable[..., Path]
+
+
+def _goal_mutation(operation: str) -> Callable[[GoalMutationMethod], GoalMutationMethod]:
+    """在读取业务状态前取得 run 锁，避免两个写者基于同一旧状态提交结果。"""
+
+    def decorate(method: GoalMutationMethod) -> GoalMutationMethod:
+        @wraps(method)
+        def locked(
+            runtime: GoalRuntime,
+            run: str,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Path:
+            run_dir = resolve_run_dir(runtime.workspace, run)
+            with RunMutationLock.acquire(run_dir, operation):
+                return method(runtime, run, *args, **kwargs)
+
+        return locked
+
+    return decorate
 
 
 class GoalRuntime:
@@ -63,6 +96,7 @@ class GoalRuntime:
         )
         return run_dir
 
+    @_goal_mutation("goal.step")
     def step(self, run: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "step")
@@ -100,6 +134,7 @@ class GoalRuntime:
         )
         return run_dir
 
+    @_goal_mutation("goal.attach")
     def attach(
         self,
         run: str,
@@ -153,6 +188,7 @@ class GoalRuntime:
         )
         return run_dir
 
+    @_goal_mutation("goal.checkpoint_done")
     def checkpoint_done(
         self,
         run: str,
@@ -232,6 +268,152 @@ class GoalRuntime:
         )
         return run_dir
 
+    @_goal_mutation("goal.handoff")
+    def handoff(self, run: str, checkpoint: str, input_path: str) -> Path:
+        run_dir, state, contract = self._load(run)
+        _ensure_action_allowed(state, "handoff")
+        checkpoint_id = _normalize_checkpoint(checkpoint)
+        record = _find_checkpoint_record(state, checkpoint_id)
+        if record is None:
+            raise ValueError(f"checkpoint 不存在：{checkpoint_id}")
+        if record.status != "done":
+            raise ValueError(f"checkpoint {checkpoint_id} 必须先完成，才能执行 handoff。")
+
+        _, refresh_errors = _revalidate_checkpoint_refs(
+            self.workspace,
+            Path(state.repo_path),
+            record,
+        )
+        if refresh_errors:
+            raise ValueError("checkpoint 证据重新校验失败：" + "；".join(refresh_errors))
+
+        handoff_input = _load_goal_handoff_input(input_path)
+        handoff_version = f"v{handoff_input.handoff_version:04d}"
+        handoff_prefix = (
+            f"checkpoints/{checkpoint_id}/handoffs/{handoff_version}/"
+        )
+        if any(
+            artifact.startswith(handoff_prefix)
+            for artifact in state.artifacts
+        ):
+            raise ValueError(
+                "handoff version 已存在且已登记到 Goal state，不能覆盖："
+                f"{handoff_version}"
+            )
+        result = create_goal_handoff(
+            handoff_input,
+            workspace=self.workspace,
+            run_id=state.run_id,
+            checkpoint=checkpoint_id,
+            objective=contract.objective,
+            repo_path=state.repo_path,
+        )
+        state.artifacts = _dedupe([*state.artifacts, *result.artifact_paths])
+        state.status = "checkpoint_done"
+        state.current_step = "handoff_created"
+        write_redacted_text(
+            run_dir / "goal-handoff-report.md",
+            _render_goal_handoff_report(state, checkpoint_id, result),
+        )
+        state.artifacts = _dedupe([*state.artifacts, "goal-handoff-report.md"])
+        _write_progress(run_dir, state, contract)
+        _save_goal_state(run_dir, state)
+        TraceWriter(run_dir / "goal-trace.jsonl").write(
+            "goal_handoff_created",
+            checkpoint=checkpoint_id,
+            artifact_paths=result.artifact_paths,
+            status=result.status,
+        )
+        return run_dir
+
+    @_goal_mutation("goal.handoff_context")
+    def handoff_context(
+        self,
+        run: str,
+        checkpoint: str,
+        version: str,
+        consumer_session_id: str,
+        consumer_worker_epoch: str,
+        max_chars: int,
+    ) -> Path:
+        run_dir, state, contract = self._load(run)
+        _ensure_action_allowed(state, "handoff_context")
+        checkpoint_id = _normalize_checkpoint(checkpoint)
+        record = _find_checkpoint_record(state, checkpoint_id)
+        if record is None:
+            raise ValueError(f"checkpoint 不存在：{checkpoint_id}")
+        if record.status != "done":
+            raise ValueError(
+                f"checkpoint {checkpoint_id} 必须先完成，才能编译 handoff context。"
+            )
+
+        normalized_version = _normalize_handoff_version(version)
+        handoff_prefix = (
+            f"checkpoints/{checkpoint_id}/handoffs/{normalized_version}/"
+        )
+        _, refresh_errors = _revalidate_checkpoint_refs(
+            self.workspace,
+            Path(state.repo_path),
+            record,
+        )
+        if refresh_errors:
+            raise ValueError("checkpoint 证据重新校验失败：" + "；".join(refresh_errors))
+
+        consumer_prefix = (
+            f"{handoff_prefix}"
+            f"consumers/{consumer_session_id.strip()}/"
+        )
+        if any(
+            artifact.startswith(consumer_prefix)
+            for artifact in state.artifacts
+        ):
+            raise ValueError(
+                "consumer session artifact 已登记到 Goal state，"
+                f"不能重复编译：{consumer_session_id.strip()}"
+            )
+
+        result = compile_goal_handoff_context(
+            workspace=self.workspace,
+            run_id=state.run_id,
+            checkpoint=checkpoint_id,
+            version=normalized_version,
+            consumer_session_id=consumer_session_id,
+            consumer_worker_epoch=consumer_worker_epoch,
+            max_chars=max_chars,
+            objective=contract.objective,
+            repo_path=state.repo_path,
+        )
+        state.artifacts = _dedupe([*state.artifacts, *result.artifact_paths])
+        if result.status == "ready":
+            state.status = "checkpoint_done"
+            state.current_step = "handoff_context_ready"
+        elif result.status == "split_required":
+            state.status = "checkpoint_done"
+            state.current_step = "handoff_split_required"
+        else:
+            state.status = "blocked"
+            state.current_step = "handoff_blocked"
+        write_redacted_text(
+            run_dir / "goal-handoff-context-report.md",
+            _render_goal_handoff_context_report(state, checkpoint_id, result),
+        )
+        state.artifacts = _dedupe(
+            [*state.artifacts, "goal-handoff-context-report.md"]
+        )
+        _write_progress(run_dir, state, contract)
+        _save_goal_state(run_dir, state)
+        TraceWriter(run_dir / "goal-trace.jsonl").write(
+            "goal_handoff_context_compiled",
+            checkpoint=checkpoint_id,
+            version=normalized_version,
+            consumer_session_id=consumer_session_id,
+            consumer_worker_epoch=consumer_worker_epoch,
+            artifact_paths=result.artifact_paths,
+            status=result.status,
+        )
+        return run_dir
+
+    @_goal_mutation("goal.pause")
     def pause(self, run: str, reason: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "pause")
@@ -247,6 +429,7 @@ class GoalRuntime:
         TraceWriter(run_dir / "goal-trace.jsonl").write("goal_paused", reason=reason)
         return run_dir
 
+    @_goal_mutation("goal.resume")
     def resume(self, run: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "resume")
@@ -261,6 +444,7 @@ class GoalRuntime:
         TraceWriter(run_dir / "goal-trace.jsonl").write("goal_resumed")
         return run_dir
 
+    @_goal_mutation("goal.stop")
     def stop(self, run: str, reason: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "stop")
@@ -279,6 +463,7 @@ class GoalRuntime:
         TraceWriter(run_dir / "goal-trace.jsonl").write("goal_stopped", reason=reason)
         return run_dir
 
+    @_goal_mutation("goal.complete")
     def complete(self, run: str, note: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "complete")
@@ -331,6 +516,7 @@ class GoalRuntime:
         )
         return run_dir
 
+    @_goal_mutation("goal.recover")
     def recover(self, run: str, reason: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "recover")
@@ -861,6 +1047,67 @@ def _checkpoint_completion_is_current(
     return _checkpoint_completion_is_valid(refreshed)
 
 
+def _load_goal_handoff_input(input_path: str) -> GoalHandoffInput:
+    try:
+        raw = Path(input_path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"handoff input 无法读取：{input_path}") from exc
+    try:
+        return GoalHandoffInput.model_validate_json(raw)
+    except ValidationError as exc:
+        raise ValueError(
+            f"handoff input schema 不合法：{exc.errors()[0]['type']}"
+        ) from exc
+
+
+def _normalize_handoff_version(value: str) -> str:
+    normalized = value.strip().lower()
+    match = re.fullmatch(r"v([0-9]{4})", normalized)
+    if match is None or int(match.group(1)) < 1:
+        raise ValueError("handoff version 必须使用 vNNNN，且版本大于 0")
+    return normalized
+
+
+def _render_goal_handoff_report(
+    state: GoalState,
+    checkpoint_id: str,
+    result: GoalHandoffWriteResult,
+) -> str:
+    return "\n".join(
+        [
+            "# Goal Handoff Report",
+            "",
+            f"- run：`{state.run_id}`",
+            f"- checkpoint：`{checkpoint_id}`",
+            f"- status：`{result.status}`",
+            "",
+            "## Artifacts",
+            "",
+        ]
+        + [f"- {item}" for item in result.artifact_paths]
+    ).rstrip() + "\n"
+
+
+def _render_goal_handoff_context_report(
+    state: GoalState,
+    checkpoint_id: str,
+    result: GoalHandoffCompileResult,
+) -> str:
+    return "\n".join(
+        [
+            "# Goal Handoff Context Report",
+            "",
+            f"- run：`{state.run_id}`",
+            f"- checkpoint：`{checkpoint_id}`",
+            f"- status：`{result.status}`",
+            "",
+            "## Artifacts",
+            "",
+        ]
+        + [f"- {item}" for item in result.artifact_paths]
+    ).rstrip() + "\n"
+
+
 def _revalidate_checkpoint_refs(
     workspace: Path,
     repo_path: Path,
@@ -886,6 +1133,12 @@ def _revalidate_checkpoint_refs(
 
 
 def _ensure_action_allowed(state: GoalState, action: str) -> None:
+    if (
+        action in {"handoff", "handoff_context"}
+        and state.status == "blocked"
+        and state.current_step == "handoff_blocked"
+    ):
+        return
     if action == "resume":
         if state.status == "paused":
             return
@@ -901,6 +1154,8 @@ def _ensure_action_allowed(state: GoalState, action: str) -> None:
         "step": {"created", "running", "checkpoint_done"},
         "attach": {"running"},
         "checkpoint_done": {"running"},
+        "handoff": {"checkpoint_done"},
+        "handoff_context": {"checkpoint_done"},
         "pause": {"created", "running", "checkpoint_done"},
         "stop": {
             "created",
