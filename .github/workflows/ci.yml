@@ -38,8 +38,8 @@ jobs:
 
       - name: 编译与静态检查
         run: |
-          python -m compileall src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/run_assurance_stage2_sqlite_experiment.py
-          ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/run_assurance_stage2_sqlite_experiment.py
+          python -m compileall src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py
+          ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py
 
       - name: 检查仓库路径与私密文件卫生
         shell: bash
@@ -109,9 +109,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "651" ]]; then
+          if [[ "$node_count" != "664" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 651 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 664 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -207,6 +207,7 @@ jobs:
               tests/test_assurance_verification_semantics.py
               tests/test_assurance_stage1_contract.py
               tests/test_assurance_stage2_sqlite_experiment.py
+              tests/test_assurance_stage2_expand_contract_experiment.py
           - name: remaining
             test_timeout: 58
             files: >-
@@ -274,6 +275,7 @@ jobs:
             tests/test_adapter_realpath_boundary.py `
             tests/test_assurance_stage1_contract.py `
             tests/test_assurance_stage2_sqlite_experiment.py `
+            tests/test_assurance_stage2_expand_contract_experiment.py `
             tests/test_runtime_safety_integration.py::test_windows_verification_preserves_nested_python_quotes `
             tests/test_execution_control_safety.py `
             tests/test_run_mutation_lock.py
