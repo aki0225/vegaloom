@@ -268,6 +268,21 @@ experimental -> 修改核心终态或默认 CLI 行为
 
 任一情况下都不在本轮把 Stage 2 接入核心 Runtime。
 
+### 本轮候选执行记录（2026-07-23）
+
+1. **清单与决策**：已建立本文件，冻结核心闭环、实验隔离、artifact 和状态边界。
+2. **增量门禁**：`scripts/check_architecture_growth.py` 已检查 C901 增长、模块行数增长和
+   Core → Experimental 静态依赖；门禁相对 `origin/main` 必须通过。
+3. **非核心隔离**：Memory、Goal、Adapter、Assurance 与兼容 Inspection 已移动到
+   `vega.experimental`；核心 Loop 的证据校验位于 `loop_evidence.py`，不静态依赖实验模块。
+   `loop_runtime.py` 只完成第一轮 iteration 状态聚合，既有巨型编排债务仍保留。
+4. **Stage 2 实验**：仅增加
+   [`ASSURANCE-STAGE2-SQLITE-EXPERIMENT.md`](ASSURANCE-STAGE2-SQLITE-EXPERIMENT.md)
+   所述 SQLite 危险/安全双生脚本和测试。它不新增 `vega` 命令、默认状态、默认 `runs/`
+   或成功条件；总体结论最高为 `continue-experiment`。
+
+本节是候选分支的执行边界，不替代最终本地全量测试和 PR 跨平台 CI 结论。
+
 ## 十、进入主线的门槛
 
 只有同时满足以下条件，精简分支才可以建议合并：
@@ -279,4 +294,3 @@ experimental -> 修改核心终态或默认 CLI 行为
 5. 实验模块不能改变默认运行和 Finish 结果。
 6. 数据库 migration 实验诚实记录不能证明的生产结论。
 7. `eval/` 历史记录未被改写。
-

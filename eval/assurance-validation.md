@@ -1923,3 +1923,90 @@ Assurance 合同或把独立 `sufficient_for_merge` 接入当前 Runtime/Finish 
 
 本条目改变了 PR head 的文档证据，因此必须等待该最新文档 head 再次完成跨平台 PR CI；
 在该 CI 全绿且人工确认合并前，不得将 PR 标为已合并或删除 head 分支。
+
+---
+
+## 2026-07-23 · AV-STAGE2-001 · SQLite migration 双生实验本地结果
+
+### 验证问题
+
+在不把数据库能力接入 Vega Runtime 的前提下，一个受控 SQLite 实验能否同时证明：
+
+1. 已有行的表新增无默认值 `NOT NULL` 列会被注册的危险 detector 拒绝；
+2. 绕过 detector 后，SQLite 实际执行失败，且 schema/data 保持基线；
+3. expand-only 的可空列安全双生可通过最小 OldApp/NewApp × OldSchema/NewSchema 兼容矩阵；
+4. 安全 wrapper 的第二次执行不会重复执行 DDL。
+
+详细范围、SQL、重放命令和结论上限见
+[`docs/ASSURANCE-STAGE2-SQLITE-EXPERIMENT.md`](../docs/ASSURANCE-STAGE2-SQLITE-EXPERIMENT.md)。
+
+### Baseline 与预注册边界
+
+- Git 基线：`origin/main@521f9b924241ec258c75b2ecc893bdaa3be91abd`。
+- 候选分支：`refactor/lean-core`；该次实验与核心隔离改动同一候选工作树进行，尚未形成可合并
+  结论。
+- 平台：Windows / Python `3.14.3` / SQLite `3.50.4`。
+- 实验脚本和双生测试在实际 artifact 运行前已固定为
+  `scripts/run_assurance_stage2_sqlite_experiment.py` 与
+  `tests/test_assurance_stage2_sqlite_experiment.py`。
+- 详细文字预注册文档在同一候选工作树中补充，因此本条只能作为 `local candidate`，不能替代
+  事前冻结、跨引擎或生产规模实验。
+
+### 非目标
+
+- 不新增 `vega` CLI、默认状态、默认 `runs/` artifact 或成功条件。
+- 不接入 Finish、Goal、Loop 或 `AdequacyResult`。
+- 不验证 PostgreSQL/MySQL 锁语义、在线索引、真实发布编排、真实应用代码或生产数据规模。
+- 不验证 DML/backfill、恢复、并发写入、复制延迟、监控或 staged rollout。
+
+### 过程
+
+1. 在 `.local-validation/assurance-stage2-sqlite-20260723-142449/` 创建两个 SQLite 文件。
+2. 对危险 SQL `ALTER TABLE customer ADD COLUMN external_id TEXT NOT NULL`：
+   - 先运行有限语法 detector；
+   - 再在含两行数据的表中实际执行；
+   - 比较失败前后的 schema 与旧应用可读数据。
+3. 对安全 SQL `ALTER TABLE customer ADD COLUMN external_id TEXT`：
+   - 运行 detector；
+   - 顺序执行四格兼容矩阵；
+   - 通过 schema 检查包装 migration，第二次执行必须为 `already_present`。
+4. 运行同一脚本的两条 pytest 回归，并确认输出目录越界时 fail-closed。
+
+### 实际观察
+
+- 危险双生：
+  - detector 输出：
+    `T-DB-MIG-COMPAT:add_column_not_null_without_default:existing_rows_would_reject_migration`；
+  - SQLite 返回 `OperationalError: Cannot add a NOT NULL column with default value NULL`；
+  - 失败后 schema 与两条基线数据保持一致；
+  - 个案判定：`reject`。
+- 安全双生：
+  - detector 没有输出危险项；
+  - `OldApp/OldSchema`、`NewApp/OldSchema`、`OldApp/NewSchema`、
+    `NewApp/NewSchema` 均为通过；
+  - 首次 wrapper 结果为 `applied`，第二次为 `already_present`；
+  - 新列保持可空，`id` 与 `display_name` 基线不变；
+  - 个案判定：`passed-local`。
+- 总体实验结论：`continue-experiment`。
+- 定向回归：`2 passed in 13.89s`。
+
+### 证据
+
+- 机器事实：`.local-validation/assurance-stage2-sqlite-20260723-142449/result.json`
+  - SHA-256：`D6CE0892952DEC6C77855CCEFFD16BFBDE5D59A72F0FDCEA7B84406A39B62067`
+- 人类报告：`.local-validation/assurance-stage2-sqlite-20260723-142449/report.md`
+  - SHA-256：`5ED4631A0B67AB083CB033E93F2D44A0E3DED3D3AB08134DC82492C211882D3B`
+- `.local-validation/` 已被 `.gitignore` 排除；本条只公开可重放步骤、摘要和哈希，不提交
+  本机 SQLite 文件。
+
+### 裁决与下一步
+
+`confirmed-local / continue-experiment / do-not-integrate`
+
+本实验确认了一个真实执行的 SQLite migration 兼容性危险控制和对应安全双生的最低敏感性，
+但没有获得任何生产数据库、锁影响、恢复、数据规模或实际发布顺序的证据。不得把
+`passed-local` 或 `continue-experiment` 解释为 `sufficient_for_merge`、生产安全或
+Runtime 成功。
+
+下一步只能在独立实验中增加一个明确、可重放的数据库引擎/发布兼容场景；在该场景有危险控制、
+负向敏感性、限制说明和跨平台复核前，不扩大 Threat Family，也不接入默认产品路径。
