@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .models import LoopSpec, RunState
+from ...models import LoopSpec, RunState
 
 
 QUESTION_SECTION_MARKERS = ("questions", "问题")

@@ -8,7 +8,7 @@ import pytest
 import vega.loop_runtime as loop_runtime_module
 
 from vega.finish_runtime import FinishRuntime
-from vega.goal_evidence import validate_goal_evidence
+from vega.experimental.goal_evidence import validate_goal_evidence
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput
 from vega.runner import RunnerResult

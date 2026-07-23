@@ -7,27 +7,29 @@ from pathlib import Path
 import typer
 
 from . import __version__
-from .adapter_runtime import init_adapter, render_adapter_init_summary
 from .brief_runtime import BriefRuntime
 from .change_plan_runtime import ChangePlanRuntime
+from .cli_support import (
+    echo_run_status,
+    exit_for_loop_result,
+    exit_if_failed,
+    read_engineering_change_status,
+)
 from .decision import append_run_decision, list_run_decisions
 from .execution_control import request_stop_for_run
 from .finish_runtime import FinishRuntime
 from .gate_runtime import GateRuntime
-from .goal_runtime import GoalRuntime
-from .loop_spec import list_loop_specs, load_loop_spec
 from .loop_runtime import LoopAutomationRuntime
+from .memory_artifacts import MemoryProposalStore
 from .models import BriefInput
 from .project_config import check_project_config, render_project_config_check
 from .project_profile import ProjectProfileRuntime
 from .redaction import redact_text, sensitive_path_reason
 from .reflect_runtime import ReflectRuntime
-from .memory import MemoryLedgerStore, MemoryProposalStore
 from .recovery_runtime import RecoveryRuntime
 from .review_runtime import ReviewPackRuntime, ReviewRuntime
 from .run_status import latest_run_dir, render_run_status, run_status_payload
 from .run_utils import resolve_run_dir
-from .runtime import EngineeringChangeRuntime
 from .tools.git_tools import run_git
 
 app = typer.Typer(help="Vega 本地 Agent Loop Runtime。", invoke_without_command=True)
@@ -75,6 +77,7 @@ def main(
     if version:
         typer.echo(__version__)
         raise typer.Exit()
+    _install_optional_extensions()
 
 
 @app.command()
@@ -84,6 +87,9 @@ def run(
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
 ) -> None:
     """运行本地 loop 并写入可复盘 artifacts。"""
+    from .experimental.inspection.loop_spec import load_loop_spec
+    from .experimental.inspection.runtime import EngineeringChangeRuntime
+
     _reject_sensitive_input_path(task, "--task")
     if not task.exists():
         raise typer.BadParameter(f"任务文件不存在：{_safe_path_display(task)}")
@@ -99,7 +105,7 @@ def run(
 
     runtime = EngineeringChangeRuntime(workspace=workspace, loop_spec=spec)
     run_dir = runtime.run(task_file=task.resolve(), repo_path=repo.resolve())
-    status = _read_engineering_change_status(run_dir)
+    status = read_engineering_change_status(run_dir)
     if status == "success":
         typer.echo(f"运行成功：status={status}，run={run_dir}")
         return
@@ -114,7 +120,7 @@ def profile(repo: Path = typer.Option(..., "--repo", help="目标仓库路径。
         raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
     run_dir = ProjectProfileRuntime(workspace=Path.cwd()).run(repo.resolve())
     typer.echo(f"项目画像生成完成：{run_dir}")
-    _exit_if_failed(run_dir)
+    exit_if_failed(run_dir)
 
 
 @app.command("reflect")
@@ -321,7 +327,7 @@ def goal_start(
         raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
     content, source = _load_brief_input(input_path, text)
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).start(repo.resolve(), content, source, scope)
+        run_dir = _goal_runtime().start(repo.resolve(), content, source, scope)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"goal 创建完成：{run_dir}")
@@ -348,7 +354,7 @@ def goal_status(
 def goal_step(run: str = typer.Option(..., "--run", help="goal run_id 或 runs/<run_id>。")) -> None:
     """只生成下一个 checkpoint plan，不自动执行 worker。"""
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).step(run)
+        run_dir = _goal_runtime().step(run)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"checkpoint plan 生成完成：{run_dir}")
@@ -374,7 +380,7 @@ def goal_attach(
 ) -> None:
     """把人工完成的子 run 或证据引用挂到 checkpoint，不自动执行。"""
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).attach(
+        run_dir = _goal_runtime().attach(
             run,
             checkpoint=checkpoint,
             child_run=child_run,
@@ -401,7 +407,7 @@ def goal_checkpoint_done(
 ) -> None:
     """标记 checkpoint 完成并写 checkpoint-report.md。"""
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).checkpoint_done(
+        run_dir = _goal_runtime().checkpoint_done(
             run,
             checkpoint,
             note=note,
@@ -421,7 +427,7 @@ def goal_complete(
 ) -> None:
     """在全部 checkpoint 完成后收口 goal，并生成最终报告和 eval。"""
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).complete(run, note)
+        run_dir = _goal_runtime().complete(run, note)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"goal 已完成：{run_dir}")
@@ -436,7 +442,7 @@ def goal_pause(
 ) -> None:
     """暂停 goal，不清理工作区。"""
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).pause(run, reason)
+        run_dir = _goal_runtime().pause(run, reason)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"goal 已暂停：{run_dir}")
@@ -446,7 +452,7 @@ def goal_pause(
 def goal_resume(run: str = typer.Option(..., "--run", help="goal run_id 或 runs/<run_id>。")) -> None:
     """恢复 paused goal 的状态，不恢复外部 worker 上下文。"""
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).resume(run)
+        run_dir = _goal_runtime().resume(run)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"goal 已恢复：{run_dir}")
@@ -461,7 +467,7 @@ def goal_stop(
 ) -> None:
     """停止 goal 后续调度，不回滚、不删除、不提交。"""
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).stop(run, reason)
+        run_dir = _goal_runtime().stop(run, reason)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"goal 已停止：{run_dir}")
@@ -476,7 +482,7 @@ def goal_recover(
 ) -> None:
     """把 running goal 标记为 needs_human，保留现场并交还人工。"""
     try:
-        run_dir = GoalRuntime(workspace=Path.cwd()).recover(run, reason)
+        run_dir = _goal_runtime().recover(run, reason)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"goal recover 完成：{run_dir}")
@@ -487,6 +493,8 @@ def goal_recover(
 @app.command("list-loops")
 def list_loops() -> None:
     """列出当前 workspace 中可用的 loop。"""
+    from .experimental.inspection.loop_spec import list_loop_specs
+
     specs = list_loop_specs(Path.cwd())
     if not specs:
         typer.echo("未找到 loop 配置。")
@@ -545,6 +553,8 @@ def adapters_init(
     force: bool = typer.Option(False, "--force", help="覆盖已存在的 adapter 文件。"),
 ) -> None:
     """生成工具侧轻量 skill adapter，不安装 hook，不修改全局配置。"""
+    from .experimental.adapter_runtime import init_adapter, render_adapter_init_summary
+
     if not repo.exists():
         raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
     try:
@@ -776,8 +786,8 @@ def loop_continue(
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"loop continue 完成：{run_dir}")
     typer.echo("")
-    _echo_run_status(run_dir)
-    _exit_for_loop_result(run_dir, allow_initial_assist_wait=False)
+    echo_run_status(run_dir)
+    exit_for_loop_result(run_dir, allow_initial_assist_wait=False)
 
 
 def _run_brief(mode: str, repo: Path, input_path: Path | None, text: str | None) -> None:
@@ -841,8 +851,8 @@ def _run_loop(
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"loop 运行完成：{run_dir}")
     typer.echo("")
-    _echo_run_status(run_dir)
-    _exit_for_loop_result(
+    echo_run_status(run_dir)
+    exit_for_loop_result(
         run_dir,
         allow_initial_assist_wait=allow_initial_assist_wait,
     )
@@ -904,72 +914,12 @@ def _safe_path_display(path: Path) -> str:
     return redact_text(str(path))
 
 
-def _read_engineering_change_status(run_dir: Path) -> str:
-    state_path = run_dir / "state.json"
-    try:
-        payload = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return "unknown"
-    status = payload.get("status")
-    return status if isinstance(status, str) and status else "unknown"
-
-
-def _exit_if_failed(run_dir: Path) -> None:
-    if _read_engineering_change_status(run_dir) == "failed":
-        raise typer.Exit(code=1)
-
-
-def _echo_run_status(run_dir: Path) -> None:
-    try:
-        typer.echo(render_run_status(Path.cwd(), run_dir.name))
-    except (FileNotFoundError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
-
-
-def _exit_for_loop_result(
-    run_dir: Path,
-    *,
-    allow_initial_assist_wait: bool,
-) -> None:
-    status, current_step, automation_mode = _read_loop_outcome(run_dir)
-    if status == "success":
-        return
-    if (
-        allow_initial_assist_wait
-        and automation_mode == "assist"
-        and status == "needs_human"
-        and current_step == "waiting_for_worker"
-    ):
-        return
-    raise typer.Exit(code=1)
-
-
-def _read_loop_outcome(run_dir: Path) -> tuple[str, str, str]:
-    state_path = run_dir / "state.json"
-    try:
-        payload = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return "unknown", "unknown", "unknown"
-    if not isinstance(payload, dict):
-        return "unknown", "unknown", "unknown"
-    status = payload.get("status")
-    current_step = payload.get("current_step")
-    automation_mode = payload.get("automation_mode")
-    return (
-        status if isinstance(status, str) and status else "unknown",
-        current_step if isinstance(current_step, str) and current_step else "unknown",
-        automation_mode
-        if isinstance(automation_mode, str) and automation_mode
-        else "unknown",
-    )
-
-
 @memory_app.command("list")
 def memory_list(
     status: str | None = typer.Option(None, "--status", help="按 accepted 或 rejected 过滤。"),
 ) -> None:
     """列出长期 memory ledger 中的决策记录。"""
-    store = MemoryLedgerStore(Path.cwd())
+    store = _memory_ledger_store(Path.cwd())
     entries = store.list_entries()
     if status:
         entries = [entry for entry in entries if entry.status == status]
@@ -983,7 +933,7 @@ def memory_list(
 @memory_app.command("search")
 def memory_search(query: str = typer.Argument(..., help="检索关键词。")) -> None:
     """检索已接受的长期 memory。"""
-    store = MemoryLedgerStore(Path.cwd())
+    store = _memory_ledger_store(Path.cwd())
     results = store.search(query, accepted_only=True)
     if not results:
         typer.echo("未命中已接受 memory。")
@@ -1019,7 +969,7 @@ def _decide_memory(proposal_id: str, run: str, status: str, reason: str | None) 
     if proposal is None:
         raise typer.BadParameter(f"指定 run 中不存在 proposal：{proposal_id}")
 
-    ledger = MemoryLedgerStore(workspace)
+    ledger = _memory_ledger_store(workspace)
     if ledger.has_decision(proposal_id):
         raise typer.BadParameter(f"proposal 已经有决策记录：{proposal_id}")
     entry = ledger.append_decision(proposal, status, reason)
@@ -1032,6 +982,24 @@ def _resolve_run_dir(workspace: Path, run: str) -> Path:
         return resolve_run_dir(workspace, run)
     except FileNotFoundError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+def _install_optional_extensions() -> None:
+    from .experimental.memory import install_memory_backend
+
+    install_memory_backend()
+
+
+def _goal_runtime():
+    from .experimental.goal_runtime import GoalRuntime
+
+    return GoalRuntime(workspace=Path.cwd())
+
+
+def _memory_ledger_store(workspace: Path):
+    from .experimental.memory import MemoryLedgerStore
+
+    return MemoryLedgerStore(workspace)
 
 
 if __name__ == "__main__":

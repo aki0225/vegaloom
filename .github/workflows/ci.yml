@@ -289,7 +289,7 @@ jobs:
           if ($version.Trim() -ne "0.1.2") {
             throw "Windows wheel 版本不一致：$version"
           }
-          & $venvPython -I -c "from vega.assurance import AdequacyResult; print(AdequacyResult.__name__)"
+          & $venvPython -I -c "from vega.experimental.assurance import AdequacyResult; print(AdequacyResult.__name__)"
           Push-Location $env:RUNNER_TEMP
           try {
             $loops = & $vegaCli list-loops
@@ -379,7 +379,7 @@ jobs:
               "import vega; print(vega.__version__)"
           )" = "0.1.2"
           .tmp/release-validation/venv/bin/python -I -c \
-            "from vega.assurance import AdequacyResult; print(AdequacyResult.__name__)"
+            "from vega.experimental.assurance import AdequacyResult; print(AdequacyResult.__name__)"
           test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.1.2"
           .tmp/release-validation/venv/bin/vega --help >/dev/null
 

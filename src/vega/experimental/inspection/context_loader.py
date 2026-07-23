@@ -6,8 +6,8 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 
-from .models import ToolResult
-from .redaction import assert_not_sensitive_path, is_sensitive_path, redact_text
+from ...models import ToolResult
+from ...redaction import assert_not_sensitive_path, is_sensitive_path, redact_text
 
 
 TEXT_EXTENSIONS = {

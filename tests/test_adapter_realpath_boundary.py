@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from vega.adapter_runtime import init_adapter
+from vega.experimental.adapter_runtime import init_adapter
 from vega.cli import app
 
 

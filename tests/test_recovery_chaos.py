@@ -16,7 +16,7 @@ import vega.loop_runtime as loop_runtime_module
 import vega.recovery_runtime as recovery_runtime_module
 from vega.cli import app
 from vega.execution_control import ExecutionLease, is_process_alive
-from vega.goal_evidence import validate_loop_artifact_integrity
+from vega.loop_evidence import validate_loop_artifact_integrity
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.recovery_runtime import RecoveryRuntime

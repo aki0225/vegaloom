@@ -9,7 +9,7 @@ import pytest
 
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
-from vega.goal_runtime import GoalRuntime
+from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput
 from vega.reflect_runtime import ReflectRuntime

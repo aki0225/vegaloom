@@ -8,7 +8,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .redaction import redact_text, redact_value
+from ...redaction import redact_text, redact_value
 
 
 DEFAULT_MODEL = "gpt-5.5"

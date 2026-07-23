@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
-from vega.loop_spec import default_engineering_change_spec
+from vega.experimental.inspection.loop_spec import default_engineering_change_spec
 from vega.models import BriefInput
 from vega.reflect_runtime import ReflectRuntime
-from vega.reviewer import run_review
+from vega.experimental.inspection.reviewer import run_review
 from vega.runner import RunnerResult
-from vega.runtime import EngineeringChangeRuntime
+from vega.experimental.inspection.runtime import EngineeringChangeRuntime
 
 
 class QueueRunner:

@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 import vega.finish_runtime as finish_runtime
-import vega.goal_evidence as goal_evidence
+import vega.loop_evidence as goal_evidence
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import render_gate_report
-from vega.goal_runtime import GoalRuntime
+from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput, GateResult
 from vega.risk_gate_evidence import render_risk_gate_report_binding, sha256_text

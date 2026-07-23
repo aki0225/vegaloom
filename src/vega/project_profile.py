@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from .memory import MemoryLedgerStore
+from .extensions import search_memory
 from .models import ProfileState, ProjectProfile
 from .project_config import (
     ProjectConfigCheckResult,
@@ -153,13 +153,8 @@ def build_project_profile(
         tracked_revision=resolved_revision,
     )
     repo_scope = repository_scope(repo)
-    memory_hits = filter_sensitive_memory_entries(
-        MemoryLedgerStore(workspace).search(
-            query=repo.name,
-            accepted_only=True,
-            repo=repo_scope,
-        )
-    )
+    memory_entries = search_memory(workspace, query=repo.name, accepted_only=True, repo=repo_scope)
+    memory_hits = filter_sensitive_memory_entries(memory_entries)
     node_package_manager = _detect_node_package_manager(
         repo,
         config_files,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .models import RunState
+from ...models import RunState
 
 
 class StateStore:

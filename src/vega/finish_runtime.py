@@ -8,14 +8,14 @@ from typing import Any
 from pydantic import ValidationError
 
 from .decision import DecisionStore
-from .goal_evidence import (
+from .loop_evidence import (
     EvidenceFreshness,
     LoopArtifactIntegrity,
     latest_verification_failed,
     trusted_verification_passed,
     validate_loop_evidence_snapshot,
 )
-from .memory import MemoryProposalStore
+from .memory_artifacts import MemoryProposalStore
 from .models import LoopAutomationState, ReviewVerdict
 from .redaction import redact_text, redact_value, write_redacted_json, write_redacted_text
 from .run_lock import RunMutationLock

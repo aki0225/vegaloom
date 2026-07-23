@@ -14,7 +14,7 @@ from vega.project_config import load_project_config
 from vega.project_knowledge import load_agents_instructions
 from vega.project_profile import build_project_profile
 from vega.redaction import REDACTION_TEXT, redact_text
-from vega.runtime import EngineeringChangeRuntime
+from vega.experimental.inspection.runtime import EngineeringChangeRuntime
 from vega.workspace_check import capture_review_workspace, evaluate_workspace
 
 
@@ -73,7 +73,7 @@ def test_engineering_runtime_rejects_sensitive_task_before_reading(
 
     monkeypatch.setattr(Path, "read_text", guarded_read_text)
     monkeypatch.setattr(
-        "vega.runtime.LLMClient.from_env",
+        "vega.experimental.inspection.runtime.LLMClient.from_env",
         lambda: (_ for _ in ()).throw(
             AssertionError("sensitive task must be rejected before LLM initialization")
         ),

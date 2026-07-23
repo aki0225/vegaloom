@@ -11,7 +11,7 @@ from vega.change_plan_runtime import ChangePlanRuntime
 from vega.decision import DecisionStore
 from vega.execution_control import ExecutionRecoveryInspection, OwnedProcessResult
 from vega.gate_runtime import GateRuntime
-from vega.goal_runtime import GoalRuntime
+from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput
 from vega.recovery_runtime import render_recovery_report
@@ -19,7 +19,7 @@ from vega.reflect_runtime import ReflectRuntime
 from vega.review_runtime import ReviewRuntime
 from vega.run_status import run_status_payload
 from vega.runner import RunnerResult
-from vega.tool_broker import ToolBroker
+from vega.experimental.inspection.tool_broker import ToolBroker
 from vega.verification import VerificationRunResult, run_project_verification
 from vega.workspace_check import capture_review_workspace, run_workspace_check
 

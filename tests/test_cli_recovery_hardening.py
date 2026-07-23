@@ -435,9 +435,12 @@ def test_engineering_change_cli_uses_final_state_for_exit_code(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("vega.cli._ensure_git_ready", lambda _: None)
-    monkeypatch.setattr("vega.cli.load_loop_spec", lambda *_: object())
     monkeypatch.setattr(
-        "vega.cli.EngineeringChangeRuntime",
+        "vega.experimental.inspection.loop_spec.load_loop_spec",
+        lambda *_: object(),
+    )
+    monkeypatch.setattr(
+        "vega.experimental.inspection.runtime.EngineeringChangeRuntime",
         lambda **_: SimpleNamespace(run=lambda **__: run_dir),
     )
 

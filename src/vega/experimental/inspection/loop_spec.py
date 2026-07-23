@@ -7,8 +7,8 @@ from typing import Any
 
 import yaml
 
-from .models import LoopSpec
-from .tools.git_tools import ALLOWED_CHECKS
+from ...models import LoopSpec
+from ...tools.git_tools import ALLOWED_CHECKS
 
 SUPPORTED_TOOLS = {
     "file.search",

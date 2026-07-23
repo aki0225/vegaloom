@@ -4,14 +4,14 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
 from .brief_runtime import BriefRuntime
 from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk, render_gate_report
-from .goal_evidence import (
+from .loop_evidence import (
     trusted_verification_passed,
     validate_loop_artifact_integrity,
     validate_loop_evidence_freshness,
@@ -336,6 +336,10 @@ class LoopAutomationRuntime:
         _, reviewer_name = _apply_runner_defaults(config, "codex-exec", reviewer_name)
         trace = TraceWriter(run_dir / "trace.jsonl")
         iteration_number = _next_iteration_number(run_dir, state)
+        iteration_state = LoopIterationState(
+            iteration=iteration_number,
+            worker_status="skipped",
+        )
         state.status = "running"
         state.current_iteration = iteration_number
         state.current_step = "workspace_check"
@@ -358,15 +362,13 @@ class LoopAutomationRuntime:
             new_untracked_count=workspace_check.new_untracked_count,
             baseline_untracked_changed=workspace_check.baseline_untracked_changed,
         )
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            workspace_status=workspace_check.status,
+            workspace_new_files_count=workspace_check.new_untracked_count,
+        )
         if workspace_check.has_failures:
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                    workspace_status="failed",
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                )
-            )
+            state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             if workspace_check.new_untracked_count:
                 _write_text_artifact(
@@ -416,16 +418,12 @@ class LoopAutomationRuntime:
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
         )
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+        )
         if not scope_evidence.passed:
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                    workspace_status=workspace_check.status,
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                )
-            )
+            state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
@@ -481,6 +479,11 @@ class LoopAutomationRuntime:
         else:
             verification_status = "skipped"
             verification_failed_count = 0
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            verification_status=verification_status,
+            verification_failed_count=verification_failed_count,
+        )
 
         current_policy = project_policy_snapshot(repo)
         if _project_policy_changed(repo, state.project_policy_snapshot):
@@ -492,17 +495,7 @@ class LoopAutomationRuntime:
                 current_policy,
             )
             trace.write("project_policy_changed", iteration=iteration_number)
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                    workspace_status=workspace_check.status,
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                    verification_status=verification_status,
-                    verification_failed_count=verification_failed_count,
-                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                )
-            )
+            state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             _write_final_report(
                 run_dir,
@@ -531,24 +524,17 @@ class LoopAutomationRuntime:
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
         )
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            **scope_gate_state_fields(
+                post_scope_evidence,
+                phase="post_verification",
+            ),
+        )
         if not post_scope_evidence.passed:
             if verification_status != "skipped" and auto_test_log is not None:
                 _copy_if_exists(auto_test_log, iteration_dir / "test-summary.md")
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                    workspace_status=workspace_check.status,
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                    verification_status=verification_status,
-                    verification_failed_count=verification_failed_count,
-                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                    **scope_gate_state_fields(
-                        post_scope_evidence,
-                        phase="post_verification",
-                    ),
-                )
-            )
+            state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
@@ -578,23 +564,12 @@ class LoopAutomationRuntime:
             note=note,
         )
         _record_reflect(iteration_dir, reflect_run)
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            reflect_run=run_name(reflect_run),
+        )
         if not _reflect_run_succeeded(reflect_run):
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                    workspace_status=workspace_check.status,
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                    verification_status=verification_status,
-                    verification_failed_count=verification_failed_count,
-                    reflect_run=run_name(reflect_run),
-                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                    **scope_gate_state_fields(
-                        post_scope_evidence,
-                        phase="post_verification",
-                    ),
-                )
-            )
+            state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             _write_reflect_failure_report(iteration_dir, reflect_run)
             trace.write(
@@ -654,27 +629,15 @@ class LoopAutomationRuntime:
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
         )
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            **scope_gate_state_fields(
+                review_scope_evidence,
+                phase="pre_review",
+            ),
+        )
         if not review_scope_evidence.passed:
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                    workspace_status=workspace_check.status,
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                    verification_status=verification_status,
-                    verification_failed_count=verification_failed_count,
-                    reflect_run=run_name(reflect_run),
-                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                    **scope_gate_state_fields(
-                        post_scope_evidence,
-                        phase="post_verification",
-                    ),
-                    **scope_gate_state_fields(
-                        review_scope_evidence,
-                        phase="pre_review",
-                    ),
-                )
-            )
+            state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
@@ -695,26 +658,7 @@ class LoopAutomationRuntime:
             )
             return run_dir
         if not _reflect_has_tracked_diff(reflect_run):
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                    workspace_status=workspace_check.status,
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                    verification_status=verification_status,
-                    verification_failed_count=verification_failed_count,
-                    reflect_run=run_name(reflect_run),
-                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                    **scope_gate_state_fields(
-                        post_scope_evidence,
-                        phase="post_verification",
-                    ),
-                    **scope_gate_state_fields(
-                        review_scope_evidence,
-                        phase="pre_review",
-                    ),
-                )
-            )
+            state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
@@ -744,32 +688,16 @@ class LoopAutomationRuntime:
             iteration_number,
         )
         gate_result = gate_evidence.result
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            **_risk_gate_state_fields(gate_evidence),
+        )
         if (
             gate_evidence.error
             or gate_result is None
             or gate_result.recommendation == "human-review"
         ):
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                    workspace_status=workspace_check.status,
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                    verification_status=verification_status,
-                    verification_failed_count=verification_failed_count,
-                    reflect_run=run_name(reflect_run),
-                    **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                    **scope_gate_state_fields(
-                        post_scope_evidence,
-                        phase="post_verification",
-                    ),
-                    **scope_gate_state_fields(
-                        review_scope_evidence,
-                        phase="pre_review",
-                    ),
-                    **_risk_gate_state_fields(gate_evidence),
-                )
-            )
+            state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
@@ -820,28 +748,16 @@ class LoopAutomationRuntime:
             status=review_run_status,
             verdict=verdict.verdict,
         )
-        iteration = LoopIterationState(
-            iteration=iteration_number,
-            worker_status="skipped",
+        iteration_state = _update_iteration_state(
+            iteration_state,
             reviewer_status=reviewer_status,
-            verification_status=verification_status,
-            verification_failed_count=verification_failed_count,
-            reflect_run=run_name(reflect_run),
-            **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-            **scope_gate_state_fields(
-                post_scope_evidence,
-                phase="post_verification",
-            ),
-            **scope_gate_state_fields(
-                review_scope_evidence,
-                phase="pre_review",
-            ),
-            **_risk_gate_state_fields(gate_evidence),
+            workspace_status="skipped",
+            workspace_new_files_count=0,
             review_run=run_name(review_run),
             verdict=verdict.verdict,
             findings_count=len(verdict.findings),
         )
-        state.iterations.append(iteration)
+        state.iterations.append(iteration_state)
         state.current_iteration = iteration_number
         if not _review_run_allows_verdict(review_run_status, verdict):
             trace.write(
@@ -885,6 +801,10 @@ class LoopAutomationRuntime:
         )
 
         for iteration_number in range(1, state.max_iterations + 1):
+            iteration_state = LoopIterationState(
+                iteration=iteration_number,
+                worker_status="skipped",
+            )
             state.current_iteration = iteration_number
             state.current_step = "worker"
             state.save(run_dir / "state.json")
@@ -910,12 +830,7 @@ class LoopAutomationRuntime:
             )
             if prompt_metrics.exceeded:
                 write_context_budget_report(iteration_dir, "worker", prompt_metrics)
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="skipped",
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_final_report(
                     run_dir,
                     state,
@@ -946,14 +861,12 @@ class LoopAutomationRuntime:
                     expected_head_sha=state.initial_head_sha,
                     allow_existing_tracked_diff=iteration_number > 1,
                 )
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="skipped",
-                        workspace_status="failed",
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                    )
+                iteration_state = _update_iteration_state(
+                    iteration_state,
+                    workspace_status="failed",
+                    workspace_new_files_count=workspace_check.new_untracked_count,
                 )
+                state.iterations.append(iteration_state)
                 if head_changed_before_worker:
                     _write_text_artifact(
                         iteration_dir / "fix-prompt.md",
@@ -1015,12 +928,11 @@ class LoopAutomationRuntime:
             )
             trace.write("worker_finished", iteration=iteration_number, status=worker_result.status)
             if worker_result.status in {"timed_out", "stopped"}:
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status=worker_result.status,
-                    )
+                iteration_state = _update_iteration_state(
+                    iteration_state,
+                    worker_status=worker_result.status,
                 )
+                state.iterations.append(iteration_state)
                 _write_execution_interruption_report(
                     iteration_dir,
                     step="worker",
@@ -1055,14 +967,13 @@ class LoopAutomationRuntime:
                     new_untracked_count=workspace_check.new_untracked_count,
                     baseline_untracked_changed=workspace_check.baseline_untracked_changed,
                 )
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="failed",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                    )
+                iteration_state = _update_iteration_state(
+                    iteration_state,
+                    worker_status="failed",
+                    workspace_status=workspace_check.status,
+                    workspace_new_files_count=workspace_check.new_untracked_count,
                 )
+                state.iterations.append(iteration_state)
                 _write_runner_error_report(
                     iteration_dir,
                     step="worker",
@@ -1084,6 +995,10 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
 
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                worker_status="success",
+            )
             current_policy = project_policy_snapshot(repo_path)
             if _project_policy_changed(repo_path, state.project_policy_snapshot):
                 _write_project_policy_change_report(
@@ -1092,12 +1007,7 @@ class LoopAutomationRuntime:
                     current_policy,
                 )
                 trace.write("project_policy_changed", iteration=iteration_number)
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_final_report(
                     run_dir,
                     state,
@@ -1126,15 +1036,13 @@ class LoopAutomationRuntime:
                 new_untracked_count=workspace_check.new_untracked_count,
                 baseline_untracked_changed=workspace_check.baseline_untracked_changed,
             )
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                workspace_status=workspace_check.status,
+                workspace_new_files_count=workspace_check.new_untracked_count,
+            )
             if workspace_check.has_failures:
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status="failed",
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_workspace_fix_prompt(iteration_number + 1),
@@ -1155,14 +1063,11 @@ class LoopAutomationRuntime:
                 return run_dir
 
             if workspace_check.new_untracked_count:
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status="failed",
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                    )
+                iteration_state = _update_iteration_state(
+                    iteration_state,
+                    workspace_status="failed",
                 )
+                state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_untracked_files_fix_prompt(
@@ -1203,16 +1108,12 @@ class LoopAutomationRuntime:
                 expected_head_sha=state.initial_head_sha,
                 expected_policy_sha256=state.scope_policy_sha256,
             )
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+            )
             if not scope_evidence.passed:
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_scope_gate_fix_prompt(iteration_number + 1, scope_evidence),
@@ -1268,6 +1169,11 @@ class LoopAutomationRuntime:
                         scope_evidence=scope_evidence,
                     )
                     return run_dir
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                verification_status=verification_status,
+                verification_failed_count=verification_failed_count,
+            )
 
             current_policy = project_policy_snapshot(repo_path)
             if _project_policy_changed(repo_path, state.project_policy_snapshot):
@@ -1279,17 +1185,7 @@ class LoopAutomationRuntime:
                     current_policy,
                 )
                 trace.write("project_policy_changed", iteration=iteration_number)
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        verification_status=verification_status,
-                        verification_failed_count=verification_failed_count,
-                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_final_report(
                     run_dir,
                     state,
@@ -1317,24 +1213,17 @@ class LoopAutomationRuntime:
                 expected_head_sha=state.initial_head_sha,
                 expected_policy_sha256=state.scope_policy_sha256,
             )
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                **scope_gate_state_fields(
+                    post_scope_evidence,
+                    phase="post_verification",
+                ),
+            )
             if not post_scope_evidence.passed:
                 if verification_status != "skipped" and verification_log is not None:
                     _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        verification_status=verification_status,
-                        verification_failed_count=verification_failed_count,
-                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                        **scope_gate_state_fields(
-                            post_scope_evidence,
-                            phase="post_verification",
-                        ),
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_scope_gate_fix_prompt(iteration_number + 1, post_scope_evidence),
@@ -1363,23 +1252,12 @@ class LoopAutomationRuntime:
                 note=f"auto loop 第 {iteration_number} 轮执行后复盘",
             )
             _record_reflect(iteration_dir, reflect_run)
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                reflect_run=run_name(reflect_run),
+            )
             if not _reflect_run_succeeded(reflect_run):
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        verification_status=verification_status,
-                        verification_failed_count=verification_failed_count,
-                        reflect_run=run_name(reflect_run),
-                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                        **scope_gate_state_fields(
-                            post_scope_evidence,
-                            phase="post_verification",
-                        ),
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_reflect_failure_report(iteration_dir, reflect_run)
                 trace.write(
                     "reflect_failed",
@@ -1438,27 +1316,15 @@ class LoopAutomationRuntime:
                 expected_head_sha=state.initial_head_sha,
                 expected_policy_sha256=state.scope_policy_sha256,
             )
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                **scope_gate_state_fields(
+                    review_scope_evidence,
+                    phase="pre_review",
+                ),
+            )
             if not review_scope_evidence.passed:
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        verification_status=verification_status,
-                        verification_failed_count=verification_failed_count,
-                        reflect_run=run_name(reflect_run),
-                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                        **scope_gate_state_fields(
-                            post_scope_evidence,
-                            phase="post_verification",
-                        ),
-                        **scope_gate_state_fields(
-                            review_scope_evidence,
-                            phase="pre_review",
-                        ),
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_scope_gate_fix_prompt(iteration_number + 1, review_scope_evidence),
@@ -1478,26 +1344,7 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
             if not _reflect_has_tracked_diff(reflect_run):
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        verification_status=verification_status,
-                        verification_failed_count=verification_failed_count,
-                        reflect_run=run_name(reflect_run),
-                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                        **scope_gate_state_fields(
-                            post_scope_evidence,
-                            phase="post_verification",
-                        ),
-                        **scope_gate_state_fields(
-                            review_scope_evidence,
-                            phase="pre_review",
-                        ),
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_no_diff_fix_prompt(iteration_number + 1),
@@ -1526,28 +1373,12 @@ class LoopAutomationRuntime:
                 iteration_number,
             )
             gate_result = gate_evidence.result
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                **_risk_gate_state_fields(gate_evidence),
+            )
             if gate_evidence.error or gate_result is None:
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        verification_status=verification_status,
-                        verification_failed_count=verification_failed_count,
-                        reflect_run=run_name(reflect_run),
-                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                        **scope_gate_state_fields(
-                            post_scope_evidence,
-                            phase="post_verification",
-                        ),
-                        **scope_gate_state_fields(
-                            review_scope_evidence,
-                            phase="pre_review",
-                        ),
-                        **_risk_gate_state_fields(gate_evidence),
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_risk_gate_fix_prompt(iteration_number + 1, None),
@@ -1567,27 +1398,7 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
             if gate_result.recommendation == "human-review":
-                state.iterations.append(
-                    LoopIterationState(
-                        iteration=iteration_number,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        verification_status=verification_status,
-                        verification_failed_count=verification_failed_count,
-                        reflect_run=run_name(reflect_run),
-                        **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                        **scope_gate_state_fields(
-                            post_scope_evidence,
-                            phase="post_verification",
-                        ),
-                        **scope_gate_state_fields(
-                            review_scope_evidence,
-                            phase="pre_review",
-                        ),
-                        **_risk_gate_state_fields(gate_evidence),
-                    )
-                )
+                state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_risk_gate_fix_prompt(iteration_number + 1, gate_result),
@@ -1629,30 +1440,14 @@ class LoopAutomationRuntime:
                 status=review_run_status,
                 verdict=verdict.verdict,
             )
-            iteration = LoopIterationState(
-                iteration=iteration_number,
-                worker_status="success",
+            iteration_state = _update_iteration_state(
+                iteration_state,
                 reviewer_status=reviewer_status,
-                workspace_status=workspace_check.status,
-                workspace_new_files_count=workspace_check.new_untracked_count,
-                verification_status=verification_status,
-                verification_failed_count=verification_failed_count,
-                reflect_run=run_name(reflect_run),
-                **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-                **scope_gate_state_fields(
-                    post_scope_evidence,
-                    phase="post_verification",
-                ),
-                **scope_gate_state_fields(
-                    review_scope_evidence,
-                    phase="pre_review",
-                ),
-                **_risk_gate_state_fields(gate_evidence),
                 review_run=run_name(review_run),
                 verdict=verdict.verdict,
                 findings_count=len(verdict.findings),
             )
-            state.iterations.append(iteration)
+            state.iterations.append(iteration_state)
             previous_verdict = verdict
             if not _review_run_allows_verdict(review_run_status, verdict):
                 trace.write(
@@ -3064,6 +2859,17 @@ def _risk_gate_state_fields(evidence: LoopRiskGateEvidence) -> dict[str, object]
         "risk_gate_result_sha256": evidence.result_sha256,
         "risk_gate_report_sha256": evidence.report_sha256,
     }
+
+
+def _update_iteration_state(
+    iteration: LoopIterationState,
+    **updates: Any,
+) -> LoopIterationState:
+    """每个 iteration 只维护一份逐阶段累积状态，避免分支重复拼装事实。"""
+
+    payload = iteration.model_dump(mode="json")
+    payload.update(updates)
+    return LoopIterationState.model_validate(payload)
 
 
 def _record_review(iteration_dir: Path, review_run: Path) -> None:
