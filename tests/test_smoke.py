@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import re
@@ -12,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import vega
 from typer.testing import CliRunner
 
 from vega.experimental.inspection import eval as eval_runner
@@ -64,6 +66,12 @@ def test_project_skeleton_exists() -> None:
     assert PROJECT_ROOT.joinpath("docs", "ARCHITECTURE.md").exists()
     assert PROJECT_ROOT.joinpath("loops", "engineering-change.loop.yaml").exists()
     assert PROJECT_ROOT.joinpath("examples", "tasks", "check-atg-mcp-docs.md").exists()
+
+
+def test_python_package_public_api_is_version_only() -> None:
+    assert vega.__all__ == ["__version__"]
+    assert importlib.util.find_spec("vega.assurance") is None
+    assert importlib.util.find_spec("vega.experimental.assurance") is not None
 
 
 def test_packaged_baseline_loop_matches_workspace_mirror() -> None:

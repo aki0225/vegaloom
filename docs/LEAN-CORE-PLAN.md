@@ -105,6 +105,18 @@ resources/loops/engineering-change.loop.yaml
 3. 不再给该路径新增能力、artifact 或成功语义。
 4. 后续只有存在独立真实使用证据才保留；否则在下一次破坏性版本中移除。
 
+### 3.4 Python 导入兼容决策
+
+采用“CLI 为稳定入口”的方案：
+
+1. 稳定 Python 导出仅为 `vega.__version__`。
+2. `vega` 下 Runtime、Memory、Goal、Assurance、Adapter 和 Inspection 模块均为内部实现。
+3. 不恢复 `vega.assurance`、`vega.memory`、`vega.runtime` 等旧路径兼容 shim。
+4. 架构门禁必须拒绝重新创建已移除的顶层内部模块。
+5. 下一次发布说明必须明确该边界；若未来提供 Python SDK，另建有版本合同的命名空间。
+
+该决策不影响已有 CLI 命令兼容要求，也不允许 Experimental 反向进入核心成功语义。
+
 ## 四、CLI 清单与决策
 
 ### 4.1 日常核心入口
@@ -291,7 +303,7 @@ experimental -> 修改核心终态或默认 CLI 行为
 只有同时满足以下条件，精简分支才可以建议合并：
 
 1. Python 3.11/3.12、Windows、POSIX 和 wheel CI 全绿。
-2. 核心 CLI、artifact、状态和成功语义保持兼容。
+2. 核心 CLI、artifact、状态和成功语义保持兼容；内部 Python 模块路径按 3.4 不属于该承诺。
 3. 架构门禁能在危险样例上失败、在当前基线上通过。
 4. 默认 Loop 不再静态依赖实验模块。
 5. 实验模块不能改变默认运行和 Finish 结果。

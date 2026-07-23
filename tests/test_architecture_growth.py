@@ -146,6 +146,21 @@ def test_cli_cannot_eagerly_import_experimental_module(tmp_path: Path) -> None:
     ]
 
 
+def test_removed_internal_module_gate_rejects_compatibility_shim(tmp_path: Path) -> None:
+    module = _architecture_module()
+    package = tmp_path / "src" / "vega"
+    package.mkdir(parents=True)
+    package.joinpath("assurance.py").write_text(
+        "from .experimental.assurance import AdequacyResult\n",
+        encoding="utf-8",
+    )
+
+    assert module._removed_internal_module_issues(tmp_path) == [
+        "已移除的内部模块不得恢复兼容层："
+        "src/vega/assurance.py；稳定入口是 CLI"
+    ]
+
+
 def test_repository_architecture_matches_its_own_head() -> None:
     module = _architecture_module()
 

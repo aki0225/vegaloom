@@ -6,7 +6,7 @@
 >
 > Draft PR：[#8](https://github.com/aki0225/vegaloom/pull/8)
 >
-> 当前裁决：`continue-on-same-branch / do-not-merge`
+> 当前裁决：`continue-on-same-branch / manual-merge-only`
 
 ## 1. 基线与提交
 
@@ -114,13 +114,13 @@ Draft PR 首个 head `5f62ad2` 的静态任务在全分支 whitespace 门禁失�
 `.local-validation/` 不提交。其他机器可重放实验，但新生成 artifact 的时间和哈希允许不同；
 必须重新核对结构化结论，不能复制本机结论冒充 live evidence。
 
-## 5. 当前仍不能直接合并的原因
+## 5. 主线评估仍需关注的风险
 
-1. Draft PR 最新 head 的跨平台 CI 尚未完成。
+1. 每个新 head 仍必须完成 Python 3.11/3.12、Windows、POSIX 和 wheel/package CI。
 2. `src/vega/loop_runtime.py` 仍有 3291 行，巨型状态机债务没有消失。
 3. 当前仍有 46 个 C901；本轮只禁止增长并减少两个，不代表复杂度已经健康。
-4. 模块移动会改变外部 Python 导入路径。仓库内引用已迁移，但尚无证据证明所有外部使用者
-   都未依赖 `vega.assurance`、`vega.memory` 等旧路径。
+4. 已决定旧 Python 模块路径属于内部实现，不恢复兼容 shim。仓库外偶然导入旧路径的代码需要
+   迁移；下一次发布说明必须明确该边界。
 5. 实验模块仍由既有 CLI 命令延迟加载，当前是隔离依赖而非删除产品表面。
 6. SQLite 个案没有覆盖 PostgreSQL/MySQL、锁、在线索引、backfill、并发写、恢复、复制延迟
    或真实生产规模。
@@ -178,15 +178,15 @@ Draft PR #8 在最新 handoff 提交推送后会重新运行 CI。按以下顺�
 1. 等待最新 head 的全部 required checks 完成。
 2. 任一检查失败时，在同一 `refactor/lean-core` 分支修复并重跑，不新建分支。
 3. 检查 Python 3.11/3.12、Windows、POSIX、wheel 安装和 package smoke 是否全部通过。
-4. 由人工决定旧 Python 导入路径是否属于承诺的公共 API，以及是否需要发布说明。
-5. 只有上述条件满足后，才把 Draft 转为 Ready for review；仍不要自动合并。
-6. 最终人工合并后再删除远端分支；Draft 和验证阶段保留该分支用于接力。
+4. 确认 Python 接口边界测试和“禁止恢复旧 shim”的架构门禁通过。
+5. 为下一次发布准备内部模块路径迁移说明。
+6. 只有上述条件满足后，才把 Draft 转为 Ready for review；仍不要自动合并。
+7. 最终人工合并后再删除远端分支；Draft 和验证阶段保留该分支用于接力。
 
 ## 8. 建议的下一步
 
-先不要继续扩大 Stage 2 Threat Family。优先处理两个主线决策：
+先不要继续扩大 Stage 2 Threat Family。兼容性决策已经完成，下一步只做第二轮 Loop 精简设计：
 
-1. **兼容性决策**：明确旧模块导入是否为公共 API。若不是，记录 breaking boundary；若是，
-   需要设计最小、有限期、可测试的迁移方案，不能恢复整套旧实现。
-2. **第二轮 Loop 精简设计**：只画出 `loop_runtime.py` 的阶段边界和可提取纯函数清单，先补
-   characterization tests，再拆一个最小阶段；不要立即重写整个状态机。
+1. 画出 `loop_runtime.py` 的阶段边界和可提取纯函数清单。
+2. 先补 characterization tests，再拆一个最小阶段。
+3. 不立即重写整个状态机，不新增默认命令、状态或成功条件。

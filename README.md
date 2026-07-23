@@ -51,6 +51,10 @@ Codex CLI。
 命名约定：`Vega` 是产品名，`vegaloom` 是公开仓库、Python distribution 和发布制品名，
 `vega` 是 Python 导入包与 CLI 命令。
 
+稳定用户入口是本文和产品契约记录的 `vega` CLI。Python 程序化接口只承诺
+`vega.__version__`；`vega` 下的其他模块属于内部实现，允许随核心精简移动，不提供旧导入路径
+兼容层。`vega.experimental.*` 更不承诺跨版本稳定，不能作为默认成功语义的扩展点。
+
 ```powershell
 git clone https://github.com/aki0225/vegaloom.git
 cd vegaloom

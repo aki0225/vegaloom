@@ -41,6 +41,20 @@ vega recover
 兼容的 `vega run engineering-change` 是 YAML 驱动的只读 Inspection Loop，用于生成计划、
 报告和 eval；它不等同于会启动 worker 的日常 Coding Harness。
 
+## Python 接口边界
+
+Vega 发布 Python distribution 是为了安装 CLI 和本地资源，不把内部 Runtime 模块承诺为
+稳定 SDK：
+
+- 稳定的程序化导出只有 `vega.__version__`。
+- 用户级稳定入口是本文记录的 `vega` CLI 及其 artifact/状态合同。
+- `vega` 下其他模块属于内部实现，可以因核心精简而移动或删除。
+- `vega.experimental.*` 明确为实验实现，不承诺导入路径、类型或调用方式跨版本稳定。
+- 已移动的内部模块不恢复 `vega.assurance`、`vega.memory`、`vega.runtime` 等兼容 shim。
+
+如果未来要提供 Python SDK，必须单独定义命名空间、版本和自动化兼容合同；不能把当前内部模块
+被外部偶然导入视为既成公共 API。
+
 ## 能力分层
 
 ### 核心能力

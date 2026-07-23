@@ -13,6 +13,21 @@ from pathlib import Path
 SOURCE_ROOT = Path("src/vega")
 MODULE_SOFT_LIMIT = 500
 COMPLEXITY_PATTERN = re.compile(r"\((?P<actual>\d+)\s*>\s*(?P<limit>\d+)\)")
+REMOVED_INTERNAL_MODULE_PATHS = (
+    SOURCE_ROOT / "adapter_runtime.py",
+    SOURCE_ROOT / "assurance.py",
+    SOURCE_ROOT / "context_loader.py",
+    SOURCE_ROOT / "eval.py",
+    SOURCE_ROOT / "goal_evidence.py",
+    SOURCE_ROOT / "goal_runtime.py",
+    SOURCE_ROOT / "llm_client.py",
+    SOURCE_ROOT / "loop_spec.py",
+    SOURCE_ROOT / "memory.py",
+    SOURCE_ROOT / "reviewer.py",
+    SOURCE_ROOT / "runtime.py",
+    SOURCE_ROOT / "state.py",
+    SOURCE_ROOT / "tool_broker.py",
+)
 
 
 @dataclass(frozen=True)
@@ -267,6 +282,17 @@ def _inside_function(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
     return False
 
 
+def _removed_internal_module_issues(repo_root: Path) -> list[str]:
+    issues: list[str] = []
+    for relative_path in REMOVED_INTERNAL_MODULE_PATHS:
+        if repo_root.joinpath(relative_path).exists():
+            issues.append(
+                "已移除的内部模块不得恢复兼容层："
+                f"{relative_path.as_posix()}；稳定入口是 CLI"
+            )
+    return issues
+
+
 def check_architecture_growth(repo_root: Path, base_ref: str) -> list[str]:
     repo_root = repo_root.resolve()
     _git(repo_root, "rev-parse", "--verify", base_ref)
@@ -282,6 +308,7 @@ def check_architecture_growth(repo_root: Path, base_ref: str) -> list[str]:
     issues = _complexity_issues(base_complexity, current_complexity, renames)
     issues.extend(_module_size_issues(base_sizes, current_sizes, renames))
     issues.extend(_core_import_issues(repo_root))
+    issues.extend(_removed_internal_module_issues(repo_root))
     if not issues:
         print(
             "架构增长门禁通过："

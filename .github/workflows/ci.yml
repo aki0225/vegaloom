@@ -109,9 +109,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "613" ]]; then
+          if [[ "$node_count" != "615" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 613 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 615 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -291,7 +291,7 @@ jobs:
           if ($version.Trim() -ne "0.1.2") {
             throw "Windows wheel 版本不一致：$version"
           }
-          & $venvPython -I -c "from vega.experimental.assurance import AdequacyResult; print(AdequacyResult.__name__)"
+          & $venvPython -I -c "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; assert vega.__all__ == ['__version__']; assert importlib.util.find_spec('vega.assurance') is None; print(AdequacyResult.__name__)"
           Push-Location $env:RUNNER_TEMP
           try {
             $loops = & $vegaCli list-loops
@@ -381,7 +381,7 @@ jobs:
               "import vega; print(vega.__version__)"
           )" = "0.1.2"
           .tmp/release-validation/venv/bin/python -I -c \
-            "from vega.experimental.assurance import AdequacyResult; print(AdequacyResult.__name__)"
+            "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; assert vega.__all__ == ['__version__']; assert importlib.util.find_spec('vega.assurance') is None; print(AdequacyResult.__name__)"
           test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.1.2"
           .tmp/release-validation/venv/bin/vega --help >/dev/null
 
@@ -419,3 +419,5 @@ jobs:
             .tmp/release-validation/sdist-venv/bin/python -I -c \
               "import vega; print(vega.__version__)"
           )" = "0.1.2"
+          .tmp/release-validation/sdist-venv/bin/python -I -c \
+            "import importlib.util, vega; assert vega.__all__ == ['__version__']; assert importlib.util.find_spec('vega.assurance') is None"
