@@ -25,7 +25,15 @@ PARENT_HASH = "3" * 64
 
 def test_valid_contract_is_budget_eligible_and_deterministic() -> None:
     payload = _plan_payload()
-    context = _context()
+    payload["task_dag"][0]["verification"]["commands"].append(
+        "cmd /d /c echo verification"
+    )
+    context = _context(
+        allowed_verification_commands=[
+            "python -m pytest tests/test_example.py",
+            "cmd /d /c echo verification",
+        ]
+    )
 
     first = evaluate_delegation_payload(payload, expected=context)
     second = evaluate_delegation_payload(copy.deepcopy(payload), expected=context)
@@ -83,6 +91,8 @@ def test_contract_cannot_self_declare_route() -> None:
         "src/vega/*.py",
         ".git/config",
         "src//example.py",
+        ".env",
+        "secrets/id_rsa",
     ],
 )
 def test_contract_rejects_unsafe_or_ambiguous_paths(unsafe_path: str) -> None:
@@ -219,6 +229,22 @@ def test_write_path_outside_compiled_scope_fails_closed() -> None:
     ]
 
 
+def test_read_path_outside_compiled_scope_fails_closed() -> None:
+    payload = _plan_payload()
+    payload["task_dag"][0]["read_paths"] = [
+        "src/vega/other.py",
+        "tests/test_example.py",
+    ]
+
+    result = evaluate_delegation_payload(payload, expected=_context())
+
+    assert result.status == "human_required"
+    assert result.binding_valid is False
+    assert result.issue_codes == [
+        "read_path_outside_compiled_scope:S-IMPLEMENT"
+    ]
+
+
 def test_unapproved_verification_command_fails_closed() -> None:
     payload = _plan_payload()
     payload["task_dag"][0]["verification"]["commands"] = [
@@ -232,6 +258,22 @@ def test_unapproved_verification_command_fails_closed() -> None:
     assert result.issue_codes == [
         "verification_command_not_authorized:S-IMPLEMENT"
     ]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "python C:/private/check.py",  # repo-path-policy: allow-test-fixture
+        r"python \\server\share\check.py",  # repo-path-policy: allow-test-fixture
+        "python /tmp/check.py",
+    ],
+)
+def test_contract_rejects_verification_commands_with_local_paths(command: str) -> None:
+    payload = _plan_payload()
+    payload["task_dag"][0]["verification"]["commands"] = [command]
+
+    with pytest.raises(ValidationError):
+        PlanContract.model_validate(payload)
 
 
 def test_input_artifact_hash_mismatch_fails_closed() -> None:
@@ -535,6 +577,10 @@ def _context(**updates: object) -> DelegationValidationContext:
         "task_id": "TASK-001",
         "task_ref": _artifact("tasks/TASK-001.md", TASK_HASH),
         "baseline": _snapshot(),
+        "allowed_read_paths": [
+            "src/vega/example.py",
+            "tests/test_example.py",
+        ],
         "allowed_write_paths": ["src/vega/example.py"],
         "allowed_verification_commands": [
             "python -m pytest tests/test_example.py"

@@ -91,9 +91,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "600" ]]; then
+          if [[ "$node_count" != "649" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 600 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 649 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -184,6 +184,7 @@ jobs:
             test_timeout: 58
             files: >-
               tests/test_success_semantics.py
+              tests/test_delegation_contract.py
               tests/test_evidence_freshness.py
               tests/test_review_artifact_integrity.py
               tests/test_assurance_verification_semantics.py

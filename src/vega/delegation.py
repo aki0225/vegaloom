@@ -17,7 +17,7 @@ from pydantic import (
     model_validator,
 )
 
-from .redaction import redact_text, write_redacted_json
+from .redaction import redact_text, sensitive_path_reason, write_redacted_json
 
 
 DELEGATION_SCHEMA_VERSION = 1
@@ -27,6 +27,17 @@ MAX_DELEGATION_INPUT_BYTES = 1024 * 1024
 _STRICT_MODEL = ConfigDict(extra="forbid", strict=True)
 _ZERO_HASH = hashlib.sha256(b"").hexdigest()
 _PATH_GLOB_CHARACTERS = frozenset("*?[]{}")
+_LOCAL_PATH_PATTERNS = (
+    re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"),
+    re.compile(
+        r"(?<![A-Za-z0-9._\\-])(?:\\\\){1,2}"
+        r"[A-Za-z0-9._$-]+\\+[A-Za-z0-9._$-]+"
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9:/])/"
+        r"(?![A-Za-z?](?:[\s\"'`<>]|$))"
+    ),
+)
 
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 GitObjectId = Annotated[
@@ -337,18 +348,19 @@ class DelegationValidationContext(BaseModel):
     task_id: TaskId
     task_ref: ArtifactReference
     baseline: DelegationSnapshot
+    allowed_read_paths: list[str] = Field(min_length=1, max_length=4096)
     allowed_write_paths: list[str] = Field(min_length=1, max_length=4096)
     allowed_verification_commands: list[CommandText] = Field(min_length=1, max_length=128)
     available_artifacts: list[ArtifactReference] = Field(max_length=512)
     budget_limits: BudgetEligibilityLimits
 
-    @field_validator("allowed_write_paths")
+    @field_validator("allowed_read_paths", "allowed_write_paths")
     @classmethod
-    def validate_allowed_write_paths(cls, values: list[str]) -> list[str]:
+    def validate_allowed_paths(cls, values: list[str]) -> list[str]:
         normalized = [
-            _validate_repo_relative_path(value, "allowed_write_paths") for value in values
+            _validate_repo_relative_path(value, "allowed_paths") for value in values
         ]
-        _require_unique(normalized, "allowed_write_paths 不能重复")
+        _require_unique(normalized, "allowed_paths 不能重复")
         return normalized
 
     @field_validator("allowed_verification_commands")
@@ -494,6 +506,7 @@ def _evaluate_plan(
         binding_issues.append("task_artifact_mismatch")
     _compare_snapshot(plan.baseline, expected.baseline, binding_issues)
 
+    allowed_read_paths = set(expected.allowed_read_paths)
     allowed_write_paths = set(expected.allowed_write_paths)
     allowed_commands = set(expected.allowed_verification_commands)
     available_artifacts = {
@@ -508,6 +521,11 @@ def _evaluate_plan(
         binding_issues.append("parent_plan_artifact_unavailable")
 
     for task_slice in plan.task_dag:
+        for path in task_slice.read_paths:
+            if path not in allowed_read_paths:
+                binding_issues.append(
+                    f"read_path_outside_compiled_scope:{task_slice.slice_id}"
+                )
         for path in task_slice.allowed_write_paths:
             write_path_owners.setdefault(path, []).append(task_slice.slice_id)
             if path not in allowed_write_paths:
@@ -697,6 +715,9 @@ def _validate_repo_relative_path(value: str, field_name: str) -> str:
         raise ValueError(f"{field_name} 不能包含空路径段、'.' 或 '..'")
     if segments[0] == ".git":
         raise ValueError(f"{field_name} 不能指向 Git 控制目录")
+    sensitive_reason = sensitive_path_reason(value)
+    if sensitive_reason:
+        raise ValueError(f"{field_name} 不能指向敏感路径（{sensitive_reason}）")
     if redact_text(value) != value:
         raise ValueError(f"{field_name} 会触发脱敏，不能作为稳定 artifact 身份")
     return value
@@ -706,6 +727,8 @@ def _validate_command(value: str) -> str:
     if value != value.strip():
         raise ValueError("verification command 不能包含首尾空白")
     _reject_unsafe_text(value, "verification command")
+    if any(pattern.search(value) for pattern in _LOCAL_PATH_PATTERNS):
+        raise ValueError("verification command 不能包含本机绝对路径")
     if redact_text(value) != value:
         raise ValueError("verification command 会触发脱敏，不能进入公开合同")
     return value
