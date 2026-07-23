@@ -1880,3 +1880,46 @@ git diff --check
 
 下一步只等待并核对最新分支 head 的跨平台 PR CI；若失败，必须修真实问题，不得放宽
 Assurance 合同或把独立 `sufficient_for_merge` 接入当前 Runtime/Finish 成功语义。
+
+---
+
+## 2026-07-23 · AV-STAGE1-001 · draft PR CI 与 post-CI 只读复核
+
+### CI 身份
+
+- Draft PR：`#7`，`Assurance Stage 1 威胁与证据数据合同`。
+- CI head：`b263d3020442ba07f2676282766b7cc14f7f9310`。
+- GitHub Actions run：`29973446567`，事件：`pull_request`。
+- 运行结论：`success`。
+
+### 已通过的 CI 覆盖
+
+- 静态检查与 600 节点收集合同。
+- Python 3.11 全量测试。
+- Python 3.12 的 `smoke`、`p0-cli-lock`、`artifacts-runtime-security`、
+  `semantics-evidence-review` 与 `remaining` 五个分片。
+- Windows 专项与 wheel smoke、POSIX 临时目录专项、构建并安装 wheel。
+
+### 本地复核边界
+
+- 当前候选 head 的 Stage 1 定向测试为 `59 passed`，本地收集为 `600 tests collected`；
+  compileall、Ruff、相对 `origin/main` 的仓库卫生检查和 diff 检查均通过。
+- 本机 Python 3.14 上直接执行全量 pytest 在外层 20 分钟执行上限前没有形成最终汇总；
+  该尝试既不是全量绿灯，也不作为产品失败结论。跨平台 CI 是本条目的全量测试证据。
+
+### post-CI 只读复核
+
+- 变更面仅包含 Stage 1 合同模块、合同测试、CI 收集/专项覆盖与对应文档；没有把
+  `AdequacyResult` 接入 Finish、Goal 或 Loop 的现有成功语义。
+- 复核了严格 schema、可信上下文 hash、当前 run/current iteration artifact 绑定、
+  有界读取与缓存、verification artifact v2 的命令/结果绑定，以及 LLM candidate
+  不能升级为 active Threat 或充分证据的 fail-closed 路径。
+- 本轮未发现新的阻断项；仍不把 Stage 1 的独立 `sufficient_for_merge` 解释为生产安全或
+  Runtime 成功。
+
+### 裁决
+
+`pr-ci-passed / post-ci-evidence-appended / final-head-ci-required / do-not-merge`
+
+本条目改变了 PR head 的文档证据，因此必须等待该最新文档 head 再次完成跨平台 PR CI；
+在该 CI 全绿且人工确认合并前，不得将 PR 标为已合并或删除 head 分支。
