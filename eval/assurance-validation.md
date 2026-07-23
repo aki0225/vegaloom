@@ -1660,3 +1660,266 @@ workflow 29932356389
 
 本次 post-CI 证据和 Roadmap 会形成新的纯文档 head。该最新 head 仍须通过全部 CI 后，才能
 把 PR 从 Draft 转为 Ready；不自动合并，不开始 Stage 1 实现。
+
+---
+
+## 2026-07-22 · AV-STAGE1-001 · preregistration
+
+### 目标
+
+冻结并验证 Assurance Stage 1 的最小数据合同：版本化 Claim、Threat、EvidenceRecord、
+AssuranceBundle 和确定性 AdequacyResult。该阶段只生成独立 Assurance artifact，不修改
+Finish、Goal 或 Runtime 的成功语义。
+
+### Baseline
+
+- Git 基线：`main@775e1b9fb20f6c842ca70b7766abd76bab9707e3`。
+- 工作分支：`feat/assurance-stage1-contract`。
+- 稳定版本：`v0.1.2`。
+- 测试文件：`tests/test_assurance_stage1_contract.py`。
+
+### 预注册问题
+
+1. 缺少必填字段或出现未知结构时，是否只能得到 fail-closed 结果。
+2. 伪造、重复或悬空的 Claim/Threat/Evidence 引用是否被拒绝。
+3. run、iteration、HEAD、staged/unstaged diff、review snapshot、项目策略和 scope policy
+   错绑时，是否不能给出充分结论。
+4. artifact 相对路径逃逸、文件缺失或 SHA-256 不一致时，是否被拒绝。
+5. 旧 artifact 是否仍可读取，但不能升级为 `sufficient_for_merge`。
+6. LLM 来源是否只能保留为候选，不能激活 Threat 或宣布证据充分。
+7. 危险案例缺少最低证据时是否为 `insufficient`，对应安全双生案例是否能得到
+   `sufficient_for_merge`。
+8. 残余风险和人工决策是否分别收敛到 `requires_staged_rollout` 与 `human_required`。
+9. 损坏输入是否仍能生成独立、脱敏的 fail-closed `assurance-result.json`。
+
+### 非目标
+
+- 不接 Runtime detector。
+- 不改变 `ready_to_commit`、Finish 或 Goal 成功规则。
+- 不调用 LLM。
+- 不实现数据库 migration、数据修改或并发 Threat Family。
+- 不引入数据库、Web UI、LangGraph、Memory 或多 Agent 产品能力。
+
+### 预期
+
+- 新增 26 个纯合同节点，完整收集从 541 增至 567。
+- 旧实现因缺少 `vega.assurance` 而稳定红灯。
+- 实现后 26 个节点全部通过，且现有 541 个节点结果不被放宽。
+- CI 节点合同更新为 567，并把新文件加入 Python 3.12
+  `semantics-evidence-review` 分片。
+
+### 停止条件
+
+只有以下条件同时满足，Stage 1 才可提出合并建议：
+
+1. 26 个预注册节点转绿。
+2. 完整 567 节点得到明确 passed/skipped/failed 计数。
+3. compileall、Ruff、仓库卫生和 `git diff --check` 通过。
+4. 独立审阅未发现 fail-open、引用逃逸或 LLM 越权。
+5. 最新 PR head 的跨平台 CI 全绿。
+
+---
+
+## 2026-07-22 · AV-STAGE1-001 · red test result
+
+### 旧实现复现
+
+只运行预注册文件：
+
+```text
+26 failed in 0.92s
+ModuleNotFoundError: No module named 'vega.assurance'
+```
+
+完整收集结果：
+
+```text
+567 tests collected in 10.87s
+```
+
+所有失败都发生在测试按需导入 Stage 1 合同模块时。测试文件本身已通过 Ruff；完整节点收集
+成功，因此红灯不是 pytest fixture、临时目录或收集基础设施故障，而是当前主线确实没有该
+合同能力。
+
+### 本地证据
+
+- 红灯日志：`.tmp/pytest/logs/stage1-red.txt`
+- 红灯日志 SHA-256：
+  `9B841AB9CE2045384F0BA98EE71E637CE69569661BB5613E607A54A7468426F7`
+- 收集日志：`.tmp/pytest/logs/stage1-collect.txt`
+- 收集日志 SHA-256：
+  `DA87D6C07638D1E199BA1F475B995A0B46E5C1A250AF1A6BD3B28D2B700430AC`
+
+### 裁决
+
+`confirmed-red / not-mergeable`
+
+下一步只能实现严格版本化模型、run-local artifact 引用解析和确定性充分性校验器；不得通过
+放宽 snapshot、引用或 LLM 来源约束让测试转绿，也不得在本阶段接入 Finish 成功条件。
+
+---
+
+## 2026-07-22 · AV-STAGE1-001 · independent review correction
+
+### 首轮实现结果
+
+预注册的 26 个节点一度全部通过，但三路独立只读审阅发现该结果不足以满足合同：
+
+1. 其他 run 或旧 iteration 中哈希相同的 artifact 可被当前 EvidenceRecord 复用。
+2. 任意文件只要哈希匹配，就可能配合 Bundle 自报的 `result.status=passed` 冒充证据。
+3. Bundle 自报的 `verification_conclusion` 未由结构化 artifact 重算。
+4. LLM 可把来源标签改写为 `deterministic_detector`，原实现没有独立来源集合绑定。
+5. candidate Threat 的悬空 Claim/Evidence 引用未被检查。
+6. Pydantic 默认类型转换接受字符串 iteration 或布尔 schema version。
+7. scope policy hash 可为 `null`。
+8. Evidence 读取没有单文件、总字节和输入大小预算。
+9. Windows 专项和 wheel smoke 没有直接覆盖新模块。
+
+该首轮 `26 passed` 不能作为可合并证据，也没有提交。
+
+### 修正
+
+- Artifact 强制绑定当前 run/current iteration 的固定 verification-result 路径。
+- 解析 verification artifact v2，重算命令、结果、失败数、中断和总体验证结论。
+- 可信上下文独立冻结 accepted Claim、active Threat 和允许的 Evidence 合同 hash。
+- 所有 Threat（包括 LLM candidate）都检查双向引用。
+- 全部模型启用严格类型，scope policy hash 改为必需。
+- 路径拒绝盘符、URI scheme、NTFS ADS、`..` 和静态 symlink/junction 逃逸。
+- 输入、单 Evidence 文件和总读取量增加硬预算，并按真实路径去重。
+- 独立 AdequacyResult 写入 snapshot、来源集合 hash 和输入 hash。
+- Windows CI 直接运行 Stage 1 文件，Windows/Linux wheel smoke 都导入新模块。
+
+### 审阅修正回归
+
+测试文件从 26 个节点扩展到 54 个节点，新增覆盖：
+
+- 重复 Claim/Threat/Evidence ID 与完整双向引用。
+- 未知字段、不支持版本、布尔版本号和错误类型。
+- Bundle、Evidence、Artifact 的 run/iteration/snapshot 错绑。
+- 文件缺失、目录替代、真实链接逃逸、NTFS ADS 和跨 run/iteration 复用。
+- 结构化 verification 与 Evidence 自报结果矛盾。
+- LLM 来源伪装和 candidate 悬空引用。
+- 损坏/深层 JSON、输入过大、Evidence 文件过大和持久化脱敏。
+- 结果 snapshot 与可信来源 hash 绑定。
+
+当前定向结果：
+
+```text
+54 passed in 2.64s
+595 tests collected
+```
+
+compileall、Ruff、仓库卫生和 `git diff --check` 通过。
+
+### 裁决
+
+`review-correction-passed-targeted / full-suite-required / do-not-merge`
+
+下一步必须用修正后的 595 节点合同重新跑完整本地分片。此前因 basetemp 父目录未预创建而产生
+的 fixture setup errors 属于无效验证尝试，不计入产品裁决；重跑必须预先创建每个分片父目录。
+
+---
+
+## 2026-07-22 · AV-STAGE1-001 · candidate checkpoint
+
+### 最新合同
+
+独立审阅继续发现并修正以下边界：
+
+1. Assurance input 在 `stat` 后增长时仍可能被完整读入。
+2. verification artifact 未绑定声明命令、实际命令、命令序号和 verification 临时目录。
+3. 同一个 oversized artifact 失败后会被多个 Evidence 重复读取。
+4. 合法的多命令中断 artifact 会因存在 `skipped_commands` 被误判为结构损坏。
+5. 双斜杠会被 `PurePosixPath` 规范化，导致原始空路径段未被拒绝。
+
+新增红灯均在旧实现上稳定失败，修正后 Stage 1 文件结果为：
+
+```text
+59 passed in 1.24s
+600 tests collected
+```
+
+候选实现提交：`9a67692`。
+
+### 全量分片状态
+
+最后三项审阅修正前，597 节点四分片得到：
+
+```text
+595 passed
+1 skipped
+2 failed
+0 timed out
+```
+
+两条失败分别为 owner crash recovery 在长 Windows basetemp 下进入 `needs_human`，以及
+dogfood eval 在四路并发下只完成 `7/8`。两条随后使用短路径、无并发条件串行复跑：
+
+```text
+owner crash recovery: 1 passed in 13.73s
+dogfood eval: 1 passed in 37.14s
+```
+
+该串行结果关闭了两条既有测试的回归疑点，但最新 600 节点尚未重新完成全量分片，不能把
+597 节点结果外推为最终通过。
+
+### 静态门禁
+
+以下命令通过：
+
+```text
+python -m compileall src scripts/check_repository_hygiene.py
+ruff check src tests scripts/check_repository_hygiene.py --no-cache
+python scripts/check_repository_hygiene.py --base-ref main
+git diff --check
+```
+
+### 裁决
+
+`candidate-committed / full-600-and-pr-ci-required / do-not-merge`
+
+下一步只等待并核对最新分支 head 的跨平台 PR CI；若失败，必须修真实问题，不得放宽
+Assurance 合同或把独立 `sufficient_for_merge` 接入当前 Runtime/Finish 成功语义。
+
+---
+
+## 2026-07-23 · AV-STAGE1-001 · draft PR CI 与 post-CI 只读复核
+
+### CI 身份
+
+- Draft PR：`#7`，`Assurance Stage 1 威胁与证据数据合同`。
+- CI head：`b263d3020442ba07f2676282766b7cc14f7f9310`。
+- GitHub Actions run：`29973446567`，事件：`pull_request`。
+- 运行结论：`success`。
+
+### 已通过的 CI 覆盖
+
+- 静态检查与 600 节点收集合同。
+- Python 3.11 全量测试。
+- Python 3.12 的 `smoke`、`p0-cli-lock`、`artifacts-runtime-security`、
+  `semantics-evidence-review` 与 `remaining` 五个分片。
+- Windows 专项与 wheel smoke、POSIX 临时目录专项、构建并安装 wheel。
+
+### 本地复核边界
+
+- 当前候选 head 的 Stage 1 定向测试为 `59 passed`，本地收集为 `600 tests collected`；
+  compileall、Ruff、相对 `origin/main` 的仓库卫生检查和 diff 检查均通过。
+- 本机 Python 3.14 上直接执行全量 pytest 在外层 20 分钟执行上限前没有形成最终汇总；
+  该尝试既不是全量绿灯，也不作为产品失败结论。跨平台 CI 是本条目的全量测试证据。
+
+### post-CI 只读复核
+
+- 变更面仅包含 Stage 1 合同模块、合同测试、CI 收集/专项覆盖与对应文档；没有把
+  `AdequacyResult` 接入 Finish、Goal 或 Loop 的现有成功语义。
+- 复核了严格 schema、可信上下文 hash、当前 run/current iteration artifact 绑定、
+  有界读取与缓存、verification artifact v2 的命令/结果绑定，以及 LLM candidate
+  不能升级为 active Threat 或充分证据的 fail-closed 路径。
+- 本轮未发现新的阻断项；仍不把 Stage 1 的独立 `sufficient_for_merge` 解释为生产安全或
+  Runtime 成功。
+
+### 裁决
+
+`pr-ci-passed / post-ci-evidence-appended / final-head-ci-required / do-not-merge`
+
+本条目改变了 PR head 的文档证据，因此必须等待该最新文档 head 再次完成跨平台 PR CI；
+在该 CI 全绿且人工确认合并前，不得将 PR 标为已合并或删除 head 分支。
