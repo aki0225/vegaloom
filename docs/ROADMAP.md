@@ -1,8 +1,9 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-07-22
+> 更新时间：2026-07-23
 > 稳定基线：`v0.1.2`
-> 当前状态：`M-001`、`M-002`、`M-003` 已完成，当前唯一的 `Now` 是 Assurance Stage 1
+> 当前状态：`M-001`、`M-002`、`M-003` 与 Assurance Stage 1 已完成；当前唯一的 `Now`
+> 是 Stage 2 数据库 Migration 纵向实验，现有候选仍在 Draft PR 中审查，不属于主线能力
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -22,7 +23,7 @@
 v0.1.2 稳定与冻结
   -> Assurance Stage 0 维护收口
   -> Assurance Stage 1：Threat / Evidence 数据合同
-  -> 选择一个高价值 Threat 做纵向闭环
+  -> Assurance Stage 2：数据库 Migration 纵向实验
   -> 依次评估数据修改、并发和生产 Handoff 风险
 ```
 
@@ -92,7 +93,7 @@ Stage 0 的三个维护任务均已完成，并由各自的预注册回归、本
 
 ### Stage 1：Threat 与 Evidence 数据合同
 
-状态：`next`
+状态：`completed`
 
 范围：
 
@@ -107,13 +108,27 @@ Stage 0 的三个维护任务均已完成，并由各自的预注册回归、本
 - 旧 run 可以复盘，但不能因缺少新字段升级成功。
 - 每个关键 threat 至少有一个危险案例和一个安全双生案例。
 
+完成证据：
+
+- PR `#7` 最终 head `428573e` 的 workflow `29973922619`：10 项检查全部成功。
+- 合并提交：`main@521f9b9`。
+- 合并后的主线 workflow `29977016358`：10 项检查全部成功。
+- Stage 1 定向测试：`59 passed`；完整收集合同：`600 tests collected`。
+
+Stage 1 只完成独立数据合同和确定性充分性校验器，没有接入默认 Runtime、Finish、Goal 或
+`ready_to_commit`。`sufficient_for_merge` 仍只是合同层结论，不是生产安全证明。
+
 ### Stage 2：数据库 Migration 纵向闭环
 
-状态：`planned`
+状态：`planned` / `candidate-under-review`
 
 识别 migration、DDL 和 ORM schema 变化，验证兼容矩阵、锁影响、数据转换和恢复路径。
 这不是给 Vega 自身接数据库，而是审查目标项目中的数据库变更风险。没有接近生产规模的
 演练时，最高只能给出 `requires_staged_rollout` 或 `human_required`。
+
+Draft PR `#8` 中已有独立 SQLite 危险/安全双生实验，但它尚未进入主线，也没有注册默认
+CLI 或修改成功语义。当前先关闭该候选的审查 findings，再决定是否把实验结果作为 Stage 2
+的第一份公开证据；不得直接把 SQLite 个案扩大为通用数据库安全声明。
 
 ### Stage 3：数据修改与 Backfill
 
@@ -196,6 +211,12 @@ detector，再选择单一 Threat 做纵向闭环，不一次性实现完整 Ris
 
 LangGraph、Selective Memory、Goal P1 和多 Reviewer 保持独立实验状态；实验只能提出
 opt-in 合并建议，不能自动改变默认 Linear 路径。
+
+### 2026-07-23：Assurance Stage 1 完成
+
+Stage 1 已由最终 PR head 和合并后的主线 CI 验证并进入 `main`。下一阶段只选择数据库
+Migration 这一类 Threat 做纵向实验；在 detector、真实证据和危险/安全双生案例形成独立
+结论前，不把 AdequacyResult 接入默认成功语义。
 
 ## 七、更新规则
 
