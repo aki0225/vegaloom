@@ -163,3 +163,48 @@ Runtime，当前不把该歧义视为 Gate 阻断。后续若要把委派合同�
 shell kind，并分别校验 shell 开关、POSIX 路径与本机文件 URI。
 
 以上修正不改变 `MA-1` 的 `accept` 结论，也不授权进入 `MA-2`。
+
+## 八、远端 CI 证据
+
+2026-07-23 在 `experiment/multi-agent-coordination` 分支手动触发
+`workflow_dispatch`，远端运行信息如下：
+
+- 被验证提交：
+  `3aa632f02fd5d42dc13247e2c7a783621fd94c5b`
+- workflow run：`持续集成 #63`
+- run ID：`30013682778`
+- run URL：`https://github.com/aki0225/vegaloom/actions/runs/30013682778`
+- 运行时间：`2026-07-23T13:59:11Z` 至 `2026-07-23T14:02:07Z`
+- 最终状态：`completed / success`
+
+10 个 job 实例全部成功：
+
+```text
+静态检查与节点收集                          success
+Python 3.11 全量测试                        success
+Python 3.12 分片 smoke                      success
+Python 3.12 分片 p0-cli-lock                success
+Python 3.12 分片 artifacts-runtime-security success
+Python 3.12 分片 semantics-evidence-review  success
+Python 3.12 分片 remaining                  success
+Windows 专项与 wheel smoke                  success
+POSIX 临时目录专项                          success
+构建并安装 wheel                            success
+```
+
+关键日志证据：
+
+- 静态门禁核对 `649` 个测试节点，Python 3.12 的 5 个分片完整覆盖全部
+  `23` 个 `tests/test_*.py` 文件；
+- Python 3.11 全量测试为 `648 passed, 1 skipped`；
+- 包含 `tests/test_delegation_contract.py` 的
+  `semantics-evidence-review` 分片为 `188 passed`；
+- Windows 专项为 `89 passed`，并完成 wheel 构建、干净环境安装、版本、
+  `AdequacyResult` 导入与 `engineering-change` Loop 资源检查；
+- POSIX 专项明确为 `1 passed`，未出现 skipped；
+- Linux wheel 与 sdist 构建、安装和元数据检查对应 job 成功。
+
+该远端运行验证的是上述 `3aa632f` 代码提交。本节是对既成运行结果的追加记录，不反向宣称
+后续纯证据文档提交经过同一次运行。
+
+远端 CI 与本地 Gate 证据一致，`MA-1` 的 `accept` 结论保持不变；仍不授权进入 `MA-2`。
