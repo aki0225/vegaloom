@@ -25,6 +25,10 @@
 3. 一个 expand-only 的可空列迁移，是否能通过最小 OldApp/NewApp × OldSchema/NewSchema
    兼容矩阵？
 4. 安全双生是否至少能证明受控 wrapper 的重复执行不会二次执行 DDL？
+5. 如果矩阵读取字段或最终行内容被破坏，确定性 oracle 是否会把结论降为
+   `inconclusive`？
+6. `.local-validation/` 或任一已有输出路径组件是 symlink、Windows junction 或其他
+   reparse point 时，脚本是否在写入前 fail-closed？
 
 ## 三、双生设计
 
@@ -48,7 +52,12 @@ ALTER TABLE customer ADD COLUMN external_id TEXT
 - 新列保持可空，避免把旧行或旧应用立即推入不兼容状态。
 - `NewApp` 最小适配器在旧 schema 下显式回退为 `external_id=None`；`OldApp` 只读取旧列。
 - 覆盖 `OldApp/OldSchema`、`NewApp/OldSchema`、`OldApp/NewSchema`、`NewApp/NewSchema`。
+- 每格按完整有序行内容判定，不只比较主键；`NewApp` 还必须绑定 `external_id` 和
+  `schema_mode`。
 - migration wrapper 先读取 schema；第二次执行必须是 `already_present`，而非重新执行 DDL。
+- 矩阵完成后分别读取 OldApp/NewApp 行内容，并通过独立 SQL 直接读取持久化
+  `external_id`；只有基线姓名、空 `external_id` 和 `schema_mode=expanded` 全部保持时，
+  `data_invariant.passed` 才为真。
 - 预期：安全双生仅可得到 `passed-local`；整体最多为 `continue-experiment`。
 
 ## 四、重放
@@ -73,6 +82,10 @@ safe.sqlite
 `result.json` 是机器可读事实源；`report.md` 只渲染同一结论。所有输出默认被 `.gitignore`
 排除，公开验证记录只在 `eval/assurance-validation.md` 追加摘要和 SHA-256。
 
+当前 artifact schema 为 `2`。脚本使用当前工作目录下的词法 `.local-validation/` 作为允许
+根，并在创建输出目录前后拒绝任一已有路径组件为 symlink、junction 或 reparse point。
+这是本地 fail-closed 边界，不构成对恶意并发替换路径的操作系统级隔离证明。
+
 ## 五、停止条件与结论上限
 
 本实验通过的最低条件：
@@ -81,7 +94,10 @@ safe.sqlite
 2. 危险执行失败后 schema 与两行基线数据不变。
 3. 安全案例的四格兼容矩阵全部通过。
 4. 安全 wrapper 第二次执行只报告 `already_present`。
-5. 任何输出目录不在 `.local-validation/` 下时，脚本 fail-closed 拒绝写入。
+5. 四格矩阵和最终 `data_invariant` 均按完整行内容、`external_id` 和 `schema_mode`
+   精确匹配；持久化 `external_id` 必须由独立 SQL 快照验证，不能只信任 NewApp 适配器。
+6. 任何输出目录不在 `.local-validation/` 下，或已有路径组件是链接/reparse point 时，
+   脚本 fail-closed 拒绝写入。
 
 即使以上全部成立，结论仍不能超过 `continue-experiment`。未覆盖的关键生产问题包括：
 

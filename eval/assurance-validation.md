@@ -2068,3 +2068,99 @@ Runtime 成功。
 
 下一步只能在独立实验中增加一个明确、可重放的数据库引擎/发布兼容场景；在该场景有危险控制、
 负向敏感性、限制说明和跨平台复核前，不扩大 Threat Family，也不接入默认产品路径。
+
+---
+
+## 2026-07-23 · AV-STAGE2-001 · review correction candidate
+
+### 原始审查问题
+
+Draft PR `#8` 的只读审查确认三个阻塞问题：
+
+1. 架构增长门禁可被 package shim、`from . import experimental` 和
+   `from vega import experimental` 绕过。
+2. SQLite 安全双生只比较行 ID，错误 `external_id`、`schema_mode` 或实际行内容破坏仍可
+   得到 `passed-local`。
+3. `.local-validation/` 本身为 symlink 或 Windows junction 时，输出可被重定向到当前工作
+   目录外。
+
+### 红灯
+
+```text
+architecture targeted: 15 failed, 24 passed
+stage2 targeted: 5 failed, 1 passed
+```
+
+失败均位于上述新负向断言，不是 fixture、SQLite 初始化或目录链接创建失败。
+
+### 修复候选
+
+- 已移除内部模块改按模块名检查，同名 `.py`、package 目录和链接路径均被拒绝。
+- Core → Experimental 检查解析 `ImportFrom.names`，补齐两种 package 导入变体。
+- SQLite artifact schema 升为 `2`；四格矩阵按完整有序行内容校验，最终
+  `data_invariant` 绑定 `display_name`、`external_id` 和 `schema_mode` 并参与结论。
+- 输出目录使用词法 `.local-validation/` 根，在目录创建前后拒绝 symlink、junction 和
+  reparse point。
+- wheel/sdist smoke 扩展为检查全部 13 个已移除旧模块路径。
+
+### 定向结果
+
+```text
+architecture targeted: 39 passed
+stage2 targeted: 6 passed
+full collection: 646 tests collected
+targeted compileall: passed
+targeted Ruff: passed
+```
+
+### 裁决
+
+`review-findings-closed-targeted / full-suite-and-pr-ci-required / do-not-merge`
+
+这只证明三个已知复现已由确定性回归关闭。完整本地分片、仓库卫生、架构增量门禁、Windows、
+POSIX、Python 3.11/3.12、wheel/sdist 和最新 PR head CI 尚未完成；也不证明恶意并发路径替换、
+其他数据库引擎或生产 migration 安全。
+
+---
+
+## 2026-07-23 · AV-STAGE2-001 · review correction local final result
+
+### 追加红灯
+
+首次定向修复后，独立只读复核又注册并复现：
+
+1. `import vega.experimental_tools` 与 `import vega.experimentalish` 被命名空间前缀误报：
+   `2 failed`。
+2. 数据库 `external_id` 被破坏、NewApp 同时掩盖该值时，安全双生仍可能误判：
+   `1 failed`。
+
+两个红灯均在对应最小修复后转绿。SQLite 最终 oracle 现在通过独立 SQL 快照校验持久化
+`external_id`，不再只信任被测 NewApp 读取层。
+
+### 完整本地结果
+
+```text
+full collection: 651 tests collected
+full sharded result: 650 passed, 1 skipped, 0 failed, 0 errors
+architecture targeted: 42 passed
+stage2 targeted: 8 passed
+compileall: passed
+Ruff: passed
+architecture growth: passed, C901 48->46, Python modules 47->54
+repository hygiene: passed
+CI YAML parse: passed
+git diff --check: passed
+```
+
+唯一跳过为 Windows 本地不执行 POSIX shell 变量展开专项；Linux PR CI 必须真实通过。由于本机
+未安装 `pytest-timeout`，测试按文件或完整 node id 集合分片，外层 60 秒超时；所有超时尝试
+均未计入最终汇总。
+
+### 裁决
+
+`passed-local / pr-ci-required / do-not-merge`
+
+三个原始 finding 和后续同根组合问题已由负向回归关闭，完整本地节点与静态门禁通过。该结果
+仍不证明恶意并发路径替换、其他数据库引擎、生产 migration 或操作系统级隔离安全；在最新
+PR head 的 Python 3.11/3.12、Windows、POSIX、wheel/sdist 检查全部成功并完成 post-CI
+只读复核前，不得转 Ready 或合并。

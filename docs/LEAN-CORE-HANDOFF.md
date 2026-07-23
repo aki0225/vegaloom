@@ -6,7 +6,7 @@
 >
 > Draft PR：[#8](https://github.com/aki0225/vegaloom/pull/8)
 >
-> 当前裁决：`continue-on-same-branch / do-not-merge`
+> 当前裁决：`passed-local / pr-ci-required / do-not-merge`
 
 ## 1. 基线与提交
 
@@ -130,10 +130,13 @@ Draft PR 首个 head `5f62ad2` 的静态任务在全分支 whitespace 门禁失�
 5. 实验模块仍由既有 CLI 命令延迟加载，当前是隔离依赖而非删除产品表面。
 6. SQLite 个案没有覆盖 PostgreSQL/MySQL、锁、在线索引、backfill、并发写、恢复、复制延迟
    或真实生产规模。
-7. 架构门禁目前可被 package shim 和两种常见 `ImportFrom` 写法绕过。
-8. SQLite 安全双生的通过判定没有把行内容不变量纳入 oracle，可能产生假阳性。
-9. `.local-validation/` 自身为符号链接或 Windows junction 时，输出边界校验会跟随链接写到
-   当前工作目录外。
+7. 审查基线的架构门禁可被 package shim 和两种常见 `ImportFrom` 写法绕过；当前修复候选
+   已加入 31 个模块、导入和命名空间边界节点，仍待全量和 CI 复核。
+8. 审查基线的 SQLite oracle 未绑定完整行内容；当前修复候选已绑定 `display_name`、
+   `external_id`、`schema_mode` 和最终数据不变量，并用独立 SQL 快照验证持久化
+   `external_id`，仍待完整验证。
+9. 审查基线允许 `.local-validation/` 链接逃逸；当前修复候选在创建前后拒绝 symlink、
+   Windows junction 和 reparse point，仍不声明操作系统级 TOCTOU 隔离。
 
 ## 6. 只读审查结论
 
@@ -217,10 +220,15 @@ Draft PR #8 在最新 handoff 提交推送后会重新运行 CI。按以下顺�
 
 ## 9. 建议的下一步
 
-先不要继续扩大 Stage 2 Threat Family，也不要开始第二轮 Loop 拆分。优先关闭只读审查的三个
-findings：
+先不要继续扩大 Stage 2 Threat Family，也不要开始第二轮 `loop_runtime.py` 拆分。三个
+findings 和后续同根组合问题已完成本地收口：
 
-1. 修复架构门禁绕过。
-2. 修复 SQLite 假阳性 oracle。
-3. 修复输出目录 symlink/junction 逃逸。
-4. 完成跨平台 CI 后，再画 `loop_runtime.py` 阶段边界和可提取纯函数清单。
+1. 完整收集：`651 tests collected`。
+2. 完整分片：`650 passed, 1 skipped, 0 failed, 0 errors`。
+3. compileall、Ruff、架构增量、仓库卫生、CI YAML 和 diff check 全部通过。
+4. 下一步只推送同一 `refactor/lean-core`，等待最新 head 的 10 项跨平台 CI。
+5. CI 全绿后做一次 post-CI 只读复核，再决定是否把 Draft 转为 Ready。
+
+唯一 Windows 本地 skip 是 POSIX shell 变量展开专项，Linux CI 必须真实通过。Stage 2
+不宣称抵御恶意并发路径替换；正式 run/Goal/Memory 的更广泛 reparse 加固属于主线已有的
+独立安全债，不在本 PR 扩大处理。
