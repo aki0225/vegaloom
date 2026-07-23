@@ -3,16 +3,19 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sqlite3
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-EXPERIMENT_SCHEMA_VERSION = 1
+EXPERIMENT_SCHEMA_VERSION = 2
 THREAT_ID = "T-DB-MIG-COMPAT"
 LOCAL_VALIDATION_ROOT = Path(".local-validation")
+BASELINE_CUSTOMERS = ((1, "Ada"), (2, "Lin"))
 DANGEROUS_MIGRATION = "ALTER TABLE customer ADD COLUMN external_id TEXT NOT NULL"
 SAFE_MIGRATION = "ALTER TABLE customer ADD COLUMN external_id TEXT"
 ADD_COLUMN_NOT_NULL_PATTERN = re.compile(
@@ -34,6 +37,7 @@ def run_experiment(output_dir: Path) -> dict[str, Any]:
 
     output_dir = _validate_output_dir(output_dir)
     output_dir.mkdir(parents=True, exist_ok=False)
+    output_dir = _validate_output_dir(output_dir)
     dangerous = _run_dangerous_twin(output_dir / "dangerous.sqlite")
     safe = _run_safe_twin(output_dir / "safe.sqlite")
     decision = (
@@ -99,23 +103,49 @@ def _run_safe_twin(database_path: Path) -> dict[str, Any]:
     connection = sqlite3.connect(database_path)
     try:
         _create_baseline(connection)
+        expected_old_rows = _expected_old_app_rows()
         matrix = {
-            "old_app_on_old_schema": _case_result(_old_app_reads(connection)),
-            "new_app_on_old_schema": _case_result(_new_app_reads(connection)),
+            "old_app_on_old_schema": _case_result(
+                _old_app_reads(connection),
+                expected_old_rows,
+            ),
+            "new_app_on_old_schema": _case_result(
+                _new_app_reads(connection),
+                _expected_new_app_rows("old_fallback"),
+            ),
         }
         first_apply = _apply_expand_only_migration(connection)
-        matrix["old_app_on_new_schema"] = _case_result(_old_app_reads(connection))
-        matrix["new_app_on_new_schema"] = _case_result(_new_app_reads(connection))
+        matrix["old_app_on_new_schema"] = _case_result(
+            _old_app_reads(connection),
+            expected_old_rows,
+        )
+        matrix["new_app_on_new_schema"] = _case_result(
+            _new_app_reads(connection),
+            _expected_new_app_rows("expanded"),
+        )
         second_apply = _apply_expand_only_migration(connection)
         snapshot = _database_snapshot(connection)
+        final_new_app_rows = _new_app_reads(connection)
+        stored_rows = _stored_new_schema_rows(connection)
     finally:
         connection.close()
     all_matrix_passed = all(case["passed"] for case in matrix.values())
     idempotent = first_apply == "applied" and second_apply == "already_present"
     nullable_column = _column_is_nullable(snapshot["columns"], "external_id")
+    data_invariant = _data_invariant(
+        snapshot["rows"],
+        final_new_app_rows,
+        stored_rows,
+    )
     decision = (
         "passed-local"
-        if not issues and all_matrix_passed and idempotent and nullable_column
+        if (
+            not issues
+            and all_matrix_passed
+            and idempotent
+            and nullable_column
+            and data_invariant["passed"]
+        )
         else "inconclusive"
     )
     return {
@@ -126,10 +156,7 @@ def _run_safe_twin(database_path: Path) -> dict[str, Any]:
         "second_apply": second_apply,
         "idempotent_wrapper": idempotent,
         "nullable_column": nullable_column,
-        "data_invariant": {
-            "customer_ids": [row["id"] for row in snapshot["rows"]],
-            "display_names": [row["display_name"] for row in snapshot["rows"]],
-        },
+        "data_invariant": data_invariant,
         "decision": decision,
     }
 
@@ -152,7 +179,7 @@ def _create_baseline(connection: sqlite3.Connection) -> None:
     )
     connection.executemany(
         "INSERT INTO customer (id, display_name) VALUES (?, ?)",
-        [(1, "Ada"), (2, "Lin")],
+        BASELINE_CUSTOMERS,
     )
     connection.commit()
 
@@ -205,13 +232,80 @@ def _new_app_reads(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     ]
 
 
-def _case_result(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    expected_ids = [1, 2]
+def _case_result(
+    rows: list[dict[str, Any]],
+    expected_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
     return {
-        "passed": [row["id"] for row in rows] == expected_ids,
+        "passed": rows == expected_rows,
         "row_count": len(rows),
         "rows": rows,
     }
+
+
+def _expected_old_app_rows() -> list[dict[str, Any]]:
+    return [
+        {"id": customer_id, "display_name": display_name}
+        for customer_id, display_name in BASELINE_CUSTOMERS
+    ]
+
+
+def _expected_new_app_rows(schema_mode: str) -> list[dict[str, Any]]:
+    return [
+        {
+            **row,
+            "external_id": None,
+            "schema_mode": schema_mode,
+        }
+        for row in _expected_old_app_rows()
+    ]
+
+
+def _data_invariant(
+    old_app_rows: list[dict[str, Any]],
+    new_app_rows: list[dict[str, Any]],
+    stored_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    expected_old_rows = _expected_old_app_rows()
+    expected_new_rows = _expected_new_app_rows("expanded")
+    expected_stored_rows = [
+        {
+            **row,
+            "external_id": None,
+        }
+        for row in expected_old_rows
+    ]
+    old_app_contract_passed = old_app_rows == expected_old_rows
+    new_app_contract_passed = new_app_rows == expected_new_rows
+    stored_rows_passed = stored_rows == expected_stored_rows
+    return {
+        "passed": (
+            old_app_contract_passed
+            and new_app_contract_passed
+            and stored_rows_passed
+        ),
+        "old_app_contract_passed": old_app_contract_passed,
+        "new_app_contract_passed": new_app_contract_passed,
+        "stored_rows_passed": stored_rows_passed,
+        "customer_ids": [row["id"] for row in stored_rows],
+        "display_names": [row["display_name"] for row in stored_rows],
+        "external_ids": [row["external_id"] for row in stored_rows],
+        "schema_modes": [row["schema_mode"] for row in new_app_rows],
+    }
+
+
+def _stored_new_schema_rows(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = connection.execute(
+        "SELECT id, display_name, external_id FROM customer ORDER BY id"
+    ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "display_name": row[1],
+            "external_id": row[2],
+        }
+        for row in rows
+    ]
 
 
 def _database_snapshot(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -240,13 +334,37 @@ def _column_is_nullable(columns: list[dict[str, Any]], column_name: str) -> bool
 
 
 def _validate_output_dir(output_dir: Path) -> Path:
-    root = (Path.cwd() / LOCAL_VALIDATION_ROOT).resolve()
-    candidate = output_dir.resolve()
+    workspace = Path.cwd().resolve(strict=True)
+    root = workspace / LOCAL_VALIDATION_ROOT
+    candidate = Path(os.path.abspath(output_dir if output_dir.is_absolute() else workspace / output_dir))
     try:
         candidate.relative_to(root)
     except ValueError as exc:
         raise ValueError("实验输出目录必须位于当前工作目录的 .local-validation/ 下。") from exc
+    _reject_link_or_reparse_components(workspace, candidate)
+    try:
+        candidate.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError as exc:
+        raise ValueError("实验输出目录必须位于当前工作目录的 .local-validation/ 下。") from exc
     return candidate
+
+
+def _reject_link_or_reparse_components(workspace: Path, candidate: Path) -> None:
+    current = workspace
+    for part in candidate.relative_to(workspace).parts:
+        current /= part
+        if os.path.lexists(current) and _is_link_or_reparse_point(current):
+            raise ValueError(
+                "实验输出目录必须位于当前工作目录的 .local-validation/ 下，"
+                "且路径组件不能是符号链接、junction 或 reparse point。"
+            )
+
+
+def _is_link_or_reparse_point(path: Path) -> bool:
+    stat_result = path.lstat()
+    file_attributes = int(getattr(stat_result, "st_file_attributes", 0))
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return stat.S_ISLNK(stat_result.st_mode) or bool(file_attributes & reparse_flag)
 
 
 def _render_report(result: dict[str, Any]) -> str:
@@ -278,6 +396,7 @@ def _render_report(result: dict[str, Any]) -> str:
             f"- NewApp/NewSchema：`{matrix['new_app_on_new_schema']['passed']}`",
             f"- 受控重跑：`{safe['idempotent_wrapper']}`",
             f"- 新列可空：`{safe['nullable_column']}`",
+            f"- 行内容与 schema 读取合同保持不变：`{safe['data_invariant']['passed']}`",
             f"- 判定：`{safe['decision']}`",
             "",
             "## 限制",

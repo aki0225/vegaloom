@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -13,20 +14,20 @@ from pathlib import Path
 SOURCE_ROOT = Path("src/vega")
 MODULE_SOFT_LIMIT = 500
 COMPLEXITY_PATTERN = re.compile(r"\((?P<actual>\d+)\s*>\s*(?P<limit>\d+)\)")
-REMOVED_INTERNAL_MODULE_PATHS = (
-    SOURCE_ROOT / "adapter_runtime.py",
-    SOURCE_ROOT / "assurance.py",
-    SOURCE_ROOT / "context_loader.py",
-    SOURCE_ROOT / "eval.py",
-    SOURCE_ROOT / "goal_evidence.py",
-    SOURCE_ROOT / "goal_runtime.py",
-    SOURCE_ROOT / "llm_client.py",
-    SOURCE_ROOT / "loop_spec.py",
-    SOURCE_ROOT / "memory.py",
-    SOURCE_ROOT / "reviewer.py",
-    SOURCE_ROOT / "runtime.py",
-    SOURCE_ROOT / "state.py",
-    SOURCE_ROOT / "tool_broker.py",
+REMOVED_INTERNAL_MODULE_NAMES = (
+    "adapter_runtime",
+    "assurance",
+    "context_loader",
+    "eval",
+    "goal_evidence",
+    "goal_runtime",
+    "llm_client",
+    "loop_spec",
+    "memory",
+    "reviewer",
+    "runtime",
+    "state",
+    "tool_broker",
 )
 
 
@@ -241,11 +242,28 @@ def _module_size_issues(
 
 def _experimental_import(node: ast.Import | ast.ImportFrom) -> bool:
     if isinstance(node, ast.Import):
-        return any(name.name.startswith("vega.experimental") for name in node.names)
+        return any(
+            _is_module_or_child(name.name, "vega.experimental")
+            for name in node.names
+        )
     module = node.module or ""
+    imports_experimental_name = any(
+        _is_module_or_child(name.name, "experimental")
+        for name in node.names
+    )
     if node.level:
-        return module == "experimental" or module.startswith("experimental.")
-    return module == "vega.experimental" or module.startswith("vega.experimental.")
+        return (
+            _is_module_or_child(module, "experimental")
+            or (not module and imports_experimental_name)
+        )
+    return (
+        _is_module_or_child(module, "vega.experimental")
+        or (module == "vega" and imports_experimental_name)
+    )
+
+
+def _is_module_or_child(module: str, root: str) -> bool:
+    return module == root or module.startswith(f"{root}.")
 
 
 def _core_import_issues(repo_root: Path) -> list[str]:
@@ -284,11 +302,18 @@ def _inside_function(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
 
 def _removed_internal_module_issues(repo_root: Path) -> list[str]:
     issues: list[str] = []
-    for relative_path in REMOVED_INTERNAL_MODULE_PATHS:
-        if repo_root.joinpath(relative_path).exists():
+    for module_name in REMOVED_INTERNAL_MODULE_NAMES:
+        module_path = SOURCE_ROOT / f"{module_name}.py"
+        package_path = SOURCE_ROOT / module_name
+        if os.path.lexists(repo_root.joinpath(module_path)):
             issues.append(
                 "已移除的内部模块不得恢复兼容层："
-                f"{relative_path.as_posix()}；稳定入口是 CLI"
+                f"{module_path.as_posix()}；稳定入口是 CLI"
+            )
+        if os.path.lexists(repo_root.joinpath(package_path)):
+            issues.append(
+                "已移除的内部模块不得恢复兼容层："
+                f"{package_path.as_posix()}/；稳定入口是 CLI"
             )
     return issues
 
