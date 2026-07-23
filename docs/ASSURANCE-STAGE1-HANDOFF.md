@@ -1,10 +1,12 @@
-# Assurance Stage 1 接力说明
+# Assurance Stage 1 完成与接力说明
 
 > 日期：2026-07-22
 >
+> 完成日期：2026-07-23
+>
 > 分支：`feat/assurance-stage1-contract`
 >
-> 当前裁决：`candidate-committed / full-600-and-pr-ci-required / do-not-merge`
+> 当前裁决：`completed / merged-to-main / main-ci-passed`
 
 ## 一、先看结论
 
@@ -15,14 +17,16 @@ fail-closed 的数据合同。
 本阶段没有接入 Runtime detector，没有修改 Finish、Goal、`ready_to_commit` 或现有成功语义。
 `sufficient_for_merge` 目前只是独立合同层结果，不能直接让 Vega run 成功。
 
-当前还不能合并：最新代码已收集到 600 个测试节点，但最后三项审阅修正后没有重新完成
-600 节点本地全量分片；必须等待分支最新 head 的跨平台 PR CI，并复核所有审阅结论关闭。
+PR `#7` 已完成最终 head 和合并后主线的跨平台 CI，并以 `main@521f9b9` 合并。下文保留
+候选阶段的红灯、审阅修正和本地分片历史，避免把合并前的不完整证据改写成事后全绿。
 
 关键提交：
 
 - 基线：`775e1b9`
 - 红灯预注册：`75ddc50`
 - Stage 1 候选实现：`9a67692`
+- 最终 PR head：`428573e`
+- 主线合并：`521f9b9`
 
 ## 二、实现内容
 
@@ -75,7 +79,7 @@ LLM 来源伪装、严格类型、读取预算和跨平台 CI 等缺口，因此
 - `python scripts/check_repository_hygiene.py --base-ref main`
 - `git diff --check`
 
-## 四、全量分片的诚实状态
+## 四、候选阶段的本地全量分片历史
 
 审阅最后三项修正前，597 节点的四分片结果为：
 
@@ -99,35 +103,19 @@ dogfood eval: 1 passed in 37.14s
 ```
 
 这能说明两条失败不是 Assurance 代码回归，但不能替代最新 600 节点全量结论。最新 head 的
-完整裁决必须由 PR CI 给出；在 CI 全绿前不得把本阶段标为 completed。
+完整裁决最终由 PR 和合并后主线 CI 给出，而不是由这次候选阶段分片外推。
 
 唯一 Windows 本地 skip 预计仍是 POSIX shell 变量展开专项，Linux CI 必须实际通过。
 
 ## 五、下一步
 
-1. 获取远端分支并确认 HEAD：
-
-   ```powershell
-   git fetch origin
-   git switch --track origin/feat/assurance-stage1-contract
-   git status -sb
-   git log --oneline -3
-   ```
-
-2. 先复核 Stage 1：
-
-   ```powershell
-   python -m pytest -q tests/test_assurance_stage1_contract.py
-   python -m pytest --collect-only -q
-   ```
-
-   期望：`59 passed`、`600 tests collected`。
-
-3. 查看 Draft PR 最新 head 的所有跨平台 CI。CI 必须覆盖 Python 3.11 全量、Python 3.12
-   分片、Windows 专项、POSIX 专项和 Windows/Linux wheel smoke。
-4. 若 CI 出现失败，只修真实失败，不放宽 snapshot、路径、来源、Evidence 或成功语义。
-5. CI 全绿后重新做一次只读审阅，再追加 post-CI 记录。
-6. 最新文档 head 再次全绿后，才可把 Draft PR 转为 Ready；不自动合并。
+1. 将 Stage 1 视为已完成的数据合同层，不在后续改动中重复扩大其 schema。
+2. 下一阶段只选择数据库 Migration 这一类高价值 Threat 做独立纵向实验。
+3. 任何 Stage 2 候选继续保持默认关闭，不注册默认 CLI，不修改现有成功语义。
+4. 先关闭 Draft PR `#8` 已记录的审查 findings，再决定是否合入其轻量核心重构和 SQLite
+   双生实验。
+5. 在真实 detector、Evidence 生产链和跨平台危险/安全案例完成前，不把
+   `AdequacyResult` 接入 Finish、Goal 或 `ready_to_commit`。
 
 ## 六、剩余边界
 
@@ -136,3 +124,20 @@ dogfood eval: 1 passed in 37.14s
 - 尚未把 AdequacyResult 接入 Finish/Goal；这必须是后续独立预注册阶段。
 - 当前 artifact 可信度仍依赖 Vega run-local 证据链；不声称容器、操作系统或远程证明级隔离。
 - 不新增数据库、Web UI、LangGraph、Memory、自动 commit、push 或 release 能力。
+
+## 七、最终合并与 CI 结论
+
+- PR：`#7`。
+- 最终 head：`428573efc5e962757b146995fba1f0f47261f0c0`。
+- 最终 PR workflow：`29973922619`，10 项检查全部成功。
+- 合并提交：`521f9b924241ec258c75b2ecc893bdaa3be91abd`。
+- 合并后主线 workflow：`29977016358`，10 项检查全部成功。
+- 主线本地复核：Stage 1 `59 passed`，完整收集 `600 tests collected`，仓库卫生与
+  `git diff --check` 通过。
+
+最终裁决：
+
+`completed / merged-to-main / main-ci-passed`
+
+该结论只证明 Stage 1 数据合同满足当前仓库的测试和证据门槛，不证明真实模型、生产数据库、
+容器隔离或远程证明级安全。

@@ -1923,3 +1923,61 @@ Assurance 合同或把独立 `sufficient_for_merge` 接入当前 Runtime/Finish 
 
 本条目改变了 PR head 的文档证据，因此必须等待该最新文档 head 再次完成跨平台 PR CI；
 在该 CI 全绿且人工确认合并前，不得将 PR 标为已合并或删除 head 分支。
+
+---
+
+## 2026-07-23 · AV-STAGE1-001 · 最终 head、合并与主线 CI 结果
+
+### 身份
+
+- PR：`#7`。
+- 最终 PR head：`428573efc5e962757b146995fba1f0f47261f0c0`。
+- 最终 PR workflow：`29973922619`，事件：`pull_request`。
+- 合并提交：`521f9b924241ec258c75b2ecc893bdaa3be91abd`。
+- 合并后主线 workflow：`29977016358`，事件：`push`。
+
+### 最终 PR head
+
+最终文档 head 的 10 项检查全部成功：
+
+1. 静态检查与 600 节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 的 `smoke`、`p0-cli-lock`、`artifacts-runtime-security`、
+   `semantics-evidence-review` 和 `remaining` 五个分片。
+4. Windows 专项与 wheel smoke。
+5. POSIX 临时目录专项。
+6. 构建并安装 wheel。
+
+这关闭了上一条记录中的 `final-head-ci-required`，没有通过覆盖、删除或改写旧记录伪造连续
+成功。
+
+### 合并后主线
+
+PR `#7` 已合并到 `main@521f9b9`。合并后的 push workflow `29977016358` 状态为
+`success`，总耗时 `2m 29s`，同一 10 项任务全部成功。
+
+主线本地复核结果：
+
+```text
+Stage 1 targeted: 59 passed
+full collection: 600 tests collected
+repository hygiene: passed
+git diff --check: passed
+```
+
+### 裁决
+
+`completed / merged-to-main / main-ci-passed`
+
+Assurance Stage 1 已满足预注册合同、独立审阅、最终 PR head CI 和合并后主线 CI 的退出条件。
+Stage 1 到此完成。
+
+该结果仍只适用于独立数据合同与确定性充分性校验器。它不生成真实 Runtime Threat，不改变
+Finish、Goal、`ready_to_commit` 或 Loop 的现有成功语义，也不构成生产数据库、操作系统
+隔离或远程证明级安全声明。
+
+### 下一步
+
+下一阶段只选择数据库 Migration 做独立纵向实验。任何候选必须继续默认关闭，先关闭危险与
+安全双生案例、输出路径和确定性 oracle 的审查问题，再讨论是否形成 Stage 2 的第一份公开
+证据；不得直接把 SQLite 个案扩展为通用数据库安全结论。
