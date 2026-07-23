@@ -2164,3 +2164,133 @@ git diff --check: passed
 仍不证明恶意并发路径替换、其他数据库引擎、生产 migration 或操作系统级隔离安全；在最新
 PR head 的 Python 3.11/3.12、Windows、POSIX、wheel/sdist 检查全部成功并完成 post-CI
 只读复核前，不得转 Ready 或合并。
+
+---
+
+## 2026-07-23 · AV-STAGE2-001 · final PR/main closure
+
+### PR head 门禁
+
+- PR：`#8`。
+- 最终 head：`f59a71d7dd6898bc6fb240bdec3a19d0cb8727df`。
+- PR workflow：`30014062338`。
+- 结果：`success`，总耗时 `2m 50s`。
+- 同一 run 完成：
+  - 静态检查与节点收集；
+  - Python 3.11 全量测试；
+  - Python 3.12 五个分片；
+  - Windows 专项与 wheel smoke；
+  - POSIX 临时目录专项；
+  - wheel 构建与安装。
+
+post-CI 定向复核结果：
+
+```text
+architecture + Stage 2 targeted: 50 passed
+compileall: passed
+Ruff: passed
+architecture growth: passed, C901 48->46, Python modules 47->54
+repository hygiene: passed
+git diff --check: passed
+```
+
+三路独立只读复核没有发现新的阻塞问题。架构门禁、SQLite 独立 SQL oracle 和
+`.local-validation/` 链接/reparse 防护的已知 findings 均已关闭。
+
+### 合并后主线
+
+- PR `#8` 已 squash 合并。
+- 主线提交：`main@0280b9f6df0205261a489e1fd67c6b574684cb64`。
+- 合并后 push workflow：`30016175900`。
+- 结果：`success`，总耗时 `2m 39s`。
+- 同一 10 项任务全部成功。
+
+### 裁决
+
+`completed-first-public-evidence / continue-experiment / do-not-integrate`
+
+`AV-STAGE2-001` 已完成预注册问题、真实 SQLite 执行、负向敏感性修复、完整本地测试、
+最终 PR head CI、post-CI 只读复核和合并后主线 CI。它现在可以作为 Stage 2 的第一份公开
+实验代码与证据。
+
+该裁决只关闭 `AV-STAGE2-001` 的工程与证据门禁，不把 SQLite 个案提升为生产数据库安全、
+跨数据库引擎安全或 Runtime 成功，也不改变 `continue-experiment` 的结论上限。
+
+---
+
+## 2026-07-23 · AV-STAGE2-002 · expand/backfill/contract preregistration
+
+### 基线
+
+- Git 基线：`main@0280b9f6df0205261a489e1fd67c6b574684cb64`。
+- 工作分支：`experiment/assurance-stage2-backfill`。
+- Threat：`T-DB-MIG-COMPAT`。
+- 引擎：Python 标准库 SQLite。
+- 详细预注册合同：
+  [`docs/ASSURANCE-STAGE2-EXPAND-CONTRACT-EXPERIMENT.md`](../docs/ASSURANCE-STAGE2-EXPAND-CONTRACT-EXPERIMENT.md)。
+
+### 冻结问题
+
+1. 固定两行已有数据时，`expand -> contract -> backfill` 的危险顺序能否在执行前被 detector
+   标记，并在绕过 detector 后由 SQLite 实际拒绝？
+2. contract 失败后，transaction rollback 能否保持 expanded schema 和完整数据，同时不残留
+   临时表？
+3. `expand -> bounded fixture backfill -> contract` 能否通过 OldApp/NewApp 与
+   Old/Expanded/Backfilled/Contract schema 的兼容矩阵？
+4. 数据准备和 contract wrapper 能否在本实验固定 fixture 上重复执行而不产生额外修改？
+5. 关闭原连接后重新打开数据库的独立 SQL oracle，能否精确验证 `NOT NULL UNIQUE`、完整行
+   映射和零个 `NULL`？
+6. 部分数据准备、错误映射、读取层掩盖、错误约束和临时表残留是否都会使结论降为
+   `inconclusive`？
+
+### 冻结顺序
+
+危险控制：
+
+```text
+old -> expand -> contract -> backfill
+```
+
+安全双生：
+
+```text
+old -> expand -> bounded fixture backfill -> contract
+```
+
+bounded fixture data preparation 只更新：
+
+```text
+id=1 -> external_id=cust-0001
+id=2 -> external_id=cust-0002
+```
+
+### 非目标
+
+- 不实现通用 backfill runner、租户 scope、row budget、分批 checkpoint 或恢复框架。
+- 不覆盖并发写入、复制延迟、真实应用部署、生产数据规模或在线 DDL。
+- 不注册默认 CLI，不写默认 `runs/`，不接 Finish、Goal、Loop 或 `AdequacyResult`。
+- 不把实验结论解释为 `sufficient_for_merge`、`ready_to_commit` 或生产 migration 安全。
+
+### Artifact 与停止条件
+
+- artifact schema：`2`。
+- 输出只能位于 `.local-validation/`。
+- 机器事实源：`result.json`。
+- 人类报告：`report.md`。
+- 数据库：`dangerous.sqlite`、`safe.sqlite`。
+- 所有注册负向控制、定向测试、完整测试、静态检查和跨平台 CI 必须明确通过。
+
+即使全部通过，结论仍不得超过：
+
+```text
+overall_decision = continue-experiment
+evidence_adequacy = requires_staged_rollout
+runtime_integration = disabled
+```
+
+### 当前裁决
+
+`preregistered / not-run / do-not-integrate`
+
+本条在实现脚本、测试和本地 artifact 运行前追加。后续失败、修正和结果只能继续追加，不能
+改写本预注册合同。
