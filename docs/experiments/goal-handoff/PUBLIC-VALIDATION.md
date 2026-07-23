@@ -6,7 +6,7 @@
 >
 > 分支：`experiment/goal-handoff-integration`
 >
-> 当前阶段：本地审计通过，等待公开远端 CI
+> 当前阶段：本地审计与公开远端 CI 均已通过
 
 ## 1. 迁移范围
 
@@ -84,8 +84,25 @@ errors = 0
 该长跑在未出现测试失败的情况下人工停止。原因是当前 Windows 环境中部分未变更基线测试
 单个小分片仍需要两分钟以上，继续串行完成 591 个节点的本地验证成本过高。
 
-因此不能把这 141 个 node 包装成完整回归。完整 591-node 结论必须以本分支推送后触发的
-公开远端 CI 为准；远端未通过前，本分支不满足合并条件。
+因此不能把这 141 个 node 包装成完整本地回归。完整 591-node 结论以本分支推送后触发的
+公开远端 CI 为准。首轮公开 CI 已在 `6cadd6d` 上完成全量验证：
+
+```text
+workflow = 持续集成 #53
+run id = 29975165067
+commit = 6cadd6d
+status = success
+total duration = 2m 32s
+static and collection = passed
+Python 3.11 full suite = passed
+Python 3.12 matrix = 6/6 jobs passed
+Windows targeted and wheel smoke = passed
+POSIX temporary-directory target = passed
+build and install wheel = passed
+```
+
+这份远端证据补足了本地未完成的全量回归，但不会改变分支隔离边界：本次只验证公开实验
+分支，不创建 PR，也不修改公开 `main`。
 
 ## 6. 当前结论
 
@@ -94,8 +111,10 @@ privacy audit = passed
 static checks = passed
 targeted goal/handoff = passed
 local full regression = incomplete
-remote CI = pending
-merge readiness = pending
+remote CI = passed
+branch validation = passed
+main integration = not started
 ```
 
-这组证据足以允许把独立实验分支推到公开远端接受 CI，但不足以允许合入 `main`。
+这组证据证明 Goal/Handoff 增量已在公开 Linux、Windows 和 wheel 安装链路上通过验证。
+独立实验分支已具备后续人工评审或集成讨论的技术证据，但是否合入 `main` 仍需单独决策。
