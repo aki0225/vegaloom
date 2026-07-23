@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import re
@@ -12,11 +13,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import vega
 from typer.testing import CliRunner
 
-from vega import eval as eval_runner
+from vega.experimental.inspection import eval as eval_runner
 from vega.cli import app
-from vega.context_loader import load_target_context, parse_target_files
+from vega.experimental.inspection.context_loader import load_target_context, parse_target_files
 from vega.execution_control import (
     ExecutionLease,
     RunnerExecutionContext,
@@ -24,12 +26,15 @@ from vega.execution_control import (
     run_owned_process,
 )
 from vega.finish_runtime import FinishRuntime
-from vega.goal_evidence import validate_loop_artifact_integrity
-from vega.goal_runtime import GoalRuntime
-from vega.llm_client import LLMClient
-from vega.loop_spec import list_loop_specs, load_loop_spec, load_loop_spec_file
+from vega.experimental.goal_runtime import GoalRuntime
+from vega.experimental.inspection.llm_client import LLMClient
+from vega.experimental.inspection.loop_spec import (
+    list_loop_specs,
+    load_loop_spec,
+    load_loop_spec_file,
+)
 from vega.loop_runtime import LoopAutomationRuntime
-from vega.memory import MemoryLedgerStore
+from vega.experimental.memory import MemoryLedgerStore
 from vega.models import BriefInput, MemoryProposal, RunState, ToolResult
 from vega.project_config import CodexExecOptions, check_project_config, load_project_config
 from vega.project_profile import build_project_profile
@@ -40,9 +45,10 @@ from vega.repository_identity import repository_scope
 from vega.runner import CodexExecRunner, RunnerResult
 from vega.run_status import run_status_payload
 from vega.run_lock import RunMutationLock
-from vega.runtime import EngineeringChangeRuntime
+from vega.experimental.inspection.runtime import EngineeringChangeRuntime
 from vega.run_utils import create_run_dir
-from vega.tool_broker import ToolBroker
+from vega.experimental.inspection.tool_broker import ToolBroker
+from vega.loop_evidence import validate_loop_artifact_integrity
 from vega.tools import git_tools
 
 
@@ -60,6 +66,12 @@ def test_project_skeleton_exists() -> None:
     assert PROJECT_ROOT.joinpath("docs", "ARCHITECTURE.md").exists()
     assert PROJECT_ROOT.joinpath("loops", "engineering-change.loop.yaml").exists()
     assert PROJECT_ROOT.joinpath("examples", "tasks", "check-atg-mcp-docs.md").exists()
+
+
+def test_python_package_public_api_is_version_only() -> None:
+    assert vega.__all__ == ["__version__"]
+    assert importlib.util.find_spec("vega.assurance") is None
+    assert importlib.util.find_spec("vega.experimental.assurance") is not None
 
 
 def test_packaged_baseline_loop_matches_workspace_mirror() -> None:
@@ -813,7 +825,10 @@ def test_artifacts_do_not_contain_api_key_when_llm_falls_back(tmp_path, monkeypa
     def fail_without_leaking_secret(*args, **kwargs):
         raise RuntimeError("simulated provider failure with sk-test-secret")
 
-    monkeypatch.setattr("vega.llm_client.LLMClient._chat", fail_without_leaking_secret)
+    monkeypatch.setattr(
+        "vega.experimental.inspection.llm_client.LLMClient._chat",
+        fail_without_leaking_secret,
+    )
 
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(

@@ -8,16 +8,16 @@ from typing import cast
 from pydantic import ValidationError
 
 from .goal_evidence import validate_goal_evidence
-from .models import (
+from ..models import (
     GoalCheckpointEvidenceType,
     GoalCheckpointRecord,
     GoalCheckpointRef,
     GoalContract,
     GoalState,
 )
-from .redaction import write_redacted_json, write_redacted_text
-from .run_utils import create_run_dir, resolve_run_dir
-from .trace import TraceWriter
+from ..redaction import write_redacted_json, write_redacted_text
+from ..run_utils import create_run_dir, resolve_run_dir
+from ..trace import TraceWriter
 
 
 class GoalRuntime:

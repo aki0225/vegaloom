@@ -5,7 +5,7 @@ import re
 import subprocess
 from pathlib import Path, PurePosixPath
 
-from .memory import MemoryLedgerStore
+from .extensions import search_memory
 from .models import AgentsInstruction, MemoryHit, ProjectKnowledge
 from .redaction import filter_sensitive_memory_entries, redact_text
 from .repository_identity import repository_scope, resolve_git_revision
@@ -142,14 +142,18 @@ def search_related_memory(
     input_text: str,
     related_paths: list[str] | None = None,
 ) -> list[MemoryHit]:
-    store = MemoryLedgerStore(workspace)
     repo_scope = repository_scope(repo_path)
     queries = _memory_queries(repo_path.name, input_text, related_paths or [])
     hits = []
     seen: set[str] = set()
 
     for query in queries:
-        entries = store.search(query=query, accepted_only=True, repo=repo_scope)
+        entries = search_memory(
+            workspace,
+            query=query,
+            accepted_only=True,
+            repo=repo_scope,
+        )
         for entry in filter_sensitive_memory_entries(entries):
             if entry.proposal_id not in seen:
                 hits.append(_to_memory_hit(entry))
@@ -159,7 +163,8 @@ def search_related_memory(
 
     # repo 为空的通用经验也可能有价值，按关键词再补一次。
     for query in queries[1:]:
-        entries = store.search(
+        entries = search_memory(
+            workspace,
             query=query,
             accepted_only=True,
             repo_unscoped_only=True,

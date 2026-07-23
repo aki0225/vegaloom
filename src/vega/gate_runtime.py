@@ -6,7 +6,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from .goal_evidence import validate_reflect_evidence_freshness
+from .loop_evidence import validate_reflect_evidence_freshness
 from .models import GateReason, GateResult, GateState
 from .project_config import (
     ProjectConfigCheckResult,

@@ -1981,3 +1981,186 @@ Finish、Goal、`ready_to_commit` 或 Loop 的现有成功语义，也不构成�
 下一阶段只选择数据库 Migration 做独立纵向实验。任何候选必须继续默认关闭，先关闭危险与
 安全双生案例、输出路径和确定性 oracle 的审查问题，再讨论是否形成 Stage 2 的第一份公开
 证据；不得直接把 SQLite 个案扩展为通用数据库安全结论。
+
+---
+
+## 2026-07-23 · AV-STAGE2-001 · SQLite migration 双生实验本地结果
+
+### 验证问题
+
+在不把数据库能力接入 Vega Runtime 的前提下，一个受控 SQLite 实验能否同时证明：
+
+1. 已有行的表新增无默认值 `NOT NULL` 列会被注册的危险 detector 拒绝；
+2. 绕过 detector 后，SQLite 实际执行失败，且 schema/data 保持基线；
+3. expand-only 的可空列安全双生可通过最小 OldApp/NewApp × OldSchema/NewSchema 兼容矩阵；
+4. 安全 wrapper 的第二次执行不会重复执行 DDL。
+
+详细范围、SQL、重放命令和结论上限见
+[`docs/ASSURANCE-STAGE2-SQLITE-EXPERIMENT.md`](../docs/ASSURANCE-STAGE2-SQLITE-EXPERIMENT.md)。
+
+### Baseline 与预注册边界
+
+- Git 基线：`origin/main@521f9b924241ec258c75b2ecc893bdaa3be91abd`。
+- 候选分支：`refactor/lean-core`；该次实验与核心隔离改动同一候选工作树进行，尚未形成可合并
+  结论。
+- 平台：Windows / Python `3.14.3` / SQLite `3.50.4`。
+- 实验脚本和双生测试在实际 artifact 运行前已固定为
+  `scripts/run_assurance_stage2_sqlite_experiment.py` 与
+  `tests/test_assurance_stage2_sqlite_experiment.py`。
+- 详细文字预注册文档在同一候选工作树中补充，因此本条只能作为 `local candidate`，不能替代
+  事前冻结、跨引擎或生产规模实验。
+
+### 非目标
+
+- 不新增 `vega` CLI、默认状态、默认 `runs/` artifact 或成功条件。
+- 不接入 Finish、Goal、Loop 或 `AdequacyResult`。
+- 不验证 PostgreSQL/MySQL 锁语义、在线索引、真实发布编排、真实应用代码或生产数据规模。
+- 不验证 DML/backfill、恢复、并发写入、复制延迟、监控或 staged rollout。
+
+### 过程
+
+1. 在 `.local-validation/assurance-stage2-sqlite-20260723-142449/` 创建两个 SQLite 文件。
+2. 对危险 SQL `ALTER TABLE customer ADD COLUMN external_id TEXT NOT NULL`：
+   - 先运行有限语法 detector；
+   - 再在含两行数据的表中实际执行；
+   - 比较失败前后的 schema 与旧应用可读数据。
+3. 对安全 SQL `ALTER TABLE customer ADD COLUMN external_id TEXT`：
+   - 运行 detector；
+   - 顺序执行四格兼容矩阵；
+   - 通过 schema 检查包装 migration，第二次执行必须为 `already_present`。
+4. 运行同一脚本的两条 pytest 回归，并确认输出目录越界时 fail-closed。
+
+### 实际观察
+
+- 危险双生：
+  - detector 输出：
+    `T-DB-MIG-COMPAT:add_column_not_null_without_default:existing_rows_would_reject_migration`；
+  - SQLite 返回 `OperationalError: Cannot add a NOT NULL column with default value NULL`；
+  - 失败后 schema 与两条基线数据保持一致；
+  - 个案判定：`reject`。
+- 安全双生：
+  - detector 没有输出危险项；
+  - `OldApp/OldSchema`、`NewApp/OldSchema`、`OldApp/NewSchema`、
+    `NewApp/NewSchema` 均为通过；
+  - 首次 wrapper 结果为 `applied`，第二次为 `already_present`；
+  - 新列保持可空，`id` 与 `display_name` 基线不变；
+  - 个案判定：`passed-local`。
+- 总体实验结论：`continue-experiment`。
+- 定向回归：`2 passed in 13.89s`。
+
+### 证据
+
+- 机器事实：`.local-validation/assurance-stage2-sqlite-20260723-142449/result.json`
+  - SHA-256：`D6CE0892952DEC6C77855CCEFFD16BFBDE5D59A72F0FDCEA7B84406A39B62067`
+- 人类报告：`.local-validation/assurance-stage2-sqlite-20260723-142449/report.md`
+  - SHA-256：`5ED4631A0B67AB083CB033E93F2D44A0E3DED3D3AB08134DC82492C211882D3B`
+- `.local-validation/` 已被 `.gitignore` 排除；本条只公开可重放步骤、摘要和哈希，不提交
+  本机 SQLite 文件。
+
+### 裁决与下一步
+
+`confirmed-local / continue-experiment / do-not-integrate`
+
+本实验确认了一个真实执行的 SQLite migration 兼容性危险控制和对应安全双生的最低敏感性，
+但没有获得任何生产数据库、锁影响、恢复、数据规模或实际发布顺序的证据。不得把
+`passed-local` 或 `continue-experiment` 解释为 `sufficient_for_merge`、生产安全或
+Runtime 成功。
+
+下一步只能在独立实验中增加一个明确、可重放的数据库引擎/发布兼容场景；在该场景有危险控制、
+负向敏感性、限制说明和跨平台复核前，不扩大 Threat Family，也不接入默认产品路径。
+
+---
+
+## 2026-07-23 · AV-STAGE2-001 · review correction candidate
+
+### 原始审查问题
+
+Draft PR `#8` 的只读审查确认三个阻塞问题：
+
+1. 架构增长门禁可被 package shim、`from . import experimental` 和
+   `from vega import experimental` 绕过。
+2. SQLite 安全双生只比较行 ID，错误 `external_id`、`schema_mode` 或实际行内容破坏仍可
+   得到 `passed-local`。
+3. `.local-validation/` 本身为 symlink 或 Windows junction 时，输出可被重定向到当前工作
+   目录外。
+
+### 红灯
+
+```text
+architecture targeted: 15 failed, 24 passed
+stage2 targeted: 5 failed, 1 passed
+```
+
+失败均位于上述新负向断言，不是 fixture、SQLite 初始化或目录链接创建失败。
+
+### 修复候选
+
+- 已移除内部模块改按模块名检查，同名 `.py`、package 目录和链接路径均被拒绝。
+- Core → Experimental 检查解析 `ImportFrom.names`，补齐两种 package 导入变体。
+- SQLite artifact schema 升为 `2`；四格矩阵按完整有序行内容校验，最终
+  `data_invariant` 绑定 `display_name`、`external_id` 和 `schema_mode` 并参与结论。
+- 输出目录使用词法 `.local-validation/` 根，在目录创建前后拒绝 symlink、junction 和
+  reparse point。
+- wheel/sdist smoke 扩展为检查全部 13 个已移除旧模块路径。
+
+### 定向结果
+
+```text
+architecture targeted: 39 passed
+stage2 targeted: 6 passed
+full collection: 646 tests collected
+targeted compileall: passed
+targeted Ruff: passed
+```
+
+### 裁决
+
+`review-findings-closed-targeted / full-suite-and-pr-ci-required / do-not-merge`
+
+这只证明三个已知复现已由确定性回归关闭。完整本地分片、仓库卫生、架构增量门禁、Windows、
+POSIX、Python 3.11/3.12、wheel/sdist 和最新 PR head CI 尚未完成；也不证明恶意并发路径替换、
+其他数据库引擎或生产 migration 安全。
+
+---
+
+## 2026-07-23 · AV-STAGE2-001 · review correction local final result
+
+### 追加红灯
+
+首次定向修复后，独立只读复核又注册并复现：
+
+1. `import vega.experimental_tools` 与 `import vega.experimentalish` 被命名空间前缀误报：
+   `2 failed`。
+2. 数据库 `external_id` 被破坏、NewApp 同时掩盖该值时，安全双生仍可能误判：
+   `1 failed`。
+
+两个红灯均在对应最小修复后转绿。SQLite 最终 oracle 现在通过独立 SQL 快照校验持久化
+`external_id`，不再只信任被测 NewApp 读取层。
+
+### 完整本地结果
+
+```text
+full collection: 651 tests collected
+full sharded result: 650 passed, 1 skipped, 0 failed, 0 errors
+architecture targeted: 42 passed
+stage2 targeted: 8 passed
+compileall: passed
+Ruff: passed
+architecture growth: passed, C901 48->46, Python modules 47->54
+repository hygiene: passed
+CI YAML parse: passed
+git diff --check: passed
+```
+
+唯一跳过为 Windows 本地不执行 POSIX shell 变量展开专项；Linux PR CI 必须真实通过。由于本机
+未安装 `pytest-timeout`，测试按文件或完整 node id 集合分片，外层 60 秒超时；所有超时尝试
+均未计入最终汇总。
+
+### 裁决
+
+`passed-local / pr-ci-required / do-not-merge`
+
+三个原始 finding 和后续同根组合问题已由负向回归关闭，完整本地节点与静态门禁通过。该结果
+仍不证明恶意并发路径替换、其他数据库引擎、生产 migration 或操作系统级隔离安全；在最新
+PR head 的 Python 3.11/3.12、Windows、POSIX、wheel/sdist 检查全部成功并完成 post-CI
+只读复核前，不得转 Ready 或合并。

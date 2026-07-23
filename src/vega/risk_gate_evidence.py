@@ -321,7 +321,7 @@ def _validate_recomputed_result(
     if workspace is None or repo_path is None or not iteration.reflect_run:
         return
     try:
-        # gate_runtime 在模块加载时依赖 goal_evidence；这里延迟导入以避免循环依赖。
+        # gate_runtime 在模块加载时依赖 loop_evidence；这里延迟导入以避免循环依赖。
         from .gate_runtime import evaluate_risk
 
         expected = evaluate_risk(workspace, repo_path, iteration.reflect_run)

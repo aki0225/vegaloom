@@ -16,13 +16,13 @@ from pydantic import (
     model_validator,
 )
 
-from .project_config import (
+from ..project_config import (
     VERIFICATION_TEMP_PLACEHOLDER,
     VERIFICATION_TEMP_ROOT,
     render_verification_command,
 )
-from .redaction import write_redacted_json
-from .run_utils import resolve_run_dir
+from ..redaction import write_redacted_json
+from ..run_utils import resolve_run_dir
 
 
 ASSURANCE_SCHEMA_VERSION = 1

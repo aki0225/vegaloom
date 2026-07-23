@@ -10,8 +10,8 @@ from . import eval as eval_runner
 from .context_loader import load_target_context, parse_target_files
 from .llm_client import LLMClient, LLMRequestError
 from .loop_spec import default_engineering_change_spec
-from .models import LoopSpec, RunState, ToolResult
-from .redaction import assert_not_sensitive_path, is_sensitive_path, redact_text
+from ...models import LoopSpec, RunState, ToolResult
+from ...redaction import assert_not_sensitive_path, is_sensitive_path, redact_text
 from .reviewer import (
     UNANSWERED_TASK_DECLARATION,
     extract_task_questions,
@@ -20,8 +20,8 @@ from .reviewer import (
 )
 from .state import StateStore
 from .tool_broker import ToolBroker
-from .trace import TraceWriter
-from .run_utils import create_run_dir
+from ...trace import TraceWriter
+from ...run_utils import create_run_dir
 
 
 class RuntimeLLMClient(Protocol):

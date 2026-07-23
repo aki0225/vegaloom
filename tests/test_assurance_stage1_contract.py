@@ -1115,7 +1115,7 @@ def test_human_required_threat_cannot_be_auto_sufficient(tmp_path: Path) -> None
 
 
 def _assurance_api() -> ModuleType:
-    return importlib.import_module("vega.assurance")
+    return importlib.import_module("vega.experimental.assurance")
 
 
 def _context(

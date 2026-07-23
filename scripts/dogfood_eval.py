@@ -25,7 +25,7 @@ from vega.execution_control import (  # noqa: E402
 )
 from vega.finish_runtime import FinishRuntime  # noqa: E402
 from vega.gate_runtime import GateRuntime  # noqa: E402
-from vega.goal_runtime import GoalRuntime  # noqa: E402
+from vega.experimental.goal_runtime import GoalRuntime  # noqa: E402
 from vega.loop_runtime import LoopAutomationRuntime  # noqa: E402
 from vega.models import BriefInput  # noqa: E402
 from vega.project_config import check_project_config  # noqa: E402

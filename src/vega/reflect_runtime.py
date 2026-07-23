@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .agents_proposal import render_agents_md_proposals
-from .memory import MemoryProposalStore, make_memory_proposal_id
+from .memory_artifacts import MemoryProposalStore, make_memory_proposal_id
 from .models import BriefInput, BriefState, MemoryProposal, ProjectKnowledge, ReflectState
 from .project_config import load_project_config
 from .project_context import write_project_context

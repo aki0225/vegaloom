@@ -6,13 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from vega.memory import MemoryLedgerStore
+from vega.experimental.memory import MemoryLedgerStore, install_memory_backend
 from vega.models import MemoryProposal
 from vega.project_context import build_project_context
 from vega.project_knowledge import load_agents_instructions, search_related_memory
 from vega.project_profile import build_project_profile
 from vega.repository_identity import repository_scope
-from vega.runtime import EngineeringChangeRuntime
+from vega.experimental.inspection.runtime import EngineeringChangeRuntime
+
+install_memory_backend()
 
 
 def _git(repo: Path, *args: str) -> str:

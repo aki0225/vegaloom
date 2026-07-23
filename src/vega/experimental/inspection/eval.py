@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from .loop_spec import default_engineering_change_spec
-from .models import LoopSpec, RunState
+from ...models import LoopSpec, RunState
 
 
 def run_basic_eval(run_dir: Path, spec: LoopSpec | None = None) -> list[str]:

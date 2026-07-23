@@ -8,10 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from vega.context_loader import load_target_context, parse_target_files
+from vega.experimental.inspection.context_loader import load_target_context, parse_target_files
 from vega.run_status import latest_run_dir
 from vega.run_utils import create_run_dir, resolve_run_dir
-from vega.tool_broker import ToolBroker
+from vega.experimental.inspection.tool_broker import ToolBroker
 from vega.tools import file_tools
 from vega.tools import git_tools
 

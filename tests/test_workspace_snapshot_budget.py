@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from vega import context_loader
+from vega.experimental.inspection import context_loader
 from vega import workspace_check as workspace_check_module
-from vega.context_loader import load_target_context
+from vega.experimental.inspection.context_loader import load_target_context
 from vega.workspace_check import capture_review_workspace
 
 
