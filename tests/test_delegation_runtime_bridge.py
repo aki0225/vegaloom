@@ -150,6 +150,18 @@ class ArtifactProbe:
         return artifact_path
 
 
+class WorkspaceMutatingProbe(ArtifactProbe):
+    def __call__(self, *args: Any, **kwargs: Any) -> Path:
+        repo_path = Path(kwargs["repo_path"])
+        readme = repo_path / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8") + "probe mutation\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        return super().__call__(*args, **kwargs)
+
+
 @pytest.mark.parametrize(
     ("readiness_status", "worker_tier"),
     [
@@ -261,6 +273,129 @@ def test_budget_eligible_starts_exactly_one_injected_worker(
     assert verification.calls == 1
     assert worker.calls[0]["sandbox"] == "workspace-write"
     assert worker.calls[0]["execution_context"].run_id == RUN_ID
+
+
+def test_workspace_change_after_control_freeze_blocks_before_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import vega.delegation_runtime as runtime
+
+    repo = _init_repo(tmp_path / "repo")
+    run_dir = tmp_path / "workspace" / "runs" / RUN_ID
+    source, plan = _runtime_contract(repo, run_dir)
+    worker = RecordingWorker()
+    original_capture = runtime._capture_control_artifact_hashes
+    changed = False
+
+    def capture_then_change_workspace(paths: tuple[Path, ...]) -> dict[Path, str]:
+        nonlocal changed
+        result = original_capture(paths)
+        if not changed:
+            changed = True
+            readme = repo / "README.md"
+            readme.write_text(
+                readme.read_text(encoding="utf-8") + "concurrent change\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+        return result
+
+    monkeypatch.setattr(
+        runtime,
+        "_capture_control_artifact_hashes",
+        capture_then_change_workspace,
+    )
+    outcome = runtime.DelegationRuntimeBridge(
+        run_dir=run_dir,
+        repo_path=repo,
+        worker_runner=worker,
+        worker_tier="budget",
+        context_source=source,
+        scope_gate=ArtifactProbe(),
+        verification_runner=ArtifactProbe(),
+    ).run(plan=plan, slice_id=SLICE_ID)
+
+    assert outcome.status == "blocked"
+    assert "workspace_changed_before_worker" in outcome.issue_codes
+    assert worker.calls == []
+
+
+def test_run_policy_cannot_relax_project_budget_before_worker(
+    tmp_path: Path,
+) -> None:
+    from vega.delegation_runtime import DelegationRuntimeBridge
+
+    repo = _init_repo(
+        tmp_path / "repo",
+        budget_max_changed_files=1,
+    )
+    run_dir = tmp_path / "workspace" / "runs" / RUN_ID
+    source, plan = _runtime_contract(
+        repo,
+        run_dir,
+        route_max_changed_files=10,
+        plan_max_changed_files=2,
+    )
+    worker = RecordingWorker()
+
+    outcome = DelegationRuntimeBridge(
+        run_dir=run_dir,
+        repo_path=repo,
+        worker_runner=worker,
+        worker_tier="budget",
+        context_source=source,
+        scope_gate=ArtifactProbe(),
+        verification_runner=ArtifactProbe(),
+    ).run(plan=plan, slice_id=SLICE_ID)
+
+    assert outcome.status == "blocked"
+    assert outcome.readiness_status == "premium_required"
+    assert "changed_files_exceed_budget_limit" in outcome.issue_codes
+    assert worker.calls == []
+
+
+@pytest.mark.parametrize(
+    ("mutating_stage", "expected_issue"),
+    [
+        ("scope", "workspace_changed_during_scope_probe"),
+        ("verification", "workspace_changed_during_verification_probe"),
+    ],
+)
+def test_probe_workspace_mutation_cannot_record_attempt(
+    tmp_path: Path,
+    mutating_stage: str,
+    expected_issue: str,
+) -> None:
+    from vega.delegation_runtime import DelegationRuntimeBridge
+
+    repo = _init_repo(tmp_path / "repo")
+    run_dir = tmp_path / "workspace" / "runs" / RUN_ID
+    source, plan = _runtime_contract(repo, run_dir)
+    worker = RecordingWorker()
+    scope_gate = (
+        WorkspaceMutatingProbe() if mutating_stage == "scope" else ArtifactProbe()
+    )
+    verification = (
+        WorkspaceMutatingProbe()
+        if mutating_stage == "verification"
+        else ArtifactProbe()
+    )
+
+    outcome = DelegationRuntimeBridge(
+        run_dir=run_dir,
+        repo_path=repo,
+        worker_runner=worker,
+        worker_tier="budget",
+        context_source=source,
+        scope_gate=scope_gate,
+        verification_runner=verification,
+    ).run(plan=plan, slice_id=SLICE_ID)
+
+    assert outcome.status == "blocked"
+    assert expected_issue in outcome.issue_codes
+    assert len(worker.calls) == 1
+    assert outcome.attempt_path is None
 
 
 def test_plan_and_readiness_artifacts_must_stay_in_run_owned_directory(
@@ -468,13 +603,19 @@ def _runtime_contract(
     repo: Path,
     run_dir: Path,
     readiness_status: str = "budget_eligible",
+    *,
+    route_max_changed_files: int = 1,
+    plan_max_changed_files: int = 1,
 ) -> tuple[Any, PlanContract]:
     from vega.delegation_runtime import (
         DelegationContextSource,
         compile_delegation_context,
     )
 
-    _prepare_runtime_sources(run_dir)
+    _prepare_runtime_sources(
+        run_dir,
+        route_max_changed_files=route_max_changed_files,
+    )
     source = DelegationContextSource.model_validate(
         {
             "schema_version": 1,
@@ -496,6 +637,7 @@ def _runtime_contract(
     payload["task_dag"][0]["input_artifact_refs"] = [
         context.available_artifacts[0].model_dump(mode="json")
     ]
+    payload["budget"]["max_changed_files"] = plan_max_changed_files
     if readiness_status == "human_required":
         payload["risk"]["human_required"] = True
     elif readiness_status == "premium_required":
@@ -619,7 +761,11 @@ def _artifact(relative_path: str, sha256: str) -> dict[str, str]:
     }
 
 
-def _prepare_runtime_sources(run_dir: Path) -> None:
+def _prepare_runtime_sources(
+    run_dir: Path,
+    *,
+    route_max_changed_files: int = 1,
+) -> None:
     run_dir.joinpath("tasks").mkdir(parents=True)
     run_dir.joinpath("policies").mkdir()
     run_dir.joinpath("inputs").mkdir()
@@ -644,7 +790,7 @@ def _prepare_runtime_sources(run_dir: Path) -> None:
                     "max_slices": 1,
                     "max_dependency_edges": 0,
                     "max_write_paths": 1,
-                    "max_changed_files": 1,
+                    "max_changed_files": route_max_changed_files,
                     "max_diff_lines": 100,
                     "max_new_files": 0,
                     "max_context_tokens": 10_000,
@@ -677,6 +823,7 @@ def _init_repo(
     *,
     scope_allowed_paths: list[str] | None = None,
     verification_command: str | None = None,
+    budget_max_changed_files: int | None = None,
 ) -> Path:
     repo.mkdir(parents=True)
     _git(repo, "init")
@@ -712,6 +859,13 @@ def _init_repo(
         f"    - {effective_verification}",
         "  max_commands: 1",
     ]
+    if budget_max_changed_files is not None:
+        config_lines.extend(
+            [
+                "budget:",
+                f"  max_changed_files: {budget_max_changed_files}",
+            ]
+        )
     repo.joinpath(".vega.yaml").write_text(
         "\n".join(config_lines) + "\n",
         encoding="utf-8",

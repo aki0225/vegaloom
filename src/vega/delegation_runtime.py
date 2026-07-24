@@ -680,6 +680,26 @@ class DelegationRuntimeBridge:
                 plan_path=paths.plan,
                 readiness_path=paths.readiness,
             )
+        pre_worker_issues = _control_artifact_issues(control_hashes)
+        try:
+            current_before_worker = _capture_runtime_workspace(self.repo_path)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            pre_worker_issues.append("workspace_recheck_before_worker_failed")
+        else:
+            pre_worker_issues.extend(
+                _runtime_workspace_identity_issues(
+                    snapshot_before,
+                    current_before_worker,
+                    issue_code="workspace_changed_before_worker",
+                )
+            )
+        if pre_worker_issues:
+            return self._blocked(
+                readiness_status=readiness.status,
+                issue_codes=pre_worker_issues,
+                plan_path=paths.plan,
+                readiness_path=paths.readiness,
+            )
 
         execution_context = RunnerExecutionContext(
             execution_dir=paths.execution.parent,
@@ -797,6 +817,18 @@ class DelegationRuntimeBridge:
                 readiness_path=paths.readiness,
             )
         probe_control_issues = _control_artifact_issues(post_worker_hashes)
+        try:
+            workspace_after_scope = _capture_runtime_workspace(self.repo_path)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            probe_control_issues.append("workspace_recheck_after_scope_failed")
+        else:
+            probe_control_issues.extend(
+                _runtime_workspace_identity_issues(
+                    snapshot_after,
+                    workspace_after_scope,
+                    issue_code="workspace_changed_during_scope_probe",
+                )
+            )
         if probe_control_issues:
             return self._blocked(
                 readiness_status=readiness.status,
@@ -843,6 +875,18 @@ class DelegationRuntimeBridge:
                 final_control_issues.append("control_artifact_changed:scope-gate.json")
         except OSError:
             final_control_issues.append("control_artifact_missing:scope-gate.json")
+        try:
+            workspace_after_verification = _capture_runtime_workspace(self.repo_path)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+            final_control_issues.append("workspace_recheck_after_verification_failed")
+        else:
+            final_control_issues.extend(
+                _runtime_workspace_identity_issues(
+                    snapshot_after,
+                    workspace_after_verification,
+                    issue_code="workspace_changed_during_verification_probe",
+                )
+            )
         if final_control_issues:
             return self._blocked(
                 readiness_status=readiness.status,
@@ -1639,6 +1683,25 @@ def _snapshot_after_issues(
     if _changed_diff_line_count(after_review.full_diff) > plan.budget.max_diff_lines:
         issues.append("diff_lines_exceed_plan_budget")
     return _sorted_unique(issues)
+
+
+def _runtime_workspace_identity_issues(
+    expected: _RuntimeWorkspaceSnapshot,
+    actual: _RuntimeWorkspaceSnapshot,
+    *,
+    issue_code: str,
+) -> list[str]:
+    """探针和控制面检查都不能让已绑定的 workspace 在后台漂移。"""
+
+    if (
+        actual.review.head_sha != expected.review.head_sha
+        or actual.review.fingerprint != expected.review.fingerprint
+        or actual.tracked_files != expected.tracked_files
+        or actual.tracked_files_manifest_sha256
+        != expected.tracked_files_manifest_sha256
+    ):
+        return [issue_code]
+    return []
 
 
 def _changed_diff_line_count(diff_text: str) -> int:
