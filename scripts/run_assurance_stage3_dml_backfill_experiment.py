@@ -26,6 +26,7 @@ LOCAL_VALIDATION_ROOT = Path(".local-validation")
 POLICY_RELATIVE_PATH = "docs/ASSURANCE-STAGE3-DML-BACKFILL-PREREGISTRATION.md"
 PRODUCER = "scripts/run_assurance_stage3_dml_backfill_experiment.py"
 HEAD_PATTERN = re.compile(r"[0-9a-f]{40}")
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 INJECTED_PROCESS_EXIT_CODE = 97
 INTERNAL_WORKER_SCRIPT_ENV = "VEGA_STAGE3_INTERNAL_WORKER_SCRIPT"
 INTERNAL_WORKER_DATABASE_ENV = "VEGA_STAGE3_INTERNAL_WORKER_DATABASE"
@@ -161,11 +162,18 @@ def _plan_digest(plan: dict[str, Any]) -> str:
 FIXTURE_SHA256 = _sha256_payload(BASELINE_ROWS)
 FROZEN_PLAN_DIGEST = _plan_digest(FROZEN_PLAN)
 _POLICY_PATH = SOURCE_PROJECT_ROOT / POLICY_RELATIVE_PATH
-POLICY_SHA256 = (
-    hashlib.sha256(_POLICY_PATH.read_bytes()).hexdigest()
-    if _POLICY_PATH.is_file()
-    else "unavailable"
-)
+
+
+def _policy_sha256() -> str | None:
+    try:
+        if not _POLICY_PATH.is_file():
+            return None
+        return hashlib.sha256(_POLICY_PATH.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+POLICY_SHA256 = _policy_sha256()
 
 
 def run_experiment(output_dir: Path) -> dict[str, Any]:
@@ -941,8 +949,8 @@ def _plan_issues(plan: dict[str, Any]) -> list[str]:
 
 def _detect_update_scope(update_sql: str) -> list[str]:
     normalized = " ".join(update_sql.lower().split())
-    has_tenant = "tenant_id = ?" in normalized
-    has_target = "id = ?" in normalized
+    has_tenant = re.search(r"\btenant_id\s*=\s*\?", normalized) is not None
+    has_target = re.search(r"\bid\s*=\s*\?", normalized) is not None
     has_pending_state = (
         "canonical_handle is null" in normalized
         and "backfill_version = 0" in normalized
@@ -1166,6 +1174,10 @@ def _build_evidence(
                 "result": copy.deepcopy(case_result),
                 "covers": covers,
                 "artifacts": artifacts,
+                "artifact_hashes": {
+                    artifact: _sha256_file(output_dir / artifact)
+                    for artifact in artifacts
+                },
                 "limitations": [
                     "固定 SQLite fixture。",
                     "不能替代外部质量门禁或生产演练。",
@@ -1221,6 +1233,8 @@ def _evidence_entry_is_bound(
         return False
     if evidence_input.get("plan_digest") != FROZEN_PLAN_DIGEST:
         return False
+    if not _declared_artifacts_are_bound(entry, output_dir):
+        return False
     oracle = entry.get("oracle", {})
     if not _artifact_hash_matches(
         output_dir,
@@ -1236,6 +1250,33 @@ def _evidence_entry_is_bound(
     )
 
 
+def _declared_artifacts_are_bound(
+    entry: dict[str, Any],
+    output_dir: Path,
+) -> bool:
+    artifacts = entry.get("artifacts")
+    artifact_hashes = entry.get("artifact_hashes")
+    if not isinstance(artifacts, list) or not artifacts:
+        return False
+    if not isinstance(artifact_hashes, dict):
+        return False
+    if not all(_safe_artifact_name(item) for item in artifacts):
+        return False
+    artifact_names = [str(item) for item in artifacts]
+    if len(set(artifact_names)) != len(artifact_names):
+        return False
+    if set(artifact_hashes) != set(artifact_names):
+        return False
+    return all(
+        _artifact_hash_matches(
+            output_dir,
+            artifact_name,
+            artifact_hashes.get(artifact_name),
+        )
+        for artifact_name in artifact_names
+    )
+
+
 def _artifact_hash_matches(
     output_dir: Path,
     artifact_name: Any,
@@ -1247,6 +1288,7 @@ def _artifact_hash_matches(
     return (
         artifact_path.is_file()
         and isinstance(expected_sha256, str)
+        and SHA256_PATTERN.fullmatch(expected_sha256) is not None
         and _sha256_file(artifact_path) == expected_sha256
     )
 
@@ -1264,6 +1306,7 @@ def _safe_artifact_name(value: Any) -> bool:
 
 
 def _repository_snapshot() -> dict[str, Any]:
+    current_policy_sha256 = _policy_sha256()
     try:
         head_result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -1291,7 +1334,7 @@ def _repository_snapshot() -> dict[str, Any]:
         "worktree_clean": worktree_clean,
         "policy": {
             "path": POLICY_RELATIVE_PATH,
-            "sha256": POLICY_SHA256,
+            "sha256": current_policy_sha256,
         },
         "fixture_sha256": FIXTURE_SHA256,
         "plan_digest": FROZEN_PLAN_DIGEST,
@@ -1300,9 +1343,13 @@ def _repository_snapshot() -> dict[str, Any]:
 
 def _snapshot_is_trusted(snapshot: dict[str, Any]) -> bool:
     # 脏工作区不能声称 artifact 与当前 HEAD 一致，候选结论必须保持 fail-closed。
+    current_policy_sha256 = _policy_sha256()
     return (
         bool(HEAD_PATTERN.fullmatch(str(snapshot.get("head", ""))))
         and snapshot.get("worktree_clean") is True
+        and isinstance(POLICY_SHA256, str)
+        and SHA256_PATTERN.fullmatch(POLICY_SHA256) is not None
+        and current_policy_sha256 == POLICY_SHA256
         and snapshot.get("policy")
         == {
             "path": POLICY_RELATIVE_PATH,

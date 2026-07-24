@@ -244,8 +244,14 @@ def test_stage3_001_runs_bounded_interruption_recovery_and_repeat(
             "result",
             "covers",
             "artifacts",
+            "artifact_hashes",
             "limitations",
         }
+        assert set(entry["artifact_hashes"]) == set(entry["artifacts"])
+        assert all(
+            len(value) == 64
+            for value in entry["artifact_hashes"].values()
+        )
         assert str(tmp_path.resolve()) not in json.dumps(entry, ensure_ascii=False)
 
     assert output_dir.joinpath("dangerous.sqlite").is_file()
@@ -316,6 +322,35 @@ def test_stage3_001_missing_tenant_scope_stops_before_write(
         "T-DB-DML-SCOPE:bounded_update:tenant_scope_missing"
     ]
     assert result["updated_ids"] == []
+    assert _read_rows(database_path) == module.BASELINE_ROWS
+
+
+def test_stage3_001_missing_target_scope_stops_before_write(
+    tmp_path: Path,
+) -> None:
+    module = _experiment_module()
+    database_path = tmp_path / "missing-target.sqlite"
+    module._create_fixture_database(database_path)
+    update_without_target_scope = (
+        "UPDATE customer "
+        "SET canonical_handle = ?, backfill_version = 1 "
+        "WHERE tenant_id = ? AND legacy_handle <> ? "
+        "AND canonical_handle IS NULL AND backfill_version = 0"
+    )
+
+    result = module._run_initial_backfill(
+        database_path,
+        copy.deepcopy(module.FROZEN_PLAN),
+        update_without_target_scope,
+        interrupt_after_batches=None,
+    )
+
+    assert result["status"] == "rejected"
+    assert result["issues"] == [
+        "T-DB-DML-SCOPE:bounded_update:target_scope_missing"
+    ]
+    assert result["updated_ids"] == []
+    assert module._checkpoint_row(database_path) is None
     assert _read_rows(database_path) == module.BASELINE_ROWS
 
 
@@ -681,6 +716,48 @@ def test_stage3_001_evidence_binding_rejects_snapshot_or_artifact_mismatch(
         snapshot,
         Path(".local-validation") / "binding",
     )
+
+
+def test_stage3_001_evidence_binding_rejects_declared_oracle_tampering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _experiment_module()
+    _bind_project_root(module, tmp_path, monkeypatch)
+    snapshot = _bind_trusted_snapshot(module, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    output_dir = Path(".local-validation") / "oracle-binding"
+
+    result = module.run_experiment(output_dir)
+    output_dir.joinpath("safe-oracle.json").write_text(
+        '{"tampered":true}\n',
+        encoding="utf-8",
+    )
+
+    assert not module._evidence_entries_are_bound(
+        result["evidence"],
+        snapshot,
+        output_dir,
+    )
+
+
+def test_stage3_001_policy_hash_sentinel_is_not_trusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _experiment_module()
+    monkeypatch.setattr(module, "POLICY_SHA256", "unavailable")
+    snapshot = {
+        "head": "a" * 40,
+        "worktree_clean": True,
+        "policy": {
+            "path": module.POLICY_RELATIVE_PATH,
+            "sha256": "unavailable",
+        },
+        "fixture_sha256": module.FIXTURE_SHA256,
+        "plan_digest": module.FROZEN_PLAN_DIGEST,
+    }
+
+    assert module._snapshot_is_trusted(snapshot) is False
 
 
 def test_stage3_001_plan_digest_covers_all_frozen_plan_fields() -> None:
