@@ -140,7 +140,7 @@ Stage 1 只完成独立数据合同和确定性充分性校验器，没有接入
 
 ### Stage 3：数据修改与 Backfill
 
-状态：`experimental` / `local-candidate`
+状态：`experimental` / `review-corrected-pr-candidate`
 
 覆盖 DML、backfill、cleanup、scope、row budget、幂等、恢复和 reconciliation。
 
@@ -149,8 +149,12 @@ Stage 1 只完成独立数据合同和确定性充分性校验器，没有接入
 越界、幂等和 reconciliation。
 详细合同见
 [`ASSURANCE-STAGE3-DML-BACKFILL-PREREGISTRATION.md`](ASSURANCE-STAGE3-DML-BACKFILL-PREREGISTRATION.md)。
-当前实现只存在于 `scripts/` 与 `tests/`，本地候选证据已生成；完整跨平台 CI 和 post-CI
-审查仍待完成。它没有新增默认命令或 Runtime 集成。
+当前实现只存在于 `scripts/` 与 `tests/`，没有新增默认命令或 Runtime 集成。独立审查发现
+并修复了目标 ID scope 误判、声明 artifact 哈希未全覆盖和 policy hash sentinel 三个问题；
+修复提交 `25a7efc` 的 `691` 节点收集合同与 10 项跨平台 PR CI 已全部成功。最新 docs-only
+head 仍必须在人工合并时通过同一实时门禁；最终状态记录在 PR，而不是继续追加文档提交追逐
+新的 SHA。无论是否合并，都不得把该 SQLite 个案解释为通用 backfill、生产数据库或 Runtime
+自动执行能力。
 
 ### Stage 4：并发与外部副作用
 

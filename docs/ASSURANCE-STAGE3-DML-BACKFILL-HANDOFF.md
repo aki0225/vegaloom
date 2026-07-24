@@ -6,7 +6,10 @@
 >
 > 实现提交：`c7122d3ce41407beeb59b2285b07ee910b6ea52e`
 >
-> 状态：`local-candidate / Draft PR and cross-platform CI pending`
+> 审查修复提交：`25a7efc0058de62d2fc665c99b501f890ff5d3e9`
+>
+> 状态：`review-findings-fixed / implementation-head PR CI 10/10 passed /
+> latest-head live CI is the merge gate`
 
 ## 一、当前结论
 
@@ -20,6 +23,10 @@
 - 第三次执行更新零行；
 - 最终 oracle 精确检查目标映射和 `id=201/202` 的完整范围外快照；
 - batch 行更新与 checkpoint 更新位于同一 SQLite transaction。
+- SQL scope detector 只把独立列名 `id = ?` 识别为目标约束，不再把
+  `tenant_id = ?` 中的后缀误判为目标 ID；
+- 每条 evidence 都绑定全部声明 artifact 的 SHA-256，单独篡改 oracle JSON 会使绑定失效；
+- policy 文件缺失、不可读或哈希不是实际 64 位 SHA-256 时，snapshot 直接 fail-closed。
 
 实现仍保持实验隔离：
 
@@ -64,17 +71,18 @@ exit code: 1
 .tmp/pytest/stage3-red.txt
 ```
 
-后续补充 transaction、checkpoint metadata 和 reconciliation 负向控制后，当前 Stage 3
-文件共有 `20` 个测试节点。
+后续补充 transaction、checkpoint metadata、reconciliation、missing target scope、
+oracle artifact tampering 和 policy hash sentinel 负向控制后，当前 Stage 3 文件共有
+`23` 个测试节点。
 
-### 当前实现提交验证
+### 审查修复提交验证
 
-绑定 `c7122d3` 的本地结果：
+绑定 `25a7efc` 的本地结果：
 
 ```text
-Stage 1 + Stage 2 + Stage 3 + repository/architecture targeted: 155 passed
-Stage 3 targeted: 20 passed
-full collection: 688 tests collected
+Stage 1 + Stage 2 + Stage 3 + repository/architecture targeted: 158 passed
+Stage 3 targeted: 23 passed
+full collection: 691 tests collected
 compileall src + registered experiment scripts: passed
 Ruff src + tests + registered experiment scripts: passed
 Ruff C901 on Stage 3 script: passed
@@ -83,13 +91,17 @@ repository hygiene: passed
 git diff check: passed
 ```
 
+Stage 3 最初并行运行四个本地分片时，三个分片因共享 Windows 环境资源争用超过 60 秒，
+不能记为通过。随后改为四个互斥 basetemp 的串行分片，明确得到
+`6 + 6 + 6 + 5 = 23 passed`；该失败尝试保留为调度事实，不包装成测试失败或通过。
+
 ### clean-head artifact
 
 在工作区干净时执行：
 
 ```powershell
 python scripts/run_assurance_stage3_dml_backfill_experiment.py `
-  --output-dir .local-validation/assurance-stage3-dml-backfill-20260724-handoff
+  --output-dir .local-validation/assurance-stage3-dml-backfill-20260724-review-fix
 ```
 
 结果：
@@ -104,25 +116,40 @@ interruption.process_exit_code: 97
 recovery.updated_ids: [102]
 repeat.updated_ids: []
 safe_twin.oracle.passed: true
-snapshot.head: c7122d3ce41407beeb59b2285b07ee910b6ea52e
+snapshot.head: 25a7efc0058de62d2fc665c99b501f890ff5d3e9
+verified declared artifact bindings: 10
 ```
 
 SHA-256：
 
 ```text
 result.json:
-2BB892547773B14D0D4917C55EF8DF0EC2F988BAAA9824FC3220D5A883BE34CA
+883C133F0790AD7F3793F6F774A796D95CF4077CF5A463F5FAFE9A0E733D0EDA
 
 report.md:
-D871929E6E5F615627C9A48F322055C3645A66C1E9389440BAB82A94B3B6A053
+67BABCFE2836F3E3B900E4E480F899852ABA90047C0AA56C1149642DEA55B630
 ```
 
-该目录被 `.gitignore` 忽略，不会推送。它只绑定实现提交 `c7122d3`；接力文档提交会产生新的
-branch head，因此最新 head 的完整测试和跨平台结果仍必须由 Draft PR CI 重新确认。
+该目录被 `.gitignore` 忽略，不会推送。artifact 的文本文件通过本机路径与凭据扫描，六条
+evidence 共十个声明 artifact 均按记录哈希重新核对通过。
+
+### PR CI
+
+PR `#13` 的实现修复 head `25a7efc` 对应 workflow `30099248716`：
+
+```text
+10/10 jobs success
+Python 3.11 full suite: success
+Python 3.12 five shards: success
+Windows + wheel smoke: success
+POSIX temp-dir checks: success
+wheel/sdist build and package smoke: success
+static checks and 691-node collection contract: success
+```
 
 ## 四、未通过或尚未完成的验证
 
-以下尝试不能记为通过：
+以下事实仍不能扩大解释：
 
 1. 单进程全量 pytest 运行超过 30 分钟外层预算，只到约 `31%`，进程已明确终止；
 2. Windows 本地运行完整 semantics shard 时，
@@ -130,17 +157,21 @@ branch head，因此最新 head 的完整测试和跨平台结果仍必须由 Dr
    触发 `58s` timeout；
 3. 同一节点随后独立重跑为 `1 passed in 48.65s`，说明本地失败更像共享 Windows 环境的
    时序/性能问题，但不能据此把完整 shard 记为通过；
-4. Python 3.11/3.12 全量、Windows、POSIX、wheel/sdist 和 package smoke 尚未绑定最新
-   branch head。
+4. 本地没有重新声明单进程全量测试通过；完整跨平台门禁来自同一实现修复提交的隔离 PR CI；
+5. 合并前必须读取 PR 最新 head 的实时 10 项 CI，不能沿用 `25a7efc` 的状态；CI 通过后只在
+   PR 描述或评论中记录最终 head，不再为了追逐新 SHA 追加仓库文档提交。
 
 因此当前裁决是：
 
 ```text
-local-candidate
+review-findings-fixed
+implementation-head-pr-ci-passed
+latest-head-ci-must-be-green-at-merge
 full-local-suite-not-established
-draft-pr-ci-required
+continue-experiment
+requires_staged_rollout
 do-not-integrate
-do-not-merge-yet
+manual-merge-candidate-only
 ```
 
 ## 五、另一台电脑继续
@@ -183,12 +214,14 @@ python scripts/run_assurance_stage3_dml_backfill_experiment.py `
 
 ## 六、下一步
 
-1. 查看 Draft PR 最新 head 的 10 项 CI，任何失败都保留为事实；
-2. CI 全绿后做一次只读 post-CI 审查，重点核对：
+1. 推送本 docs-only 接力提交，并确认 Draft PR 最新 head 的 10 项 CI；任何失败都保留为事实；
+2. CI 全绿后做最终只读复核，重点核对：
    - Stage 3 未进入 `src/vega/`、CLI、Runtime、Finish、Goal 或成功语义；
    - `eval/` 相对主线只有追加；
    - artifact 和控制台不含绝对工作区路径；
    - 子进程退出、transaction rollback、checkpoint mismatch 和 oracle tampering 测试真实运行；
-3. 评估 `scripts/run_assurance_stage3_dml_backfill_experiment.py` 作为实验脚本的体积和重复结构；
-   在行为证据稳定前不要抽象成通用 backfill runner；
-4. 不自动合并，不删除实验分支。
+3. 最新 head 10/10 全绿且上述边界成立后，只更新 PR 描述或评论记录最终 SHA，不再追加
+   “CI 已通过”文档提交；PR 才能从 Draft 转为人工合并候选；
+4. 不自动合并，不删除实验分支，不启动 Stage 4；
+5. `scripts/run_assurance_stage3_dml_backfill_experiment.py` 继续保持冻结实验脚本。只有未来要接
+   Runtime 或支持通用 SQL/backfill 时，才需要先拆分并替换字符串级 SQL detector。

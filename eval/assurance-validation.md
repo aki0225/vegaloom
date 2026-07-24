@@ -2759,3 +2759,145 @@ do-not-merge-yet
 
 该结果只证明固定 SQLite 个案的本地候选成立，不证明生产数据库、并发写入、真实流量、
 PostgreSQL/MySQL、在线 DML 或通用 backfill runner 已成立。
+
+---
+
+## 2026-07-24 · AV-STAGE3-001 · independent review correction and PR CI
+
+### 独立审查发现
+
+三个只读审查视角分别检查实现语义、安全边界和测试/CI，确认 Stage 3 仍未进入
+`src/vega/`、CLI、Runtime、Finish、Goal 或成功语义，同时发现三个需要在合并前修正的问题：
+
+1. SQL scope detector 使用子字符串判断 `id = ?`，会把 `tenant_id = ?` 的后缀误判为
+   独立目标 ID 约束；
+2. evidence 虽声明 `dangerous-oracle.json`、`safe-oracle.json` 等 artifact，但绑定检查没有
+   重新校验全部声明文件的 SHA-256；
+3. policy 文件缺失时使用 `unavailable` sentinel，snapshot 可能与同一 sentinel 自洽。
+
+### 测试先行红灯与修复
+
+先新增三个回归测试，得到：
+
+```text
+3 failed
+missing target scope: detector 未在写入前给出 target_scope_missing
+oracle artifact tampering: evidence binding 仍返回 true
+policy unavailable sentinel: snapshot 仍返回 trusted
+```
+
+随后做最小修复：
+
+- 使用带列名边界的正则分别识别 `tenant_id = ?` 与独立 `id = ?`；
+- 每条 evidence 新增 `artifact_hashes`，要求它与 `artifacts` 完全同集合且每个文件的
+  64 位 SHA-256 与磁盘内容一致；
+- policy 缺失或不可读时返回 `None`，trusted snapshot 要求加载时和运行时 policy 哈希均为
+  相同的真实 64 位 SHA-256。
+
+同三个节点修复后：
+
+```text
+3 passed
+```
+
+### 本地验证
+
+Stage 3 并行分片首次尝试造成共享 Windows 资源争用：一个分片 `5 passed`，其余三个超过
+60 秒，超时分片不计为通过或失败。随后使用独立 basetemp 串行执行全部节点：
+
+```text
+6 passed
+6 passed
+6 passed
+5 passed
+Stage 3 total: 23 passed
+```
+
+跨阶段与仓库门禁分片：
+
+```text
+Stage 1 contract: 59 passed
+Stage 2 experiments: 24 passed
+Stage 3 experiment: 23 passed
+architecture + repository hygiene tests: 52 passed
+targeted total: 158 passed
+full collection: 691 tests collected
+```
+
+其他门禁：
+
+```text
+compileall src + registered experiment scripts: passed
+Ruff src + tests + registered experiment scripts: passed
+Ruff C901 on Stage 3 script: passed
+architecture growth: passed, C901 46->46, Python modules 54->54
+repository hygiene: passed
+git diff check: passed
+path/secret scan: passed
+eval relative to origin/main remains append-only
+src/vega diff remains empty
+```
+
+### clean-head artifact
+
+artifact 绑定审查修复提交：
+
+```text
+snapshot.head: 25a7efc0058de62d2fc665c99b501f890ff5d3e9
+script exit code: 1
+overall_decision: inconclusive
+candidate_decision: continue-experiment
+evidence_adequacy: insufficient
+runtime_integration: disabled
+dangerous_twin.decision: reject
+safe_twin.decision: candidate-passed-local
+safe_twin.evidence_bindings_valid: true
+interruption.process_exit_code: 97
+recovery.updated_ids: [102]
+repeat.updated_ids: []
+safe_twin.oracle.passed: true
+verified declared artifact bindings: 10
+```
+
+SHA-256：
+
+```text
+result.json:
+883C133F0790AD7F3793F6F774A796D95CF4077CF5A463F5FAFE9A0E733D0EDA
+
+report.md:
+67BABCFE2836F3E3B900E4E480F899852ABA90047C0AA56C1149642DEA55B630
+```
+
+artifact 文本扫描未发现本机绝对路径、API key 或 Authorization header；目录继续由
+`.gitignore` 排除。
+
+### PR CI
+
+修复提交 `25a7efc` 对应 Draft PR `#13` workflow `30099248716`：
+
+```text
+10/10 jobs success
+static checks and 691-node collection: success
+Python 3.11 full suite: success
+Python 3.12 five shards: success
+Windows + wheel smoke: success
+POSIX temp-dir checks: success
+wheel/sdist build and package smoke: success
+```
+
+### 当前裁决
+
+```text
+review-findings-fixed
+implementation-head-pr-ci-passed
+latest-head-ci-must-be-green-at-merge
+continue-experiment
+requires_staged_rollout
+do-not-integrate
+manual-merge-candidate-only
+```
+
+该裁决只允许继续把 Stage 3 作为冻结实验候选审查。人工合并时必须读取 PR 最新 head 的
+实时 10 项 CI；通过后只在 PR 描述或评论记录最终 SHA，不再为追逐新 SHA 追加仓库文档提交。
+它不自动接入 Runtime、不启动 Stage 4，也不扩大为通用数据库安全声明。
