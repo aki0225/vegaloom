@@ -34,6 +34,10 @@ line-length = 100
 target-version = "py311"
 cache-dir = ".tmp/ruff/cache"
 
+[tool.ruff.lint]
+# 不依赖 Ruff 版本的隐式默认值，升级时必须显式评估新增规则。
+select = ["E4", "E7", "E9", "F"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

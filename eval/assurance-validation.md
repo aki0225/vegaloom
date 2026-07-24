@@ -2164,3 +2164,444 @@ git diff --check: passed
 仍不证明恶意并发路径替换、其他数据库引擎、生产 migration 或操作系统级隔离安全；在最新
 PR head 的 Python 3.11/3.12、Windows、POSIX、wheel/sdist 检查全部成功并完成 post-CI
 只读复核前，不得转 Ready 或合并。
+
+---
+
+## 2026-07-23 · AV-STAGE2-001 · final PR/main closure
+
+### PR head 门禁
+
+- PR：`#8`。
+- 最终 head：`f59a71d7dd6898bc6fb240bdec3a19d0cb8727df`。
+- PR workflow：`30014062338`。
+- 结果：`success`，总耗时 `2m 50s`。
+- 同一 run 完成：
+  - 静态检查与节点收集；
+  - Python 3.11 全量测试；
+  - Python 3.12 五个分片；
+  - Windows 专项与 wheel smoke；
+  - POSIX 临时目录专项；
+  - wheel 构建与安装。
+
+post-CI 定向复核结果：
+
+```text
+architecture + Stage 2 targeted: 50 passed
+compileall: passed
+Ruff: passed
+architecture growth: passed, C901 48->46, Python modules 47->54
+repository hygiene: passed
+git diff --check: passed
+```
+
+三路独立只读复核没有发现新的阻塞问题。架构门禁、SQLite 独立 SQL oracle 和
+`.local-validation/` 链接/reparse 防护的已知 findings 均已关闭。
+
+### 合并后主线
+
+- PR `#8` 已 squash 合并。
+- 主线提交：`main@0280b9f6df0205261a489e1fd67c6b574684cb64`。
+- 合并后 push workflow：`30016175900`。
+- 结果：`success`，总耗时 `2m 39s`。
+- 同一 10 项任务全部成功。
+
+### 裁决
+
+`completed-first-public-evidence / continue-experiment / do-not-integrate`
+
+`AV-STAGE2-001` 已完成预注册问题、真实 SQLite 执行、负向敏感性修复、完整本地测试、
+最终 PR head CI、post-CI 只读复核和合并后主线 CI。它现在可以作为 Stage 2 的第一份公开
+实验代码与证据。
+
+该裁决只关闭 `AV-STAGE2-001` 的工程与证据门禁，不把 SQLite 个案提升为生产数据库安全、
+跨数据库引擎安全或 Runtime 成功，也不改变 `continue-experiment` 的结论上限。
+
+---
+
+## 2026-07-23 · AV-STAGE2-002 · expand/backfill/contract preregistration
+
+### 基线
+
+- Git 基线：`main@0280b9f6df0205261a489e1fd67c6b574684cb64`。
+- 工作分支：`experiment/assurance-stage2-backfill`。
+- Threat：`T-DB-MIG-COMPAT`。
+- 引擎：Python 标准库 SQLite。
+- 详细预注册合同：
+  [`docs/ASSURANCE-STAGE2-EXPAND-CONTRACT-EXPERIMENT.md`](../docs/ASSURANCE-STAGE2-EXPAND-CONTRACT-EXPERIMENT.md)。
+
+### 冻结问题
+
+1. 固定两行已有数据时，`expand -> contract -> backfill` 的危险顺序能否在执行前被 detector
+   标记，并在绕过 detector 后由 SQLite 实际拒绝？
+2. contract 失败后，transaction rollback 能否保持 expanded schema 和完整数据，同时不残留
+   临时表？
+3. `expand -> bounded fixture backfill -> contract` 能否通过 OldApp/NewApp 与
+   Old/Expanded/Backfilled/Contract schema 的兼容矩阵？
+4. 数据准备和 contract wrapper 能否在本实验固定 fixture 上重复执行而不产生额外修改？
+5. 关闭原连接后重新打开数据库的独立 SQL oracle，能否精确验证 `NOT NULL UNIQUE`、完整行
+   映射和零个 `NULL`？
+6. 部分数据准备、错误映射、读取层掩盖、错误约束和临时表残留是否都会使结论降为
+   `inconclusive`？
+
+### 冻结顺序
+
+危险控制：
+
+```text
+old -> expand -> contract -> backfill
+```
+
+安全双生：
+
+```text
+old -> expand -> bounded fixture backfill -> contract
+```
+
+bounded fixture data preparation 只更新：
+
+```text
+id=1 -> external_id=cust-0001
+id=2 -> external_id=cust-0002
+```
+
+### 非目标
+
+- 不实现通用 backfill runner、租户 scope、row budget、分批 checkpoint 或恢复框架。
+- 不覆盖并发写入、复制延迟、真实应用部署、生产数据规模或在线 DDL。
+- 不注册默认 CLI，不写默认 `runs/`，不接 Finish、Goal、Loop 或 `AdequacyResult`。
+- 不把实验结论解释为 `sufficient_for_merge`、`ready_to_commit` 或生产 migration 安全。
+
+### Artifact 与停止条件
+
+- artifact schema：`2`。
+- 输出只能位于 `.local-validation/`。
+- 机器事实源：`result.json`。
+- 人类报告：`report.md`。
+- 数据库：`dangerous.sqlite`、`safe.sqlite`。
+- 所有注册负向控制、定向测试、完整测试、静态检查和跨平台 CI 必须明确通过。
+
+即使全部通过，结论仍不得超过：
+
+```text
+overall_decision = continue-experiment
+evidence_adequacy = requires_staged_rollout
+runtime_integration = disabled
+```
+
+### 当前裁决
+
+`preregistered / not-run / do-not-integrate`
+
+本条在实现脚本、测试和本地 artifact 运行前追加。后续失败、修正和结果只能继续追加，不能
+改写本预注册合同。
+
+---
+
+## 2026-07-23 · AV-STAGE2-002 · local candidate result
+
+### 基线与范围
+
+- Git 基线：`main@0280b9f6df0205261a489e1fd67c6b574684cb64`。
+- 工作分支：`experiment/assurance-stage2-backfill`。
+- 预注册提交：`0eb8073`。
+- 实现仍是 Python 标准库 SQLite 独立脚本；没有注册 `vega` CLI，没有接入 Runtime、
+  Finish、Goal、Loop 或 `AdequacyResult`。
+
+### 红灯、无效尝试与审查修正
+
+预注册后先执行了目标测试红灯，再实现双生实验。后续两次本地 artifact 暴露结论层级问题：
+
+1. `.local-validation/assurance-stage2-expand-contract-20260723-232008/` 在外部测试和 CI
+   未关闭时，错误地把总体结论提升为 `continue-experiment / requires_staged_rollout`，
+   且没有显式记录决策范围和外部门禁状态。
+2. `.local-validation/assurance-stage2-expand-contract-20260723-234037/` 补充了
+   `decision_scope` 和 `external_quality_gates`，但仍由单次脚本自行提升总体结论。
+
+这两个目录均早于最终修正，不具备证据资格；不记录其 SHA-256，也不用于本条裁决。最终实现
+把“实验执行候选”和“组合门禁裁决”分开：
+
+- artifact 固定为 `overall_decision=inconclusive`；
+- 内部候选单独记录为 `candidate_decision=continue-experiment`；
+- `evidence_adequacy=insufficient`；
+- `external_quality_gates.status=not_evaluated`；
+- 独立脚本即使完整写出 artifact，也返回退出码 `1`，直到外部门禁由追加式证据关闭。
+
+只读审查还发现 `main()` 入口的退出码、控制台脱敏和相对 artifact 路径没有被直接测试。
+该合同已并入现有首个 Stage 2 测试，测试节点总数不变；目标文件最终为 `13 passed`。
+
+第一次全量分片使用过长的 Windows `basetemp`，触发 `WinError 206` 和衍生的
+`RunMutationLockError`。该轮属于测试环境路径失效，全部作废。第二轮改用数字短路径重新
+执行全部收集节点，不把首轮结果计为产品失败或通过。
+
+### 最终实验事实
+
+最终本地 artifact：
+
+- `.local-validation/assurance-stage2-expand-contract-20260723-final/result.json`
+  - SHA-256：
+    `6AA739107A360035AD34DB412D9FEC0B3CEFFFF842F0AE96063296F660DBB35E`
+- `.local-validation/assurance-stage2-expand-contract-20260723-final/report.md`
+  - SHA-256：
+    `42843CF1CD39A58A28C82157BC888F750621FA405EDC4CCDC3992A94795F2DDD`
+
+结构化结果：
+
+```text
+overall_decision: inconclusive
+candidate_decision: continue-experiment
+evidence_adequacy: insufficient
+runtime_integration: disabled
+external_quality_gates.status: not_evaluated
+dangerous_twin.decision: reject
+safe_twin.decision: candidate-passed-local
+script exit code: 1
+```
+
+危险顺序 `expand -> contract -> backfill` 先被 detector 标记，绕过 detector 后 SQLite
+真实拒绝包含 `NULL` 的 contract，transaction rollback 后 expanded schema 和两行数据保持
+不变，且没有残留临时表。
+
+安全顺序 `expand -> bounded fixture backfill -> contract` 只更新冻结的 `id=1/2`。首次
+数据准备更新两行，第二次更新零行；contract 第二次返回 `already_contracted`；完整兼容矩阵
+和独立 SQL oracle 均通过。
+
+`.local-validation/` 不提交。其他机器重放时允许时间戳和哈希变化，但必须重新核对结构化字段，
+不能复制本机结论冒充 live evidence。
+
+### 完整本地测试
+
+机器可读汇总：
+
+- `.tmp/validation/stage2-adaptive-v2/summary.json`
+- SHA-256：
+  `50EAFEFCEB3CB38DEA17440C434B8D21E983AC33C7180FC2729150A0DB3D00E3`
+
+```text
+collected: 664
+passed: 663
+skipped: 1
+failed: 0
+timed_out: 0
+```
+
+唯一跳过是 Windows 本地不执行的 POSIX shell 变量展开专项，Linux PR CI 必须真实执行。
+本地分片使用互不相同的短 `basetemp`，每个分片由 58 秒外层预算控制；超时的大分片只用于
+递归拆分，不进入最终 leaves 或通过计数。
+
+最终收尾门禁：
+
+```text
+compileall src scripts: passed
+Ruff src tests scripts: passed
+architecture growth: passed, C901 46->46, Python modules 54->54
+repository hygiene: passed
+final collection: 664 tests collected
+git diff check: passed
+```
+
+### 当前裁决
+
+`candidate-passed-local / pr-ci-required / do-not-integrate`
+
+本地危险/安全双生、负向敏感性、入口合同和完整 664 节点已经关闭。当前仍缺最新 PR head
+上的 Python 3.11/3.12、Windows、POSIX、wheel/sdist 和 package CI，以及 CI 后只读复核。
+这些门禁全部成功前，不得把本实验接入 Runtime，不得把裁决提升为
+`continue-experiment / requires_staged_rollout`，也不得自动合并。
+
+---
+
+## 2026-07-24 · AV-STAGE2-002 · independent review correction local result
+
+### 审查红灯
+
+对 `44ab56f` 做独立审查时新增三个负向回归，修正前结果为：
+
+```text
+3 failed, 13 passed
+```
+
+三个红灯分别证明：
+
+1. 错误 backfill 与共享 `_stored_rows` 掩盖同时存在时，NewApp、detector 和旧 oracle 会读取
+   同一份伪装结果；实际 SQLite 行为 `wrong-0001/wrong-0002` 时仍可能得到
+   `candidate-passed-local`。
+2. contract 表删除 `id PRIMARY KEY` 与 `display_name NOT NULL` 后，旧完整性判定仍会返回
+   `already_contracted`，旧 oracle 也会通过。
+3. `external_id_not_unique` 检查位于精确映射比较之后，重复值只能得到
+   `external_id_mapping_mismatch`，专用 detector 分支不可达。
+
+### 最小修复
+
+- oracle 在关闭原连接后重新打开 SQLite，并独立执行列、行、计数、表和索引 SQL；不再复用
+  NewApp、detector 或 contract 的读取 helper。
+- contract 完整性与 oracle 都核对冻结的完整列定义，保留 `id PRIMARY KEY`、
+  `display_name TEXT NOT NULL` 和 `external_id TEXT NOT NULL UNIQUE`。
+- detector 先检查 `NULL` 与唯一性，再检查精确行映射。
+- 新增三个负向回归；完整收集合同由 `664` 更新为 `667`。
+
+### 当前本地结果
+
+```text
+Stage 2 targeted: 16 passed
+compileall src scripts: passed
+Ruff src tests scripts: passed
+architecture growth: passed, C901 46->46, Python modules 54->54
+repository hygiene: passed
+full collection: 667 tests collected
+git diff check: passed
+```
+
+本轮没有得到可采信的当前 head 完整 pytest 汇总：
+
+- 单进程全量运行耗尽 20 分钟外层预算；
+- 直接 smoke 和后续自适应分片运行时，同机另有 pytest 进程并行执行；
+- 第一版自适应脚本未预建短 `basetemp` 父目录，产生环境性 setup error，整轮作废；
+- 第二版只完成部分节点并记录多个 60 秒 timeout，随后主动终止。
+
+上述尝试均不计为通过，也不直接计为产品失败。2026-07-23 的
+`663 passed, 1 skipped` 只适用于修正前旧 head，不能复用来关闭当前 head。
+
+### 当前裁决
+
+`review-findings-fixed-targeted / pr-ci-required / do-not-integrate`
+
+三个已知 evidence false-positive 已由定向回归关闭，静态门禁与 667 节点收集合同通过。完整
+Python 3.11/3.12、Windows、POSIX、wheel/sdist 和 package smoke 必须由同一最新 Draft PR
+head 的隔离 CI 关闭；CI 全绿并完成 post-CI 只读复核前，不得合并或接入 Runtime。
+
+### 修正后 artifact 重放
+
+当前工作区重新执行：
+
+```text
+.local-validation/assurance-stage2-expand-contract-20260724-review-final/
+```
+
+结果保持 fail-closed：
+
+```text
+overall_decision: inconclusive
+candidate_decision: continue-experiment
+evidence_adequacy: insufficient
+runtime_integration: disabled
+external_quality_gates.status: not_evaluated
+dangerous_twin.decision: reject
+safe_twin.decision: candidate-passed-local
+safe_twin.oracle.passed: true
+safe_twin.oracle.schema_columns_passed: true
+script exit code: 1
+```
+
+SHA-256：
+
+```text
+result.json:
+29BC11A9E060ED547665050E0F6B3123134A0A25F96C88D3EE51F4AD1BA20442
+
+report.md:
+90D09243024EA7BE00AD86C4FFB640274838FED12E4F92C92B3B3E0FA16A8B05
+```
+
+该目录仍是本地重放 artifact，不提交；哈希只绑定本次输出，不能替代 PR CI。
+
+---
+
+## 2026-07-24 · AV-STAGE2-002 · PR #10 first-head static failure and correction
+
+### 失败事实
+
+- Draft PR：`#10`。
+- 失败 head：`237cb2967b73743194fa338775bd37b3945a7f0f`。
+- workflow：`30066400503`。
+- 结果：`failure`。
+- 失败任务：`静态检查与节点收集`。
+- 失败步骤：`编译与静态检查`。
+- 其余依赖该任务的测试与打包任务全部被跳过。
+
+该 run 必须保留为失败，不能用后续重跑覆盖描述。
+
+### 根因复现
+
+项目开发依赖只声明 `ruff>=0.5`，`pyproject.toml` 没有显式冻结 lint 规则集合。PR runner 安装
+Ruff `0.16.0` 后，当前配置实际启用了比本机 Ruff `0.15.20` 更广的规则集合，立即报告大量
+历史代码问题；这不是 Stage 2 新脚本单独引入的 193 个回归，也不能通过一次性批量格式化扩大
+本 PR 范围。
+
+本机使用 Python 3.12 与 Ruff `0.16.0` 复现同一行为后，采用最小根因修复：
+
+```toml
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+```
+
+该配置把仓库原先依赖的 Ruff 默认规则转成显式合同；未来增加规则必须单独评估。新增
+`test_ruff_lint_selection_is_explicit_and_stable`，防止再次退回隐式版本默认值。
+
+### 修正后本地结果
+
+```text
+Python 3.12 + Ruff 0.16.0 exact CI command: passed
+local Ruff 0.15.20: passed
+repository hygiene + Stage 2 targeted: 26 passed
+full collection: 668 tests collected
+compileall src scripts: passed
+git diff check: passed
+```
+
+### 当前裁决
+
+`first-pr-head-failed / ruff-contract-fixed-local / latest-head-ci-required / do-not-integrate`
+
+下一次推送必须使用同一 Draft PR `#10`。只有新 head 的静态任务和全部下游跨平台任务都成功，
+才可继续 post-CI 复核；不得新建微型修复分支，也不得自动合并。
+
+---
+
+## 2026-07-24 · AV-STAGE2-002 · PR #10 code-head CI and post-CI review
+
+### PR head 门禁
+
+- PR：`#10`。
+- head：`6e809caa5511385c6852da2d404aa70d8bcc6f17`。
+- workflow：`30066936448`。
+- event：`pull_request`。
+- 结果：`success`。
+- 运行时间：2026-07-24 12:29 至 12:32（Asia/Shanghai）。
+
+同一 run 的 10 项任务全部成功：
+
+1. 静态检查与 `668` 节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 `smoke` 分片。
+4. Python 3.12 `p0-cli-lock` 分片。
+5. Python 3.12 `artifacts-runtime-security` 分片。
+6. Python 3.12 `semantics-evidence-review` 分片。
+7. Python 3.12 `remaining` 分片。
+8. Windows 专项与 wheel smoke。
+9. POSIX 临时目录专项。
+10. wheel/sdist 构建、安装和 package smoke。
+
+POSIX 专项的 job conclusion 为 `success`，不是 skip。首个失败 workflow `30066400503`
+仍保留为失败记录，不能被本次成功覆盖。
+
+### post-CI 只读复核
+
+复核绑定同一 `6e809ca`：
+
+- PR head、远端分支和本地 `HEAD` 一致；
+- 新实验没有进入 `src/`、默认 Loop 或 `vega` CLI；
+- artifact 仍固定为
+  `inconclusive / insufficient / runtime_integration=disabled / external gates not_evaluated`，
+  脚本退出码仍为 `1`；
+- `eval/assurance-validation.md` 相对主线只有新增行，没有删除历史记录；
+- PR 文件集合不含 `.tmp/`、`.local-validation/`、SQLite、`runs/`、`.env`、docx 或本机路径；
+- 仓库卫生、架构增量和 diff check 再次通过；
+- 没有发现新的阻塞 finding。
+
+### 代码 head 裁决
+
+`pr-ci-passed / post-ci-review-clean / continue-experiment / requires_staged_rollout / do-not-integrate`
+
+该裁决只关闭 `AV-STAGE2-002` 代码 head 的实验与工程门禁，不证明 PostgreSQL/MySQL、生产
+规模、在线 DDL、并发写入、可恢复 backfill 或 Runtime 成功语义。本文与接力文档的收口提交
+只修改文档；推送后仍必须确认新的最新 PR head CI 全绿，PR 保持 Draft 且不得自动合并。

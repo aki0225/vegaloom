@@ -1,9 +1,10 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-07-23
+> 更新时间：2026-07-24
 > 稳定基线：`v0.1.2`
 > 当前状态：`M-001`、`M-002`、`M-003` 与 Assurance Stage 1 已完成；当前唯一的 `Now`
-> 是 Stage 2 数据库 Migration 纵向实验，现有候选仍在 Draft PR 中审查，不属于主线能力
+> 是 Stage 2 数据库 Migration 纵向实验。`AV-STAGE2-001` 已作为首份公开证据进入主线，
+> `AV-STAGE2-002` 正在 Draft PR `#10` 中验证，仍不属于 Runtime 或默认主线能力
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -120,15 +121,21 @@ Stage 1 只完成独立数据合同和确定性充分性校验器，没有接入
 
 ### Stage 2：数据库 Migration 纵向闭环
 
-状态：`planned` / `candidate-under-review`
+状态：`experimental` / `first-evidence-merged`
 
 识别 migration、DDL 和 ORM schema 变化，验证兼容矩阵、锁影响、数据转换和恢复路径。
 这不是给 Vega 自身接数据库，而是审查目标项目中的数据库变更风险。没有接近生产规模的
 演练时，最高只能给出 `requires_staged_rollout` 或 `human_required`。
 
-Draft PR `#8` 中已有独立 SQLite 危险/安全双生实验，但它尚未进入主线，也没有注册默认
-CLI 或修改成功语义。当前先关闭该候选的审查 findings，再决定是否把实验结果作为 Stage 2
-的第一份公开证据；不得直接把 SQLite 个案扩大为通用数据库安全声明。
+`AV-STAGE2-001` 独立 SQLite 危险/安全双生实验已经通过审查、PR CI 和合并后主线 CI，
+以 `main@0280b9f` 成为 Stage 2 的第一份公开实验代码与证据。它没有注册默认 CLI，也没有
+修改成功语义；结论仍只能是 `continue-experiment / do-not-integrate`。
+
+`AV-STAGE2-002` 已预注册一个新的发布顺序实验：在固定两行 fixture 上比较
+`expand -> contract -> backfill` 与 `expand -> bounded fixture backfill -> contract`。
+该实验仍只覆盖 `T-DB-MIG-COMPAT`，不会扩展为 Stage 3 的通用 backfill 能力。详细合同见
+[`ASSURANCE-STAGE2-EXPAND-CONTRACT-EXPERIMENT.md`](ASSURANCE-STAGE2-EXPAND-CONTRACT-EXPERIMENT.md)。
+不得直接把 SQLite 个案扩大为通用数据库安全声明。
 
 ### Stage 3：数据修改与 Backfill
 
