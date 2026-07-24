@@ -663,6 +663,8 @@ def _controlled_delegation_summary(inputs: dict[str, Any]) -> dict[str, Any]:
         if field.endswith("_sha256") and not _DELEGATION_SHA256.fullmatch(value):
             continue
         controlled[field] = redact_value(value)
+    if set(controlled) != set(DELEGATION_SUMMARY_FIELDS):
+        return {}
     return controlled
 
 

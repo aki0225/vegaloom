@@ -131,12 +131,16 @@ class ArtifactProbe:
         self.calls += 1
         artifact_path = Path(kwargs["artifact_path"])
         artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = dict(kwargs.get("expected_artifact", {}))
+        payload.update(
+            {
+                "schema_version": 1,
+                "status": self.status,
+            }
+        )
         artifact_path.write_text(
             json.dumps(
-                {
-                    "schema_version": 1,
-                    "status": self.status,
-                },
+                payload,
                 ensure_ascii=False,
                 indent=2,
             )
@@ -162,22 +166,21 @@ def test_non_eligible_or_tier_mismatched_readiness_never_starts_worker(
 
     repo = _init_repo(tmp_path / "repo")
     run_dir = tmp_path / "workspace" / "runs" / RUN_ID
+    source, plan = _runtime_contract(repo, run_dir, readiness_status)
     worker = RecordingWorker()
     bridge = DelegationRuntimeBridge(
         run_dir=run_dir,
         repo_path=repo,
         worker_runner=worker,
         worker_tier=worker_tier,
-        validation_context=_delegation_context(),
-        shell_kind="posix",
+        context_source=source,
         scope_gate=ArtifactProbe(),
         verification_runner=ArtifactProbe(),
     )
 
     outcome = bridge.run(
-        plan=_plan(readiness_status),
+        plan=plan,
         slice_id=SLICE_ID,
-        prompt="执行冻结的单 slice。",
     )
 
     assert outcome.status == "blocked"
@@ -186,8 +189,8 @@ def test_non_eligible_or_tier_mismatched_readiness_never_starts_worker(
     assert not run_dir.joinpath("executions", "worker", "execution.json").exists()
 
 
-@pytest.mark.parametrize("case", ["stale_snapshot", "missing_shell_kind"])
-def test_stale_context_or_missing_shell_kind_blocks_before_worker(
+@pytest.mark.parametrize("case", ["stale_snapshot", "missing_task_artifact"])
+def test_stale_context_or_missing_authoritative_task_blocks_before_worker(
     tmp_path: Path,
     case: str,
 ) -> None:
@@ -195,33 +198,29 @@ def test_stale_context_or_missing_shell_kind_blocks_before_worker(
 
     repo = _init_repo(tmp_path / "repo")
     run_dir = tmp_path / "workspace" / "runs" / RUN_ID
+    source, plan = _runtime_contract(repo, run_dir)
     worker = RecordingWorker()
-    validation_context = (
-        _delegation_context(workspace_fingerprint="f" * 64)
-        if case == "stale_snapshot"
-        else _delegation_context()
-    )
-    shell_kind = None if case == "missing_shell_kind" else "posix"
-    expected_issue = (
-        "snapshot_workspace_mismatch"
-        if case == "stale_snapshot"
-        else "shell_kind_missing"
-    )
+    if case == "stale_snapshot":
+        payload = plan.model_dump(mode="json")
+        payload["baseline"]["workspace_fingerprint"] = "f" * 64
+        plan = PlanContract.model_validate(payload)
+        expected_issue = "snapshot_workspace_mismatch"
+    else:
+        run_dir.joinpath("tasks", "TASK-MA2A.json").unlink()
+        expected_issue = "task_artifact_unreadable"
     bridge = DelegationRuntimeBridge(
         run_dir=run_dir,
         repo_path=repo,
         worker_runner=worker,
         worker_tier="budget",
-        validation_context=validation_context,
-        shell_kind=shell_kind,
+        context_source=source,
         scope_gate=ArtifactProbe(),
         verification_runner=ArtifactProbe(),
     )
 
     outcome = bridge.run(
-        plan=_plan(),
+        plan=plan,
         slice_id=SLICE_ID,
-        prompt="不应启动 worker。",
     )
 
     assert outcome.status == "blocked"
@@ -236,6 +235,7 @@ def test_budget_eligible_starts_exactly_one_injected_worker(
 
     repo = _init_repo(tmp_path / "repo")
     run_dir = tmp_path / "workspace" / "runs" / RUN_ID
+    source, plan = _runtime_contract(repo, run_dir)
     worker = RecordingWorker()
     scope_gate = ArtifactProbe()
     verification = ArtifactProbe()
@@ -244,16 +244,14 @@ def test_budget_eligible_starts_exactly_one_injected_worker(
         repo_path=repo,
         worker_runner=worker,
         worker_tier="budget",
-        validation_context=_delegation_context(),
-        shell_kind="posix",
+        context_source=source,
         scope_gate=scope_gate,
         verification_runner=verification,
     )
 
     outcome = bridge.run(
-        plan=_plan(),
+        plan=plan,
         slice_id=SLICE_ID,
-        prompt="执行冻结的单 slice。",
     )
 
     assert outcome.status == "attempt_recorded"
@@ -272,6 +270,7 @@ def test_plan_and_readiness_artifacts_must_stay_in_run_owned_directory(
 
     repo = _init_repo(tmp_path / "repo")
     run_dir = tmp_path / "workspace" / "runs" / RUN_ID
+    source, plan = _runtime_contract(repo, run_dir)
     outside = tmp_path / "outside-artifacts"
     worker = RecordingWorker()
 
@@ -282,14 +281,12 @@ def test_plan_and_readiness_artifacts_must_stay_in_run_owned_directory(
             artifact_dir=outside,
             worker_runner=worker,
             worker_tier="budget",
-            validation_context=_delegation_context(),
-            shell_kind="posix",
+            context_source=source,
             scope_gate=ArtifactProbe(),
             verification_runner=ArtifactProbe(),
         ).run(
-            plan=_plan(),
+            plan=plan,
             slice_id=SLICE_ID,
-            prompt="不应启动 worker。",
         )
 
     assert worker.calls == []
@@ -306,27 +303,28 @@ def test_attempt_hashes_every_authoritative_artifact_and_tampering_fails_closed(
 
     repo = _init_repo(tmp_path / "repo")
     run_dir = tmp_path / "workspace" / "runs" / RUN_ID
+    source, plan = _runtime_contract(repo, run_dir)
     bridge = DelegationRuntimeBridge(
         run_dir=run_dir,
         repo_path=repo,
         worker_runner=RecordingWorker(),
         worker_tier="budget",
-        validation_context=_delegation_context(),
-        shell_kind="posix",
+        context_source=source,
         scope_gate=ArtifactProbe(),
         verification_runner=ArtifactProbe(),
     )
     outcome = bridge.run(
-        plan=_plan(),
+        plan=plan,
         slice_id=SLICE_ID,
-        prompt="执行冻结的单 slice。",
     )
     assert outcome.status == "attempt_recorded"
     attempt = _read_json(outcome.attempt_path)
 
     reference_fields = {
         "plan_ref",
+        "context_ref",
         "readiness_ref",
+        "prompt_ref",
         "execution_ref",
         "snapshot_before_ref",
         "snapshot_after_ref",
@@ -466,13 +464,43 @@ def test_assurance_cannot_treat_readiness_as_verification_evidence(
     assert "assurance_verification_conclusion_mismatch:unknown" in result.issues
 
 
-def _plan(readiness_status: str = "budget_eligible") -> PlanContract:
+def _runtime_contract(
+    repo: Path,
+    run_dir: Path,
+    readiness_status: str = "budget_eligible",
+) -> tuple[Any, PlanContract]:
+    from vega.delegation_runtime import (
+        DelegationContextSource,
+        compile_delegation_context,
+    )
+
+    _prepare_runtime_sources(run_dir)
+    source = DelegationContextSource.model_validate(
+        {
+            "schema_version": 1,
+            "task_artifact_path": "tasks/TASK-MA2A.json",
+            "delegation_policy_path": "policies/delegation-policy.json",
+            "input_artifact_paths": ["inputs/design.json"],
+        }
+    )
+    compiled = compile_delegation_context(
+        run_dir=run_dir,
+        repo_path=repo,
+        source=source,
+    )
     payload = _plan_payload()
+    context = compiled.validation_context
+    payload["task_id"] = context.task_id
+    payload["task_ref"] = context.task_ref.model_dump(mode="json")
+    payload["baseline"] = context.baseline.model_dump(mode="json")
+    payload["task_dag"][0]["input_artifact_refs"] = [
+        context.available_artifacts[0].model_dump(mode="json")
+    ]
     if readiness_status == "human_required":
         payload["risk"]["human_required"] = True
     elif readiness_status == "premium_required":
         payload["risk"]["premium_worker_required"] = True
-    return PlanContract.model_validate(payload)
+    return source, PlanContract.model_validate(payload)
 
 
 def _readiness(status: str) -> DelegationReadinessResult:
@@ -591,6 +619,59 @@ def _artifact(relative_path: str, sha256: str) -> dict[str, str]:
     }
 
 
+def _prepare_runtime_sources(run_dir: Path) -> None:
+    run_dir.joinpath("tasks").mkdir(parents=True)
+    run_dir.joinpath("policies").mkdir()
+    run_dir.joinpath("inputs").mkdir()
+    run_dir.joinpath("tasks", "TASK-MA2A.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "task_id": "TASK-MA2A",
+                "summary": "执行 MA-2A 单 Slice。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    run_dir.joinpath("policies", "delegation-policy.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "budget_limits": {
+                    "max_slices": 1,
+                    "max_dependency_edges": 0,
+                    "max_write_paths": 1,
+                    "max_changed_files": 1,
+                    "max_diff_lines": 100,
+                    "max_new_files": 0,
+                    "max_context_tokens": 10_000,
+                    "max_worker_time_seconds": 60,
+                    "max_worker_tokens": 5_000,
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    run_dir.joinpath("inputs", "design.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "decision": "只运行一个 Slice。",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _init_repo(
     repo: Path,
     *,
@@ -615,30 +696,27 @@ def _init_repo(
         encoding="utf-8",
         newline="\n",
     )
-    if scope_allowed_paths is not None or verification_command is not None:
-        config_lines = ["version: 1"]
-        if scope_allowed_paths is not None:
-            config_lines.extend(
-                [
-                    "scope:",
-                    "  allowed_paths:",
-                    *[f"    - {path}" for path in scope_allowed_paths],
-                ]
-            )
-        if verification_command is not None:
-            config_lines.extend(
-                [
-                    "verification:",
-                    "  commands:",
-                    f"    - {verification_command}",
-                    "  max_commands: 1",
-                ]
-            )
-        repo.joinpath(".vega.yaml").write_text(
-            "\n".join(config_lines) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
+    effective_scope = scope_allowed_paths or ["README.md", "tests/test_example.py"]
+    effective_verification = (
+        verification_command
+        if verification_command is not None
+        else "python -m pytest tests/test_example.py"
+    )
+    config_lines = [
+        "version: 1",
+        "scope:",
+        "  allowed_paths:",
+        *[f"    - {path}" for path in effective_scope],
+        "verification:",
+        "  commands:",
+        f"    - {effective_verification}",
+        "  max_commands: 1",
+    ]
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(config_lines) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     _git(repo, "add", ".")
     subprocess.run(
         [

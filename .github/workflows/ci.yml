@@ -91,9 +91,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "660" ]]; then
+          if [[ "$node_count" != "669" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 660 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 669 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -190,6 +190,9 @@ jobs:
               tests/test_review_artifact_integrity.py
               tests/test_assurance_verification_semantics.py
               tests/test_assurance_stage1_contract.py
+          - name: delegation-binding
+            test_timeout: 58
+            files: tests/test_delegation_runtime_binding_repair.py
           - name: remaining
             test_timeout: 58
             files: >-
