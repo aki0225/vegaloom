@@ -2656,3 +2656,106 @@ do-not-integrate
 
 `do-not-integrate` 继续表示不得接入默认 Runtime、Finish、Goal 或成功语义；实验代码与证据
 进入主线不等于生产 migration、通用 backfill、并发安全或自动部署能力成立。
+
+---
+
+## 2026-07-24 · AV-STAGE3-001 · test-first red and local implementation candidate
+
+### 测试先行失败事实
+
+在实现脚本不存在时，先新增 Stage 3 测试并运行：
+
+```text
+14 failed
+exit code: 1
+共同根因：scripts/run_assurance_stage3_dml_backfill_experiment.py 不存在
+```
+
+该红灯证明测试不是在实现完成后补写。后续又增加了 batch/checkpoint transaction 原子性、
+checkpoint metadata mismatch 和 reconciliation tampering 负向控制；当前 Stage 3 文件共有
+`20` 个测试节点。
+
+### 实现边界
+
+- 分支：`experiment/assurance-stage3-dml-backfill`。
+- 实现提交：`c7122d3ce41407beeb59b2285b07ee910b6ea52e`。
+- 新增独立脚本与测试，没有修改 `src/vega/`。
+- 没有新增 `vega` CLI、默认 Loop、Runtime 状态、Finish、Goal 或成功条件。
+- batch 行更新与 checkpoint 更新在同一 SQLite transaction。
+- 首批提交后由独立子进程以退出码 `97` 硬退出，父进程重新打开数据库恢复。
+- checkpoint 只用于诊断；恢复以数据库中的 `exact / pending / conflict` 事实为准。
+- 独立 SQL oracle 不复用 detector、checkpoint 或应用读取 helper。
+
+### 当前本地结果
+
+```text
+Stage 1 + Stage 2 + Stage 3 + repository/architecture targeted: 155 passed
+Stage 3 targeted: 20 passed
+full collection: 688 tests collected
+compileall src + registered experiment scripts: passed
+Ruff src + tests + registered experiment scripts: passed
+Ruff C901 on Stage 3 script: passed
+architecture growth: passed, C901 46->46, Python modules 54->54
+repository hygiene: passed
+git diff check: passed
+```
+
+clean-head artifact 绑定 `c7122d3`：
+
+```text
+overall_decision: inconclusive
+candidate_decision: continue-experiment
+evidence_adequacy: insufficient
+runtime_integration: disabled
+external_quality_gates.status: not_evaluated
+safe_twin.decision: candidate-passed-local
+safe_twin.evidence_bindings_valid: true
+interruption.process_exit_code: 97
+recovery.updated_ids: [102]
+repeat.updated_ids: []
+safe_twin.oracle.passed: true
+script exit code: 1
+```
+
+本地目录：
+
+```text
+.local-validation/assurance-stage3-dml-backfill-20260724-handoff/
+```
+
+SHA-256：
+
+```text
+result.json:
+2BB892547773B14D0D4917C55EF8DF0EC2F988BAAA9824FC3220D5A883BE34CA
+
+report.md:
+D871929E6E5F615627C9A48F322055C3645A66C1E9389440BAB82A94B3B6A053
+```
+
+该目录不提交；哈希只绑定本次 clean-head 重放。
+
+### 未完成与失败尝试
+
+- 单进程全量 pytest 超过 30 分钟外层预算，只到约 `31%`，不计为通过；
+- Windows 本地完整 semantics shard 在既有
+  `test_loop_eval_rejects_superseded_terminal_without_state_binding` 上触发 `58s` timeout；
+- 同一节点独立重跑为 `1 passed in 48.65s`，只能说明该失败可能受本地共享环境时序影响，
+  不能把完整 shard 改记为通过；
+- Python 3.11/3.12、Windows、POSIX、wheel/sdist 与 package smoke 仍需最新 Draft PR head
+  的隔离 CI。
+
+### 当前裁决
+
+```text
+local-candidate
+full-local-suite-not-established
+draft-pr-ci-required
+continue-experiment
+requires_staged_rollout
+do-not-integrate
+do-not-merge-yet
+```
+
+该结果只证明固定 SQLite 个案的本地候选成立，不证明生产数据库、并发写入、真实流量、
+PostgreSQL/MySQL、在线 DML 或通用 backfill runner 已成立。
