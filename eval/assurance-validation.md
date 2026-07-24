@@ -2605,3 +2605,54 @@ POSIX 专项的 job conclusion 为 `success`，不是 skip。首个失败 workfl
 该裁决只关闭 `AV-STAGE2-002` 代码 head 的实验与工程门禁，不证明 PostgreSQL/MySQL、生产
 规模、在线 DDL、并发写入、可恢复 backfill 或 Runtime 成功语义。本文与接力文档的收口提交
 只修改文档；推送后仍必须确认新的最新 PR head CI 全绿，PR 保持 Draft 且不得自动合并。
+
+---
+
+## 2026-07-24 · AV-STAGE2-002 · PR #10 merge and main CI verification
+
+### 合并事实
+
+- PR：`#10`。
+- 最终 head：`625acf6fdce718fa2741f9a45ecfc9798e72d858`。
+- 合并方式：`squash`。
+- 合并提交：`main@1922e5f0e821a22b2ea6a3c0c9f15686e5374dc7`。
+- 实验分支保留，未删除。
+
+合并前重新确认 PR 为非 Draft、`MERGEABLE`，base 仍为 `main@0280b9f`，最终 head 的
+10 项 PR CI 全部成功，且 `git diff --check` 无问题。
+
+### 合并后主线 CI
+
+- workflow：`30072320027`。
+- event：`push`。
+- commit：`1922e5f0e821a22b2ea6a3c0c9f15686e5374dc7`。
+- 结果：`success`。
+
+同一 run 的 10 项任务全部成功：
+
+1. 静态检查与 `668` 节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 `smoke` 分片。
+4. Python 3.12 `p0-cli-lock` 分片。
+5. Python 3.12 `artifacts-runtime-security` 分片。
+6. Python 3.12 `semantics-evidence-review` 分片。
+7. Python 3.12 `remaining` 分片。
+8. Windows 专项与 wheel smoke。
+9. POSIX 临时目录专项。
+10. wheel/sdist 构建、安装和 package smoke。
+
+没有 pending、skip 或失败任务。该事实只证明同一合并提交通过仓库现有门禁，不替代生产环境
+数据库演练。
+
+### 合并后裁决
+
+```text
+pr-merged
+main-ci-passed
+continue-experiment
+requires_staged_rollout
+do-not-integrate
+```
+
+`do-not-integrate` 继续表示不得接入默认 Runtime、Finish、Goal 或成功语义；实验代码与证据
+进入主线不等于生产 migration、通用 backfill、并发安全或自动部署能力成立。

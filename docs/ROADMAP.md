@@ -3,8 +3,8 @@
 > 更新时间：2026-07-24
 > 稳定基线：`v0.1.2`
 > 当前状态：`M-001`、`M-002`、`M-003` 与 Assurance Stage 1 已完成；当前唯一的 `Now`
-> 是 Stage 2 数据库 Migration 纵向实验。`AV-STAGE2-001` 已作为首份公开证据进入主线，
-> `AV-STAGE2-002` 正在 Draft PR `#10` 中验证，仍不属于 Runtime 或默认主线能力
+> 是 Stage 3 数据修改与 Backfill 的预注册。Stage 2 的两个 SQLite 个案已进入主线，
+> 但仍不属于 Runtime 或默认能力，也不能解释为生产数据库安全证明
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -22,13 +22,13 @@
 
 ```text
 v0.1.2 稳定与冻结
-  -> Assurance Stage 0 维护收口
+  -> Assurance Stage 0 维护完成
   -> Assurance Stage 1：Threat / Evidence 数据合同
   -> Assurance Stage 2：数据库 Migration 纵向实验
   -> 依次评估数据修改、并发和生产 Handoff 风险
 ```
 
-Stage 0 的三个已确认维护缺口按以下顺序收口：
+Stage 0 的三个已确认维护缺口按以下顺序完成：
 
 1. Adapter junction/reparse point 的真实路径边界。
 2. pnpm/yarn 项目的包管理器命令选择。
@@ -80,7 +80,7 @@ M-001 Adapter 边界
 
 ## 三、主线阶段
 
-### Stage 0：基础成功语义与维护收口
+### Stage 0：基础成功语义与维护完成
 
 状态：`completed`
 
@@ -119,9 +119,9 @@ Stage 0 的三个维护任务均已完成，并由各自的预注册回归、本
 Stage 1 只完成独立数据合同和确定性充分性校验器，没有接入默认 Runtime、Finish、Goal 或
 `ready_to_commit`。`sufficient_for_merge` 仍只是合同层结论，不是生产安全证明。
 
-### Stage 2：数据库 Migration 纵向闭环
+### Stage 2：数据库 Migration 纵向验证
 
-状态：`experimental` / `first-evidence-merged`
+状态：`experimental` / `two-cases-merged`
 
 识别 migration、DDL 和 ORM schema 变化，验证兼容矩阵、锁影响、数据转换和恢复路径。
 这不是给 Vega 自身接数据库，而是审查目标项目中的数据库变更风险。没有接近生产规模的
@@ -131,17 +131,24 @@ Stage 1 只完成独立数据合同和确定性充分性校验器，没有接入
 以 `main@0280b9f` 成为 Stage 2 的第一份公开实验代码与证据。它没有注册默认 CLI，也没有
 修改成功语义；结论仍只能是 `continue-experiment / do-not-integrate`。
 
-`AV-STAGE2-002` 已预注册一个新的发布顺序实验：在固定两行 fixture 上比较
-`expand -> contract -> backfill` 与 `expand -> bounded fixture backfill -> contract`。
-该实验仍只覆盖 `T-DB-MIG-COMPAT`，不会扩展为 Stage 3 的通用 backfill 能力。详细合同见
+`AV-STAGE2-002` 在固定两行 fixture 上比较
+`expand -> contract -> backfill` 与 `expand -> bounded fixture backfill -> contract`，
+已通过 PR `#10`、合并提交 `main@1922e5f` 和合并后主线 10 项 CI。该实验仍只覆盖
+`T-DB-MIG-COMPAT`，不会扩展为 Stage 3 的通用 backfill 能力。详细合同见
 [`ASSURANCE-STAGE2-EXPAND-CONTRACT-EXPERIMENT.md`](ASSURANCE-STAGE2-EXPAND-CONTRACT-EXPERIMENT.md)。
 不得直接把 SQLite 个案扩大为通用数据库安全声明。
 
 ### Stage 3：数据修改与 Backfill
 
-状态：`planned`
+状态：`preregistered` / `not-implemented`
 
 覆盖 DML、backfill、cleanup、scope、row budget、幂等、恢复和 reconciliation。
+
+当前只预注册 `AV-STAGE3-001`：在冻结的双租户 SQLite fixture 上验证有界 DML 是否只修改
+明确目标，能否在部分提交后恢复，并由独立 SQL oracle 检查越界、幂等和 reconciliation。
+详细合同见
+[`ASSURANCE-STAGE3-DML-BACKFILL-PREREGISTRATION.md`](ASSURANCE-STAGE3-DML-BACKFILL-PREREGISTRATION.md)。
+本阶段尚未实现脚本、测试、默认命令或 Runtime 集成。
 
 ### Stage 4：并发与外部副作用
 
@@ -212,7 +219,7 @@ Stage 1 只完成独立数据合同和确定性充分性校验器，没有接入
 ### 2026-07-21：主线转向 Evidence Adequacy
 
 Evidence Integrity 已有基础，下一问题是证据是否足以支撑交付结论。先定义合同和确定性
-detector，再选择单一 Threat 做纵向闭环，不一次性实现完整 Risk Engine。
+detector，再选择单一 Threat 做纵向实验，不一次性实现完整 Risk Engine。
 
 ### 2026-07-21：实验与主线分离
 
