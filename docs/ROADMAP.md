@@ -4,7 +4,7 @@
 > 稳定基线：`v0.1.2`
 > 当前状态：`M-001`、`M-002`、`M-003` 与 Assurance Stage 1 已完成；当前唯一的 `Now`
 > 是 Stage 2 数据库 Migration 纵向实验。`AV-STAGE2-001` 已作为首份公开证据进入主线，
-> `AV-STAGE2-002` 仍是独立候选，不属于 Runtime 或默认主线能力
+> `AV-STAGE2-002` 正在 Draft PR `#10` 中验证，仍不属于 Runtime 或默认主线能力
 
 本文是 Vega 当前路线的统一入口，只回答：
 

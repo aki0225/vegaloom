@@ -4,6 +4,8 @@
 >
 > 分支：`experiment/assurance-stage2-backfill`
 >
+> Draft PR：`#10`
+>
 > 基线：`main@0280b9f6df0205261a489e1fd67c6b574684cb64`
 >
 > 当前裁决：`review-findings-fixed-targeted / pr-ci-required / do-not-integrate`
@@ -16,7 +18,7 @@
 
 当前 head 的静态门禁和 667 节点收集合同通过，但本机完整执行没有形成合格的最终汇总；
 2026-07-23 的 `663 passed, 1 skipped` 只适用于修正前旧 head，不能复用为当前 head 证据。
-下一步必须创建 Draft PR，使用同一最新 head 的跨平台 CI 关闭完整测试：
+Draft PR `#10` 已创建。下一步必须使用同一最新 head 的跨平台 CI 关闭完整测试：
 
 - 危险顺序 `expand -> contract -> backfill` 会被 detector 标记，并被 SQLite 实际拒绝；
 - 安全顺序 `expand -> bounded fixture backfill -> contract` 在固定两行 fixture 上通过；
@@ -140,7 +142,7 @@ report.md:
 首轮完整分片使用过长 Windows `basetemp`，产生 `WinError 206` 和衍生锁错误；该轮全部作废。
 有效汇总只来自数字短路径的 `stage2-adaptive-v2`。
 
-## 五、当前继续：创建 Draft PR 并关闭 CI
+## 五、当前继续：关闭 Draft PR #10 的 CI
 
 在另一台机器恢复：
 
@@ -163,7 +165,8 @@ python -m pytest --collect-only -q
 git diff --check
 ```
 
-然后创建 Draft PR，目标为 `main`。不要自动合并。等待同一最新 head 的全部任务完成，至少核对：
+Draft PR `#10` 已存在，目标为 `main`。不要另建分支或 PR，也不要自动合并。等待同一最新
+head 的全部任务完成，至少核对：
 
 1. Python 3.11 全量测试。
 2. Python 3.12 分片测试。
