@@ -34,6 +34,10 @@ line-length = 100
 target-version = "py311"
 cache-dir = ".tmp/ruff/cache"
 
+[tool.ruff.lint]
+# 显式冻结既有门禁，避免 Ruff 版本升级把新增规则静默变成实验分支阻断项。
+select = ["E4", "E7", "E9", "F"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
