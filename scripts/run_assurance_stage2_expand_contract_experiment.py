@@ -22,6 +22,30 @@ EXPECTED_ROWS = [
     {"id": 1, "display_name": "Ada", "external_id": "cust-0001"},
     {"id": 2, "display_name": "Lin", "external_id": "cust-0002"},
 ]
+# SQLite 会把 INTEGER PRIMARY KEY 的 notnull 报为 0，因此必须结合 primary_key 判断原约束。
+EXPECTED_CONTRACT_COLUMNS = [
+    {
+        "name": "id",
+        "type": "INTEGER",
+        "not_null": False,
+        "default": None,
+        "primary_key": True,
+    },
+    {
+        "name": "display_name",
+        "type": "TEXT",
+        "not_null": True,
+        "default": None,
+        "primary_key": False,
+    },
+    {
+        "name": "external_id",
+        "type": "TEXT",
+        "not_null": True,
+        "default": None,
+        "primary_key": False,
+    },
+]
 
 
 def run_experiment(output_dir: Path) -> dict[str, Any]:
@@ -281,15 +305,15 @@ def _contract_precondition_issues(connection: sqlite3.Connection) -> list[str]:
             f"{THREAT_ID}:contract_before_backfill:"
             "external_id_contains_null_rows"
         ]
-    if rows != EXPECTED_ROWS:
-        return [
-            f"{THREAT_ID}:contract_after_wrong_backfill:"
-            "external_id_mapping_mismatch"
-        ]
     if len({row["external_id"] for row in rows}) != len(rows):
         return [
             f"{THREAT_ID}:contract_after_wrong_backfill:"
             "external_id_not_unique"
+        ]
+    if rows != EXPECTED_ROWS:
+        return [
+            f"{THREAT_ID}:contract_after_wrong_backfill:"
+            "external_id_mapping_mismatch"
         ]
     return []
 
@@ -434,13 +458,51 @@ def _database_snapshot(connection: sqlite3.Connection) -> dict[str, Any]:
 def _independent_oracle(database_path: Path) -> dict[str, Any]:
     connection = sqlite3.connect(database_path)
     try:
-        columns = _table_columns(connection)
+        # Oracle 有意不复用 NewApp、detector 或 contract 的读取 helper，避免同根缺陷自证通过。
+        columns = [
+            {
+                "name": column[1],
+                "type": column[2],
+                "not_null": bool(column[3]),
+                "default": column[4],
+                "primary_key": bool(column[5]),
+            }
+            for column in connection.execute("PRAGMA table_info(customer)")
+        ]
         column_map = {column["name"]: column for column in columns}
-        rows = _stored_rows(connection)
-        tables = _table_names(connection)
+        rows = [
+            {
+                "id": row[0],
+                "display_name": row[1],
+                "external_id": row[2],
+            }
+            for row in connection.execute(
+                "SELECT id, display_name, external_id FROM customer ORDER BY id"
+            )
+        ]
+        tables = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' ORDER BY name"
+            )
+        ]
+        table_sql_row = connection.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'customer'"
+        ).fetchone()
+        table_sql = str(table_sql_row[0]) if table_sql_row else ""
         external_ids = [row["external_id"] for row in rows]
-        null_count = sum(value is None for value in external_ids)
-        distinct_count = len({value for value in external_ids if value is not None})
+        null_count = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM customer WHERE external_id IS NULL"
+            ).fetchone()[0]
+        )
+        distinct_count, total_count = connection.execute(
+            "SELECT COUNT(DISTINCT external_id), COUNT(*) FROM customer"
+        ).fetchone()
+        distinct_count = int(distinct_count)
+        total_count = int(total_count)
         not_null_columns = {
             name: bool(column["not_null"])
             for name, column in column_map.items()
@@ -449,25 +511,49 @@ def _independent_oracle(database_path: Path) -> dict[str, Any]:
             name: str(column["type"]).strip().upper()
             for name, column in column_map.items()
         }
-        unique_external_id = _external_id_is_unique(connection)
-        schema_mode = _schema_mode(connection)
+        unique_external_id = False
+        for index in connection.execute("PRAGMA index_list(customer)"):
+            is_unique = bool(index[2])
+            is_partial = bool(index[4]) if len(index) > 4 else False
+            if not is_unique or is_partial:
+                continue
+            index_columns = [
+                str(column[0])
+                for column in connection.execute(
+                    "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+                    (str(index[1]),),
+                )
+            ]
+            if index_columns == ["external_id"]:
+                unique_external_id = True
+                break
+        external_column = column_map.get("external_id")
+        if external_column is None:
+            schema_mode = "old"
+        elif external_column["not_null"]:
+            schema_mode = "contracted_not_null"
+        else:
+            schema_mode = (
+                "backfilled_nullable" if null_count == 0 else "expanded_nullable"
+            )
         temp_table_present = CONTRACT_TABLE in tables
         stored_rows_passed = rows == EXPECTED_ROWS
+        schema_columns_passed = columns == EXPECTED_CONTRACT_COLUMNS
         passed = (
             schema_mode == "contracted_not_null"
-            and not_null_columns.get("external_id") is True
-            and column_types.get("external_id") == "TEXT"
+            and schema_columns_passed
             and unique_external_id
             and stored_rows_passed
             and null_count == 0
-            and distinct_count == len(EXPECTED_ROWS)
+            and distinct_count == total_count == len(EXPECTED_ROWS)
             and not temp_table_present
         )
         return {
             "passed": passed,
             "schema_mode": schema_mode,
-            "table_sql": _customer_table_sql(connection),
+            "table_sql": table_sql,
             "columns": columns,
+            "schema_columns_passed": schema_columns_passed,
             "not_null_columns": not_null_columns,
             "column_types": column_types,
             "unique_external_id": unique_external_id,
@@ -476,6 +562,7 @@ def _independent_oracle(database_path: Path) -> dict[str, Any]:
             "external_ids": external_ids,
             "null_external_id_count": null_count,
             "distinct_external_id_count": distinct_count,
+            "total_row_count": total_count,
             "tables": tables,
             "temp_table_present": temp_table_present,
         }
@@ -547,14 +634,8 @@ def _external_id_is_unique(connection: sqlite3.Connection) -> bool:
 
 def _contract_schema_is_complete(connection: sqlite3.Connection) -> bool:
     columns = _table_columns(connection)
-    external = next(
-        (column for column in columns if column["name"] == "external_id"),
-        None,
-    )
-    return bool(
-        external is not None
-        and external["not_null"]
-        and str(external["type"]).strip().upper() == "TEXT"
+    return (
+        columns == EXPECTED_CONTRACT_COLUMNS
         and _external_id_is_unique(connection)
     )
 

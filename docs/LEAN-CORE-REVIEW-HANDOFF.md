@@ -2,11 +2,23 @@
 
 > 审查日期：2026-07-23
 >
-> 工作分支：`refactor/lean-core`
+> 关闭日期：2026-07-24
 >
-> 审查基线：`48b7f37ce56e35a7a86b0dbcfa46669593e3265e`
+> 历史工作分支：`refactor/lean-core`（本地与远端均已删除）
 >
-> 当前裁决：`passed-local / pr-ci-required / do-not-merge`
+> 当前裁决：`findings-closed / pr-ci-passed / merged-to-main`
+
+## 0. 最终关闭结论
+
+- 三个阻塞 finding 和后续同根组合问题均已由负向回归关闭；
+- PR `#8` 最终 head `f59a71d7dd6898bc6fb240bdec3a19d0cb8727df` 的 workflow
+  `30014062338` 共 10 项检查全部成功；
+- PR 已于 2026-07-23 合并为
+  `main@0280b9f6df0205261a489e1fd67c6b574684cb64`；
+- 合并后主线 workflow `30016175900` 共 10 项检查全部成功。
+
+本文后续保留审查时的红灯、修正和本地证据。中间出现的 `do-not-merge` 是当时的阶段门禁，
+不是当前主线裁决。
 
 ## 1. 审查快照
 
@@ -411,9 +423,9 @@ Windows 本地按合同跳过 POSIX shell 变量展开语义；Linux PR CI 必�
   存在更广泛的并发/链接加固空间。相同写入形态已存在于 `origin/main`，不是本分支新增回归；
   应在独立安全任务中统一评估，不能在本 PR 临时扩成重型路径框架。
 
-### 当前裁决
+### 最终裁决
 
-`passed-local / pr-ci-required / do-not-merge`
+`findings-closed / pr-ci-passed / merged-to-main`
 
-三个阻塞 finding 及后续同根组合问题已由负向测试关闭，完整 651 节点和静态门禁本地通过。
-下一步只推送同一 `refactor/lean-core`，等待最新 head 的 10 项跨平台 CI 和 post-CI 只读复核。
+三个阻塞 finding 及后续同根组合问题已由负向测试关闭；最终 PR head 与合并后主线的 10 项
+跨平台 CI 均已通过。本审查任务结束，不再从历史分支继续开发。

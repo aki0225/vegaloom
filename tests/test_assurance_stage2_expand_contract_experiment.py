@@ -258,6 +258,59 @@ def test_stage2_002_independent_oracle_rejects_masked_wrong_mapping(
     assert result["overall_decision"] == "inconclusive"
 
 
+def test_stage2_002_independent_oracle_does_not_share_application_row_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _experiment_module()
+    original_stored_rows = module._stored_rows
+    calls = 0
+
+    def wrong_backfill(connection: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            cursor = connection.execute(
+                "UPDATE customer SET external_id = 'wrong-' || printf('%04d', id) "
+                "WHERE external_id IS NULL"
+            )
+            connection.commit()
+            return {"status": "applied", "updated_rows": cursor.rowcount}
+        return {"status": "already_backfilled", "updated_rows": 0}
+
+    def masking_shared_row_reader(connection: Any) -> list[dict[str, Any]]:
+        rows = original_stored_rows(connection)
+        return [
+            {
+                **row,
+                "external_id": (
+                    f"cust-{row['id']:04d}"
+                    if str(row["external_id"]).startswith("wrong-")
+                    else row["external_id"]
+                ),
+            }
+            for row in rows
+        ]
+
+    monkeypatch.setattr(module, "_backfill_external_ids", wrong_backfill)
+    monkeypatch.setattr(module, "_stored_rows", masking_shared_row_reader)
+    _bind_project_root(module, tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    result = module.run_experiment(
+        Path(".local-validation") / "shared-reader-masked-wrong-mapping"
+    )
+
+    safe = result["safe_twin"]
+    assert safe["detector_issues"] == []
+    assert all(case["passed"] for case in safe["matrix"].values())
+    assert safe["oracle"]["rows"] != EXPECTED_ROWS
+    assert safe["oracle"]["stored_rows_passed"] is False
+    assert safe["oracle"]["passed"] is False
+    assert safe["decision"] == "inconclusive"
+    assert result["overall_decision"] == "inconclusive"
+
+
 def test_stage2_002_rejects_contract_without_not_null(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -335,6 +388,41 @@ def test_stage2_002_rejects_incomplete_contract_schema(
     assert result["overall_decision"] == "inconclusive"
 
 
+def test_stage2_002_rejects_contract_that_drops_baseline_constraints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _experiment_module()
+
+    def create_weakened_contract_table(connection: Any) -> None:
+        connection.execute(
+            "CREATE TABLE customer__contract_tmp ("
+            "id INTEGER, "
+            "display_name TEXT, "
+            "external_id TEXT NOT NULL UNIQUE)"
+        )
+
+    monkeypatch.setattr(
+        module,
+        "_create_contract_table",
+        create_weakened_contract_table,
+    )
+    _bind_project_root(module, tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    result = module.run_experiment(
+        Path(".local-validation") / "weakened-baseline-constraints"
+    )
+
+    safe = result["safe_twin"]
+    assert safe["contract"]["first_run"]["status"] == "applied"
+    assert safe["contract"]["second_run"]["status"] != "already_contracted"
+    assert safe["oracle"]["schema_columns_passed"] is False
+    assert safe["oracle"]["passed"] is False
+    assert safe["decision"] == "inconclusive"
+    assert result["overall_decision"] == "inconclusive"
+
+
 def test_stage2_002_backfill_only_updates_frozen_fixture_ids(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -362,6 +450,25 @@ def test_stage2_002_backfill_only_updates_frozen_fixture_ids(
         "display_name": "Out of scope",
         "external_id": None,
     }
+
+
+def test_stage2_002_duplicate_external_ids_have_specific_detector_issue() -> None:
+    module = _experiment_module()
+    connection = sqlite3.connect(":memory:")
+    try:
+        module._create_baseline(connection)
+        module._apply_expand(connection)
+        connection.execute("UPDATE customer SET external_id = 'duplicate'")
+        connection.commit()
+
+        issues = module._contract_precondition_issues(connection)
+    finally:
+        connection.close()
+
+    assert issues == [
+        "T-DB-MIG-COMPAT:contract_after_wrong_backfill:"
+        "external_id_not_unique"
+    ]
 
 
 def test_stage2_002_rejects_leftover_contract_table(

@@ -1,12 +1,27 @@
 # 轻量核心精简分支接力说明
 
-> 更新时间：2026-07-23
+> 更新时间：2026-07-24
 >
-> 工作分支：`refactor/lean-core`
+> 历史工作分支：`refactor/lean-core`（本地与远端均已删除）
 >
-> Draft PR：[#8](https://github.com/aki0225/vegaloom/pull/8)
+> PR：[#8](https://github.com/aki0225/vegaloom/pull/8)（已合并）
 >
-> 当前裁决：`passed-local / pr-ci-required / do-not-merge`
+> 当前裁决：`completed / merged-to-main / main-ci-10-of-10`
+
+## 0. 关闭说明
+
+本接力任务已经关闭：
+
+- PR `#8` 最终 head `f59a71d7dd6898bc6fb240bdec3a19d0cb8727df` 的 workflow
+  `30014062338` 共 10 项检查全部成功；
+- PR 已于 2026-07-23 squash 合并为
+  `main@0280b9f6df0205261a489e1fd67c6b574684cb64`；
+- 合并后主线 workflow `30016175900` 共 10 项检查全部成功；
+- 三个阻塞 finding 及后续同根组合问题均由负向回归关闭；
+- 历史工作分支已清理，后续不应恢复该分支继续开发。
+
+本文其余内容保留为当时的实现、验证和接力复盘。下文中的 `pr-ci-required`、
+`do-not-merge` 和“下一步”只描述合并前旧 head，不再代表当前状态。
 
 ## 1. 基线与提交
 
@@ -205,7 +220,7 @@ python -m pytest -q -p no:cacheprovider `
 审查问题的最小复现、预期输出和建议测试名见
 [`LEAN-CORE-REVIEW-HANDOFF.md`](LEAN-CORE-REVIEW-HANDOFF.md)。
 
-## 8. PR 与主线门禁
+## 8. 历史 PR 与主线门禁（已完成）
 
 Draft PR #8 在最新 handoff 提交推送后会重新运行 CI。按以下顺序处理：
 
@@ -218,7 +233,7 @@ Draft PR #8 在最新 handoff 提交推送后会重新运行 CI。按以下顺�
 7. 只有上述条件满足后，才把 Draft 转为 Ready for review；仍不要自动合并。
 8. 最终人工合并后再删除远端分支；Draft 和验证阶段保留该分支用于接力。
 
-## 9. 建议的下一步
+## 9. 历史建议（已完成）
 
 先不要继续扩大 Stage 2 Threat Family，也不要开始第二轮 `loop_runtime.py` 拆分。三个
 findings 和后续同根组合问题已完成本地收口：

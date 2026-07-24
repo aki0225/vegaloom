@@ -2407,3 +2407,99 @@ git diff check: passed
 上的 Python 3.11/3.12、Windows、POSIX、wheel/sdist 和 package CI，以及 CI 后只读复核。
 这些门禁全部成功前，不得把本实验接入 Runtime，不得把裁决提升为
 `continue-experiment / requires_staged_rollout`，也不得自动合并。
+
+---
+
+## 2026-07-24 · AV-STAGE2-002 · independent review correction local result
+
+### 审查红灯
+
+对 `44ab56f` 做独立审查时新增三个负向回归，修正前结果为：
+
+```text
+3 failed, 13 passed
+```
+
+三个红灯分别证明：
+
+1. 错误 backfill 与共享 `_stored_rows` 掩盖同时存在时，NewApp、detector 和旧 oracle 会读取
+   同一份伪装结果；实际 SQLite 行为 `wrong-0001/wrong-0002` 时仍可能得到
+   `candidate-passed-local`。
+2. contract 表删除 `id PRIMARY KEY` 与 `display_name NOT NULL` 后，旧完整性判定仍会返回
+   `already_contracted`，旧 oracle 也会通过。
+3. `external_id_not_unique` 检查位于精确映射比较之后，重复值只能得到
+   `external_id_mapping_mismatch`，专用 detector 分支不可达。
+
+### 最小修复
+
+- oracle 在关闭原连接后重新打开 SQLite，并独立执行列、行、计数、表和索引 SQL；不再复用
+  NewApp、detector 或 contract 的读取 helper。
+- contract 完整性与 oracle 都核对冻结的完整列定义，保留 `id PRIMARY KEY`、
+  `display_name TEXT NOT NULL` 和 `external_id TEXT NOT NULL UNIQUE`。
+- detector 先检查 `NULL` 与唯一性，再检查精确行映射。
+- 新增三个负向回归；完整收集合同由 `664` 更新为 `667`。
+
+### 当前本地结果
+
+```text
+Stage 2 targeted: 16 passed
+compileall src scripts: passed
+Ruff src tests scripts: passed
+architecture growth: passed, C901 46->46, Python modules 54->54
+repository hygiene: passed
+full collection: 667 tests collected
+git diff check: passed
+```
+
+本轮没有得到可采信的当前 head 完整 pytest 汇总：
+
+- 单进程全量运行耗尽 20 分钟外层预算；
+- 直接 smoke 和后续自适应分片运行时，同机另有 pytest 进程并行执行；
+- 第一版自适应脚本未预建短 `basetemp` 父目录，产生环境性 setup error，整轮作废；
+- 第二版只完成部分节点并记录多个 60 秒 timeout，随后主动终止。
+
+上述尝试均不计为通过，也不直接计为产品失败。2026-07-23 的
+`663 passed, 1 skipped` 只适用于修正前旧 head，不能复用来关闭当前 head。
+
+### 当前裁决
+
+`review-findings-fixed-targeted / pr-ci-required / do-not-integrate`
+
+三个已知 evidence false-positive 已由定向回归关闭，静态门禁与 667 节点收集合同通过。完整
+Python 3.11/3.12、Windows、POSIX、wheel/sdist 和 package smoke 必须由同一最新 Draft PR
+head 的隔离 CI 关闭；CI 全绿并完成 post-CI 只读复核前，不得合并或接入 Runtime。
+
+### 修正后 artifact 重放
+
+当前工作区重新执行：
+
+```text
+.local-validation/assurance-stage2-expand-contract-20260724-review-final/
+```
+
+结果保持 fail-closed：
+
+```text
+overall_decision: inconclusive
+candidate_decision: continue-experiment
+evidence_adequacy: insufficient
+runtime_integration: disabled
+external_quality_gates.status: not_evaluated
+dangerous_twin.decision: reject
+safe_twin.decision: candidate-passed-local
+safe_twin.oracle.passed: true
+safe_twin.oracle.schema_columns_passed: true
+script exit code: 1
+```
+
+SHA-256：
+
+```text
+result.json:
+29BC11A9E060ED547665050E0F6B3123134A0A25F96C88D3EE51F4AD1BA20442
+
+report.md:
+90D09243024EA7BE00AD86C4FFB640274838FED12E4F92C92B3B3E0FA16A8B05
+```
+
+该目录仍是本地重放 artifact，不提交；哈希只绑定本次输出，不能替代 PR CI。

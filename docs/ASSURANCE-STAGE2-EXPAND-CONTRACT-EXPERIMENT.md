@@ -1,7 +1,7 @@
 # Assurance Stage 2 expand/backfill/contract 双生实验
 
 > 实验：`AV-STAGE2-002`
-> 状态：已预注册，尚未运行
+> 状态：本地候选已运行；2026-07-24 独立审查修正后等待 PR CI
 > Threat：`T-DB-MIG-COMPAT`
 > 结论上限：`continue-experiment / requires_staged_rollout`
 
@@ -64,8 +64,11 @@ threat_id
 engine
 generated_at_utc
 overall_decision
+candidate_decision
 evidence_adequacy
 runtime_integration
+decision_scope
+external_quality_gates
 dangerous_twin
 safe_twin
 limitations
@@ -143,7 +146,8 @@ OldApp 只读取 `id/display_name`。NewApp 在旧 schema 下显式回退为
 ## 五、独立 Oracle
 
 应用适配器不能同时充当被测对象和最终 oracle。contract 完成后必须关闭原连接，重新打开
-SQLite 文件并直接检查：
+SQLite 文件并直接检查；oracle 不得复用 NewApp、detector 或 contract 的行/schema 读取
+helper：
 
 ```sql
 PRAGMA table_info(customer);
@@ -157,7 +161,13 @@ SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;
 最终必须精确满足：
 
 ```text
+columns = [
+  {name: id, type: INTEGER, primary_key: true},
+  {name: display_name, type: TEXT, not_null: true},
+  {name: external_id, type: TEXT, not_null: true}
+]
 external_id.not_null = true
+external_id 具有非 partial UNIQUE
 rows = [
   {id: 1, display_name: Ada, external_id: cust-0001},
   {id: 2, display_name: Lin, external_id: cust-0002}
@@ -178,6 +188,12 @@ customer__contract_tmp 不存在
 5. transaction 失败后残留临时表时不能得到 `passed-local`；
 6. 输出目录越过 `.local-validation/`，或任一已有组件是 symlink、junction、reparse point
    时必须在写入前 fail-closed。
+7. 应用层与 detector 共享的行读取 helper 同时掩盖错误映射时，独立 oracle 仍必须读取真实
+   SQLite 行并把结论降为 `inconclusive`；
+8. contract 表丢失既有 `id PRIMARY KEY` 或 `display_name NOT NULL` 约束时，不能被误报为
+   `already_contracted`，也不能得到 `passed-local`；
+9. 重复 `external_id` 必须得到专用的 `external_id_not_unique` detector issue，不能被较宽泛
+   的映射错误分类吞掉。
 
 ## 七、停止条件
 
@@ -192,13 +208,22 @@ customer__contract_tmp 不存在
 7. 输出路径边界 fail-closed；
 8. 定向测试、完整测试、静态检查和跨平台 CI 均明确通过。
 
-即使全部成立，总体结论仍只能是：
+单次本地脚本不能自行证明完整测试、静态检查和跨平台 CI 已通过，因此执行 artifact 固定保持：
 
 ```text
-overall_decision = continue-experiment
-evidence_adequacy = requires_staged_rollout
+overall_decision = inconclusive
+candidate_decision = continue-experiment
+evidence_adequacy = insufficient
 runtime_integration = disabled
+external_quality_gates.status = not_evaluated
 ```
 
-它不支持 `sufficient_for_merge`、生产 migration 安全、可恢复 backfill 安全或默认 Runtime
-集成结论。
+只有追加式 eval 证据把负向控制、完整测试、静态检查和同一最新 head 的跨平台 CI 全部关闭
+后，组合裁决才最多提升为：
+
+```text
+continue-experiment / requires_staged_rollout / do-not-integrate
+```
+
+它仍不支持 `sufficient_for_merge`、生产 migration 安全、可恢复 backfill 安全或默认
+Runtime 集成结论。
