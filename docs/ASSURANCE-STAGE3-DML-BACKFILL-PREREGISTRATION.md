@@ -16,6 +16,10 @@
 `row budget` 内完成；进程在部分提交后中断时，是否能依据持久化事实恢复，并确认没有修改
 范围外数据。
 
+它把合同中的 `T-DATA-SCOPE`、`T-DATA-PARTIAL`、`T-DATA-RETRY` 和
+`T-DATA-INTEGRITY` 收敛为一个冻结实验 ID `T-DB-DML-SCOPE`；这个 ID 仅供本实验 artifact
+使用，不替代 Stage 1 的 Threat Family ID。
+
 本实验不创建通用 backfill runner，不注册 `vega` CLI，不写入默认 `runs/`，不接入
 Runtime、Finish、Goal、Loop、`ready_to_commit` 或 `AdequacyResult`，也不改变成功语义。
 
@@ -82,6 +86,18 @@ mapping = {
 
 `id=201/202` 是范围外哨兵。任一值发生变化，安全案例都不能通过。
 
+执行前 dry-run 必须只产生计划，不得写入数据库，并记录：
+
+```text
+candidate_rows = [101, 102]
+candidate_count = 2
+row_budget = 2
+within_budget = true
+```
+
+dry-run 的目标集合、数量、`plan_digest` 或范围外快照任一与冻结输入不一致时，执行阶段不得
+开始。
+
 ## 四、危险双生
 
 危险路径故意构造缺少租户和目标 ID 的更新：
@@ -107,7 +123,7 @@ WHERE canonical_handle IS NULL;
 安全路径必须使用冻结计划，并按单行 batch 执行：
 
 1. 写入前重新计算目标集合，必须精确等于 `[101, 102]`；
-2. 计划目标数不得超过 `row_budget=2`；
+2. dry-run 的目标数必须为 `2`，且不得超过 `row_budget=2`；
 3. 每次更新同时限制 `tenant_id`、目标 `id`、`canonical_handle IS NULL` 和
    `backfill_version=0`；
 4. 严格按 `execution_order=[101, 102]` 执行，每个 batch 使用独立 transaction；
@@ -127,7 +143,9 @@ evidence_adequacy = insufficient
 runtime_integration = disabled
 ```
 
-恢复后的本地安全案例最多得到 `candidate-passed-local`，不能自行升级整体结论。
+恢复后的本地安全案例最多得到 `candidate-passed-local`，不能自行升级整体结论。该候选结论
+还要求本次运行的结构化 verification 为 `verified`；中断 run 的 verification 必须为
+`interrupted`，不得因已经提交第一批而变成 `verified`。
 
 ## 六、独立 SQL Oracle
 
@@ -206,6 +224,27 @@ limitations
 artifacts
 ```
 
+每个危险、dry-run、中断、恢复和重复执行事实都必须带可追溯的 `evidence` 条目，至少记录：
+
+```text
+id
+kind
+producer
+command
+environment
+snapshot
+input.fixture_sha256
+oracle
+result
+covers
+artifacts
+limitations
+```
+
+`snapshot` 必须绑定同一实验的 HEAD、策略和 fixture；`plan_digest`、SQLite 文件哈希或
+reconciliation 报告与该 snapshot 不一致时，整体 `evidence_adequacy` 必须为
+`insufficient`。哈希只证明 artifact 未被替换，不能替代独立 SQL oracle。
+
 路径边界、异常消息脱敏和链接目录拒绝继续沿用仓库已有实验约束；不得把绝对工作区路径写入
 artifact、控制台、文档或提交内容。
 
@@ -219,7 +258,8 @@ artifact、控制台、文档或提交内容。
 4. 恢复过程只处理剩余目标，第三次执行更新零行；
 5. 独立 oracle 精确验证全部目标和范围外哨兵；
 6. 所有负向控制都能得到 `reject` 或 `inconclusive`；
-7. 定向测试、完整测试、静态检查和跨平台 CI 均绑定同一最新 head。
+7. 每条声明的 evidence 都绑定同一最新 HEAD、策略、fixture、计划和结构化 verification；
+8. 定向测试、完整测试、静态检查和跨平台 CI 均绑定同一最新 head。
 
 即使全部满足，组合结论最高仍为：
 
