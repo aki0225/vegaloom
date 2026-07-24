@@ -40,7 +40,9 @@ jobs:
         run: python -m compileall src scripts/check_repository_hygiene.py
 
       - name: 运行 Ruff 静态检查
-        run: ruff check src tests scripts/check_repository_hygiene.py
+        run: |
+          ruff --version
+          ruff check src tests scripts/check_repository_hygiene.py --output-format=github
 
       - name: 检查仓库路径与私密文件卫生
         shell: bash
