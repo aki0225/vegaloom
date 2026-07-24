@@ -2503,3 +2503,54 @@ report.md:
 ```
 
 该目录仍是本地重放 artifact，不提交；哈希只绑定本次输出，不能替代 PR CI。
+
+---
+
+## 2026-07-24 · AV-STAGE2-002 · PR #10 first-head static failure and correction
+
+### 失败事实
+
+- Draft PR：`#10`。
+- 失败 head：`237cb2967b73743194fa338775bd37b3945a7f0f`。
+- workflow：`30066400503`。
+- 结果：`failure`。
+- 失败任务：`静态检查与节点收集`。
+- 失败步骤：`编译与静态检查`。
+- 其余依赖该任务的测试与打包任务全部被跳过。
+
+该 run 必须保留为失败，不能用后续重跑覆盖描述。
+
+### 根因复现
+
+项目开发依赖只声明 `ruff>=0.5`，`pyproject.toml` 没有显式冻结 lint 规则集合。PR runner 安装
+Ruff `0.16.0` 后，当前配置实际启用了比本机 Ruff `0.15.20` 更广的规则集合，立即报告大量
+历史代码问题；这不是 Stage 2 新脚本单独引入的 193 个回归，也不能通过一次性批量格式化扩大
+本 PR 范围。
+
+本机使用 Python 3.12 与 Ruff `0.16.0` 复现同一行为后，采用最小根因修复：
+
+```toml
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+```
+
+该配置把仓库原先依赖的 Ruff 默认规则转成显式合同；未来增加规则必须单独评估。新增
+`test_ruff_lint_selection_is_explicit_and_stable`，防止再次退回隐式版本默认值。
+
+### 修正后本地结果
+
+```text
+Python 3.12 + Ruff 0.16.0 exact CI command: passed
+local Ruff 0.15.20: passed
+repository hygiene + Stage 2 targeted: 26 passed
+full collection: 668 tests collected
+compileall src scripts: passed
+git diff check: passed
+```
+
+### 当前裁决
+
+`first-pr-head-failed / ruff-contract-fixed-local / latest-head-ci-required / do-not-integrate`
+
+下一次推送必须使用同一 Draft PR `#10`。只有新 head 的静态任务和全部下游跨平台任务都成功，
+才可继续 post-CI 复核；不得新建微型修复分支，也不得自动合并。

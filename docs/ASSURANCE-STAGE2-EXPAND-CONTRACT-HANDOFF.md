@@ -16,7 +16,7 @@
 的问题：共享行读取 helper 可同时欺骗应用层和 oracle、contract 完整性判定会忽略既有约束
 丢失、重复值的专用 detector 分类不可达。三项红灯现已由 16 个定向测试关闭。
 
-当前 head 的静态门禁和 667 节点收集合同通过，但本机完整执行没有形成合格的最终汇总；
+当前 head 的静态门禁和 668 节点收集合同通过，但本机完整执行没有形成合格的最终汇总；
 2026-07-23 的 `663 passed, 1 skipped` 只适用于修正前旧 head，不能复用为当前 head 证据。
 Draft PR `#10` 已创建。下一步必须使用同一最新 head 的跨平台 CI 关闭完整测试：
 
@@ -50,7 +50,7 @@ Draft PR `#10` 已创建。下一步必须使用同一最新 head 的跨平台 C
   - 当前结果：`16 passed`。
 - `.github/workflows/ci.yml`
   - 编译和 Ruff 纳入新脚本；
-  - Linux 收集合同更新为 `667`；
+  - Linux 收集合同更新为 `668`；
   - Python 3.12 和 Windows 分片纳入新测试文件。
 
 证据记录：
@@ -173,7 +173,7 @@ head 的全部任务完成，至少核对：
 3. Windows 专项测试。
 4. Linux POSIX 临时环境变量专项没有 skip。
 5. wheel/sdist 构建、安装和 package smoke。
-6. 仓库卫生、架构增量、编译、Ruff 和 `667` 节点收集合同。
+6. 仓库卫生、架构增量、编译、Ruff 和 `668` 节点收集合同。
 
 CI 全绿后做一次只读复核，确认：
 
@@ -227,7 +227,7 @@ continue-experiment / requires_staged_rollout / do-not-integrate
 - oracle 在新连接中独立执行 `PRAGMA`、行查询、`COUNT` 和索引查询，不复用被测 helper；
 - contract 完整性与 oracle 都核对完整冻结列定义和既有约束；
 - detector 先检查非空与唯一性，再检查精确映射；
-- 新增三个负向回归，CI 收集合同由 `664` 更新为 `667`。
+- 新增三个负向回归和 Ruff 显式规则集回归，CI 收集合同由 `664` 更新为 `668`。
 
 ### 当前本地结果
 
@@ -237,8 +237,9 @@ compileall src scripts：passed
 Ruff src tests scripts：passed
 architecture growth：passed, C901 46->46, Python modules 54->54
 repository hygiene：passed
-collection：667 tests collected
+collection：668 tests collected
 git diff check：passed
+Python 3.12 + Ruff 0.16.0 exact CI command：passed
 ```
 
 修正后 artifact 重放：
@@ -282,3 +283,21 @@ review-findings-fixed-targeted / pr-ci-required / do-not-integrate
 ```
 
 当前 head 的完整测试只能由最新 Draft PR 的隔离 CI 关闭；不得引用旧 head 的本地汇总补齐。
+
+## 八、Draft PR #10 首个 head 的静态失败
+
+PR `#10` 的 head `237cb29` 对应 workflow `30066400503`。该 run 在
+`静态检查与节点收集 / 编译与静态检查` 失败，其余测试和打包任务被跳过；旧 run 必须保留为
+失败，不能描述为通过。
+
+根因不是 Stage 2 新增 193 个逻辑问题，而是开发依赖使用 `ruff>=0.5`，同时没有显式 lint
+规则集合。CI 安装 Ruff `0.16.0` 后，当前配置实际启用了比本机 Ruff `0.15.20` 更广的历史
+规则。最小修复为：
+
+```toml
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+```
+
+同时新增配置回归，收集合同更新为 `668`。修正后本机使用 Python 3.12 与 Ruff `0.16.0`
+重放 CI 精确命令通过。下一步仍只推送同一 Draft PR `#10`，等待新 head 全部任务完成。

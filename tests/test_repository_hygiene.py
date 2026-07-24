@@ -3,9 +3,12 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_hygiene_module():
@@ -102,6 +105,14 @@ def test_sensitive_filenames_are_rejected_but_env_example_is_allowed() -> None:
         hygiene.find_sensitive_filename_violation(path) is not None for path in rejected
     )
     assert hygiene.find_sensitive_filename_violation(".env.example") is None
+
+
+def test_ruff_lint_selection_is_explicit_and_stable() -> None:
+    config = tomllib.loads(
+        PROJECT_ROOT.joinpath("pyproject.toml").read_text(encoding="utf-8")
+    )
+
+    assert config["tool"]["ruff"]["lint"]["select"] == ["E4", "E7", "E9", "F"]
 
 
 def test_history_scan_catches_path_removed_by_later_commit(
