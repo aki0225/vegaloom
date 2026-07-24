@@ -2554,3 +2554,54 @@ git diff check: passed
 
 下一次推送必须使用同一 Draft PR `#10`。只有新 head 的静态任务和全部下游跨平台任务都成功，
 才可继续 post-CI 复核；不得新建微型修复分支，也不得自动合并。
+
+---
+
+## 2026-07-24 · AV-STAGE2-002 · PR #10 code-head CI and post-CI review
+
+### PR head 门禁
+
+- PR：`#10`。
+- head：`6e809caa5511385c6852da2d404aa70d8bcc6f17`。
+- workflow：`30066936448`。
+- event：`pull_request`。
+- 结果：`success`。
+- 运行时间：2026-07-24 12:29 至 12:32（Asia/Shanghai）。
+
+同一 run 的 10 项任务全部成功：
+
+1. 静态检查与 `668` 节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 `smoke` 分片。
+4. Python 3.12 `p0-cli-lock` 分片。
+5. Python 3.12 `artifacts-runtime-security` 分片。
+6. Python 3.12 `semantics-evidence-review` 分片。
+7. Python 3.12 `remaining` 分片。
+8. Windows 专项与 wheel smoke。
+9. POSIX 临时目录专项。
+10. wheel/sdist 构建、安装和 package smoke。
+
+POSIX 专项的 job conclusion 为 `success`，不是 skip。首个失败 workflow `30066400503`
+仍保留为失败记录，不能被本次成功覆盖。
+
+### post-CI 只读复核
+
+复核绑定同一 `6e809ca`：
+
+- PR head、远端分支和本地 `HEAD` 一致；
+- 新实验没有进入 `src/`、默认 Loop 或 `vega` CLI；
+- artifact 仍固定为
+  `inconclusive / insufficient / runtime_integration=disabled / external gates not_evaluated`，
+  脚本退出码仍为 `1`；
+- `eval/assurance-validation.md` 相对主线只有新增行，没有删除历史记录；
+- PR 文件集合不含 `.tmp/`、`.local-validation/`、SQLite、`runs/`、`.env`、docx 或本机路径；
+- 仓库卫生、架构增量和 diff check 再次通过；
+- 没有发现新的阻塞 finding。
+
+### 代码 head 裁决
+
+`pr-ci-passed / post-ci-review-clean / continue-experiment / requires_staged_rollout / do-not-integrate`
+
+该裁决只关闭 `AV-STAGE2-002` 代码 head 的实验与工程门禁，不证明 PostgreSQL/MySQL、生产
+规模、在线 DDL、并发写入、可恢复 backfill 或 Runtime 成功语义。本文与接力文档的收口提交
+只修改文档；推送后仍必须确认新的最新 PR head CI 全绿，PR 保持 Draft 且不得自动合并。

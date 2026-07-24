@@ -8,7 +8,7 @@
 >
 > 基线：`main@0280b9f6df0205261a489e1fd67c6b574684cb64`
 >
-> 当前裁决：`review-findings-fixed-targeted / pr-ci-required / do-not-integrate`
+> 当前裁决：`code-head-pr-ci-passed / closeout-head-ci-required / do-not-integrate`
 
 ## 一、先看结论
 
@@ -18,7 +18,8 @@
 
 当前 head 的静态门禁和 668 节点收集合同通过，但本机完整执行没有形成合格的最终汇总；
 2026-07-23 的 `663 passed, 1 skipped` 只适用于修正前旧 head，不能复用为当前 head 证据。
-Draft PR `#10` 已创建。下一步必须使用同一最新 head 的跨平台 CI 关闭完整测试：
+Draft PR `#10` 的代码 head `6e809ca` 已通过 10 项跨平台 CI，并完成 post-CI 只读复核。
+本文与 eval 的收口提交只修改文档；推送后仍必须确认新的最新 head CI 全绿：
 
 - 危险顺序 `expand -> contract -> backfill` 会被 detector 标记，并被 SQLite 实际拒绝；
 - 安全顺序 `expand -> bounded fixture backfill -> contract` 在固定两行 fixture 上通过；
@@ -142,7 +143,7 @@ report.md:
 首轮完整分片使用过长 Windows `basetemp`，产生 `WinError 206` 和衍生锁错误；该轮全部作废。
 有效汇总只来自数字短路径的 `stage2-adaptive-v2`。
 
-## 五、当前继续：关闭 Draft PR #10 的 CI
+## 五、当前继续：确认收口提交后的最新 CI
 
 在另一台机器恢复：
 
@@ -165,8 +166,8 @@ python -m pytest --collect-only -q
 git diff --check
 ```
 
-Draft PR `#10` 已存在，目标为 `main`。不要另建分支或 PR，也不要自动合并。等待同一最新
-head 的全部任务完成，至少核对：
+Draft PR `#10` 已存在，目标为 `main`。不要另建分支或 PR，也不要自动合并。代码 head
+`6e809ca` 已通过下列任务；本文收口提交推送后，必须再次确认最新 head 的同一任务集合：
 
 1. Python 3.11 全量测试。
 2. Python 3.12 分片测试。
@@ -301,3 +302,41 @@ select = ["E4", "E7", "E9", "F"]
 
 同时新增配置回归，收集合同更新为 `668`。修正后本机使用 Python 3.12 与 Ruff `0.16.0`
 重放 CI 精确命令通过。下一步仍只推送同一 Draft PR `#10`，等待新 head 全部任务完成。
+
+## 九、代码 head PR CI 与 post-CI 复核
+
+### 跨平台 CI
+
+- PR：`#10`。
+- head：`6e809caa5511385c6852da2d404aa70d8bcc6f17`。
+- workflow：`30066936448`。
+- 结果：`success`。
+- 时间：2026-07-24 12:29 至 12:32（Asia/Shanghai）。
+- 10 项任务全部成功：
+  - 静态检查与 668 节点收集；
+  - Python 3.11 全量测试；
+  - Python 3.12 五个分片；
+  - Windows 专项与 wheel smoke；
+  - POSIX 临时目录专项；
+  - wheel/sdist 构建、安装和 package smoke。
+
+POSIX 专项任务结论为 `success`，不是 Windows 本地的历史 skip。
+
+### post-CI 只读复核
+
+- PR head、远端分支与本地 `HEAD` 都精确绑定 `6e809ca`；
+- 新实验没有注册到 `src/`、默认 Loop 或 `vega` CLI；
+- artifact 仍固定为 `inconclusive / insufficient / runtime_integration=disabled`，退出码仍为 `1`；
+- `eval/assurance-validation.md` 相对主线只有追加，没有删除或改写历史行；
+- PR 差异不包含 `.tmp/`、`.local-validation/`、SQLite、`runs/`、`.env`、docx 或本机绝对路径；
+- 仓库卫生、架构增量和 `git diff --check` 再次通过；
+- 未发现新的阻塞 finding。
+
+代码 head 的组合裁决最多提升为：
+
+```text
+continue-experiment / requires_staged_rollout / do-not-integrate
+```
+
+本文与 eval 的收口提交不改变代码、测试或成功语义。推送后必须检查收口后的最新 head CI；
+即使全绿，PR 仍保持 Draft，不自动合并。
