@@ -177,7 +177,7 @@ vega goal recover --run <goal_run> --reason "CLI 中断"
 当前 P0 还支持 `--text` 输入短 goal：
 
 ```powershell
-vega goal start --repo . --text "分阶段收口 runtime 状态机" --scope refactor
+vega goal start --repo . --text "分阶段整理 runtime 状态机" --scope refactor
 ```
 
 P1 再增加有限自动推进：

@@ -212,7 +212,7 @@ python scripts/run_assurance_stage3_dml_backfill_experiment.py `
 ## 六、下一步
 
 1. 当前可以停止在 `main@572af85` 作为稳定证据点，不继续追加 Stage 4 或新的实验能力；
-2. 若只做使用侧收口，优先整理 README、walkthrough、release checklist 或面试说明，而不是改
+2. 若只做使用侧稳定化，优先整理 README、walkthrough、release checklist 或面试说明，而不是改
    Runtime；
 3. 如果未来必须继续数据库方向，先重新预注册 Stage 4，并明确并发、外部副作用、故障注入和
    停止条件；

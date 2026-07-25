@@ -413,7 +413,7 @@ vega gate --repo . --run <reflect_run> --scope refactor
 - 长期 memory 必须人工 accept。
 - 不允许一次任务自动污染长期项目记忆。
 
-## 9. 收口后的观察项
+## 9. 阶段整理后的观察项
 
 现在已有的 harness 能管住基本风险：输入、配置预检、执行、验证、工作区污染、变更预算、
 prompt 预算、隔离审查和状态追溯。Memory、Goal P0 与 adapter 保持实验性质，不作为主流程

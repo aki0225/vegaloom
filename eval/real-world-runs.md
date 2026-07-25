@@ -1,7 +1,7 @@
 # 真实任务运行记录（Real-world runs）
 
 在公开开源项目的真实 Issue 上运行 Vega 的记录。目的不是刷成功率，而是验证核心语义在
-真实仓库上是否成立：worker 与 reviewer 上下文隔离、确定性验证收口、证据不足时 fail-closed。
+真实仓库上是否成立：worker 与 reviewer 上下文隔离、确定性验证终态确认、证据不足时 fail-closed。
 
 ## 协议
 

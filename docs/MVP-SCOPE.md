@@ -38,7 +38,7 @@ engineering-change
 - `v0.1 baseline`：必须保持稳定的最小闭环。
 - `v0.1.x extensions`：已经在主线中落地的日常研发 harness 能力，但不反向扩大 v0.1 baseline。
 - `experimental extensions`：Goal、Memory 和 adapters 等实验扩展，可验证设计取舍，但不作为
-  v0.1 baseline 冻结或收口的阻断条件。
+  v0.1 baseline 冻结或发布准备的阻断条件。
 
 ## v0.1 baseline 必须有
 
@@ -140,7 +140,7 @@ v0.1 baseline 的最小验收定义。
 - `goal checkpoint-done` 需要可完成证据；manual evidence 必须显式 override
 - `goal checkpoint-done` 和 `goal complete` 会重新校验证据当前是否仍有效
 - 完成后的 checkpoint 证据不可再修改
-- `goal complete` 和 `goal stop` 分别表达成功收口与终止
+- `goal complete` 和 `goal stop` 分别表达成功完成与终止
 
 ## 实验能力
 
@@ -153,11 +153,11 @@ v0.1 baseline 的最小验收定义。
 - Codex skill adapter
 
 实验能力允许完全不使用，也不得要求每个 run 强制生成对应 artifact；其未冻结或后续变化
-不阻断 v0.1 baseline 收口。
+不阻断 v0.1 baseline 发布准备。
 
 ## Future goal loop 草案
 
-P1 的 `goal run --max-checkpoints N`、自动 checkpoint 推进、自动调用普通 loop 等能力不属于当前 v0.1/v0.1.x 收口范围。
+P1 的 `goal run --max-checkpoints N`、自动 checkpoint 推进、自动调用普通 loop 等能力不属于当前 v0.1/v0.1.x 发布准备范围。
 
 ## 显式非目标
 
@@ -201,7 +201,7 @@ future P1: 有限自动 checkpoint 推进
 future optional: SQLite + FTS5 memory ledger、replay UI
 ```
 
-当前产品收口以 `docs/PRODUCT-CONTRACT.md` 为准：核心是上下文编译、受控执行、确定性验证、
+当前产品范围以 `docs/PRODUCT-CONTRACT.md` 为准：核心是上下文编译、受控执行、确定性验证、
 隔离审查和证据化恢复；Memory、Goal P0 与 adapter 保持实验状态。
 
 当前稳定版本为 `v0.1.2`，只整合安全、恢复和成功语义维护修复，不扩大上述范围。

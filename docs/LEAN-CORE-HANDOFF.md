@@ -236,7 +236,7 @@ Draft PR #8 在最新 handoff 提交推送后会重新运行 CI。按以下顺�
 ## 9. 历史建议（已完成）
 
 先不要继续扩大 Stage 2 Threat Family，也不要开始第二轮 `loop_runtime.py` 拆分。三个
-findings 和后续同根组合问题已完成本地收口：
+findings 和后续同根组合问题已完成本地整理：
 
 1. 完整收集：`651 tests collected`。
 2. 完整分片：`650 passed, 1 skipped, 0 failed, 0 errors`。

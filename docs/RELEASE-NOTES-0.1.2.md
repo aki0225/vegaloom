@@ -33,7 +33,7 @@ Loop 在写入成功终态前会重新执行 eval：
 
 - eval 含任意 `FAIL:` 时，最终状态写为 `failed`；
 - `run_finished.status` 与 `state.status` 保持一致；
-- verification artifact 在终态收口前丢失或损坏时不能留下临时成功；
+- verification artifact 在终态确认前丢失或损坏时不能留下临时成功；
 - reviewer 完成后工作区发生变化时，旧 approve 不能形成成功终态。
 
 明确的验证失败仍保留“验证命令失败”结论；验证未知、跳过或零命令则交还人工。

@@ -2,7 +2,7 @@
 
 > 更新时间：2026-07-21
 > 当前结论：成功语义修复已经合并到 `main@38bf1a1`，合并后跨平台 CI 为 `10/10 success`。
-> 本文保留阶段 0-B 的历史基线，并记录独立的 v0.1.2 发布收口流程。
+> 本文保留阶段 0-B 的历史基线，并记录独立的 v0.1.2 发布验收流程。
 
 ## 1. 阶段目标
 
@@ -26,8 +26,8 @@ adapter 或新 Agent 角色：
 - 远端基线：`origin/main@176ac381`
 - 基线标签：`v0.1.1`
 - 首个修复提交：`1a2c715`
-- 成功语义收口提交：`497513c`
-- fixture 收口提交：`313503e`
+- 成功语义整理提交：`497513c`
+- fixture 整理提交：`313503e`
 - PR：`#1`
 - 最终 CI：`29837944440`，`10/10 success`
 - PR 已合并为 `main@38bf1a1`。
@@ -106,12 +106,12 @@ adapter 或新 Agent 角色：
 结果已按预注册规则追加到 `eval/assurance-validation.md` 的
 `AV-STAGE0B-001 · result`，没有改写既有实验记录。
 
-## 6. 发布收口流程
+## 6. 发布验收流程
 
 1. 在 `release/v0.1.2` 只更新版本、制品校验和正式发布文档。
 2. release 分支 CI 全绿后合并回 `main`。
 3. 合并后的 main CI 全绿后，人工创建并推送 annotated tag `v0.1.2`。
-4. GitHub Release 和 PyPI 发布不属于本次收口，除非后续单独决定。
+4. GitHub Release 和 PyPI 发布不属于本次验收，除非后续单独决定。
 
 ## 7. 剩余边界
 
@@ -119,6 +119,6 @@ adapter 或新 Agent 角色：
   backfill、分布式并发或生产事务安全。
 - reviewer 与 worker 是会话上下文隔离；reviewer 仍读取共享仓库的只读视图，
   不是容器或操作系统级文件系统隔离。
-- 目标仓库可被外部进程并发修改；Runtime 在成功收口前重算 freshness，但不提供
+- 目标仓库可被外部进程并发修改；Runtime 在成功终态前重算 freshness，但不提供
   跨进程或跨机器事务锁。
 - Vega 仍不自动 commit、push、release、删除文件或写入长期 Memory。

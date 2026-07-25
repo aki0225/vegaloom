@@ -19,7 +19,7 @@
 当前 head 的静态门禁和 668 节点收集合同通过，但本机完整执行没有形成合格的最终汇总；
 2026-07-23 的 `663 passed, 1 skipped` 只适用于修正前旧 head，不能复用为当前 head 证据。
 Draft PR `#10` 的代码 head `6e809ca` 已通过 10 项跨平台 CI，并完成 post-CI 只读复核。
-本文与 eval 的收口提交只修改文档；推送后仍必须确认新的最新 head CI 全绿：
+本文与 eval 的整理提交只修改文档；推送后仍必须确认新的最新 head CI 全绿：
 
 - 危险顺序 `expand -> contract -> backfill` 会被 detector 标记，并被 SQLite 实际拒绝；
 - 安全顺序 `expand -> bounded fixture backfill -> contract` 在固定两行 fixture 上通过；
@@ -143,7 +143,7 @@ report.md:
 首轮完整分片使用过长 Windows `basetemp`，产生 `WinError 206` 和衍生锁错误；该轮全部作废。
 有效汇总只来自数字短路径的 `stage2-adaptive-v2`。
 
-## 五、当前继续：确认收口提交后的最新 CI
+## 五、当前继续：确认整理提交后的最新 CI
 
 在另一台机器恢复：
 
@@ -167,7 +167,7 @@ git diff --check
 ```
 
 Draft PR `#10` 已存在，目标为 `main`。不要另建分支或 PR，也不要自动合并。代码 head
-`6e809ca` 已通过下列任务；本文收口提交推送后，必须再次确认最新 head 的同一任务集合：
+`6e809ca` 已通过下列任务；本文整理提交推送后，必须再次确认最新 head 的同一任务集合：
 
 1. Python 3.11 全量测试。
 2. Python 3.12 分片测试。
@@ -338,5 +338,5 @@ POSIX 专项任务结论为 `success`，不是 Windows 本地的历史 skip。
 continue-experiment / requires_staged_rollout / do-not-integrate
 ```
 
-本文与 eval 的收口提交不改变代码、测试或成功语义。推送后必须检查收口后的最新 head CI；
+本文与 eval 的整理提交不改变代码、测试或成功语义。推送后必须检查整理后的最新 head CI；
 即使全绿，PR 仍保持 Draft，不自动合并。

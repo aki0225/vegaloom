@@ -24,7 +24,7 @@
 
 写代码的 AI 不该自己审自己写的东西。Vega 是一个本地优先的 AI 编码工作流 harness：worker 负责改代码，
 reviewer 使用独立会话，不继承 worker 的完整聊天记录，并在同一目标仓库的只读视图中结合项目规则、diff
-和验证证据进行审查；每次任务用项目自己的验证命令和风险门禁收口，失败、中断或证据不足时留好现场，
+和验证证据进行审查；每次任务用项目自己的验证命令和风险门禁做终态确认，失败、中断或证据不足时留好现场，
 交还给人。Vega 的重点不是增加更多 Agent，而是让写、验、审和交付之间的边界更清楚。
 
 <p align="center">
@@ -114,6 +114,7 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 | 完整使用闭环 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
+| 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | Assurance 威胁模型与证据充分性候选合同 | [ASSURANCE-CONTRACT-CANDIDATE](docs/ASSURANCE-CONTRACT-CANDIDATE.md) |
 | Assurance 逐项验证记录 | [assurance-validation](eval/assurance-validation.md) |

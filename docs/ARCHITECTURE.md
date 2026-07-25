@@ -90,7 +90,7 @@ YAML 不允许配置：
 和 adapter 属于实验能力。完整契约见 `docs/PRODUCT-CONTRACT.md`。
 
 实验能力不得成为核心 run 的必需 artifact 或成功条件，也不作为 v0.1 baseline 冻结或
-收口的阻断条件。
+发布准备的阻断条件。
 
 ## Project Knowledge Layer
 
