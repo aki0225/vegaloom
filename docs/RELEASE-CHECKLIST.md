@@ -61,20 +61,32 @@ python -m pytest --basetemp .tmp\pytest\runs\full-local
 
 ## 四、干净安装 smoke
 
-从源码树外创建临时目录安装 wheel，验证 CLI 可用：
+从源码树外创建临时目录安装 wheel，验证 CLI 可用。不要依赖当前 Python 已经全局安装
+`build`；发布验证应使用项目内临时 venv：
 
 ```powershell
-python -m build
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$root = Join-Path ".tmp\release-readiness" $stamp
+$buildVenv = Join-Path $root "build-venv"
+$outDir = Join-Path $root "dist"
+$smokeDir = Join-Path $root "package-smoke"
 
-$tmp = Join-Path $PWD ".tmp\package-smoke"
-Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force $tmp | Out-Null
+New-Item -ItemType Directory -Force $outDir | Out-Null
 
-python -m venv "$tmp\.venv"
-& "$tmp\.venv\Scripts\python.exe" -m pip install --upgrade pip
-& "$tmp\.venv\Scripts\python.exe" -m pip install (Get-ChildItem dist\vegaloom-*.whl | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+python -m venv $buildVenv
+$buildPython = Join-Path $buildVenv "Scripts\python.exe"
+& $buildPython -m pip install --upgrade pip build
+& $buildPython -m build --outdir $outDir
 
-Push-Location $tmp
+python -m venv (Join-Path $smokeDir ".venv")
+$smokePython = Join-Path $smokeDir ".venv\Scripts\python.exe"
+& $smokePython -m pip install --upgrade pip
+$wheel = Get-ChildItem $outDir -Filter "vegaloom-*.whl" |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+& $smokePython -m pip install $wheel.FullName
+
+Push-Location $smokeDir
 & ".\.venv\Scripts\vega.exe" --version
 & ".\.venv\Scripts\vega.exe" list-loops
 Pop-Location
@@ -84,7 +96,8 @@ Pop-Location
 
 - `vega --version` 输出当前版本。
 - `vega list-loops` 在源码树外仍能看到包内 baseline loop。
-- 生成的 `dist/`、`build/` 和 `.tmp/package-smoke/` 不提交。
+- 生成的 `.tmp/release-readiness/`、`build/` 和 egg-info 中间产物不提交。
+- 如果系统 PATH 上已有旧版 `vega`，以当前 venv 或 smoke venv 中的 `vega.exe` 为准。
 
 ## 五、日常使用 smoke
 
