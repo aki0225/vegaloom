@@ -1,6 +1,6 @@
 # Vega v0.1.3 Release Summary
 
-> 状态：发布草稿，尚未创建 tag 或 GitHub Release。
+> 状态：v0.1.3 发布摘要；tag 与 GitHub Release 由人工确认后创建。
 
 这份摘要用于 GitHub Release 文案、公开仓首页说明和面试展示。详细变更记录见
 [`RELEASE-NOTES-0.1.3.md`](RELEASE-NOTES-0.1.3.md)，发布前检查步骤见
