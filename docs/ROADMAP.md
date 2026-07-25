@@ -1,7 +1,7 @@
 # Vega 后续演进路线
 
 > 更新时间：2026-07-25
-> 稳定基线：`v0.1.2`
+> 稳定基线：`v0.1.3`
 > 当前状态：`M-001`、`M-002`、`M-003`、Assurance Stage 1、Stage 2 两个 SQLite 个案
 > 与 Stage 3 有界 DML/Backfill 个案均已进入 `main`。它们仍不属于 Runtime 或默认能力，
 > 也不能解释为生产数据库安全证明。当前 `Now` 是冻结主线、整理交接和复习材料，不启动
@@ -22,7 +22,7 @@
 ## 一、当前主线
 
 ```text
-v0.1.2 稳定与冻结
+v0.1.3 稳定与冻结
   -> Assurance Stage 0 维护完成
   -> Assurance Stage 1：Threat / Evidence 数据合同
   -> Assurance Stage 2：数据库 Migration 纵向实验
