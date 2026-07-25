@@ -69,3 +69,21 @@ fail-closed 的记录与成功记录同等保留：它验证的是"证据不足�
   与路径范围门禁。
 - 结论规则：任一验证、证据完整性、范围门禁或隔离 reviewer 不通过，即保留现场并以
   `needs_human` 或更严格状态结束；不自动提交、push 或发布。
+
+## 2026-07-25 执行结果：Click #2939
+
+本条是上方预注册的对应执行结果，不回写或修改预注册条件：
+
+- 真实 auto run：`20260725-204241-079497-bug-loop`；worker 与隔离 reviewer 均正常结束。
+- 一轮完成：worker 只改动 `src/click/testing.py` 与 `tests/test_chain.py`；三阶段 scope gate
+  均通过，risk 为 `low`，reviewer verdict 为 `approve`。
+- 四条验证命令均通过：定向链式测试、独立 stdin 迭代 oracle、完整 pytest
+  （`688 passed, 72 skipped, 1 xfailed`）与 `git diff --check`。
+- 独立 oracle 还复核了 prompt 在真实 EOF 时继续走既有中止语义，避免把修复退化为简单取消
+  EOF 处理。
+- Finish 结果为 `ready_to_commit`；目标执行副本没有 remote，Vega 没有自动 commit、push、
+  release 或写入 memory。
+
+该样例的脱敏状态、trace、diff、验证、gate、review 与 finish 摘要见
+[examples/evidence/real-world-click-2939](../examples/evidence/real-world-click-2939/)。
+这是一个历史回归上的单次真实闭环，不构成模型成功率、跨仓库泛化能力或独立于训练数据的证明。

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "record_type": "sanitized-real-world-run",
+  "case_id": "RW-CLICK-2939-SUCCESS-20260725",
+  "vega_version": "0.1.3",
+  "source": {
+    "repository": "pallets/click",
+    "issue_number": 2939,
+    "source_tag": "8.2.1",
+    "source_revision": "fd183b2ced1cb5857784fe7fb22f4982f671f098",
+    "license": "BSD-3-Clause"
+  },
+  "oracle": {
+    "upstream_fix_revision": "93c6966eb3a575c2b600434d1cc9f4b3aee505ac",
+    "materialized_for_worker": false
+  },
+  "run": {
+    "run_id": "20260725-204241-079497-bug-loop",
+    "mode": "auto",
+    "final_status": "success",
+    "finish_status": "ready_to_commit",
+    "iterations": 1,
+    "reviewer_verdict": "approve"
+  },
+  "contract": {
+    "allowed_paths": [
+      "src/click/testing.py",
+      "tests/test_chain.py"
+    ],
+    "required_behavior": [
+      "stdin file iteration completes with exit code zero",
+      "stdin file iteration does not output Aborted!",
+      "prompt EOF keeps its existing abort behavior"
+    ]
+  },
+  "sanitization": {
+    "absolute_paths_replaced": true,
+    "credentials_and_auth_output_omitted": true,
+    "worker_chat_omitted": true,
+    "raw_artifacts_not_included": true
+  },
+  "artifacts": [
+    "state.json",
+    "trace.jsonl",
+    "diff.patch",
+    "verification-summary.md",
+    "gate-result.json",
+    "review-context.json",
+    "review-verdict.json",
+    "final-report.md"
+  ]
+}

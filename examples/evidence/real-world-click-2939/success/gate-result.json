@@ -1,0 +1,34 @@
+{
+  "artifact_kind": "sanitized-gate-summary",
+  "scope_gate": {
+    "pre_verification": {
+      "status": "success",
+      "changed_files": [
+        "src/click/testing.py",
+        "tests/test_chain.py"
+      ],
+      "violations": []
+    },
+    "post_verification": {
+      "status": "success",
+      "changed_files": [
+        "src/click/testing.py",
+        "tests/test_chain.py"
+      ],
+      "violations": []
+    },
+    "pre_review": {
+      "status": "success",
+      "changed_files": [
+        "src/click/testing.py",
+        "tests/test_chain.py"
+      ],
+      "violations": []
+    }
+  },
+  "risk_gate": {
+    "status": "success",
+    "risk": "low",
+    "recommendation": "self-check"
+  }
+}
