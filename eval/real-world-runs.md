@@ -35,3 +35,19 @@ fail-closed 的记录与成功记录同等保留：它验证的是"证据不足�
 
 每次运行的 state、trace、验证输出与审查报告按 [ARCHITECTURE](../docs/ARCHITECTURE.md)
 所述结构保留在本地运行档案中，包含各阶段产物哈希，可按需提供复核。
+
+## 2026-07-25 追加记录：pycodestyle #1187 的 reviewer-repair 对照
+
+该条目补充了一对同一真实 Issue 的脱敏证据，不改写上表中的历史记录：
+
+- 初始 auto run 的固定测试通过，但 worker 的最小删减修复会让普通小写变量比较产生误报；
+  初始 worker 阶段曾受外部 runner 中断影响，后续人工 continue 进入验证与审查；隔离 reviewer
+  返回 `request_changes`，run 保持 `needs_human`，没有自动提交或覆盖现场。
+- 后续使用**新的隔离快照和预先写明的 follow-up 行为合同**，将 reviewer 指出的正反例纳入
+  验证后重新运行。该 run 一轮通过完整测试、定向 oracle、三阶段 scope gate、risk gate 和
+  隔离 reviewer。
+- 两个结果的静态、脱敏摘要见
+  [examples/evidence/real-world-pycodestyle-1187](../examples/evidence/real-world-pycodestyle-1187/)。
+
+这是一对“reviewer 拒绝后修订合同”的案例，不是原始任务无条件一次成功的证明，也不用于计算
+成功率。它补充的是 reviewer 能发现测试遗漏、拒绝不安全 diff，以及新合同下可完成闭环的证据。

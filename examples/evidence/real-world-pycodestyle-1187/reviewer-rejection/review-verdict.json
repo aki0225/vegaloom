@@ -1,0 +1,14 @@
+{
+  "verdict": "request_changes",
+  "summary": "初始修复覆盖了反向内建类型比较，但删除了原有的歧义场景豁免，会引入新的 E721 误报。",
+  "findings": [
+    {
+      "severity": "major",
+      "file": "pycodestyle.py",
+      "title": "反向匹配变成无条件报错，破坏原有合法歧义比较",
+      "evidence": "expected == type(obj) 与 value != type(other) 会误报 E721。",
+      "recommendation": "只对可解释的明显类型表达式报告 E721，同时保留普通小写变量的歧义比较。"
+    }
+  ],
+  "review_context_path": "review-context.json"
+}

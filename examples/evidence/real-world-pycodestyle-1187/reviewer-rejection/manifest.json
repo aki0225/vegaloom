@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "record_type": "sanitized-real-world-run",
+  "case_id": "RW-PYC-1187-REJECT-20260725",
+  "vega_version": "0.1.3",
+  "source": {
+    "repository": "PyCQA/pycodestyle",
+    "issue_number": 1187,
+    "source_revision": "c6ccf5df495828eb6090530d91168c1b961024f1",
+    "license": "MIT"
+  },
+  "run": {
+    "mode": "auto",
+    "final_status": "needs_human",
+    "terminal_reason": "reviewer_request_changes",
+    "iterations": 2,
+    "runner_note": "The initial worker phase was interrupted by an external runner error; verification and review occurred only after an explicit human continue."
+  },
+  "contract": {
+    "allowed_paths": [
+      "pycodestyle.py"
+    ],
+    "required_behavior": [
+      "int == type(obj) reports E721",
+      "str != type(obj) reports E721",
+      "type(obj) is int remains valid",
+      "isinstance(obj, int) remains valid"
+    ]
+  },
+  "sanitization": {
+    "absolute_paths_replaced": true,
+    "credentials_and_auth_output_omitted": true,
+    "worker_chat_omitted": true,
+    "raw_artifacts_not_included": true
+  },
+  "artifacts": [
+    "state.json",
+    "trace.jsonl",
+    "diff.patch",
+    "verification-summary.md",
+    "gate-result.json",
+    "review-context.json",
+    "review-verdict.json",
+    "final-report.md"
+  ]
+}
