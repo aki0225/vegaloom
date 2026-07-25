@@ -8,8 +8,11 @@
 >
 > 审查修复提交：`25a7efc0058de62d2fc665c99b501f890ff5d3e9`
 >
-> 状态：`review-findings-fixed / implementation-head PR CI 10/10 passed /
-> latest-head live CI is the merge gate`
+> 最终 PR head：`6302dc29c63ad9a004ef146a869d885db25a37b6`
+>
+> 合并提交：`main@572af8579da162a7cc2845744dc9250d74ecd487`
+>
+> 状态：`merged-to-main / main-ci-10-of-10-passed / frozen-experiment`
 
 ## 一、当前结论
 
@@ -28,7 +31,7 @@
 - 每条 evidence 都绑定全部声明 artifact 的 SHA-256，单独篡改 oracle JSON 会使绑定失效；
 - policy 文件缺失、不可读或哈希不是实际 64 位 SHA-256 时，snapshot 直接 fail-closed。
 
-实现仍保持实验隔离：
+实现进入主线后仍保持实验隔离：
 
 - 没有修改 `src/vega/`；
 - 没有新增 `vega` CLI、默认 Loop、Runtime 状态或成功条件；
@@ -158,36 +161,30 @@ static checks and 691-node collection contract: success
 3. 同一节点随后独立重跑为 `1 passed in 48.65s`，说明本地失败更像共享 Windows 环境的
    时序/性能问题，但不能据此把完整 shard 记为通过；
 4. 本地没有重新声明单进程全量测试通过；完整跨平台门禁来自同一实现修复提交的隔离 PR CI；
-5. 合并前必须读取 PR 最新 head 的实时 10 项 CI，不能沿用 `25a7efc` 的状态；CI 通过后只在
-   PR 描述或评论中记录最终 head，不再为了追逐新 SHA 追加仓库文档提交。
+5. 这些限制没有被合并后的主线 CI 消除；它们只是说明 Stage 3 仍是固定实验，不是通用生产
+   backfill 能力。
 
 因此当前裁决是：
 
 ```text
 review-findings-fixed
 implementation-head-pr-ci-passed
-latest-head-ci-must-be-green-at-merge
+main-ci-passed
 full-local-suite-not-established
 continue-experiment
 requires_staged_rollout
 do-not-integrate
-manual-merge-candidate-only
+frozen-experiment
 ```
 
 ## 五、另一台电脑继续
 
 ```powershell
 git fetch --prune origin
-git switch --track origin/experiment/assurance-stage3-dml-backfill
+git switch main
+git pull --ff-only
 git status -sb
 git log -3 --oneline
-```
-
-如果本地已经有同名分支：
-
-```powershell
-git switch experiment/assurance-stage3-dml-backfill
-git pull --ff-only
 ```
 
 先复核：
@@ -214,14 +211,42 @@ python scripts/run_assurance_stage3_dml_backfill_experiment.py `
 
 ## 六、下一步
 
-1. 推送本 docs-only 接力提交，并确认 Draft PR 最新 head 的 10 项 CI；任何失败都保留为事实；
-2. CI 全绿后做最终只读复核，重点核对：
-   - Stage 3 未进入 `src/vega/`、CLI、Runtime、Finish、Goal 或成功语义；
-   - `eval/` 相对主线只有追加；
-   - artifact 和控制台不含绝对工作区路径；
-   - 子进程退出、transaction rollback、checkpoint mismatch 和 oracle tampering 测试真实运行；
-3. 最新 head 10/10 全绿且上述边界成立后，只更新 PR 描述或评论记录最终 SHA，不再追加
-   “CI 已通过”文档提交；PR 才能从 Draft 转为人工合并候选；
-4. 不自动合并，不删除实验分支，不启动 Stage 4；
-5. `scripts/run_assurance_stage3_dml_backfill_experiment.py` 继续保持冻结实验脚本。只有未来要接
-   Runtime 或支持通用 SQL/backfill 时，才需要先拆分并替换字符串级 SQL detector。
+1. 当前可以停止在 `main@572af85` 作为稳定证据点，不继续追加 Stage 4 或新的实验能力；
+2. 若只做使用侧收口，优先整理 README、walkthrough、release checklist 或面试说明，而不是改
+   Runtime；
+3. 如果未来必须继续数据库方向，先重新预注册 Stage 4，并明确并发、外部副作用、故障注入和
+   停止条件；
+4. `scripts/run_assurance_stage3_dml_backfill_experiment.py` 继续保持冻结实验脚本。只有未来要接
+   Runtime 或支持通用 SQL/backfill 时，才需要先拆分并替换字符串级 SQL detector；
+5. 已合并的实验代码不代表 Vega 自动执行 DML、生产 backfill、数据库迁移发布或部署。
+
+## 七、合并后主线证据
+
+PR `#13` 已完成人工合并：
+
+```text
+最终 PR head: 6302dc29c63ad9a004ef146a869d885db25a37b6
+squash merge: 572af8579da162a7cc2845744dc9250d74ecd487
+```
+
+合并后 `main` workflow `30143380213` 的 10 项任务全部成功：
+
+```text
+static checks and 691-node collection: success
+Python 3.11 full suite: success
+Python 3.12 five shards: success
+Windows + wheel smoke: success
+POSIX temp-dir checks: success
+wheel/sdist build and package smoke: success
+```
+
+合并后裁决保持：
+
+```text
+pr-merged
+main-ci-passed
+continue-experiment
+requires_staged_rollout
+do-not-integrate
+frozen-experiment
+```

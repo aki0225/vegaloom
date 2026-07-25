@@ -1,10 +1,11 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-07-24
+> 更新时间：2026-07-25
 > 稳定基线：`v0.1.2`
-> 当前状态：`M-001`、`M-002`、`M-003` 与 Assurance Stage 1 已完成；当前唯一的 `Now`
-> 是 Stage 3 数据修改与 Backfill 的预注册。Stage 2 的两个 SQLite 个案已进入主线，
-> 但仍不属于 Runtime 或默认能力，也不能解释为生产数据库安全证明
+> 当前状态：`M-001`、`M-002`、`M-003`、Assurance Stage 1、Stage 2 两个 SQLite 个案
+> 与 Stage 3 有界 DML/Backfill 个案均已进入 `main`。它们仍不属于 Runtime 或默认能力，
+> 也不能解释为生产数据库安全证明。当前 `Now` 是冻结主线、整理交接和复习材料，不启动
+> Stage 4 或新的 Runtime/Memory/LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -25,7 +26,8 @@ v0.1.2 稳定与冻结
   -> Assurance Stage 0 维护完成
   -> Assurance Stage 1：Threat / Evidence 数据合同
   -> Assurance Stage 2：数据库 Migration 纵向实验
-  -> 依次评估数据修改、并发和生产 Handoff 风险
+  -> Assurance Stage 3：固定 SQLite 有界 DML/Backfill 实验
+  -> 冻结证据点，暂不启动 Stage 4
 ```
 
 Stage 0 的三个已确认维护缺口按以下顺序完成：
@@ -140,21 +142,26 @@ Stage 1 只完成独立数据合同和确定性充分性校验器，没有接入
 
 ### Stage 3：数据修改与 Backfill
 
-状态：`experimental` / `review-corrected-pr-candidate`
+状态：`experimental` / `merged-frozen`
 
 覆盖 DML、backfill、cleanup、scope、row budget、幂等、恢复和 reconciliation。
 
-`AV-STAGE3-001` 已在独立实验分支实现：在冻结的双租户 SQLite fixture 上验证有界 DML
-是否只修改明确目标，能否在首批提交后的受控子进程硬退出后恢复，并由独立 SQL oracle 检查
-越界、幂等和 reconciliation。
+`AV-STAGE3-001` 已通过 PR `#13` 以 squash merge 进入 `main@572af85`：在冻结的双租户
+SQLite fixture 上验证有界 DML 是否只修改明确目标，能否在首批提交后的受控子进程硬退出后
+恢复，并由独立 SQL oracle 检查越界、幂等和 reconciliation。
 详细合同见
 [`ASSURANCE-STAGE3-DML-BACKFILL-PREREGISTRATION.md`](ASSURANCE-STAGE3-DML-BACKFILL-PREREGISTRATION.md)。
 当前实现只存在于 `scripts/` 与 `tests/`，没有新增默认命令或 Runtime 集成。独立审查发现
 并修复了目标 ID scope 误判、声明 artifact 哈希未全覆盖和 policy hash sentinel 三个问题；
-修复提交 `25a7efc` 的 `691` 节点收集合同与 10 项跨平台 PR CI 已全部成功。最新 docs-only
-head 仍必须在人工合并时通过同一实时门禁；最终状态记录在 PR，而不是继续追加文档提交追逐
-新的 SHA。无论是否合并，都不得把该 SQLite 个案解释为通用 backfill、生产数据库或 Runtime
-自动执行能力。
+最终 PR head `6302dc2` 的 10 项 PR CI 全部成功，合并提交 `572af85` 的主线 workflow
+`30143380213` 也为 10/10 success。无论已经合并，仍不得把该 SQLite 个案解释为通用
+backfill、生产数据库或 Runtime 自动执行能力。
+
+Stage 3 当前停止条件：
+
+1. 不把实验脚本注册为默认 CLI 或 Runtime 步骤。
+2. 不启动 Stage 4，除非重新预注册并说明为什么必须继续。
+3. 面试和公开介绍只说“固定 SQLite 个案证明机制”，不说“已支持生产 backfill”。
 
 ### Stage 4：并发与外部副作用
 

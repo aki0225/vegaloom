@@ -2901,3 +2901,52 @@ manual-merge-candidate-only
 该裁决只允许继续把 Stage 3 作为冻结实验候选审查。人工合并时必须读取 PR 最新 head 的
 实时 10 项 CI；通过后只在 PR 描述或评论记录最终 SHA，不再为追逐新 SHA 追加仓库文档提交。
 它不自动接入 Runtime、不启动 Stage 4，也不扩大为通用数据库安全声明。
+
+---
+
+## 2026-07-25 · AV-STAGE3-001 · PR #13 merge and main CI verification
+
+### 合并事实
+
+- PR：`#13`。
+- 最终 head：`6302dc29c63ad9a004ef146a869d885db25a37b6`。
+- 合并方式：`squash`。
+- 合并提交：`main@572af8579da162a7cc2845744dc9250d74ecd487`。
+
+Stage 3 仍只包含固定 SQLite 有界 DML/Backfill 实验、测试和文档证据。合并没有新增默认
+`vega` CLI 命令，没有接入 `src/vega` Runtime、Finish、Goal 或成功语义。
+
+### 合并后主线 CI
+
+- workflow：`30143380213`。
+- event：`push`。
+- commit：`572af8579da162a7cc2845744dc9250d74ecd487`。
+- 结果：`success`。
+
+同一 run 的 10 项任务全部成功：
+
+1. 静态检查与 `691` 节点收集。
+2. Python 3.11 全量测试。
+3. Python 3.12 `smoke` 分片。
+4. Python 3.12 `p0-cli-lock` 分片。
+5. Python 3.12 `artifacts-runtime-security` 分片。
+6. Python 3.12 `semantics-evidence-review` 分片。
+7. Python 3.12 `remaining` 分片。
+8. Windows 专项与 wheel smoke。
+9. POSIX 临时目录专项。
+10. wheel/sdist 构建、安装和 package smoke。
+
+### 合并后裁决
+
+```text
+pr-merged
+main-ci-passed
+continue-experiment
+requires_staged_rollout
+do-not-integrate
+frozen-experiment
+```
+
+该结论只证明固定 SQLite 个案及其工程门禁进入主线。它不证明生产数据库安全、通用
+backfill runner、并发写入、真实流量、PostgreSQL/MySQL 行为或自动 Runtime 执行能力。
+当前正确动作是冻结证据点、整理使用/复习材料；除非重新预注册，否则不启动 Stage 4。
