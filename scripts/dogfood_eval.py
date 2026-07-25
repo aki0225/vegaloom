@@ -151,7 +151,29 @@ def main() -> int:
         default=PROJECT_ROOT,
         help="Vega workspace，临时仓库会创建在该目录 runs/ 下。",
     )
+    parser.add_argument(
+        "--case",
+        action="append",
+        default=[],
+        help="只运行指定 dogfood case；可重复传入。默认按既定顺序运行全部 case。",
+    )
     args = parser.parse_args()
+
+    case_registry = [
+        ("core_loop_without_memory", case_core_loop_without_memory),
+        ("explicit_memory_lesson", case_explicit_memory_lesson),
+        ("config_check_invalid_verification", case_config_check),
+        ("execution_control", case_execution_control),
+        ("workspace_pollution_guard", case_workspace_pollution_guard),
+        ("prompt_budget_guard", case_prompt_budget_guard),
+        ("large_scope_gate", case_large_scope_gate),
+        ("goal_p0_lifecycle", case_goal_p0_lifecycle),
+    ]
+    case_by_name = dict(case_registry)
+    selected_names = list(dict.fromkeys(args.case)) or [name for name, _ in case_registry]
+    unknown_cases = [name for name in selected_names if name not in case_by_name]
+    if unknown_cases:
+        parser.error(f"未知 dogfood case：{', '.join(unknown_cases)}")
 
     workspace = args.workspace.resolve()
     _, base_dir = create_run_dir(
@@ -159,16 +181,7 @@ def main() -> int:
         f"dogfood-eval-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
     )
 
-    cases = [
-        case_core_loop_without_memory(workspace, base_dir),
-        case_explicit_memory_lesson(workspace, base_dir),
-        case_config_check(workspace, base_dir),
-        case_execution_control(workspace, base_dir),
-        case_workspace_pollution_guard(workspace, base_dir),
-        case_prompt_budget_guard(workspace, base_dir),
-        case_large_scope_gate(workspace, base_dir),
-        case_goal_p0_lifecycle(workspace, base_dir),
-    ]
+    cases = [case_by_name[name](workspace, base_dir) for name in selected_names]
     summary = {
         "base_dir": str(base_dir),
         "runner": args.runner,

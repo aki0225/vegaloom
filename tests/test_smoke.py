@@ -3553,8 +3553,22 @@ def test_goal_status_highlights_latest_checkpoint_plan(tmp_path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "case_name",
+    [
+        "core_loop_without_memory",
+        "explicit_memory_lesson",
+        "config_check_invalid_verification",
+        "execution_control",
+        "workspace_pollution_guard",
+        "prompt_budget_guard",
+        "large_scope_gate",
+        "goal_p0_lifecycle",
+    ],
+)
 def test_dogfood_eval_covers_core_loop_memory_boundary_and_goal_p0(
     tmp_path_factory: pytest.TempPathFactory,
+    case_name: str,
 ) -> None:
     workspace = tmp_path_factory.mktemp("d")
     result = subprocess.run(
@@ -3565,6 +3579,8 @@ def test_dogfood_eval_covers_core_loop_memory_boundary_and_goal_p0(
             "none",
             "--workspace",
             str(workspace),
+            "--case",
+            case_name,
         ],
         cwd=PROJECT_ROOT,
         capture_output=True,
@@ -3573,17 +3589,38 @@ def test_dogfood_eval_covers_core_loop_memory_boundary_and_goal_p0(
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "成功：8/8" in result.stdout
+    assert "成功：1/1" in result.stdout
     summary_path = next(workspace.joinpath("runs").glob("dogfood-eval-*/summary.json"))
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert summary["success_count"] == 8
-    assert {case["name"] for case in summary["cases"]} >= {
-        "core_loop_without_memory",
-        "explicit_memory_lesson",
-        "execution_control",
-        "prompt_budget_guard",
-        "goal_p0_lifecycle",
-    }
+    assert summary["success_count"] == 1
+    assert summary["case_count"] == 1
+    assert [case["name"] for case in summary["cases"]] == [case_name]
+
+
+def test_dogfood_eval_rejects_unknown_case_before_workspace_creation(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    workspace = tmp_path_factory.mktemp("dogfood-invalid") / "workspace"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PROJECT_ROOT / "scripts" / "dogfood_eval.py"),
+            "--runner",
+            "none",
+            "--workspace",
+            str(workspace),
+            "--case",
+            "unknown-case",
+        ],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "未知 dogfood case" in result.stderr
+    assert not workspace.exists()
 
 
 def _wait_for_execution_child(path: Path, timeout_seconds: float = 5.0) -> None:
