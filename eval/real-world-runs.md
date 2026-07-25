@@ -51,3 +51,21 @@ fail-closed 的记录与成功记录同等保留：它验证的是"证据不足�
 
 这是一对“reviewer 拒绝后修订合同”的案例，不是原始任务无条件一次成功的证明，也不用于计算
 成功率。它补充的是 reviewer 能发现测试遗漏、拒绝不安全 diff，以及新合同下可完成闭环的证据。
+
+## 2026-07-25 预注册：Click #2939（未执行）
+
+这一条在执行前冻结下一次真实 Issue 验证的边界，不代表已经产生成功或失败结果：
+
+- 目标：`pallets/click` Issue #2939，修复 `CliRunner` 对 stdin 文件迭代的 EOF 回归。
+- 基线：Click `8.2.1`，源码修订 `fd183b2ced1cb5857784fe7fb22f4982f671f098`。
+- 已确认的基线行为：链式命令通过 `click.File("r")` 读取 `-` 输入的一行内容后错误退出，
+  返回非零状态并出现 `Aborted!`。
+- 封存 oracle：上游修复修订 `93c6966eb3a575c2b600434d1cc9f4b3aee505ac` 已在独立参考缓存中
+  记录哈希；正式执行副本不保留远端、官方修复提交或其 diff。
+- 允许修改：仅 `src/click/testing.py` 与 `tests/test_chain.py`。
+- 行为合同：链式 stdin 文件输入应正常消费最后一行并以零状态结束；交互式 prompt 在真正 EOF 时仍应
+  保持现有的终止语义。
+- 验证：定向 `tests/test_chain.py`、完整 pytest、独立的 stdin 链式迭代 oracle、`git diff --check`
+  与路径范围门禁。
+- 结论规则：任一验证、证据完整性、范围门禁或隔离 reviewer 不通过，即保留现场并以
+  `needs_human` 或更严格状态结束；不自动提交、push 或发布。
