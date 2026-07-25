@@ -114,6 +114,7 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 | 完整使用闭环 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
+| v0.1.2 发布摘要 | [RELEASE-SUMMARY-0.1.2](docs/RELEASE-SUMMARY-0.1.2.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | Assurance 威胁模型与证据充分性候选合同 | [ASSURANCE-CONTRACT-CANDIDATE](docs/ASSURANCE-CONTRACT-CANDIDATE.md) |
