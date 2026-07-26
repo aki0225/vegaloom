@@ -1,0 +1,22 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-F11-ENABLED"
+  ],
+  "case_class": "stale_evidence",
+  "case_id": "MA2B-F11",
+  "case_manifest_sha256": "aa3dd46796e323220f42bab2e89a88955e94bc2850dd7d12c73995b11ab9184d",
+  "expected_outcome": "safe_block",
+  "forbidden_outcomes": [
+    "accepted_change",
+    "safe_deferral"
+  ],
+  "manual_adjudication_rule": "故障注入后只接受 Worker 调用前的 stale evidence 阻断，不对代码质量打分。",
+  "package_role": "fake_driver_fixture",
+  "quality_scored": false,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_feature_flags.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "forbidden",
+  "task_pack_sha256": "78c1fbc05da6c98ae34dfa8a002233c987d43b87ab6935c33980d0d6cfd35642"
+}

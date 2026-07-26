@@ -1,0 +1,22 @@
+{
+  "case_class": "code_change",
+  "case_id": "MA2B-F01",
+  "initial_workspace_ref": {
+    "relative_path": "initial-workspace.json",
+    "sha256": "f547ec92c946ea5ed0784ff5759950a8635914a8320cefaf5e7e97af8a2d56df"
+  },
+  "package_role": "fake_driver_fixture",
+  "project_policy_ref": {
+    "relative_path": "project-policy.json",
+    "sha256": "77adca62aaf8bf31bdfa0ecd7244b2fed631d5fc90429795dd2a4c8eaa85209e"
+  },
+  "schema_version": 1,
+  "task_ref": {
+    "relative_path": "task.json",
+    "sha256": "be4013a5a4683e4c4da8610cbb6ae1f117e6e5b36abaab5a06f2c680ce648a46"
+  },
+  "verification_manifest_ref": {
+    "relative_path": "verification-manifest.json",
+    "sha256": "4e1bad76d211a92f85003dc9fc78ad170a547c8220bd003d6096af917bbccc9b"
+  }
+}

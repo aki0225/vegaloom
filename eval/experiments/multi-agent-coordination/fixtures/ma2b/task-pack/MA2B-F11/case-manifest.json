@@ -1,0 +1,22 @@
+{
+  "case_class": "stale_evidence",
+  "case_id": "MA2B-F11",
+  "initial_workspace_ref": {
+    "relative_path": "initial-workspace.json",
+    "sha256": "a68267cf01802779baf2514a8277b95bd441a7ad50155fba5e04cd994612db6a"
+  },
+  "package_role": "fake_driver_fixture",
+  "project_policy_ref": {
+    "relative_path": "project-policy.json",
+    "sha256": "ce42ed486a01e32dab242496dc9aafa6ef42a7a420b993b0aea86916b9088ee2"
+  },
+  "schema_version": 1,
+  "task_ref": {
+    "relative_path": "task.json",
+    "sha256": "9b5805234f0106e01f8b09bec292f5d52584844c7808bc54a847003ec9309bda"
+  },
+  "verification_manifest_ref": {
+    "relative_path": "verification-manifest.json",
+    "sha256": "cf2d54c558147b195134a18a29c2b3eaaa689038db054643dd7326f11c3eec0b"
+  }
+}

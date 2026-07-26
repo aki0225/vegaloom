@@ -1,0 +1,11 @@
+{
+  "case_id": "MA2B-F01",
+  "commands": [
+    "python -m pytest -q tests/test_textops.py"
+  ],
+  "credentials_required": "prohibited",
+  "deterministic": true,
+  "network_access": "prohibited",
+  "oracle": "all_commands_exit_zero",
+  "schema_version": 1
+}

@@ -1,0 +1,19 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-F01-NORMALIZE",
+      "statement": "标签两端空白被移除，连续内部空白被折叠为单个空格。"
+    }
+  ],
+  "case_id": "MA2B-F01",
+  "constraints": [
+    "只允许修改 src/textops.py。"
+  ],
+  "non_goals": [
+    "不改变函数名称、参数或返回类型。"
+  ],
+  "schema_version": 1,
+  "summary": "让标签归一化函数同时处理首尾空白和连续内部空白。",
+  "task_id": "TASK-MA2B-F01",
+  "unresolved_decision": null
+}

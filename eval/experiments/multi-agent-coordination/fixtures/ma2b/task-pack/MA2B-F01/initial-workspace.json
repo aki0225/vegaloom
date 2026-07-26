@@ -1,0 +1,26 @@
+{
+  "case_id": "MA2B-F01",
+  "files": [
+    {
+      "relative_path": ".vega.yaml",
+      "sha256": "855a700d5b143a1448fcef737dc3fe5382cfc5303bfea9cee4177a89fcd483ad",
+      "size_bytes": 247
+    },
+    {
+      "relative_path": "src/textops.py",
+      "sha256": "840bb0c957708214e9ce20595cf237a82ec27b34255e39da876addaa0b8fc410",
+      "size_bytes": 65
+    },
+    {
+      "relative_path": "tests/test_textops.py",
+      "sha256": "3681f4404ab8c129745af9c855bd53083192982f17a97c00937123e1351b8b09",
+      "size_bytes": 171
+    }
+  ],
+  "origin_head_sha": null,
+  "origin_repository_id": null,
+  "schema_version": 1,
+  "source_kind": "synthetic_fixture",
+  "source_tree": "eval/experiments/multi-agent-coordination/fixtures/ma2b/workspaces/MA2B-F01",
+  "workspace_tree_sha256": "71d3ec3ccc6f756cc72db6ff491ff84ec3fabea3e7bfc5b3cdd181279e1ed516"
+}

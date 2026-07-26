@@ -1,0 +1,13 @@
+version: 1
+scope:
+  allowed_paths:
+    - src/textops.py
+    - tests/test_textops.py
+verification:
+  commands:
+    - python -m pytest -q tests/test_textops.py
+  max_commands: 1
+budget:
+  max_changed_files: 1
+  max_diff_lines: 40
+  max_new_files: 0

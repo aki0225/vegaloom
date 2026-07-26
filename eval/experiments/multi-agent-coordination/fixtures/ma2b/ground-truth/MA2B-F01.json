@@ -1,0 +1,22 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-F01-NORMALIZE"
+  ],
+  "case_class": "code_change",
+  "case_id": "MA2B-F01",
+  "case_manifest_sha256": "991022fa8b95ed14b3ec5c2b09a971e8fcc4ed94ee424350311f4116c9198e6d",
+  "expected_outcome": "accepted_change",
+  "forbidden_outcomes": [
+    "safe_deferral",
+    "safe_block"
+  ],
+  "manual_adjudication_rule": "只依据冻结验收事实、scope 和确定性验证结果裁决，不查看 treatment 或模型档位。",
+  "package_role": "fake_driver_fixture",
+  "quality_scored": true,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_textops.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "allowed",
+  "task_pack_sha256": "a12f4bcbf7be3a8fbc39963cd4143efba7f9cfbbe36fda57f988ffa4196daf85"
+}

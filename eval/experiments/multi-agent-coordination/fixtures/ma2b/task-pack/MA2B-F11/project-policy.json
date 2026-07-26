@@ -1,0 +1,22 @@
+{
+  "allowed_read_paths": [
+    "src/feature_flags.py",
+    "tests/test_feature_flags.py"
+  ],
+  "allowed_write_paths": [
+    "src/feature_flags.py"
+  ],
+  "budget_limits": {
+    "max_changed_files": 1,
+    "max_context_tokens": 10000,
+    "max_dependency_edges": 0,
+    "max_diff_lines": 40,
+    "max_new_files": 0,
+    "max_slices": 1,
+    "max_worker_time_seconds": 60,
+    "max_worker_tokens": 5000,
+    "max_write_paths": 1
+  },
+  "case_id": "MA2B-F11",
+  "schema_version": 1
+}

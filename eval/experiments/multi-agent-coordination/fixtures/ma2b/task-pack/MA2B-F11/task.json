@@ -1,0 +1,19 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-F11-ENABLED",
+      "statement": "启用状态渲染为 enabled，禁用状态仍渲染为 disabled。"
+    }
+  ],
+  "case_id": "MA2B-F11",
+  "constraints": [
+    "只允许修改 src/feature_flags.py。"
+  ],
+  "non_goals": [
+    "不增加新的功能状态或修改函数签名。"
+  ],
+  "schema_version": 1,
+  "summary": "修正功能状态渲染，使启用状态返回 enabled。",
+  "task_id": "TASK-MA2B-F11",
+  "unresolved_decision": null
+}
