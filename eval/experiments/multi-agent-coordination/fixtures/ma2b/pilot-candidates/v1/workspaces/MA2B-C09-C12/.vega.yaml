@@ -1,0 +1,15 @@
+version: 1
+scope:
+  allowed_paths:
+    - pyproject.toml
+    - src/vega/delegation.py
+    - src/vega/ma2b_execution_binding.py
+    - src/vega/redaction.py
+verification:
+  commands:
+    - python -m compileall -q src/vega/ma2b_execution_binding.py
+  max_commands: 1
+budget:
+  max_changed_files: 1
+  max_diff_lines: 120
+  max_new_files: 0

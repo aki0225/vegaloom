@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vegaloom"
+version = "0.1.2"
+description = "A local-first coding workflow harness with independent write and review sessions."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.8",
+  "pyyaml>=6.0",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5",
+]
+
+[project.scripts]
+vega = "vega.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vega = ["resources/loops/*.yaml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+cache-dir = ".tmp/ruff/cache"
+
+[tool.ruff.lint]
+# 显式冻结既有门禁，避免 Ruff 版本升级把新增规则静默变成实验分支阻断项。
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+cache_dir = ".tmp/pytest/cache"
