@@ -1,0 +1,14 @@
+version: 1
+scope:
+  allowed_paths:
+    - pyproject.toml
+    - src/vega/project_profile.py
+    - tests/test_node_package_manager_selection.py
+verification:
+  commands:
+    - python -m pytest -q tests/test_node_package_manager_selection.py
+  max_commands: 1
+budget:
+  max_changed_files: 1
+  max_diff_lines: 260
+  max_new_files: 0

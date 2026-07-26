@@ -1,0 +1,499 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from datetime import datetime
+from pathlib import Path
+
+from .models import ProfileState, ProjectProfile
+from .project_config import (
+    ProjectConfigCheckResult,
+    check_project_config,
+    load_project_config,
+    render_project_config_check,
+)
+from .project_knowledge import load_agents_instructions
+from .redaction import filter_sensitive_memory_entries, redact_text, redact_value
+from .memory import MemoryLedgerStore
+from .run_utils import create_run_dir
+from .trace import TraceWriter
+
+PROFILE_ARTIFACTS = ["state.json", "trace.jsonl", "project-profile.json", "project-profile.md", "eval.md"]
+CONFIG_CANDIDATES = [
+    "pyproject.toml",
+    "requirements.txt",
+    "package.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "package-lock.json",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "Cargo.toml",
+    "Dockerfile",
+    "docker-compose.yml",
+    ".vega.yaml",
+    ".vega.yml",
+]
+KEY_DIRS = ["src", "tests", "docs", "app", "apps", "packages", "cmd", "internal", "pkg", "frontend", "backend"]
+ENTRYPOINT_CANDIDATES = [
+    "src/main.py",
+    "main.py",
+    "app.py",
+    "src/index.ts",
+    "src/main.ts",
+    "src/App.tsx",
+    "cmd/server/main.go",
+    "main.go",
+]
+
+
+class ProjectProfileRuntime:
+    def __init__(self, workspace: Path) -> None:
+        self.workspace = workspace
+
+    def run(self, repo_path: Path) -> Path:
+        base_run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-project-profile"
+        run_id, run_dir = create_run_dir(self.workspace, base_run_id)
+        trace = TraceWriter(run_dir / "trace.jsonl")
+        state = ProfileState(run_id=run_id, repo_path=str(repo_path.resolve()), status="running")
+        state.current_step = "detect"
+        state.save(run_dir / "state.json")
+        trace.write("profile_started", repo_path=str(repo_path.resolve()))
+
+        config_check = check_project_config(repo_path)
+        if config_check.has_errors:
+            return _finish_profile_config_failure(run_dir, trace, state, config_check)
+
+        try:
+            profile = build_project_profile(self.workspace, repo_path)
+        except Exception as exc:  # noqa: BLE001 - profile run must close with failed state/artifacts
+            return _finish_profile_failure(
+                run_dir,
+                trace,
+                state,
+                code="profile_build_failed",
+                message="项目画像构建失败，已保留失败诊断供人工处理。",
+                diagnostic=str(exc),
+            )
+
+        run_dir.joinpath("project-profile.json").write_text(
+            json.dumps(
+                redact_value(profile.model_dump(mode="json")),
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        run_dir.joinpath("project-profile.md").write_text(render_project_profile(profile), encoding="utf-8")
+        trace.write("profile_written", tech_stack=profile.tech_stack, test_commands=profile.test_commands)
+
+        state.current_step = "eval"
+        run_dir.joinpath("eval.md").write_text("# Eval\n\n(pending)\n", encoding="utf-8")
+        eval_results = _run_profile_eval(run_dir, profile)
+        run_dir.joinpath("eval.md").write_text(_render_eval(eval_results), encoding="utf-8")
+        state.eval_results = eval_results
+        state.artifacts = PROFILE_ARTIFACTS
+        state.status = "failed" if any(item.startswith("FAIL:") for item in eval_results) else "success"
+        state.current_step = "done"
+        state.save(run_dir / "state.json")
+        trace.write("eval_written", file="eval.md", results=eval_results)
+        trace.write("run_finished", status=state.status)
+        return run_dir
+
+
+def build_project_profile(
+    workspace: Path,
+    repo_path: Path,
+    *,
+    tracked_only: bool = False,
+    tracked_revision: str | None = None,
+) -> ProjectProfile:
+    repo = repo_path.resolve()
+    tracked_files = (
+        _tracked_files(repo, tracked_revision or "HEAD")
+        if tracked_only
+        else None
+    )
+    config_files = _existing_files(repo, CONFIG_CANDIDATES, tracked_files=tracked_files)
+    project_config = load_project_config(
+        repo,
+        tracked_only=tracked_only,
+        tracked_revision=tracked_revision,
+    )
+    agents = load_agents_instructions(
+        repo,
+        tracked_only=tracked_only,
+        tracked_revision=tracked_revision,
+    )
+    memory_hits = filter_sensitive_memory_entries(
+        MemoryLedgerStore(workspace).search(
+            query=repo.name,
+            accepted_only=True,
+            repo=repo.name,
+        )
+    )
+    test_commands = _detect_test_commands(repo, config_files, tracked_files=tracked_files)
+    lint_commands = _detect_lint_commands(config_files)
+    if project_config.verification.commands:
+        test_commands = project_config.verification.commands
+        lint_commands = []
+    return ProjectProfile(
+        repo_name=repo.name,
+        repo_path=str(repo),
+        tech_stack=_detect_tech_stack(repo, config_files, tracked_files=tracked_files),
+        package_managers=_detect_package_managers(config_files),
+        test_commands=test_commands,
+        lint_commands=lint_commands,
+        entrypoints=_existing_files(repo, ENTRYPOINT_CANDIDATES, tracked_files=tracked_files),
+        key_directories=_existing_dirs(repo, KEY_DIRS, tracked_files=tracked_files),
+        config_files=config_files,
+        agents_files=[item.path for item in agents],
+        memory_hit_count=len(memory_hits),
+    )
+
+
+def render_project_profile(profile: ProjectProfile) -> str:
+    lines = [
+        "# Project Profile",
+        "",
+        f"- 项目：`{profile.repo_name}`",
+        "",
+        "## 技术栈",
+        "",
+        *_list_or_none(profile.tech_stack),
+        "",
+        "## 包管理器 / 构建工具",
+        "",
+        *_list_or_none(profile.package_managers),
+        "",
+        "## 推荐测试命令",
+        "",
+        *_list_or_none(profile.test_commands),
+        "",
+        "## 推荐静态检查命令",
+        "",
+        *_list_or_none(profile.lint_commands),
+        "",
+        "## 入口文件",
+        "",
+        *_list_or_none(profile.entrypoints),
+        "",
+        "## 关键目录",
+        "",
+        *_list_or_none(profile.key_directories),
+        "",
+        "## 配置文件",
+        "",
+        *_list_or_none(profile.config_files),
+        "",
+        "## AGENTS.md",
+        "",
+        *_list_or_none(profile.agents_files),
+        "",
+        "## Memory",
+        "",
+        f"- 已接受 memory 命中数：{profile.memory_hit_count}",
+    ]
+    return redact_text("\n".join(lines).rstrip() + "\n")
+
+
+def _detect_tech_stack(
+    repo: Path,
+    config_files: list[str],
+    *,
+    tracked_files: set[str] | None = None,
+) -> list[str]:
+    stack: list[str] = []
+    if any(item in config_files for item in ["pyproject.toml", "requirements.txt"]):
+        stack.append("Python")
+    if "package.json" in config_files:
+        stack.append("Node.js / TypeScript")
+    if "go.mod" in config_files:
+        stack.append("Go")
+    if "pom.xml" in config_files or "build.gradle" in config_files:
+        stack.append("Java")
+    if "Cargo.toml" in config_files:
+        stack.append("Rust")
+    if tracked_files is not None:
+        has_dotnet = any(
+            "/" not in item and item.lower().endswith((".csproj", ".sln"))
+            for item in tracked_files
+        )
+    else:
+        has_dotnet = bool(list(repo.glob("*.csproj")) or list(repo.glob("*.sln")))
+    if has_dotnet:
+        stack.append(".NET")
+    return _dedupe(stack)
+
+
+def _detect_package_managers(config_files: list[str]) -> list[str]:
+    managers: list[str] = []
+    if "pyproject.toml" in config_files:
+        managers.append("pip / pyproject")
+    if "requirements.txt" in config_files:
+        managers.append("pip requirements")
+    if "pnpm-lock.yaml" in config_files:
+        managers.append("pnpm")
+    elif "yarn.lock" in config_files:
+        managers.append("yarn")
+    elif "package-lock.json" in config_files or "package.json" in config_files:
+        managers.append("npm")
+    if "go.mod" in config_files:
+        managers.append("go modules")
+    if "pom.xml" in config_files:
+        managers.append("maven")
+    if "build.gradle" in config_files:
+        managers.append("gradle")
+    if "Cargo.toml" in config_files:
+        managers.append("cargo")
+    return managers
+
+
+def _detect_test_commands(
+    repo: Path,
+    config_files: list[str],
+    *,
+    tracked_files: set[str] | None = None,
+) -> list[str]:
+    commands: list[str] = []
+    if "pyproject.toml" in config_files or _directory_exists(
+        repo,
+        "tests",
+        tracked_files=tracked_files,
+    ):
+        commands.append("python -m pytest -q")
+    if "package.json" in config_files:
+        commands.append("npm test")
+    if "pnpm-lock.yaml" in config_files:
+        commands.append("pnpm test")
+    if "go.mod" in config_files:
+        commands.append("go test ./...")
+    if "pom.xml" in config_files:
+        commands.append("mvn test")
+    if "build.gradle" in config_files:
+        commands.append("gradle test")
+    if "Cargo.toml" in config_files:
+        commands.append("cargo test")
+    return _dedupe(commands)
+
+
+def _detect_lint_commands(config_files: list[str]) -> list[str]:
+    commands: list[str] = []
+    if "pyproject.toml" in config_files:
+        commands.append("python -m ruff check .")
+    if "package.json" in config_files:
+        commands.append("npm run lint")
+    if "go.mod" in config_files:
+        commands.append("go vet ./...")
+    if "Cargo.toml" in config_files:
+        commands.append("cargo clippy")
+    return _dedupe(commands)
+
+
+def _existing_files(
+    repo: Path,
+    candidates: list[str],
+    *,
+    tracked_files: set[str] | None = None,
+) -> list[str]:
+    if tracked_files is not None:
+        return [item for item in candidates if item in tracked_files]
+    return [item for item in candidates if (repo / item).is_file()]
+
+
+def _existing_dirs(
+    repo: Path,
+    candidates: list[str],
+    *,
+    tracked_files: set[str] | None = None,
+) -> list[str]:
+    return [
+        item
+        for item in candidates
+        if _directory_exists(repo, item, tracked_files=tracked_files)
+    ]
+
+
+def _directory_exists(
+    repo: Path,
+    relative_path: str,
+    *,
+    tracked_files: set[str] | None,
+) -> bool:
+    if tracked_files is None:
+        return (repo / relative_path).is_dir()
+    prefix = f"{relative_path}/"
+    return relative_path in tracked_files or any(
+        item.startswith(prefix)
+        for item in tracked_files
+    )
+
+
+def _tracked_files(repo: Path, revision: str) -> set[str]:
+    git_env = {
+        **os.environ,
+        "GIT_CEILING_DIRECTORIES": str(repo.parent.resolve()),
+    }
+    try:
+        probe = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=repo,
+            capture_output=True,
+            timeout=30,
+            check=False,
+            env=git_env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("无法确认目标目录是否为 Git 仓库。") from exc
+    if probe.returncode != 0:
+        diagnostic = (probe.stderr or b"").decode(
+            "utf-8",
+            errors="replace",
+        ).strip()
+        if "not a git repository" in diagnostic.lower():
+            return set()
+        suffix = f" Git 诊断：{redact_text(diagnostic)}" if diagnostic else ""
+        raise RuntimeError(f"无法确认目标目录的 Git 身份。{suffix}")
+
+    command = ["git", "ls-tree", "-r", "--name-only", "-z", revision, "--"]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=repo,
+            capture_output=True,
+            timeout=30,
+            check=False,
+            env=git_env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(
+            f"无法读取 tracked project profile revision `{redact_text(revision)}`。"
+        ) from exc
+    if result.returncode != 0:
+        diagnostic = (result.stderr or b"").decode(
+            "utf-8",
+            errors="replace",
+        ).strip()
+        suffix = f" Git 诊断：{redact_text(diagnostic)}" if diagnostic else ""
+        raise RuntimeError(
+            "无法读取 tracked project profile revision "
+            f"`{redact_text(revision)}`；已拒绝使用空画像继续。{suffix}"
+        )
+    return {
+        item.decode("utf-8", errors="replace")
+        for item in (result.stdout or b"").split(b"\0")
+        if item
+    }
+
+
+def _run_profile_eval(run_dir: Path, profile: ProjectProfile) -> list[str]:
+    results = [
+        f"{'PASS' if (run_dir / artifact).exists() else 'FAIL'}: artifact 存在：{artifact}"
+        for artifact in PROFILE_ARTIFACTS
+    ]
+    results.append("PASS: 已识别技术栈" if profile.tech_stack else "FAIL: 未识别技术栈")
+    results.append("PASS: 已识别验证命令" if profile.test_commands else "FAIL: 未识别验证命令")
+    return results
+
+
+def _render_eval(results: list[str]) -> str:
+    return redact_text("# Eval\n\n" + "\n".join(f"- {item}" for item in results) + "\n")
+
+
+def _finish_profile_config_failure(
+    run_dir: Path,
+    trace: TraceWriter,
+    state: ProfileState,
+    config_check: ProjectConfigCheckResult,
+) -> Path:
+    return _finish_profile_failure(
+        run_dir,
+        trace,
+        state,
+        code="project_config_invalid",
+        message="项目配置预检失败，Project Profile 未继续读取该配置。",
+        diagnostic=render_project_config_check(config_check),
+        config_check=config_check,
+    )
+
+
+def _finish_profile_failure(
+    run_dir: Path,
+    trace: TraceWriter,
+    state: ProfileState,
+    *,
+    code: str,
+    message: str,
+    diagnostic: str,
+    config_check: ProjectConfigCheckResult | None = None,
+) -> Path:
+    safe_message = redact_text(message)
+    safe_diagnostic = redact_text(diagnostic)
+    payload: dict[str, object] = {
+        "status": "failed",
+        "code": redact_text(code),
+        "message": safe_message,
+        "diagnostic": safe_diagnostic,
+    }
+    if config_check is not None:
+        payload["config_check"] = config_check.model_dump(mode="json")
+
+    run_dir.joinpath("project-profile.json").write_text(
+        json.dumps(redact_value(payload), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    run_dir.joinpath("project-profile.md").write_text(
+        redact_text(
+            "\n".join(
+                [
+                    "# Project Profile",
+                    "",
+                    safe_message,
+                    "",
+                    "## Diagnostic",
+                    "",
+                    safe_diagnostic,
+                ]
+            ).rstrip()
+            + "\n"
+        ),
+        encoding="utf-8",
+    )
+    eval_results = [f"FAIL: {safe_message}"]
+    if config_check is not None:
+        eval_results.extend(
+            f"FAIL: {issue.code}：{issue.message}"
+            for issue in config_check.issues
+            if issue.severity == "error"
+        )
+    else:
+        eval_results.append(f"FAIL: {code}：{safe_diagnostic[:500]}")
+    run_dir.joinpath("eval.md").write_text(_render_eval(eval_results), encoding="utf-8")
+    state.eval_results = eval_results
+    state.artifacts = PROFILE_ARTIFACTS
+    state.status = "failed"
+    state.current_step = f"{code}_failed"
+    state.save(run_dir / "state.json")
+    trace.write("profile_failed", code=code, diagnostic=safe_diagnostic)
+    trace.write("eval_written", file="eval.md", results=eval_results)
+    trace.write("run_finished", status=state.status)
+    return run_dir
+
+
+def _list_or_none(items: list[str]) -> list[str]:
+    if not items:
+        return ["- 未识别"]
+    return [f"- `{item}`" for item in items]
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result

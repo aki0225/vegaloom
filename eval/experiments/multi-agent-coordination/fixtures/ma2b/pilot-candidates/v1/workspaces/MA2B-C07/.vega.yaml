@@ -1,0 +1,15 @@
+version: 1
+scope:
+  allowed_paths:
+    - pyproject.toml
+    - src/vega/cli.py
+    - src/vega/cli_support.py
+    - tests/test_cli_validation_architecture.py
+verification:
+  commands:
+    - python -m pytest -q tests/test_cli_validation_architecture.py
+  max_commands: 1
+budget:
+  max_changed_files: 2
+  max_diff_lines: 160
+  max_new_files: 0
