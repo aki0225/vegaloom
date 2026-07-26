@@ -37,6 +37,7 @@ def _create_directory_link(link_path: Path, target_path: Path) -> None:
             ["cmd", "/d", "/c", "mklink", "/J", str(link_path), str(target_path)],
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
         )
         if result.returncode != 0:
