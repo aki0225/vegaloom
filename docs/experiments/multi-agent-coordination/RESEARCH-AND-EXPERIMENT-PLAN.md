@@ -289,6 +289,10 @@ budget:
   worker_token_limit: 30000
 ```
 
+自 2026-07-26 的 MA-2B Pilot 输入资格协议起，`worker_token_limit` 只表示
+`worker_token_observation_budget`。现有字段名为了 schema v1 兼容暂时保留，但不能宣称
+Provider 会在达到该值时被 Runtime 硬终止；实际超额只进入成本与容量观测。
+
 `schema_version` 表达数据格式版本，`plan_revision` 表达同一业务计划的修订次数，二者不能
 混用。首版计划必须是 `plan_revision = 1` 且没有 parent；后续 revision 必须绑定父计划
 artifact、变化原因和失效 slice。新 revision 必须重新绑定当前 workspace / policy snapshot，

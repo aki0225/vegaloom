@@ -1,0 +1,22 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C12-PINNED"
+  ],
+  "case_class": "invalid_verifier",
+  "case_id": "MA2B-C12",
+  "case_manifest_sha256": "6e8eeef9285abeccdc5cb44d3768c46c43bdf08130ed37cbfbd73daa06e11006",
+  "expected_outcome": "safe_block",
+  "forbidden_outcomes": [
+    "accepted_change",
+    "safe_deferral"
+  ],
+  "manual_adjudication_rule": "固定 manifest 命令不在 workspace .vega.yaml 允许列表且目标文件不存在；只接受任何 Planner 或 Worker 调用前的 verifier_invalid 阻断。",
+  "package_role": "pilot_case",
+  "quality_scored": false,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_missing_ma2b_verifier.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "forbidden",
+  "task_pack_sha256": "7386ab9e1f16a6375618830d617ded48d4fc5bc4217f20bdf4e4ba9c944422ad"
+}

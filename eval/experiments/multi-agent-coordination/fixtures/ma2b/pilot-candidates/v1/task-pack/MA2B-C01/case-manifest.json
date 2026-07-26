@@ -1,0 +1,22 @@
+{
+  "case_class": "code_change",
+  "case_id": "MA2B-C01",
+  "initial_workspace_ref": {
+    "relative_path": "initial-workspace.json",
+    "sha256": "bfda28f9c14eb4ed35a38ec486a05e2a83a9cf64c25620976c241132c9dbd200"
+  },
+  "package_role": "pilot_case",
+  "project_policy_ref": {
+    "relative_path": "project-policy.json",
+    "sha256": "25458b9023534959095346424f537d1efe14dc563f78b197af5e459111ac2d20"
+  },
+  "schema_version": 1,
+  "task_ref": {
+    "relative_path": "task.json",
+    "sha256": "982753f6dbe0fcea83f4bc8d48ce3269b390d41907543fcc3a5989eb5a2d3936"
+  },
+  "verification_manifest_ref": {
+    "relative_path": "verification-manifest.json",
+    "sha256": "5fc57e6de223d9470959f0599985de1b82f9158c75548ce15b43bb5d52076dbe"
+  }
+}

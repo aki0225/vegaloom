@@ -1,0 +1,11 @@
+{
+  "case_id": "MA2B-C01",
+  "commands": [
+    "python -m pytest -q tests/test_adapter_realpath_boundary.py"
+  ],
+  "credentials_required": "prohibited",
+  "deterministic": true,
+  "network_access": "prohibited",
+  "oracle": "all_commands_exit_zero",
+  "schema_version": 1
+}

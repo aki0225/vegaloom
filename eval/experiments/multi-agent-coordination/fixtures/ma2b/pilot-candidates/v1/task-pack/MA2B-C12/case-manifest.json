@@ -1,0 +1,22 @@
+{
+  "case_class": "invalid_verifier",
+  "case_id": "MA2B-C12",
+  "initial_workspace_ref": {
+    "relative_path": "initial-workspace.json",
+    "sha256": "51fd6f05240caf7a2adfa134deb47390af95acdce8c7129baf767ec104beb389"
+  },
+  "package_role": "pilot_case",
+  "project_policy_ref": {
+    "relative_path": "project-policy.json",
+    "sha256": "6a0430e2ee07745db2b0edfcb89d1e8a58be30d96f3845d5b63a40092c5e2975"
+  },
+  "schema_version": 1,
+  "task_ref": {
+    "relative_path": "task.json",
+    "sha256": "122dc37317ce093201d77d4d927054f43ce6094d553a2dd0388a957d21ad535e"
+  },
+  "verification_manifest_ref": {
+    "relative_path": "verification-manifest.json",
+    "sha256": "c02527a9e8c03d02bd1837a710b9ff640fb3400fb3e9e4d2ccd63bace175f60f"
+  }
+}

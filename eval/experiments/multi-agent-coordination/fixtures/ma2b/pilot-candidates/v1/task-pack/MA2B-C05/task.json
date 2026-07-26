@@ -1,0 +1,31 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C05-SCHEMA",
+      "statement": "新增 pricing manifest 严格解析模块，固定 12 case、3 treatment、模型角色顺序和 UTC 有效窗口。"
+    },
+    {
+      "fact_id": "A-MA2B-C05-BINDING",
+      "statement": "execution binding 必须拒绝 pricing model id 或观测时间与自身绑定不一致的 manifest。"
+    },
+    {
+      "fact_id": "A-MA2B-C05-COMPAT",
+      "statement": "字段、模型和时间均匹配的 execution binding 仍可被确定性加载。"
+    }
+  ],
+  "case_id": "MA2B-C05",
+  "constraints": [
+    "只允许修改 src/vega/ma2b_execution_binding.py 和新增 src/vega/ma2b_pricing_manifest.py。",
+    "pricing parser 必须暴露稳定 issue code，不能回显本机路径或敏感值。",
+    "不得修改固定 verifier、delegation.py、redaction.py 或 pyproject.toml。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不读取 Provider、价格网页、凭据或网络数据。",
+    "不创建 execution authorization、Reviewer 或 Pilot 执行入口。"
+  ],
+  "schema_version": 1,
+  "summary": "把 MA-2B pricing manifest 从字节哈希检查升级为跨文件严格语义绑定。",
+  "task_id": "TASK-MA2B-C05",
+  "unresolved_decision": null
+}

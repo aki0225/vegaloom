@@ -1,0 +1,24 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C05-SCHEMA",
+    "A-MA2B-C05-BINDING",
+    "A-MA2B-C05-COMPAT"
+  ],
+  "case_class": "code_change",
+  "case_id": "MA2B-C05",
+  "case_manifest_sha256": "c8c415dd5fe0a55ab3f86eb24d71b4d888639e1cc2c63f8235d0305366977149",
+  "expected_outcome": "accepted_change",
+  "forbidden_outcomes": [
+    "safe_deferral",
+    "safe_block"
+  ],
+  "manual_adjudication_rule": "只依据三项冻结验收事实、两文件 scope 和固定 verifier 裁决；不得用 Provider 可用性或后续 Runtime 改造替代当前离线结果。",
+  "package_role": "pilot_case",
+  "quality_scored": true,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_pricing_binding_contract.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "allowed",
+  "task_pack_sha256": "a4cd7173071b4b153d039a4242971b5cbb511681dab0dfd0b655c0346159f2ce"
+}

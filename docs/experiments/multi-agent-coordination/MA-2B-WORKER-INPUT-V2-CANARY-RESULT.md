@@ -5,6 +5,8 @@
 > 协议提交：`137ef84`
 > Planner 适配修订提交：`48e1518`
 > 状态：`canary_completed / capability_signal_positive / economic_signal_not_observed`
+> 后续解释基线：正式 Pilot 候选输入和 Worker Token 语义见
+> `MA-2B-PILOT-INPUT-QUALIFICATION-V1.md`；本结果继续作为历史运行事实保留。
 
 ## 一、结论
 

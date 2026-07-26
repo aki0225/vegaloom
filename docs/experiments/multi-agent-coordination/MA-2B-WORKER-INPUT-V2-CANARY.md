@@ -4,6 +4,8 @@
 > 分支：`experiment/ma2b-planner-worker-pilot`  
 > 代码基线：`49ecc19fe4cf7acd7fb9e0c4a736b3b8fb6312d3`  
 > 状态：`protocol_frozen / owner_authorized`
+> 后续 supersession：正式 Pilot 输入资格与 Worker Token 语义由
+> `MA-2B-PILOT-INPUT-QUALIFICATION-V1.md` 控制；本文件继续作为历史 Canary 协议保留。
 
 ## 一、目的与结论边界
 
@@ -29,7 +31,7 @@
 - 最大新增文件数：`0`
 - 最大 diff 行数：`40`
 - Worker 时间上限：`180` 秒
-- Worker token 合同上限：`5000`；当前 CLI 无法强制终止 token 超额，因此只记录实际 usage，
+- Worker token 观测预算：`5000`；当前 CLI 无法强制终止 token 超额，因此只记录实际 usage，
   不把该字段声明为已执行门禁
 - 控制面 verification：`python -m pytest -q tests/test_textops.py`
 - oracle：全部命令退出状态为 `0`

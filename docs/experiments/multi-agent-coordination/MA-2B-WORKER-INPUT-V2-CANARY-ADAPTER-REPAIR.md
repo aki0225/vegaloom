@@ -5,6 +5,8 @@
 > 前置协议：`MA-2B-WORKER-INPUT-V2-CANARY.md`  
 > 前置协议提交：`137ef84`
 > 状态：`adapter_repair_frozen / owner_authorized`
+> 后续 supersession：本修订只保留为历史 Canary Planner 适配记录；正式 Pilot 输入资格由
+> `MA-2B-PILOT-INPUT-QUALIFICATION-V1.md` 控制。
 
 ## 一、首次运行事实
 

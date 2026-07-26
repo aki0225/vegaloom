@@ -20,10 +20,17 @@ from vega.ma2b_readiness import (
 from vega.ma2b_task_pack import MA2BTaskPackError
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PILOT_CANDIDATE_ROOT = Path(
+    "eval/experiments/multi-agent-coordination/fixtures/ma2b/"
+    "pilot-candidates/v1"
+)
+PILOT_TASK_PACK_ROOT = PILOT_CANDIDATE_ROOT / "task-pack"
+PILOT_GROUND_TRUTH_ROOT = PILOT_CANDIDATE_ROOT / "ground-truth"
 PRICING_PATH = Path("eval/experiments/multi-agent-coordination/pricing/MA-2B-pricing.json")
 
 
-def test_default_readiness_blocks_when_real_pilot_artifacts_are_missing(
+def test_readiness_blocks_when_pilot_artifacts_are_missing_or_partial(
     tmp_path: Path,
 ) -> None:
     repo = _repo(tmp_path)
@@ -37,6 +44,7 @@ def test_default_readiness_blocks_when_real_pilot_artifacts_are_missing(
     assert "pilot_case:MA2B-C01:task_pack_root_invalid" in result.issue_codes
     assert "execution_binding_path_invalid" in result.issue_codes
     assert "execution_authorization_path_invalid" in result.issue_codes
+    _assert_four_candidates_do_not_relax_twelve_case_readiness()
 
 
 def test_readiness_is_ready_only_when_cases_binding_pricing_and_authorization_match(
@@ -224,6 +232,41 @@ def _repo(root: Path) -> Path:
     repo = root / "repo"
     repo.mkdir()
     return repo
+
+
+def _assert_four_candidates_do_not_relax_twelve_case_readiness() -> None:
+    assert MA2B_PILOT_CASE_IDS == tuple(
+        f"MA2B-C{index:02d}" for index in range(1, 13)
+    )
+
+    result = check_ma2b_pilot_readiness(
+        repo_root=PROJECT_ROOT,
+        task_pack_root=PILOT_TASK_PACK_ROOT,
+        ground_truth_root=PILOT_GROUND_TRUTH_ROOT,
+    )
+
+    assert result.status == "blocked"
+    assert result.loaded_case_ids == [
+        "MA2B-C01",
+        "MA2B-C05",
+        "MA2B-C09",
+        "MA2B-C12",
+    ]
+    assert result.case_set_sha256 is None
+    for missing_case_id in (
+        "MA2B-C02",
+        "MA2B-C03",
+        "MA2B-C04",
+        "MA2B-C06",
+        "MA2B-C07",
+        "MA2B-C08",
+        "MA2B-C10",
+        "MA2B-C11",
+    ):
+        assert any(
+            issue.startswith(f"pilot_case:{missing_case_id}:")
+            for issue in result.issue_codes
+        )
 
 
 def _fake_case_loader(

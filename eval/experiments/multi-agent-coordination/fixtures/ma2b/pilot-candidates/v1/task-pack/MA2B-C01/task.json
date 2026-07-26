@@ -1,0 +1,26 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C01-BOUNDARY",
+      "statement": "任一 adapter 目标的真实路径越出目标仓库时，初始化必须在写入前失败。"
+    },
+    {
+      "fact_id": "A-MA2B-C01-ATOMIC",
+      "statement": "整批目标必须先完成边界预检，后置危险目标不能留下前置部分写入。"
+    }
+  ],
+  "case_id": "MA2B-C01",
+  "constraints": [
+    "只允许修改 src/vega/adapter_runtime.py。",
+    "保留真实目标仍位于仓库内部的目录链接支持。",
+    "不得修改固定 verifier 或 pyproject.toml。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不修改 CLI 命令、skill 内容或 adapter 支持类型。"
+  ],
+  "schema_version": 1,
+  "summary": "加固 Codex adapter 初始化，阻止目录链接把写入目标带出目标仓库。",
+  "task_id": "TASK-MA2B-C01",
+  "unresolved_decision": null
+}
