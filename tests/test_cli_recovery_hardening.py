@@ -356,25 +356,27 @@ def test_all_repo_cli_entries_reject_regular_file_before_creating_run(
     task_file = tmp_path / "task.md"
     task_file.write_text("# Task\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
+    repo_arg = repo_file.name
+    task_arg = task_file.name
 
     commands = [
-        ["config", "check", "--repo", str(repo_file), "--json"],
-        ["run", "engineering-change", "--task", str(task_file), "--repo", str(repo_file)],
-        ["profile", "--repo", str(repo_file)],
-        ["reflect", "--repo", str(repo_file)],
-        ["plan", "--repo", str(repo_file), "--text", "规划修复"],
-        ["review-pack", "--repo", str(repo_file), "--run", "missing-run"],
-        ["review", "--repo", str(repo_file), "--run", "missing-run", "--runner", "none"],
-        ["gate", "--repo", str(repo_file), "--run", "missing-run"],
-        ["goal", "start", "--repo", str(repo_file), "--text", "完成修复"],
-        ["adapters", "init", "codex", "--repo", str(repo_file)],
-        ["brief", "bug", "--repo", str(repo_file), "--text", "修复问题"],
-        ["brief", "feature", "--repo", str(repo_file), "--text", "新增功能"],
-        ["loop", "bug", "--repo", str(repo_file), "--text", "修复问题", "--mode", "assist"],
-        ["loop", "feature", "--repo", str(repo_file), "--text", "新增功能", "--mode", "assist"],
-        ["do", "bug", "--repo", str(repo_file), "--text", "修复问题", "--mode", "assist"],
-        ["do", "feature", "--repo", str(repo_file), "--text", "新增功能", "--mode", "assist"],
-        ["loop", "continue", "--repo", str(repo_file), "--run", "missing-run"],
+        ["config", "check", "--repo", repo_arg, "--json"],
+        ["run", "engineering-change", "--task", task_arg, "--repo", repo_arg],
+        ["profile", "--repo", repo_arg],
+        ["reflect", "--repo", repo_arg],
+        ["plan", "--repo", repo_arg, "--text", "规划修复"],
+        ["review-pack", "--repo", repo_arg, "--run", "missing-run"],
+        ["review", "--repo", repo_arg, "--run", "missing-run", "--runner", "none"],
+        ["gate", "--repo", repo_arg, "--run", "missing-run"],
+        ["goal", "start", "--repo", repo_arg, "--text", "完成修复"],
+        ["adapters", "init", "codex", "--repo", repo_arg],
+        ["brief", "bug", "--repo", repo_arg, "--text", "修复问题"],
+        ["brief", "feature", "--repo", repo_arg, "--text", "新增功能"],
+        ["loop", "bug", "--repo", repo_arg, "--text", "修复问题", "--mode", "assist"],
+        ["loop", "feature", "--repo", repo_arg, "--text", "新增功能", "--mode", "assist"],
+        ["do", "bug", "--repo", repo_arg, "--text", "修复问题", "--mode", "assist"],
+        ["do", "feature", "--repo", repo_arg, "--text", "新增功能", "--mode", "assist"],
+        ["loop", "continue", "--repo", repo_arg, "--run", "missing-run"],
     ]
 
     for command in commands:
