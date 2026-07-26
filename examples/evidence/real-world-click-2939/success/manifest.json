@@ -39,6 +39,10 @@
     "worker_chat_omitted": true,
     "raw_artifacts_not_included": true
   },
+  "evidence_scope": {
+    "kind": "sanitized_core_stage_summary",
+    "finish_eval_reconstructable": false
+  },
   "artifacts": [
     "state.json",
     "trace.jsonl",

@@ -137,6 +137,27 @@ class PollutingWorker:
         return RunnerResult(status="success", output="pollution created", command=["polluting-worker"])
 
 
+def _case_registry() -> list[tuple[str, object]]:
+    return [
+        ("core_loop_without_memory", case_core_loop_without_memory),
+        ("explicit_memory_lesson", case_explicit_memory_lesson),
+        ("config_check_invalid_verification", case_config_check),
+        ("execution_control", case_execution_control),
+        ("workspace_pollution_guard", case_workspace_pollution_guard),
+        ("prompt_budget_guard", case_prompt_budget_guard),
+        ("large_scope_gate", case_large_scope_gate),
+        ("goal_p0_lifecycle", case_goal_p0_lifecycle),
+    ]
+
+
+def select_case_names(requested_names: list[str], available_names: list[str]) -> list[str]:
+    selected_names = list(dict.fromkeys(requested_names)) or list(available_names)
+    unknown_cases = [name for name in selected_names if name not in available_names]
+    if unknown_cases:
+        raise ValueError(f"未知 dogfood case：{', '.join(unknown_cases)}")
+    return selected_names
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="运行 Vega 轻量 dogfood eval。")
     parser.add_argument(
@@ -159,21 +180,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    case_registry = [
-        ("core_loop_without_memory", case_core_loop_without_memory),
-        ("explicit_memory_lesson", case_explicit_memory_lesson),
-        ("config_check_invalid_verification", case_config_check),
-        ("execution_control", case_execution_control),
-        ("workspace_pollution_guard", case_workspace_pollution_guard),
-        ("prompt_budget_guard", case_prompt_budget_guard),
-        ("large_scope_gate", case_large_scope_gate),
-        ("goal_p0_lifecycle", case_goal_p0_lifecycle),
-    ]
+    case_registry = _case_registry()
     case_by_name = dict(case_registry)
-    selected_names = list(dict.fromkeys(args.case)) or [name for name, _ in case_registry]
-    unknown_cases = [name for name in selected_names if name not in case_by_name]
-    if unknown_cases:
-        parser.error(f"未知 dogfood case：{', '.join(unknown_cases)}")
+    try:
+        selected_names = select_case_names(
+            args.case,
+            [name for name, _ in case_registry],
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     workspace = args.workspace.resolve()
     _, base_dir = create_run_dir(

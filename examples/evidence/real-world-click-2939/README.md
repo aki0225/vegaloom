@@ -14,6 +14,8 @@
 ## 这份样例不包含什么
 
 - 原始 `runs/`、worker/reviewer 完整输出、prompt 全文、本机绝对路径、PID、认证和网络诊断。
+- 原始 `eval.md`、`finish-summary.json` 和 `finish-report.md`；本目录只能复核核心阶段的脱敏
+  摘要，不能独立重建完整 Finish/Eval 判断。
 - 上游修复 diff；执行副本不含远端或上游提交历史。
 - 成功率、任意仓库适用性或模型未使用训练数据记忆的证明。
 

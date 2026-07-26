@@ -87,3 +87,14 @@ fail-closed 的记录与成功记录同等保留：它验证的是"证据不足�
 该样例的脱敏状态、trace、diff、验证、gate、review 与 finish 摘要见
 [examples/evidence/real-world-click-2939](../examples/evidence/real-world-click-2939/)。
 这是一个历史回归上的单次真实闭环，不构成模型成功率、跨仓库泛化能力或独立于训练数据的证明。
+
+## 2026-07-26 公开证据范围说明
+
+上述 pycodestyle #1187 与 Click #2939 目录是核心阶段的脱敏摘要，不是原始运行目录的完整副本。
+公开包没有包含原始 `eval.md`、`finish-summary.json` 或 `finish-report.md`，因此第三方可以检查
+状态、trace 摘录、diff、验证摘要、范围/risk gate 与 reviewer verdict，但不能仅凭公开包
+独立重建完整 Finish/Eval 判断。
+
+pycodestyle #1187 follow-up 的“执行前冻结合同”来自本地运行记录；当前公开 Git 历史同时引入
+合同与结果，不能独立证明两者的先后顺序。Click #2939 则保留了先预注册、后追加结果的两个
+独立提交，可通过公开提交顺序核对。

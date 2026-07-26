@@ -3553,6 +3553,20 @@ def test_goal_status_highlights_latest_checkpoint_plan(tmp_path) -> None:
     )
 
 
+def test_dogfood_eval_case_selection_contract() -> None:
+    from scripts.dogfood_eval import _case_registry, select_case_names
+
+    available_names = [name for name, _ in _case_registry()]
+
+    assert select_case_names([], available_names) == available_names
+    assert select_case_names(
+        ["execution_control", "execution_control", "goal_p0_lifecycle"],
+        available_names,
+    ) == ["execution_control", "goal_p0_lifecycle"]
+    with pytest.raises(ValueError, match="未知 dogfood case：unknown-case"):
+        select_case_names(["unknown-case"], available_names)
+
+
 @pytest.mark.parametrize(
     "case_name",
     [

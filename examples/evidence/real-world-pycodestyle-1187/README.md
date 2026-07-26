@@ -4,8 +4,8 @@
 
 1. `reviewer-rejection/`：初始修复让固定测试通过，但隔离 reviewer 发现了未覆盖的语义回归，
    因此 run 保持 `needs_human`。
-2. `success/`：在新的隔离快照中，先明确补齐 reviewer 提出的正反行为合同，再由 worker 完成
-   修复、验证和独立审查。
+2. `success/`：据本地运行记录，在新的隔离快照中先明确补齐 reviewer 提出的正反行为合同，
+   再由 worker 完成修复、验证和独立审查。当前公开 Git 历史不能独立证明这一步的预注册顺序。
 
 源 Issue：PyCQA/pycodestyle #1187，目标是修复反向 `type(...)` 比较的 E721 漏报。
 
@@ -15,6 +15,8 @@
 - 本机绝对路径、执行 PID、完整 worker 输出、认证/网络诊断、prompt 全文和未跟踪文件清单均未公开。
 - 原始 `runs/` 与隔离仓库位于本地忽略目录，不能根据本目录重放同一个运行。
 - 两个样例只保留可检查的状态机结论、范围门禁、验证结果、reviewer verdict 和最小 diff。
+- 公开包没有包含原始 `eval.md`、`finish-summary.json` 或 `finish-report.md`，因此只能复核核心
+  阶段的脱敏摘要，不能仅凭本目录重建完整 Finish/Eval 判断。
 
 ## 如何解读
 
