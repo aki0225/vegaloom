@@ -9,8 +9,9 @@ import vega.loop_runtime as loop_runtime_module
 
 from vega.finish_runtime import FinishRuntime
 from vega.experimental.goal_evidence import validate_goal_evidence
+from vega.loop_integrity import LoopArtifactIntegrity, latest_verification_failed
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
-from vega.models import BriefInput
+from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.runner import RunnerResult
 
 
@@ -98,7 +99,8 @@ class SequencedReviewer:
                             {
                                 "severity": "major",
                                 "title": "继续验证",
-                                "detail": "需要下一轮确认。",
+                                "evidence": "当前验证尚未通过。",
+                                "recommendation": "修复后进入下一轮确认。",
                             }
                         ]
                     ),
@@ -219,6 +221,96 @@ def test_finish_recomputes_unverified_success_as_needs_human(tmp_path: Path) -> 
     assert finish["artifact_integrity"]["valid"] is True
     assert finish["verification_passed"] is False
     assert finish["finish_status"] == "needs_human"
+
+
+def test_legacy_verification_artifact_is_readable_but_not_completion_eligible(
+    tmp_path: Path,
+) -> None:
+    workspace, repo = _init_repo(tmp_path, with_verification_config=True)
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeWorker(),
+        reviewer_runner=ApprovingReviewer(),
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
+
+    state_path = run_dir / "state.json"
+    state = _read_json(state_path)
+    result_path = run_dir / "iterations" / "01" / "verification-result.json"
+    result = _read_json(result_path)
+    current_finish = _finish(workspace, run_dir)
+
+    assert state["verification_artifact_version"] == 2
+    assert result["artifact_version"] == 2
+    assert current_finish["verification_passed"] is True
+    assert current_finish["finish_status"] == "ready_to_commit"
+
+    state.pop("verification_artifact_version")
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    result.pop("artifact_version")
+    result_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    finish = _finish(workspace, run_dir)
+    loop_evidence = validate_goal_evidence(
+        workspace,
+        repo,
+        run_dir.name,
+        "loop",
+        "验证 legacy verification 只能读取展示，不能授予自动完成资格",
+    )
+    finish_evidence = validate_goal_evidence(
+        workspace,
+        repo,
+        run_dir.name,
+        "finish",
+        "验证 Finish 不信任缺少 v2 双重版本标记的 verification",
+    )
+
+    assert finish["artifact_integrity"]["valid"] is True
+    assert finish["verification_passed"] is False
+    assert finish["finish_status"] == "needs_human"
+    assert loop_evidence.completion_eligible is False
+    assert "verification=unverified" in (loop_evidence.validation_summary or "")
+    assert finish_evidence.completion_eligible is False
+    assert "finish_status=needs_human" in (finish_evidence.validation_summary or "")
+
+
+def test_legacy_failed_verification_is_unverified_not_trusted_failure() -> None:
+    state = LoopAutomationState(
+        run_id="legacy-verification",
+        task_mode="bug",
+        automation_mode="auto",
+        repo_path="repo",
+        input_source="inline-text",
+        current_iteration=1,
+        iterations=[
+            LoopIterationState(
+                iteration=1,
+                verification_status="failed",
+                verification_failed_count=1,
+            )
+        ],
+    )
+    integrity = LoopArtifactIntegrity(
+        valid=True,
+        issues=(),
+        verification_results=(
+            {
+                "iteration": 1,
+                "failed_count": 1,
+            },
+        ),
+    )
+
+    assert latest_verification_failed(state, integrity) is False
 
 
 def test_goal_rejects_unverified_loop_and_finish_evidence(tmp_path: Path) -> None:

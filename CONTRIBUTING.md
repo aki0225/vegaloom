@@ -12,9 +12,11 @@ python -m pip install -e ".[dev]"
 ## 运行验证
 
 ```bash
-python -m compileall -q src
-ruff check src tests
-pytest
+python -m compileall -q src scripts/check_repository_hygiene.py
+python scripts/check_repository_hygiene.py --base-ref origin/main
+python -m pytest
+ruff check src tests scripts/check_repository_hygiene.py
+git diff --check
 ```
 
 ## 提交规范

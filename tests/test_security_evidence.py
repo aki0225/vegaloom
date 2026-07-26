@@ -3,10 +3,17 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from vega import gate_runtime as gate_runtime_module
+from vega import git_read as git_read_module
+from vega import project_config as project_config_module
+from vega import project_knowledge as project_knowledge_module
+from vega import project_profile as project_profile_module
+from vega import reflect_runtime as reflect_runtime_module
+from vega import repository_identity as repository_identity_module
 from vega import workspace_check as workspace_check_module
 from vega.brief_runtime import BriefRuntime
 from vega.models import BriefInput
@@ -15,6 +22,7 @@ from vega.project_knowledge import load_agents_instructions
 from vega.project_profile import build_project_profile
 from vega.redaction import REDACTION_TEXT, redact_text
 from vega.experimental.inspection.runtime import EngineeringChangeRuntime
+from vega.tools import git_tools as git_tools_module
 from vega.workspace_check import capture_review_workspace, evaluate_workspace
 
 
@@ -390,6 +398,134 @@ def test_ignored_content_hashing_respects_file_budget(
     assert len(opened) == 1
 
 
+def test_git_reads_disable_external_config_and_diff_drivers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
+
+    workspace_check_module._run_git_bytes(
+        repo,
+        ["git", "status", "--porcelain=v1"],
+    )
+    commands: list[list[str]] = []
+
+    def fake_run_git_bytes(
+        repo_path: Path,
+        command: list[str],
+        *,
+        allowed_returncodes: tuple[int, ...] = (0,),
+    ) -> bytes:
+        del repo_path, allowed_returncodes
+        commands.append(command)
+        return b""
+
+    monkeypatch.setattr(workspace_check_module, "_run_git_bytes", fake_run_git_bytes)
+    workspace_check_module.collect_tracked_diff_parts(repo, ["--binary"])
+
+    actual_command, kwargs = calls[0]
+    assert ["-c", f"core.excludesFile={os.devnull}"] == actual_command[1:3]
+    assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert kwargs["env"]["GIT_ATTR_NOSYSTEM"] == "1"
+    assert all("--no-ext-diff" in command for command in commands)
+    assert all("--no-textconv" in command for command in commands)
+
+
+def test_reflect_git_reads_use_hardened_environment_and_diff_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
+
+    reflect_runtime_module.collect_git_reflection(repo)
+
+    assert calls
+    for command, kwargs in calls:
+        assert ["-c", f"core.excludesFile={os.devnull}"] == command[1:3]
+        assert "core.fsmonitor=false" in command
+        assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert kwargs["env"]["GIT_ATTR_NOSYSTEM"] == "1"
+    diff_commands = [command for command, _ in calls if "diff" in command]
+    assert diff_commands
+    assert all("--no-ext-diff" in command for command in diff_commands)
+    assert all("--no-textconv" in command for command in diff_commands)
+
+
+def test_gate_git_reads_use_hardened_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout=b"status", stderr=b"warning")
+
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
+
+    output = gate_runtime_module._git(
+        repo,
+        ["git", "status", "--short", "--untracked-files=all"],
+    )
+
+    assert output == "statuswarning"
+    command, kwargs = calls[0]
+    assert ["-c", f"core.excludesFile={os.devnull}"] == command[1:3]
+    assert "core.fsmonitor=false" in command
+    assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert kwargs["env"]["GIT_ATTR_NOSYSTEM"] == "1"
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        gate_runtime_module,
+        project_config_module,
+        project_knowledge_module,
+        project_profile_module,
+        reflect_runtime_module,
+        repository_identity_module,
+        git_tools_module,
+    ],
+)
+def test_production_git_read_modules_do_not_bypass_hardened_client(
+    module: ModuleType,
+) -> None:
+    assert module.__file__ is not None
+    module_path = Path(module.__file__)
+    source = module_path.read_text(encoding="utf-8")
+
+    assert "subprocess.run(" not in source
+
+
+def test_allowed_git_diff_checks_disable_external_drivers() -> None:
+    for check_id in ("git.diff", "git.diff_check"):
+        command = git_tools_module.ALLOWED_CHECKS[check_id]
+        assert "--no-ext-diff" in command
+        assert "--no-textconv" in command
+
+
 def test_workspace_check_reports_dubious_ownership_without_modifying_git_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -406,7 +542,7 @@ def test_workspace_check_reports_dubious_ownership_without_modifying_git_config(
             stderr="fatal: detected dubious ownership in repository",
         )
 
-    monkeypatch.setattr(workspace_check_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
 
     result = evaluate_workspace(repo)
     diagnostic = "\n".join(result.reasons)
@@ -425,11 +561,11 @@ def test_workspace_check_accepts_string_git_output_from_test_double(
     repo.mkdir()
 
     def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
-        if command[1:3] == ["rev-parse", "--verify"]:
+        if command[-3:] == ["rev-parse", "--verify", "HEAD"]:
             return SimpleNamespace(returncode=0, stdout="a" * 40, stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(workspace_check_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
 
     assert workspace_check_module.read_head_sha(repo) == "a" * 40
 

@@ -2,17 +2,28 @@ from __future__ import annotations
 
 import hashlib
 import json
-import stat
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .git_inventory import (
+    build_git_control_manifest,
+    read_core_ignorecase as _read_core_ignorecase,
+    read_head_sha as _read_head_sha,
+    read_ignored_paths,
+)
+from .git_read import run_git_bytes as _run_git_bytes
 from .project_config import load_project_config
-from .redaction import is_sensitive_path, redact_text, redact_value, sensitive_path_reason
-from .tools.git_tools import format_git_error
+from .redaction import redact_text, redact_value
+from .workspace_inventory import (
+    ContentManifestBudget,
+    build_content_manifest,
+    safe_git_status as _safe_git_status,
+    safe_path_for_report as _safe_path_for_report,
+    untracked_paths as _untracked_paths,
+)
 
 
 MAX_IGNORED_METADATA_FILES = 4096
@@ -22,6 +33,7 @@ MAX_IGNORED_CONTENT_BYTES = 8 * 1024 * 1024
 MAX_UNTRACKED_CONTENT_FILES = MAX_IGNORED_CONTENT_FILES
 MAX_UNTRACKED_FILE_BYTES = MAX_IGNORED_FILE_BYTES
 MAX_UNTRACKED_CONTENT_BYTES = MAX_IGNORED_CONTENT_BYTES
+MAX_GIT_CONTROL_FILE_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -31,6 +43,10 @@ class WorkspaceSnapshot:
     untracked_files: frozenset[str]
     head_sha: str = ""
     untracked_manifest_sha256: str = ""
+    ignored_manifest_sha256: str = ""
+    ignored_content_complete: bool = False
+    git_control_sha256: str = ""
+    git_control_complete: bool = False
     capture_complete: bool = True
 
     @property
@@ -57,6 +73,9 @@ class ReviewWorkspaceSnapshot:
     untracked_files: tuple[str, ...]
     unsafe_index_paths: tuple[str, ...] = ()
     untracked_content_complete: bool = False
+    ignored_content_complete: bool = False
+    git_control_sha256: str = ""
+    git_control_complete: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,6 +102,11 @@ class WorkspaceCheckResult(BaseModel):
     baseline_tracked_changes_present: bool = False
     baseline_tracked_files: list[str] = Field(default_factory=list)
     baseline_untracked_changed: bool = False
+    baseline_ignored_changed: bool = False
+    baseline_ignored_content_complete: bool = False
+    current_ignored_content_complete: bool = False
+    git_control_changed: bool = False
+    git_control_complete: bool = False
     baseline_head_sha: str | None = None
     current_head_sha: str | None = None
     baseline_head_changed: bool = False
@@ -92,6 +116,25 @@ class WorkspaceCheckResult(BaseModel):
     @property
     def has_failures(self) -> bool:
         return self.status == "failed"
+
+
+@dataclass(frozen=True)
+class _CurrentWorkspaceInventory:
+    head_sha: str
+    raw_status: str
+    ignored_manifest_sha256: str
+    ignored_content_complete: bool
+    git_control_sha256: str
+    git_control_complete: bool
+
+
+@dataclass
+class _WorkspaceAssessment:
+    status: Literal["passed", "failed", "skipped"]
+    reasons: list[str]
+    baseline_untracked_changed: bool = False
+    baseline_ignored_changed: bool = False
+    git_control_changed: bool = False
 
 
 def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
@@ -113,12 +156,35 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
         *tracked_snapshot.unstaged_files,
     ]
     untracked_files = list(tracked_snapshot.untracked_files)
+    try:
+        ignored_files, ignored_capture_complete = _ignored_paths(repo)
+        ignored_manifest_sha256, ignored_content_complete = _ignored_manifest(
+            repo,
+            ignored_files,
+        )
+        git_control_sha256, git_control_complete = _git_control_manifest(repo)
+    except RuntimeError as exc:
+        return WorkspaceSnapshot(
+            raw_status=f"<workspace control snapshot failed before worker: {exc}>",
+            tracked_files=frozenset(dict.fromkeys(tracked_files)),
+            untracked_files=frozenset(untracked_files),
+            head_sha=tracked_snapshot.head_sha,
+            untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
+            capture_complete=False,
+        )
     return WorkspaceSnapshot(
         raw_status="",
         tracked_files=frozenset(dict.fromkeys(tracked_files)),
         untracked_files=frozenset(untracked_files),
         head_sha=tracked_snapshot.head_sha,
         untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
+        ignored_manifest_sha256=ignored_manifest_sha256,
+        ignored_content_complete=(
+            ignored_capture_complete and ignored_content_complete
+        ),
+        git_control_sha256=git_control_sha256,
+        git_control_complete=git_control_complete,
+        capture_complete=git_control_complete,
     )
 
 
@@ -138,12 +204,7 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         ["--binary", "--full-index"],
     )
     tracked_files, untracked_files = _parse_porcelain_v1_paths(status)
-    ignored_files = _decode_nul_paths(
-        _run_git_bytes(
-            repo,
-            ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
-        )
-    )
+    ignored_files, ignored_capture_complete = _ignored_paths(repo)
     index_flags = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
     unsafe_index_paths = _unsafe_index_paths(index_flags)
     # 未跟踪文件只参与工作区指纹，不把其内容带入 reflect/reviewer 输入。
@@ -153,7 +214,11 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         repo,
         untracked_files,
     )
-    ignored_manifest_sha256 = _ignored_manifest_hash(repo, ignored_files)
+    ignored_manifest_sha256, ignored_content_complete = _ignored_manifest(
+        repo,
+        ignored_files,
+    )
+    git_control_sha256, git_control_complete = _git_control_manifest(repo)
     status_sha256 = _sha256(status)
     full_diff_sha256 = _sha256(full_diff.encode("utf-8"))
     staged_diff_sha256 = _sha256(staged_diff.encode("utf-8"))
@@ -168,6 +233,9 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
             f"untracked={untracked_manifest_sha256}",
             f"untracked_content_complete={untracked_content_complete}",
             f"ignored={ignored_manifest_sha256}",
+            f"ignored_content_complete={ignored_capture_complete and ignored_content_complete}",
+            f"git_control={git_control_sha256}",
+            f"git_control_complete={git_control_complete}",
             f"index_flags={_sha256(index_flags)}",
         ]
     ).encode("utf-8")
@@ -188,6 +256,11 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         untracked_files=tuple(untracked_files),
         unsafe_index_paths=tuple(unsafe_index_paths),
         untracked_content_complete=untracked_content_complete,
+        ignored_content_complete=(
+            ignored_capture_complete and ignored_content_complete
+        ),
+        git_control_sha256=git_control_sha256,
+        git_control_complete=git_control_complete,
     )
 
 
@@ -238,13 +311,12 @@ def evaluate_workspace(
 ) -> WorkspaceCheckResult:
     repo = repo_path.resolve()
     try:
-        current_head_sha = read_head_sha(repo)
-        raw_status = _git_status(repo)
+        current = _capture_current_workspace_inventory(repo)
     except RuntimeError as exc:
         return WorkspaceCheckResult(
             status="failed",
             repo_path=str(repo),
-            reasons=[f"无法读取 git status：{exc}"],
+            reasons=[f"无法读取 Git 工作区或控制文件：{exc}"],
         )
 
     try:
@@ -255,10 +327,10 @@ def evaluate_workspace(
             status="failed",
             repo_path=str(repo),
             reasons=[f"无法读取 .vega.yaml 预算配置：{exc}"],
-            raw_status=_safe_git_status(raw_status),
+            raw_status=_safe_git_status(current.raw_status),
         )
 
-    current_untracked = _untracked_paths(raw_status)
+    current_untracked = _untracked_paths(current.raw_status)
     previous_untracked = baseline.untracked_files if baseline else frozenset()
     new_untracked = sorted(set(current_untracked) - set(previous_untracked))
     baseline_tracked_files = sorted(baseline.tracked_files) if baseline else []
@@ -267,59 +339,35 @@ def evaluate_workspace(
         sorted(previous_untracked),
     )
     baseline_tracked_changes_present = bool(baseline and baseline.has_tracked_changes)
-    baseline_untracked_changed = False
     baseline_head_sha = expected_head_sha or (
         baseline.head_sha if baseline and baseline.head_sha else None
     )
     baseline_head_changed = bool(
-        baseline_head_sha and baseline_head_sha != current_head_sha
+        baseline_head_sha and baseline_head_sha != current.head_sha
     )
-    reasons: list[str] = []
-    status: Literal["passed", "failed", "skipped"] = "passed"
-    if baseline and not baseline.capture_complete:
-        status = "failed"
-        reasons.append("worker 启动前未能完整捕获工作区基线。")
-    elif baseline_head_changed:
-        status = "failed"
-        reasons.append(
-            "worker 执行期间 Git HEAD 发生变化；自动流程禁止 worker commit、checkout 或 rebase。"
-        )
-    elif baseline and baseline.has_tracked_changes:
-        if allow_existing_tracked_diff:
-            reasons.append(
-                "worker 启动前保留上一轮 auto 已产生的 tracked diff，"
-                "将其作为本轮工作区基线继续迭代。"
-            )
-        else:
-            status = "failed"
-            reasons.append(
-                "worker 启动前已存在 tracked diff；auto 无法将其安全归因于本轮 worker。"
-            )
-    elif (
-        baseline
-        and baseline.untracked_manifest_sha256 != current_baseline_manifest_sha256
-    ):
-        baseline_untracked_changed = True
-        status = "failed"
-        reasons.append("worker 修改或删除了启动前已存在的未跟踪文件。")
-
-    if require_clean_untracked and current_untracked:
-        status = "failed"
-        reasons.append("当前工作区存在未跟踪文件，隔离 reviewer 无法审查其内容。")
-    elif max_new_files is None:
-        if status != "failed":
-            status = "skipped"
-        reasons.append("未配置 budget.max_new_files，跳过新增未跟踪文件数量门禁。")
-    elif len(new_untracked) > max_new_files:
-        status = "failed"
-        reasons.append(
-            f"新增未跟踪文件数量超过预算：{len(new_untracked)} > {max_new_files}。"
-        )
-    else:
-        reasons.append(f"新增未跟踪文件数量在预算内：{len(new_untracked)} <= {max_new_files}。")
+    assessment = _WorkspaceAssessment(status="passed", reasons=[])
+    _assess_baseline_integrity(
+        assessment,
+        baseline=baseline,
+        baseline_head_changed=baseline_head_changed,
+        current_baseline_manifest_sha256=current_baseline_manifest_sha256,
+        allow_existing_tracked_diff=allow_existing_tracked_diff,
+    )
+    _assess_workspace_controls(
+        assessment,
+        baseline=baseline,
+        current=current,
+    )
+    _assess_untracked_budget(
+        assessment,
+        current_untracked=current_untracked,
+        new_untracked=new_untracked,
+        max_new_files=max_new_files,
+        require_clean_untracked=require_clean_untracked,
+    )
 
     return WorkspaceCheckResult(
-        status=status,
+        status=assessment.status,
         repo_path=str(repo),
         max_new_files=max_new_files,
         new_untracked_count=len(new_untracked),
@@ -328,12 +376,134 @@ def evaluate_workspace(
         baseline_tracked_files=[
             _safe_path_for_report(path) for path in baseline_tracked_files
         ],
-        baseline_untracked_changed=baseline_untracked_changed,
+        baseline_untracked_changed=assessment.baseline_untracked_changed,
+        baseline_ignored_changed=assessment.baseline_ignored_changed,
+        baseline_ignored_content_complete=bool(
+            baseline and baseline.ignored_content_complete
+        ),
+        current_ignored_content_complete=current.ignored_content_complete,
+        git_control_changed=assessment.git_control_changed,
+        git_control_complete=current.git_control_complete,
         baseline_head_sha=baseline_head_sha,
-        current_head_sha=current_head_sha,
+        current_head_sha=current.head_sha,
         baseline_head_changed=baseline_head_changed,
-        reasons=reasons,
-        raw_status=_safe_git_status(raw_status),
+        reasons=assessment.reasons,
+        raw_status=_safe_git_status(current.raw_status),
+    )
+
+
+def _capture_current_workspace_inventory(repo: Path) -> _CurrentWorkspaceInventory:
+    head_sha = read_head_sha(repo)
+    raw_status = _git_status(repo)
+    ignored_files, ignored_capture_complete = _ignored_paths(repo)
+    ignored_manifest_sha256, ignored_content_complete = _ignored_manifest(
+        repo,
+        ignored_files,
+    )
+    git_control_sha256, git_control_complete = _git_control_manifest(repo)
+    return _CurrentWorkspaceInventory(
+        head_sha=head_sha,
+        raw_status=raw_status,
+        ignored_manifest_sha256=ignored_manifest_sha256,
+        ignored_content_complete=(
+            ignored_capture_complete and ignored_content_complete
+        ),
+        git_control_sha256=git_control_sha256,
+        git_control_complete=git_control_complete,
+    )
+
+
+def _assess_baseline_integrity(
+    assessment: _WorkspaceAssessment,
+    *,
+    baseline: WorkspaceSnapshot | None,
+    baseline_head_changed: bool,
+    current_baseline_manifest_sha256: str,
+    allow_existing_tracked_diff: bool,
+) -> None:
+    if baseline and not baseline.capture_complete:
+        assessment.status = "failed"
+        assessment.reasons.append("worker 启动前未能完整捕获工作区基线。")
+    elif baseline_head_changed:
+        assessment.status = "failed"
+        assessment.reasons.append(
+            "worker 执行期间 Git HEAD 发生变化；自动流程禁止 worker commit、checkout 或 rebase。"
+        )
+    elif baseline and baseline.has_tracked_changes:
+        if allow_existing_tracked_diff:
+            assessment.reasons.append(
+                "worker 启动前保留上一轮 auto 已产生的 tracked diff，"
+                "将其作为本轮工作区基线继续迭代。"
+            )
+        else:
+            assessment.status = "failed"
+            assessment.reasons.append(
+                "worker 启动前已存在 tracked diff；auto 无法将其安全归因于本轮 worker。"
+            )
+    elif (
+        baseline
+        and baseline.untracked_manifest_sha256 != current_baseline_manifest_sha256
+    ):
+        assessment.baseline_untracked_changed = True
+        assessment.status = "failed"
+        assessment.reasons.append("worker 修改或删除了启动前已存在的未跟踪文件。")
+
+
+def _assess_workspace_controls(
+    assessment: _WorkspaceAssessment,
+    *,
+    baseline: WorkspaceSnapshot | None,
+    current: _CurrentWorkspaceInventory,
+) -> None:
+    if baseline is None:
+        return
+    if not baseline.git_control_complete or not current.git_control_complete:
+        assessment.status = "failed"
+        assessment.reasons.append("无法完整读取 Git 控制文件，不能信任后续状态与 diff。")
+    elif baseline.git_control_sha256 != current.git_control_sha256:
+        assessment.git_control_changed = True
+        assessment.status = "failed"
+        assessment.reasons.append(
+            "worker 修改了 Git 控制文件；已拒绝使用可能被改写的忽略或 diff 语义。"
+        )
+    if baseline.ignored_manifest_sha256 != current.ignored_manifest_sha256:
+        assessment.baseline_ignored_changed = True
+        assessment.status = "failed"
+        assessment.reasons.append("worker 新增、修改或删除了 ignored 路径。")
+    if not (
+        baseline.ignored_content_complete and current.ignored_content_complete
+    ):
+        assessment.reasons.append(
+            "ignored 路径集合已纳入指纹，但内容读取受敏感路径或预算限制；"
+            "该证据不构成对恶意本地写者的完整文件系统证明。"
+        )
+
+
+def _assess_untracked_budget(
+    assessment: _WorkspaceAssessment,
+    *,
+    current_untracked: list[str],
+    new_untracked: list[str],
+    max_new_files: int | None,
+    require_clean_untracked: bool,
+) -> None:
+    if require_clean_untracked and current_untracked:
+        assessment.status = "failed"
+        assessment.reasons.append("当前工作区存在未跟踪文件，隔离 reviewer 无法审查其内容。")
+        return
+    if max_new_files is None:
+        if assessment.status != "failed":
+            assessment.status = "skipped"
+        assessment.reasons.append("未配置 budget.max_new_files，跳过新增未跟踪文件数量门禁。")
+        return
+    if len(new_untracked) > max_new_files:
+        assessment.status = "failed"
+        assessment.reasons.append(
+            f"新增未跟踪文件数量超过预算：{len(new_untracked)} > {max_new_files}。"
+        )
+        return
+    assessment.reasons.append(
+        f"新增未跟踪文件数量在预算内：{len(new_untracked)} <= {max_new_files}。"
     )
 
 
@@ -346,6 +516,11 @@ def render_workspace_check(result: WorkspaceCheckResult) -> str:
         f"- 新增未跟踪文件：`{result.new_untracked_count}`",
         f"- 启动前已有 tracked diff：`{str(result.baseline_tracked_changes_present).lower()}`",
         f"- 启动前未跟踪文件发生变化：`{str(result.baseline_untracked_changed).lower()}`",
+        f"- ignored 路径发生变化：`{str(result.baseline_ignored_changed).lower()}`",
+        f"- ignored 基线内容完整：`{str(result.baseline_ignored_content_complete).lower()}`",
+        f"- ignored 当前内容完整：`{str(result.current_ignored_content_complete).lower()}`",
+        f"- Git 控制文件发生变化：`{str(result.git_control_changed).lower()}`",
+        f"- Git 控制文件完整：`{str(result.git_control_complete).lower()}`",
         f"- 执行期间 HEAD 发生变化：`{str(result.baseline_head_changed).lower()}`",
         f"- 预算上限：`{result.max_new_files if result.max_new_files is not None else '未配置'}`",
         "",
@@ -372,95 +547,10 @@ def render_workspace_check(result: WorkspaceCheckResult) -> str:
 
 
 def _git_status(repo_path: Path) -> str:
-    result = subprocess.run(
+    return _run_git_bytes(
+        repo_path,
         ["git", "status", "--short", "--untracked-files=all"],
-        cwd=repo_path,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    stderr = format_git_error(repo_path, result.stderr or "")
-    output = (result.stdout or "") + stderr
-    if result.returncode != 0:
-        raise RuntimeError(output.strip() or f"git status 退出码 {result.returncode}")
-    return output
-
-
-def _untracked_paths(status_text: str) -> list[str]:
-    paths: list[str] = []
-    for line in status_text.splitlines():
-        if not line.startswith("?? "):
-            continue
-        path = line[3:].strip()
-        if path:
-            paths.append(path)
-    return paths
-
-
-def _safe_git_status(status_text: str) -> str:
-    safe_lines: list[str] = []
-    for line in status_text.splitlines():
-        if len(line) < 4:
-            safe_lines.append(redact_text(line))
-            continue
-        prefix = line[:3]
-        path_text = line[3:].strip()
-        if not path_text:
-            safe_lines.append(redact_text(line))
-            continue
-        safe_lines.append(f"{prefix}{_safe_status_path_expression(path_text)}")
-    return "\n".join(safe_lines)
-
-
-def _safe_status_path_expression(path_text: str) -> str:
-    if " -> " in path_text:
-        return " -> ".join(
-            _safe_path_for_report(part.strip())
-            for part in path_text.split(" -> ")
-        )
-    return _safe_path_for_report(path_text)
-
-
-def _safe_path_for_report(path: str) -> str:
-    reason = sensitive_path_reason(path)
-    if reason:
-        return f"<sensitive-path:{reason}>"
-    return redact_text(path)
-
-
-def _run_git_bytes(
-    repo_path: Path,
-    command: list[str],
-    *,
-    allowed_returncodes: tuple[int, ...] = (0,),
-) -> bytes:
-    result = subprocess.run(
-        command,
-        cwd=repo_path,
-        capture_output=True,
-        timeout=30,
-        check=False,
-    )
-    stdout = _coerce_git_output_bytes(result.stdout)
-    stderr = _coerce_git_output_bytes(result.stderr)
-    if result.returncode not in allowed_returncodes:
-        output = stdout.decode("utf-8", errors="replace") + format_git_error(
-            repo_path,
-            stderr.decode("utf-8", errors="replace"),
-        )
-        raise RuntimeError(output.strip())
-    if result.returncode:
-        return stdout + stderr
-    return stdout
-
-
-def _coerce_git_output_bytes(value: bytes | str | None) -> bytes:
-    if isinstance(value, str):
-        return value.encode("utf-8")
-    return value or b""
+    ).decode("utf-8", errors="replace")
 
 
 def collect_tracked_diff_parts(
@@ -475,12 +565,21 @@ def collect_tracked_diff_parts(
     allowed_returncodes = (0, 1, 2) if "--check" in options else (0,)
     staged = _run_git_bytes(
         repo_path,
-        ["git", "diff", "--cached", *options, "HEAD", "--"],
+        [
+            "git",
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--cached",
+            *options,
+            "HEAD",
+            "--",
+        ],
         allowed_returncodes=allowed_returncodes,
     ).decode("utf-8", errors="replace")
     unstaged = _run_git_bytes(
         repo_path,
-        ["git", "diff", *options, "--"],
+        ["git", "diff", "--no-ext-diff", "--no-textconv", *options, "--"],
         allowed_returncodes=allowed_returncodes,
     ).decode("utf-8", errors="replace")
     return _normalize_newlines(staged), _normalize_newlines(unstaged)
@@ -704,160 +803,61 @@ def _append_changed_path(
 
 def read_head_sha(repo_path: Path) -> str:
     """读取当前提交身份；没有可解析 HEAD 时由调用方 fail-closed。"""
-    head_sha = _run_git_bytes(
-        repo_path.resolve(),
-        ["git", "rev-parse", "--verify", "HEAD"],
-    ).decode("utf-8", errors="replace").strip()
-    if not head_sha:
-        raise RuntimeError("git HEAD 为空")
-    return head_sha
+    return _read_head_sha(repo_path, run_git_bytes=_run_git_bytes)
 
 
-def _decode_nul_paths(payload: bytes) -> list[str]:
-    return [
-        item.decode("utf-8", errors="replace")
-        for item in payload.split(b"\0")
-        if item
-    ]
+def read_core_ignorecase(repo_path: Path) -> bool | None:
+    """只读取仓库本地的 core.ignorecase；未配置时交由文件系统语义决定。"""
+    return _read_core_ignorecase(repo_path, run_git_bytes=_run_git_bytes)
 
 
 def _untracked_manifest_hash(repo_path: Path, paths: list[str]) -> str:
     return _untracked_manifest(repo_path, paths)[0]
 
 
+def _ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
+    return read_ignored_paths(repo_path)
+
+
 def _untracked_manifest(
     repo_path: Path,
     paths: list[str],
 ) -> tuple[str, bool]:
-    unique_paths = sorted(dict.fromkeys(paths))
-    manifest = hashlib.sha256()
-    manifest.update(f"untracked-v2:{len(unique_paths)}".encode("ascii"))
-    manifest.update(b"\0")
-    content_files = 0
-    content_bytes = 0
-    content_complete = True
-    for relative_path in unique_paths:
-        path = repo_path / relative_path
-        manifest.update(relative_path.encode("utf-8", errors="replace"))
-        manifest.update(b"\0")
-        try:
-            stat_result = path.lstat()
-        except OSError:
-            manifest.update(b"<unreadable>")
-            content_complete = False
-        else:
-            manifest.update(_stat_metadata(stat_result))
-            if stat.S_ISLNK(stat_result.st_mode):
-                try:
-                    manifest.update(str(path.readlink()).encode("utf-8", errors="replace"))
-                except OSError:
-                    manifest.update(b"<unreadable-link>")
-                    content_complete = False
-            elif is_sensitive_path(relative_path):
-                manifest.update(b"<sensitive-content-not-read>")
-                content_complete = False
-            elif stat.S_ISREG(stat_result.st_mode):
-                remaining_bytes = MAX_UNTRACKED_CONTENT_BYTES - content_bytes
-                if content_files >= MAX_UNTRACKED_CONTENT_FILES:
-                    manifest.update(b"<content-file-budget-exceeded>")
-                    content_complete = False
-                elif stat_result.st_size > MAX_UNTRACKED_FILE_BYTES:
-                    manifest.update(b"<content-file-too-large>")
-                    content_complete = False
-                elif stat_result.st_size > remaining_bytes:
-                    manifest.update(b"<content-byte-budget-exceeded>")
-                    content_complete = False
-                else:
-                    content_files += 1
-                    content_bytes += stat_result.st_size
-                    content_hash = _bounded_file_hash(path, stat_result.st_size)
-                    try:
-                        final_stat = path.lstat()
-                    except OSError:
-                        content_hash = b"<content-changed-during-read>"
-                    else:
-                        if _stat_metadata(final_stat) != _stat_metadata(stat_result):
-                            content_hash = b"<content-changed-during-read>"
-                    manifest.update(content_hash)
-                    if not _is_complete_content_hash(content_hash):
-                        content_complete = False
-        manifest.update(b"\0")
-    return manifest.hexdigest(), content_complete
+    return build_content_manifest(
+        repo_path,
+        paths,
+        version="untracked-v2",
+        budget=ContentManifestBudget(
+            max_content_files=MAX_UNTRACKED_CONTENT_FILES,
+            max_file_bytes=MAX_UNTRACKED_FILE_BYTES,
+            max_content_bytes=MAX_UNTRACKED_CONTENT_BYTES,
+        ),
+    )
 
 
-def _ignored_manifest_hash(repo_path: Path, paths: list[str]) -> str:
-    unique_paths = sorted(dict.fromkeys(paths))
-    manifest = hashlib.sha256()
-    manifest.update(f"ignored-v2:{len(unique_paths)}".encode("ascii"))
-    manifest.update(b"\0")
-    content_files = 0
-    content_bytes = 0
-    for index, relative_path in enumerate(unique_paths):
-        path = repo_path / relative_path
-        manifest.update(relative_path.encode("utf-8", errors="replace"))
-        manifest.update(b"\0")
-        if index >= MAX_IGNORED_METADATA_FILES:
-            manifest.update(b"<metadata-budget-exceeded>")
-            manifest.update(b"\0")
-            continue
-        try:
-            stat_result = path.lstat()
-        except OSError:
-            manifest.update(b"<unreadable>")
-        else:
-            manifest.update(_stat_metadata(stat_result))
-            if path.is_symlink():
-                try:
-                    manifest.update(str(path.readlink()).encode("utf-8", errors="replace"))
-                except OSError:
-                    manifest.update(b"<unreadable-link>")
-            elif is_sensitive_path(relative_path):
-                manifest.update(b"<sensitive-content-not-read>")
-            elif stat.S_ISREG(stat_result.st_mode):
-                remaining_bytes = MAX_IGNORED_CONTENT_BYTES - content_bytes
-                if content_files >= MAX_IGNORED_CONTENT_FILES:
-                    manifest.update(b"<content-file-budget-exceeded>")
-                elif stat_result.st_size > MAX_IGNORED_FILE_BYTES:
-                    manifest.update(b"<content-file-too-large>")
-                elif stat_result.st_size > remaining_bytes:
-                    manifest.update(b"<content-byte-budget-exceeded>")
-                else:
-                    manifest.update(_bounded_file_hash(path, stat_result.st_size))
-                    content_files += 1
-                    content_bytes += stat_result.st_size
-        manifest.update(b"\0")
-    return manifest.hexdigest()
+def _ignored_manifest(
+    repo_path: Path,
+    paths: list[str],
+) -> tuple[str, bool]:
+    return build_content_manifest(
+        repo_path,
+        paths,
+        version="ignored-v3",
+        budget=ContentManifestBudget(
+            max_content_files=MAX_IGNORED_CONTENT_FILES,
+            max_file_bytes=MAX_IGNORED_FILE_BYTES,
+            max_content_bytes=MAX_IGNORED_CONTENT_BYTES,
+            max_metadata_files=MAX_IGNORED_METADATA_FILES,
+        ),
+    )
 
 
-def _stat_metadata(stat_result) -> bytes:
-    return (
-        f"{stat_result.st_mode}:{stat_result.st_size}:{stat_result.st_mtime_ns}:"
-        f"{stat_result.st_ctime_ns}:{stat_result.st_dev}:{stat_result.st_ino}"
-    ).encode("ascii")
-
-
-def _bounded_file_hash(path: Path, expected_size: int) -> bytes:
-    file_hash = hashlib.sha256()
-    read_bytes = 0
-    try:
-        with path.open("rb") as stream:
-            while read_bytes <= expected_size:
-                chunk = stream.read(min(1024 * 1024, expected_size - read_bytes + 1))
-                if not chunk:
-                    break
-                read_bytes += len(chunk)
-                if read_bytes > expected_size:
-                    return b"<content-changed-during-read>"
-                file_hash.update(chunk)
-    except OSError:
-        return b"<content-unreadable>"
-    if read_bytes != expected_size:
-        return b"<content-changed-during-read>"
-    return b"<content-sha256:" + file_hash.hexdigest().encode("ascii") + b">"
-
-
-def _is_complete_content_hash(content_hash: bytes) -> bool:
-    return content_hash.startswith(b"<content-sha256:")
+def _git_control_manifest(repo_path: Path) -> tuple[str, bool]:
+    return build_git_control_manifest(
+        repo_path,
+        run_git_bytes=_run_git_bytes,
+        max_file_bytes=MAX_GIT_CONTROL_FILE_BYTES,
+    )
 
 
 def _sha256(payload: bytes) -> str:

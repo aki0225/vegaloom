@@ -208,6 +208,50 @@ def test_human_risk_standalone_review_cannot_complete_goal_checkpoint(
         goal.checkpoint_done(goal_run.name, "01", note="不应完成")
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected_issue"),
+    [
+        ("malformed_verdict", "review_verdict_schema_invalid"),
+        ("state_verdict_mismatch", "review_state_verdict_mismatch"),
+    ],
+)
+def test_goal_review_evidence_requires_validated_review_chain(
+    tmp_path: Path,
+    mutation: str,
+    expected_issue: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    loop_run = _create_successful_loop_run(workspace, repo)
+    loop_state = _read_json(loop_run / "state.json")
+    review_run_id = loop_state["iterations"][-1]["review_run"]
+    review_run = workspace / "runs" / review_run_id
+
+    if mutation == "malformed_verdict":
+        review_run.joinpath("review-verdict.json").write_text(
+            '[{"verdict":"approve"}]\n',
+            encoding="utf-8",
+        )
+    else:
+        review_state_path = review_run / "state.json"
+        review_state = _read_json(review_state_path)
+        review_state["verdict"] = "request_changes"
+        _write_json(review_state_path, review_state)
+
+    goal = GoalRuntime(workspace)
+    goal_run = goal.start(repo, _goal_text(), "test", None)
+    goal.step(goal_run.name)
+    goal.attach(goal_run.name, "01", review_run_id, "review", "review 曾通过")
+
+    evidence = _read_json(goal_run / "goal-state.json")["checkpoint_records"][0]["refs"][0]
+    assert evidence["validated"] is True
+    assert evidence["completion_eligible"] is False
+    assert expected_issue in evidence["validation_summary"]
+    with pytest.raises(ValueError, match="缺少可完成证据"):
+        goal.checkpoint_done(goal_run.name, "01", note="不应放行")
+
+
 def test_gate_records_failure_for_reflect_from_another_repository(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     source_repo = tmp_path / "source-repo"

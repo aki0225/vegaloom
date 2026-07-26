@@ -1,0 +1,201 @@
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+import pytest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_finish_decision_has_single_definition_and_both_consumers_import_it() -> None:
+    policy_path = REPO_ROOT / "src" / "vega" / "finish_policy.py"
+    policy_tree = ast.parse(policy_path.read_text(encoding="utf-8"))
+    policy_definitions = [
+        node
+        for node in ast.walk(policy_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "decide_finish_status"
+    ]
+    assert len(policy_definitions) == 1
+
+    consumers = (
+        REPO_ROOT / "src" / "vega" / "finish_runtime.py",
+        REPO_ROOT / "src" / "vega" / "experimental" / "goal_integrity.py",
+    )
+    for consumer in consumers:
+        tree = ast.parse(consumer.read_text(encoding="utf-8"))
+        local_definitions = [
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in {
+                "decide_finish_status",
+                "_finish_status",
+                "_trusted_finish_status",
+            }
+        ]
+        imported_names = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "finish_policy"
+            for alias in node.names
+        }
+        policy_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "decide_finish_status"
+        ]
+        assert local_definitions == []
+        assert "decide_finish_status" in imported_names
+        assert len(policy_calls) == 1
+
+
+@pytest.mark.parametrize(
+    (
+        "loop_status",
+        "latest_verdict",
+        "latest_verification_failed",
+        "verification_passed",
+        "evidence_fresh",
+        "artifact_integrity_valid",
+        "expected",
+    ),
+    [
+        pytest.param(
+            "success",
+            "approve",
+            True,
+            True,
+            False,
+            False,
+            "needs_human",
+            id="invalid-artifacts-have-highest-priority",
+        ),
+        pytest.param(
+            "success",
+            "approve",
+            True,
+            True,
+            False,
+            True,
+            "needs_human",
+            id="stale-evidence-precedes-verification-failure",
+        ),
+        pytest.param(
+            "success",
+            "request_changes",
+            True,
+            False,
+            True,
+            True,
+            "needs_fix",
+            id="latest-verification-failure-precedes-missing-pass",
+        ),
+        pytest.param(
+            "success",
+            "request_changes",
+            False,
+            False,
+            True,
+            True,
+            "needs_human",
+            id="missing-trusted-pass-precedes-review-verdict",
+        ),
+        pytest.param(
+            "success",
+            "approve",
+            False,
+            True,
+            True,
+            True,
+            "ready_to_commit",
+            id="successful-approved-loop-is-ready",
+        ),
+        pytest.param(
+            "success",
+            "request_changes",
+            False,
+            True,
+            True,
+            True,
+            "needs_fix",
+            id="request-changes-needs-fix",
+        ),
+        pytest.param(
+            "failed",
+            "approve",
+            False,
+            True,
+            True,
+            True,
+            "needs_human",
+            id="failed-loop-needs-human",
+        ),
+        pytest.param(
+            "needs_human",
+            "approve",
+            False,
+            True,
+            True,
+            True,
+            "needs_human",
+            id="human-loop-remains-human",
+        ),
+        pytest.param(
+            "success",
+            "needs_human",
+            False,
+            True,
+            True,
+            True,
+            "incomplete",
+            id="successful-loop-with-human-verdict-is-incomplete",
+        ),
+        pytest.param(
+            "running",
+            "approve",
+            False,
+            True,
+            True,
+            True,
+            "incomplete",
+            id="nonterminal-loop-is-incomplete",
+        ),
+        pytest.param(
+            "created",
+            None,
+            False,
+            True,
+            True,
+            True,
+            "incomplete",
+            id="missing-verdict-is-incomplete",
+        ),
+    ],
+)
+def test_finish_decision_truth_table(
+    loop_status: str,
+    latest_verdict: str | None,
+    latest_verification_failed: bool,
+    verification_passed: bool,
+    evidence_fresh: bool,
+    artifact_integrity_valid: bool,
+    expected: str,
+) -> None:
+    from vega.finish_policy import decide_finish_status
+
+    assert (
+        decide_finish_status(
+            loop_status,
+            latest_verdict,
+            latest_verification_failed,
+            verification_passed=verification_passed,
+            evidence_fresh=evidence_fresh,
+            artifact_integrity_valid=artifact_integrity_valid,
+        )
+        == expected
+    )

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
+from vega import git_read as git_read_module
 from vega import models
 from vega.cli import app
 from vega.execution_control import ExecutionLease, inspect_execution_for_recovery
@@ -287,7 +288,7 @@ def test_git_dubious_ownership_error_is_actionable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        git_tools.subprocess,
+        git_read_module.subprocess,
         "run",
         lambda *args, **kwargs: SimpleNamespace(
             returncode=128,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 from dataclasses import dataclass
@@ -29,10 +28,11 @@ from .prompt_metrics import (
     write_prompt_metrics,
 )
 from .redaction import redact_text, redact_value
+from .review_evidence import review_evidence_issues as _review_evidence_issues
 from .run_utils import create_run_dir, resolve_run_dir
 from .runner import Runner, RunnerResult, make_runner
 from .trace import TraceWriter
-from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
+from .workspace_check import capture_review_workspace
 
 REVIEW_PACK_ARTIFACTS = [
     "state.json",
@@ -602,6 +602,14 @@ def collect_review_inputs(
             source_evidence.get("untracked_content_complete", False)
         ),
         "current_untracked_content_complete": current_snapshot.untracked_content_complete,
+        "source_ignored_content_complete": bool(
+            source_evidence.get("ignored_content_complete", False)
+        ),
+        "current_ignored_content_complete": current_snapshot.ignored_content_complete,
+        "source_git_control_complete": bool(
+            source_evidence.get("git_control_complete", False)
+        ),
+        "current_git_control_complete": current_snapshot.git_control_complete,
         "reviewer_start_workspace_fingerprint": "",
         "reviewer_end_workspace_fingerprint": "",
         "workspace_changed_during_review": False,
@@ -779,6 +787,8 @@ def parse_review_verdict(output: str, error: str | None = None) -> ReviewVerdict
         return _extract_review_verdict(output)
     except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:
         message = f"reviewer 输出无法解析为 verdict JSON：{type(exc).__name__}"
+        if str(exc) == "multiple review verdict json candidates found":
+            message = f"{message}；检测到多个合法 verdict 候选"
         if error:
             message = f"{message}；runner 错误：{error}"
         return _needs_human_verdict(message)
@@ -1095,135 +1105,6 @@ def _read_source_brief_artifact(
     )
 
 
-def _review_evidence_issues(
-    repo_path: Path,
-    source_run: str,
-    reflect_state: dict[str, Any],
-    source_evidence: dict[str, Any],
-    source_brief: str,
-    reflection: str,
-    diff_summary: str,
-    full_diff: str,
-    test_summary: str,
-    current_snapshot: ReviewWorkspaceSnapshot,
-) -> list[str]:
-    issues: list[str] = []
-    if str(reflect_state.get("run_id") or "") != source_run:
-        issues.append("source_reflect_run_id_mismatch")
-    if reflect_state.get("status") != "success":
-        # Reflect 的确定性 eval 已失败时，不能把其 patch 当成可信审查输入。
-        # 这条检查与 Goal/Gate 的证据新鲜度语义保持一致。
-        issues.append("source_reflect_not_success")
-    if not full_diff.strip():
-        issues.append("tracked_diff_empty")
-    if source_evidence.get("untracked_files"):
-        issues.append("source_untracked_files_present")
-    if current_snapshot.untracked_files:
-        issues.append("current_untracked_files_present")
-    if current_snapshot.unsafe_index_paths:
-        issues.append("current_unsafe_index_flags_present")
-    issues.extend(
-        _string_list(source_evidence.get("source_brief_evidence_issues"))
-    )
-    if not source_evidence:
-        return list(dict.fromkeys(issues))
-    schema_version = source_evidence.get("schema_version")
-    if schema_version not in {2, 3}:
-        issues.append("source_evidence_schema_unsupported")
-    if schema_version == 3:
-        for key, current_hash in (
-            ("staged_diff_sha256", current_snapshot.staged_diff_sha256),
-            ("unstaged_diff_sha256", current_snapshot.unstaged_diff_sha256),
-        ):
-            declared_hash = source_evidence.get(key)
-            if (
-                not isinstance(declared_hash, str)
-                or len(declared_hash) != 64
-                or declared_hash != current_hash
-            ):
-                issues.append(f"{key}_mismatch")
-    if str(source_evidence.get("source_run") or "") != source_run:
-        issues.append("source_run_mismatch")
-    source_repo = str(reflect_state.get("repo_path") or "")
-    if not source_repo or Path(source_repo).resolve() != repo_path.resolve():
-        issues.append("source_repo_mismatch")
-    state_upstream_source_run = reflect_state.get("source_run")
-    evidence_upstream_source_run = source_evidence.get("upstream_source_run")
-    if state_upstream_source_run != evidence_upstream_source_run:
-        issues.append("upstream_source_run_mismatch")
-    state_changed_files = _string_list(reflect_state.get("changed_files"))
-    evidence_changed_files = _string_list(source_evidence.get("changed_files"))
-    if not isinstance(reflect_state.get("changed_files"), list):
-        issues.append("source_changed_files_invalid")
-    if not isinstance(source_evidence.get("changed_files"), list):
-        issues.append("evidence_changed_files_invalid")
-    if state_changed_files != evidence_changed_files:
-        issues.append("changed_files_mismatch")
-    if str(source_evidence.get("changed_files_sha256") or "") != _sha256_json_value(
-        evidence_changed_files
-    ):
-        issues.append("changed_files_hash_mismatch")
-    snapshot_id = str(source_evidence.get("snapshot_id") or "")
-    snapshot_payload = {
-        key: value
-        for key, value in source_evidence.items()
-        if key != "snapshot_id"
-    }
-    if not snapshot_id or snapshot_id != _sha256_json(snapshot_payload):
-        issues.append("snapshot_metadata_invalid")
-    if str(source_evidence.get("source_brief_sha256") or "") != _sha256_text(
-        source_brief
-    ):
-        issues.append("source_brief_hash_mismatch")
-    if str(source_evidence.get("reflection_sha256") or "") != _sha256_text(
-        reflection
-    ):
-        issues.append("reflection_hash_mismatch")
-    if str(source_evidence.get("diff_summary_sha256") or "") != _sha256_text(
-        diff_summary
-    ):
-        issues.append("diff_summary_hash_mismatch")
-    if str(source_evidence.get("full_diff_sha256") or "") != _sha256_text(full_diff):
-        issues.append("full_diff_hash_mismatch")
-    if str(source_evidence.get("test_summary_sha256") or "") != _sha256_text(test_summary):
-        issues.append("test_summary_hash_mismatch")
-    if source_evidence.get("untracked_content_complete") is not True:
-        issues.append("source_untracked_content_incomplete")
-    if not current_snapshot.untracked_content_complete:
-        issues.append("current_untracked_content_incomplete")
-    source_workspace_fingerprint = str(
-        source_evidence.get("workspace_fingerprint") or ""
-    )
-    if (
-        not source_workspace_fingerprint
-        or reflect_state.get("workspace_fingerprint") != source_workspace_fingerprint
-    ):
-        issues.append("source_fingerprint_invalid")
-    if reflect_state.get("review_snapshot_id") != snapshot_id:
-        issues.append("source_snapshot_id_invalid")
-    if current_snapshot.fingerprint != source_workspace_fingerprint:
-        issues.append("workspace_changed_since_reflect")
-    return list(dict.fromkeys(issues))
-
-
-def _sha256_json(payload: dict[str, Any]) -> str:
-    return _sha256_json_value(payload)
-
-
-def _sha256_json_value(payload: object) -> str:
-    serialized = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return _sha256_text(serialized)
-
-
-def _sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
 def _read_text(path: Path) -> str:
     if not path.exists():
         return ""
@@ -1270,14 +1151,19 @@ def _read_json_artifact(
 
 def _extract_review_verdict(text: str) -> ReviewVerdict:
     # codex exec 这类 runner 可能在 JSON 后追加 transcript/token 统计；
-    # 这里按“第一个符合 ReviewVerdict schema 的 JSON 对象”解析，避免贪婪截取误吞后续内容。
+    # 必须完整扫描并确认只有一个合法 verdict，避免歧义输出被错误接受。
+    verdicts: list[ReviewVerdict] = []
     for candidate in _iter_json_object_candidates(text):
         try:
             data = json.loads(candidate)
-            return ReviewVerdict.model_validate(data)
+            verdicts.append(ReviewVerdict.model_validate(data))
         except (json.JSONDecodeError, ValidationError, TypeError):
             continue
-    raise ValueError("review verdict json not found")
+    if not verdicts:
+        raise ValueError("review verdict json not found")
+    if len(verdicts) > 1:
+        raise ValueError("multiple review verdict json candidates found")
+    return verdicts[0]
 
 
 def _iter_json_object_candidates(text: str) -> list[str]:

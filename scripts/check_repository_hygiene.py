@@ -70,6 +70,14 @@ class HygieneViolation:
     revision: str | None = None
 
 
+@dataclass(frozen=True)
+class GitTreeEntry:
+    mode: str
+    object_type: str
+    object_id: str
+    relative_path: str
+
+
 class HygieneCheckError(RuntimeError):
     """仓库卫生检查无法可靠完成。"""
 
@@ -170,6 +178,7 @@ def scan_worktree(repo_root: Path) -> list[HygieneViolation]:
         text = _decode_text(data)
         if text is not None:
             violations.extend(find_text_violations(relative_path, text))
+    violations.extend(_eval_worktree_violations(repo_root))
     return violations
 
 
@@ -181,6 +190,7 @@ def scan_history(repo_root: Path, base_ref: str) -> list[HygieneViolation]:
 
     for commit in commits:
         revision = commit[:12]
+        violations.extend(_eval_revision_violations(repo_root, commit, revision))
         commit_message = _run_git(
             repo_root,
             "show",
@@ -217,6 +227,136 @@ def scan_history(repo_root: Path, base_ref: str) -> list[HygieneViolation]:
                     )
                 )
     return violations
+
+
+def _eval_worktree_violations(repo_root: Path) -> list[HygieneViolation]:
+    baseline = _tree_entries(repo_root, "HEAD", "eval")
+    violations: list[HygieneViolation] = []
+    for relative_path, entry in baseline.items():
+        path = repo_root.joinpath(*PurePosixPath(relative_path).parts)
+        current_kind = _worktree_entry_kind(path)
+        expected_kind = _git_entry_kind(entry)
+        if current_kind != expected_kind:
+            violations.append(_eval_append_only_violation(relative_path))
+            continue
+        baseline_data = _read_git_blob(repo_root, entry.object_id)
+        current_data = _read_worktree_file(repo_root, relative_path)
+        if not _has_append_only_prefix(baseline_data, current_data):
+            violations.append(_eval_append_only_violation(relative_path))
+    return violations
+
+
+def _eval_revision_violations(
+    repo_root: Path,
+    commit: str,
+    revision: str,
+) -> list[HygieneViolation]:
+    parent = _first_parent(repo_root, commit)
+    if parent is None:
+        return []
+    baseline = _tree_entries(repo_root, parent, "eval")
+    current = _tree_entries(repo_root, commit, "eval")
+    violations: list[HygieneViolation] = []
+    for relative_path, baseline_entry in baseline.items():
+        current_entry = current.get(relative_path)
+        if (
+            current_entry is None
+            or current_entry.mode != baseline_entry.mode
+            or current_entry.object_type != baseline_entry.object_type
+        ):
+            violations.append(
+                _eval_append_only_violation(relative_path, revision=revision)
+            )
+            continue
+        if current_entry.object_id == baseline_entry.object_id:
+            continue
+        baseline_data = _read_git_blob(repo_root, baseline_entry.object_id)
+        current_data = _read_git_blob(repo_root, current_entry.object_id)
+        if not current_data.startswith(baseline_data):
+            violations.append(
+                _eval_append_only_violation(relative_path, revision=revision)
+            )
+    return violations
+
+
+def _eval_append_only_violation(
+    relative_path: str,
+    *,
+    revision: str | None = None,
+) -> HygieneViolation:
+    return HygieneViolation(
+        relative_path=relative_path,
+        line_number=None,
+        rule="eval-not-append-only",
+        message="eval/ 证据文件只允许尾部追加，禁止删除、重命名、改写或改变文件类型",
+        revision=revision,
+    )
+
+
+def _tree_entries(
+    repo_root: Path,
+    revision: str,
+    relative_path: str,
+) -> dict[str, GitTreeEntry]:
+    output = _run_git(
+        repo_root,
+        "ls-tree",
+        "-r",
+        "-z",
+        revision,
+        "--",
+        relative_path,
+    )
+    entries: dict[str, GitTreeEntry] = {}
+    for record in output.split(b"\0"):
+        if not record:
+            continue
+        metadata, separator, raw_path = record.partition(b"\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            raise HygieneCheckError("无法解析 eval/ Git 树条目")
+        path = raw_path.decode("utf-8", errors="surrogateescape")
+        entries[path] = GitTreeEntry(
+            mode=fields[0].decode("ascii"),
+            object_type=fields[1].decode("ascii"),
+            object_id=fields[2].decode("ascii"),
+            relative_path=path,
+        )
+    return entries
+
+
+def _first_parent(repo_root: Path, commit: str) -> str | None:
+    output = _run_git(repo_root, "rev-list", "--parents", "-n", "1", commit)
+    fields = output.decode("ascii").split()
+    return fields[1] if len(fields) > 1 else None
+
+
+def _read_git_blob(repo_root: Path, object_id: str) -> bytes:
+    return _run_git(repo_root, "cat-file", "-p", object_id)
+
+
+def _git_entry_kind(entry: GitTreeEntry) -> str:
+    if entry.object_type != "blob":
+        return entry.object_type
+    return "symlink" if entry.mode == "120000" else "file"
+
+
+def _worktree_entry_kind(path: Path) -> str:
+    if path.is_symlink():
+        return "symlink"
+    if path.is_file():
+        return "file"
+    if path.is_dir():
+        return "tree"
+    return "missing"
+
+
+def _has_append_only_prefix(baseline: bytes, current: bytes) -> bool:
+    if b"\0" in baseline or b"\0" in current:
+        return current.startswith(baseline)
+    normalized_baseline = baseline.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    normalized_current = current.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return normalized_current.startswith(normalized_baseline)
 
 
 def render_violations(violations: list[HygieneViolation]) -> str:

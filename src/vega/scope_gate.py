@@ -3,8 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from fnmatch import fnmatchcase
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 import unicodedata
@@ -14,6 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .models import LoopIterationState, ScopeGateViolation
 from .project_config import ScopeConfig, scope_policy_sha256
 from .redaction import redact_text
+from .scope_path_matching import (
+    matching_patterns as _matching_patterns,
+    path_matches_pattern as _match_scope_path_pattern,
+    scope_paths_are_case_insensitive as _scope_paths_are_case_insensitive,
+)
 from .trace import TraceWriter
 from .workspace_check import capture_tracked_scope_snapshot
 
@@ -93,7 +96,9 @@ def evaluate_scope_gate(
     """
     policy_sha256 = scope_policy_sha256(scope)
     try:
-        snapshot = capture_tracked_scope_snapshot(repo_path.resolve())
+        repo = repo_path.resolve()
+        snapshot = capture_tracked_scope_snapshot(repo)
+        case_sensitive = not _scope_paths_are_case_insensitive(repo)
     except Exception as exc:  # noqa: BLE001 - Git 读取失败必须停止后续自动流程
         return ScopeGateResult(
             status="failed",
@@ -179,7 +184,11 @@ def evaluate_scope_gate(
                 )
             )
             continue
-        forbidden_matches = _matching_patterns(path, scope.forbidden_paths)
+        forbidden_matches = _matching_patterns(
+            path,
+            scope.forbidden_paths,
+            case_sensitive=case_sensitive,
+        )
         if forbidden_matches:
             violations.append(
                 ScopeGateViolation(
@@ -190,7 +199,11 @@ def evaluate_scope_gate(
             )
             continue
         if scope.allowed_paths:
-            allowed_matches = _matching_patterns(path, scope.allowed_paths)
+            allowed_matches = _matching_patterns(
+                path,
+                scope.allowed_paths,
+                case_sensitive=case_sensitive,
+            )
             if not allowed_matches:
                 violations.append(
                     ScopeGateViolation(
@@ -426,34 +439,17 @@ def _changed_paths_sha256(staged_files: list[str], unstaged_files: list[str]) ->
     return hashlib.sha256(payload).hexdigest()
 
 
-def _matching_patterns(path: str, patterns: list[str]) -> list[str]:
-    return [pattern for pattern in patterns if _path_matches_pattern(path, pattern)]
-
-
-def _path_matches_pattern(path: str, pattern: str) -> bool:
-    """以 segment 为边界匹配 POSIX glob，`**` 仅表示零到多个完整目录段。"""
-    path_segments = tuple(path.split("/"))
-    pattern_segments = tuple(pattern.split("/"))
-
-    @lru_cache(maxsize=None)
-    def matches(path_index: int, pattern_index: int) -> bool:
-        if pattern_index == len(pattern_segments):
-            return path_index == len(path_segments)
-        current_pattern = pattern_segments[pattern_index]
-        if current_pattern == "**":
-            if pattern_index == len(pattern_segments) - 1:
-                return True
-            return any(
-                matches(next_path_index, pattern_index + 1)
-                for next_path_index in range(path_index, len(path_segments) + 1)
-            )
-        if path_index == len(path_segments):
-            return False
-        if not fnmatchcase(path_segments[path_index], current_pattern):
-            return False
-        return matches(path_index + 1, pattern_index + 1)
-
-    return matches(0, 0)
+def _path_matches_pattern(
+    path: str,
+    pattern: str,
+    *,
+    case_sensitive: bool = True,
+) -> bool:
+    return _match_scope_path_pattern(
+        path,
+        pattern,
+        case_sensitive=case_sensitive,
+    )
 
 
 def _is_safe_repo_relative_path(path: str) -> bool:

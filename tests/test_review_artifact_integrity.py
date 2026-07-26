@@ -53,7 +53,7 @@ def test_review_evidence_binds_all_reviewer_inputs(tmp_path: Path) -> None:
     reflect_run = ReflectRuntime(tmp_path).run(repo, source_run=brief_run.name)
     evidence = _read_json(reflect_run / "review-evidence.json")
 
-    assert evidence["schema_version"] == 3
+    assert evidence["schema_version"] == 4
     assert evidence["source_run"] == reflect_run.name
     assert evidence["upstream_source_run"] == brief_run.name
     assert evidence["changed_files"] == ["README.md"]
@@ -76,6 +76,9 @@ def test_review_evidence_binds_all_reviewer_inputs(tmp_path: Path) -> None:
         reflect_run / "test-summary.md"
     )
     assert evidence["untracked_content_complete"] is True
+    assert evidence["ignored_content_complete"] is True
+    assert evidence["git_control_complete"] is True
+    assert len(evidence["git_control_sha256"]) == 64
 
     runner = RecordingRunner()
     review_run = ReviewRuntime(tmp_path, runner=runner).run(repo, reflect_run.name)
@@ -223,6 +226,61 @@ def test_changed_files_and_source_run_tampering_block_reviewer(
     assert "changed_files_mismatch" in context["evidence_issues"]
     assert "source_run_mismatch" in context["evidence_issues"]
     assert _read_json(review_run / "review-verdict.json")["verdict"] == "needs_human"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_issue"),
+    [
+        ("ignored_content_complete", "unknown", "ignored_content_complete_invalid"),
+        ("git_control_sha256", "0" * 64, "git_control_sha256_mismatch"),
+        ("git_control_complete", False, "source_git_control_incomplete"),
+    ],
+)
+def test_schema_v4_evidence_fields_fail_closed(
+    tmp_path: Path,
+    field: str,
+    value: object,
+    expected_issue: str,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_repo(repo)
+    reflect_run = ReflectRuntime(tmp_path).run(repo)
+    evidence = _read_json(reflect_run / "review-evidence.json")
+    evidence[field] = value
+    evidence["snapshot_id"] = _sha256_json(
+        {key: item for key, item in evidence.items() if key != "snapshot_id"}
+    )
+    (reflect_run / "review-evidence.json").write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    runner = RecordingRunner()
+
+    review_run = ReviewRuntime(tmp_path, runner=runner).run(repo, reflect_run.name)
+
+    context = _read_json(review_run / "review-context.json")
+    assert runner.prompts == []
+    assert expected_issue in context["evidence_issues"]
+    assert _read_json(review_run / "review-verdict.json")["verdict"] == "needs_human"
+
+
+def test_review_rejects_git_control_change_since_reflect(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_repo(repo)
+    reflect_run = ReflectRuntime(tmp_path).run(repo)
+    exclude = repo / ".git" / "info" / "exclude"
+    exclude.write_text(
+        exclude.read_text(encoding="utf-8") + "\nlocal.log\n",
+        encoding="utf-8",
+    )
+    runner = RecordingRunner()
+
+    review_run = ReviewRuntime(tmp_path, runner=runner).run(repo, reflect_run.name)
+
+    context = _read_json(review_run / "review-context.json")
+    assert runner.prompts == []
+    assert "git_control_sha256_mismatch" in context["evidence_issues"]
+    assert "workspace_changed_since_reflect" in context["evidence_issues"]
 
 
 def test_incomplete_untracked_content_fingerprint_blocks_reviewer(

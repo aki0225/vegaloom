@@ -1,39 +1,30 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+
+from ..git_read import coerce_git_output_bytes, format_git_error, run_git_capture
 
 
 ALLOWED_CHECKS = {
     "git.status": ["git", "status", "--short"],
-    "git.diff": ["git", "diff", "--stat"],
-    "git.diff_check": ["git", "diff", "--check"],
+    "git.diff": ["git", "diff", "--no-ext-diff", "--no-textconv", "--stat"],
+    "git.diff_check": ["git", "diff", "--no-ext-diff", "--no-textconv", "--check"],
 }
 
 
 def run_git(repo_path: Path, check_id: str) -> tuple[int, str, str]:
     if check_id not in ALLOWED_CHECKS:
         raise ValueError(f"git check 未在允许列表中：{check_id}")
-    result = subprocess.run(
+    result = run_git_capture(
+        repo_path,
         ALLOWED_CHECKS[check_id],
-        cwd=repo_path,
-        capture_output=True,
-        encoding="utf-8",
+    )
+    stdout = coerce_git_output_bytes(result.stdout).decode(
+        "utf-8",
         errors="replace",
-        text=True,
-        timeout=30,
-        check=False,
     )
-    return result.returncode, result.stdout, format_git_error(repo_path, result.stderr)
-
-
-def format_git_error(repo_path: Path, stderr: str) -> str:
-    if "dubious ownership" not in stderr.lower():
-        return stderr
-    repo = repo_path.resolve().as_posix()
-    guidance = (
-        "\nVega 检测到 Git safe.directory 拒绝访问。"
-        "Vega 不会自动修改全局 Git 配置；请先确认该目录可信，再手动执行：\n"
-        f'git config --global --add safe.directory "{repo}"\n'
+    stderr = coerce_git_output_bytes(result.stderr).decode(
+        "utf-8",
+        errors="replace",
     )
-    return stderr.rstrip() + guidance
+    return result.returncode, stdout, format_git_error(repo_path, stderr)

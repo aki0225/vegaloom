@@ -5,7 +5,6 @@ import os
 import signal
 import subprocess
 import tempfile
-import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -17,6 +16,33 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from .execution_feedback import ExecutionProgressReporter, ExecutionProgressTicker
+from .execution_process import (
+    ProcessProbe,
+    ProcessTerminationResult,
+    activate_windows_job_process as _activate_windows_job_process,
+    add_windows_job_creation_flag as _add_windows_job_creation_flag,
+    close_windows_job as _close_windows_job,
+    create_windows_job_for_execution as _create_execution_job,
+    get_process_creation_token as _process_creation_token,
+    is_process_alive as _process_is_alive,
+    owned_process_tree_is_active as _owned_process_tree_is_active,
+    owned_process_tree_may_be_active as _owned_process_tree_may_be_active,
+    probe_process as _process_probe,
+    probe_windows_job as _windows_job_probe,
+    process_group_options as _platform_process_group_options,
+    terminate_posix_process as _terminate_posix_process,
+    windows_job_blocks_recovery,
+    windows_job_recovery_summary,
+)
+from .windows_job import (
+    NamedWindowsJob,
+    WindowsJobError as WindowsJobError,
+    WindowsJobProbe,
+)
+from .windows_process_termination import (
+    run_windows_taskkill as _taskkill_windows_process_tree,
+    terminate_windows_process as _terminate_windows_process,
+)
 
 ExecutionStatus = Literal[
     "starting",
@@ -42,7 +68,10 @@ class ExecutionLease(BaseModel):
     step: str
     iteration: int | None = None
     owner_pid: int = Field(ge=1)
+    owner_creation_token: int | None = Field(default=None, ge=0)
     child_pid: int | None = Field(default=None, ge=1)
+    child_creation_token: int | None = Field(default=None, ge=0)
+    windows_job_name: str | None = None
     termination_unconfirmed: bool = False
     command: list[str] = Field(default_factory=list)
     started_at: str
@@ -97,12 +126,6 @@ class OwnedProcessResult:
 
 
 @dataclass(frozen=True)
-class ProcessTerminationResult:
-    succeeded: bool
-    detail: str
-
-
-@dataclass(frozen=True)
 class ExecutionRecord:
     path: Path
     lease: ExecutionLease
@@ -137,6 +160,7 @@ class ExecutionController:
             step=self.context.step,
             iteration=self.context.iteration,
             owner_pid=os.getpid(),
+            owner_creation_token=_get_process_creation_token(os.getpid()),
             command=[_redact_process_output(item) for item in command_parts],
             started_at=now.isoformat(),
             last_heartbeat=now.isoformat(),
@@ -147,9 +171,22 @@ class ExecutionController:
         _write_model_atomic(self.execution_path, self.lease)
         return self.lease
 
-    def child_started(self, child_pid: int) -> None:
+    def attach_windows_job(self, job_name: str) -> None:
+        lease = self._require_lease()
+        lease.windows_job_name = job_name
+        _write_model_atomic(self.execution_path, lease)
+
+    def child_created(self, child_pid: int) -> None:
         lease = self._require_lease()
         lease.child_pid = child_pid
+        lease.child_creation_token = _get_process_creation_token(child_pid)
+        _write_model_atomic(self.execution_path, lease)
+
+    def child_started(self, child_pid: int) -> None:
+        lease = self._require_lease()
+        if lease.child_pid != child_pid:
+            self.child_created(child_pid)
+            lease = self._require_lease()
         lease.status = "running"
         self.heartbeat()
 
@@ -243,41 +280,56 @@ def run_owned_process(
     启动并写入 execution.json 的 PID，不扫描或终止系统中的其他 Codex/Node 进程。
     """
     controller = ExecutionController(context)
-    controller.prepare(command, timeout_seconds)
+    lease = controller.prepare(command, timeout_seconds)
     process: subprocess.Popen[bytes] | None = None
+    windows_job: NamedWindowsJob | None = None
     deadline = time.monotonic() + timeout_seconds
     next_heartbeat = time.monotonic()
     progress = ExecutionProgressTicker(context.step, context.progress_reporter)
     status: Literal["success", "error", "timed_out", "stopped"] = "error"
     error: str | None = None
-    stdin_writer: threading.Thread | None = None
     output = ""
     termination_unconfirmed = False
     process_environment = None
     if environment is not None:
         process_environment = os.environ.copy()
         process_environment.update(environment)
-    with tempfile.TemporaryFile("w+b") as output_file:
+    with (
+        tempfile.TemporaryFile("w+b") as output_file,
+        tempfile.TemporaryFile("w+b") as input_file,
+    ):
         try:
+            input_file.write(input_text.encode("utf-8"))
+            input_file.seek(0)
+            windows_job = _create_windows_job_for_execution(controller, lease)
+            process_options = _add_windows_job_creation_flag(
+                _process_group_options(),
+                windows_job,
+            )
             process = subprocess.Popen(
                 command,
                 cwd=cwd,
-                stdin=subprocess.PIPE,
+                stdin=input_file,
                 stdout=output_file,
                 stderr=subprocess.STDOUT,
                 env=process_environment,
-                **_process_group_options(),
+                **process_options,
+            )
+            _activate_windows_job_process(
+                windows_job,
+                process.pid,
+                controller.child_created,
             )
             controller.child_started(process.pid)
             progress.started()
-            stdin_writer = _start_stdin_writer(process, input_text)
-            while process.poll() is None:
+            while _owned_process_tree_is_active(process, windows_job):
                 request = controller.read_stop_request()
                 if request is not None:
                     controller.mark_stop_requested(request)
                     termination = _terminate_owned_process(
                         process,
                         context.terminate_grace_seconds,
+                        windows_job=windows_job,
                     )
                     if termination.succeeded:
                         status = "stopped"
@@ -295,6 +347,7 @@ def run_owned_process(
                     termination = _terminate_owned_process(
                         process,
                         context.terminate_grace_seconds,
+                        windows_job=windows_job,
                     )
                     if termination.succeeded:
                         status = "timed_out"
@@ -320,10 +373,14 @@ def run_owned_process(
                 if returncode != 0:
                     error = f"外部 runner 退出码：{returncode}"
         except KeyboardInterrupt:
-            if process is not None and process.poll() is None:
+            if process is not None and _owned_process_tree_may_be_active(
+                process,
+                windows_job,
+            ):
                 termination = _terminate_owned_process(
                     process,
                     context.terminate_grace_seconds,
+                    windows_job=windows_job,
                 )
                 if not termination.succeeded:
                     termination_unconfirmed = True
@@ -339,10 +396,14 @@ def run_owned_process(
                 error = "Vega CLI 收到中断信号，当前 owned process 已退出。"
                 status = "stopped"
         except OSError as exc:
-            if process is not None and process.poll() is None:
+            if process is not None and _owned_process_tree_may_be_active(
+                process,
+                windows_job,
+            ):
                 termination = _terminate_owned_process(
                     process,
                     context.terminate_grace_seconds,
+                    windows_job=windows_job,
                 )
                 if not termination.succeeded:
                     termination_unconfirmed = True
@@ -354,8 +415,6 @@ def run_owned_process(
                 error = f"外部 runner 执行控制失败：{exc}"
             status = "error"
         finally:
-            if stdin_writer is not None:
-                stdin_writer.join(timeout=1.0)
             try:
                 output = _persist_redacted_output(output_file, controller.output_path)
             except OSError as exc:
@@ -364,13 +423,16 @@ def run_owned_process(
                 if status == "success":
                     status = "error"
             returncode = process.returncode if process is not None else None
-            if termination_unconfirmed:
-                controller.record_termination_failure(
-                    reason=error or "owned process 终止未确认。",
-                    returncode=returncode,
-                )
-            else:
-                controller.finish(status, reason=error, returncode=returncode)
+            try:
+                if termination_unconfirmed:
+                    controller.record_termination_failure(
+                        reason=error or "owned process 终止未确认。",
+                        returncode=returncode,
+                    )
+                else:
+                    controller.finish(status, reason=error, returncode=returncode)
+            finally:
+                _close_windows_job(windows_job)
 
     return OwnedProcessResult(
         status=status,
@@ -583,6 +645,14 @@ def inspect_execution_for_recovery(run_dir: Path) -> ExecutionRecoveryInspection
     live_active_records = [record for record, stale_reason in active_records if stale_reason is None]
     if live_active_records:
         record = max(live_active_records, key=lambda item: _parse_datetime(item.lease.last_heartbeat))
+        job_probe = _execution_windows_job_probe(record.lease)
+        job_summary = windows_job_recovery_summary(job_probe)
+        if job_summary is not None:
+            return ExecutionRecoveryInspection(
+                False,
+                job_summary,
+                record,
+            )
         return ExecutionRecoveryInspection(
             False,
             "active execution 至少一个 owned/child PID 仍存活；"
@@ -633,11 +703,18 @@ def inspect_execution_for_recovery(run_dir: Path) -> ExecutionRecoveryInspection
 def _active_execution_stale_reason(lease: ExecutionLease) -> str | None:
     if lease.termination_unconfirmed:
         return "owned process tree 终止未确认"
-    owner_alive = is_process_alive(lease.owner_pid)
-    child_alive = lease.child_pid is not None and is_process_alive(lease.child_pid)
-    if owner_alive or child_alive:
+    job_probe = _execution_windows_job_probe(lease)
+    if windows_job_blocks_recovery(job_probe):
+        return None
+    owner_probe = _probe_process(lease.owner_pid, lease.owner_creation_token)
+    child_probe = (
+        _probe_process(lease.child_pid, lease.child_creation_token)
+        if lease.child_pid is not None
+        else ProcessProbe("gone")
+    )
+    if owner_probe.status != "gone" or child_probe.status != "gone":
         # heartbeat/deadline 过期不足以证明执行主体已经退出。只要任一 owned PID
-        # 仍存活，recover 就可能与原进程并发写状态，必须先 stop 或等待进程终止。
+        # 仍存活或身份无法确认，recover 就可能与原进程并发写状态，必须保守阻止。
         return None
 
     now = _now()
@@ -645,62 +722,68 @@ def _active_execution_stale_reason(lease: ExecutionLease) -> str | None:
         return "active execution deadline 已过期"
     if _parse_datetime(lease.lease_expires_at) <= now:
         return "active execution heartbeat lease 已过期"
-    if not owner_alive:
-        return "execution owner PID 已消失"
-    if lease.child_pid is not None and not child_alive:
-        return "execution child PID 已消失"
+    if owner_probe.status == "gone":
+        return "execution owner PID 已消失或已复用"
+    if lease.child_pid is not None and child_probe.status == "gone":
+        return "execution child PID 已消失或已复用"
     return None
 
 
 def _execution_has_live_owned_pid(lease: ExecutionLease) -> bool:
-    return is_process_alive(lease.owner_pid) or (
-        lease.child_pid is not None and is_process_alive(lease.child_pid)
+    job_probe = _execution_windows_job_probe(lease)
+    if windows_job_blocks_recovery(job_probe):
+        return True
+    owner_probe = _probe_process(lease.owner_pid, lease.owner_creation_token)
+    child_probe = (
+        _probe_process(lease.child_pid, lease.child_creation_token)
+        if lease.child_pid is not None
+        else ProcessProbe("gone")
     )
+    return owner_probe.status != "gone" or child_probe.status != "gone"
+
+
+def _execution_windows_job_probe(
+    lease: ExecutionLease,
+) -> WindowsJobProbe | None:
+    if lease.windows_job_name is None:
+        return None
+    return _probe_windows_job(lease.windows_job_name)
+
+
+def _probe_windows_job(job_name: str) -> WindowsJobProbe:
+    return _windows_job_probe(job_name)
 
 
 def is_process_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if _is_windows_platform():
-        return _is_windows_process_alive(pid)
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return _process_is_alive(pid, windows=_is_windows_platform())
+
+
+def _probe_process(pid: int, expected_creation_token: int | None) -> ProcessProbe:
+    return _process_probe(
+        pid,
+        expected_creation_token,
+        windows=_is_windows_platform(),
+        alive_probe=is_process_alive,
+    )
+
+
+def _get_process_creation_token(pid: int) -> int | None:
+    return _process_creation_token(pid, windows=_is_windows_platform())
+
+
+def _create_windows_job_for_execution(
+    controller: ExecutionController,
+    lease: ExecutionLease,
+) -> NamedWindowsJob | None:
+    return _create_execution_job(
+        lease.execution_id,
+        controller.attach_windows_job,
+        windows=_is_windows_platform(),
+    )
 
 
 def _process_group_options() -> dict[str, object]:
-    if _is_windows_platform():
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-    return {"start_new_session": True}
-
-
-def _start_stdin_writer(process: subprocess.Popen[bytes], input_text: str) -> threading.Thread:
-    assert process.stdin is not None
-    stdin = process.stdin
-
-    def write_stdin() -> None:
-        try:
-            stdin.write(input_text.encode("utf-8"))
-        except (BrokenPipeError, OSError, ValueError):
-            # 子进程可能不读 stdin 或已退出；最终以 returncode 和输出为准。
-            pass
-        finally:
-            try:
-                stdin.close()
-            except OSError:
-                pass
-
-    writer = threading.Thread(
-        target=write_stdin,
-        name="vega-stdin-writer",
-        daemon=True,
-    )
-    writer.start()
-    return writer
+    return _platform_process_group_options(windows=_is_windows_platform())
 
 
 def _persist_redacted_output(output_file: object, output_path: Path) -> str:
@@ -750,113 +833,24 @@ def _load_redact_text() -> Callable[[str], str] | None:
 def _terminate_owned_process(
     process: subprocess.Popen[bytes],
     grace_seconds: float,
-) -> ProcessTerminationResult:
-    failures: list[str] = []
-    tree_termination_failed = False
-    if _is_windows_platform():
-        # CTRL_BREAK_EVENT 在共享控制台中可能波及无关进程；taskkill 使用明确 PID，
-        # 先不加 /F 请求结束 owned tree，超过 grace period 后才强制终止。
-        taskkill_failure = _run_windows_taskkill(
-            process.pid,
-            force=False,
-            timeout=max(1.0, grace_seconds),
-        )
-        if taskkill_failure is not None:
-            failures.append(taskkill_failure)
-            tree_termination_failed = True
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return _confirm_owned_process_terminated(process, failures)
-        except OSError as exc:
-            failures.append(f"发送 SIGTERM 失败：{exc}")
-
-    try:
-        process.wait(timeout=grace_seconds)
-    except subprocess.TimeoutExpired:
-        pass
-    except OSError as exc:
-        failures.append(f"等待 owned process 退出失败：{exc}")
-    confirmation = _confirm_owned_process_terminated(
-        process,
-        [*failures],
-        tree_termination_failed=tree_termination_failed,
-    )
-    if confirmation.succeeded:
-        return confirmation
-    if (
-        _is_windows_platform()
-        and tree_termination_failed
-        and process.poll() is not None
-    ):
-        # 根进程已经退出，但 taskkill /T 失败时无法证明后代进程已退出。
-        return confirmation
-
-    if _is_windows_platform():
-        # PID 必须来自当前 execution lease；/T 只处理该 owned process tree，不枚举其他进程。
-        taskkill_failure = _run_windows_taskkill(process.pid, force=True, timeout=10)
-        tree_termination_failed = taskkill_failure is not None
-        if taskkill_failure is not None:
-            failures.append(taskkill_failure)
-        if process.poll() is None:
-            try:
-                process.kill()
-            except OSError as exc:
-                failures.append(f"强制终止 owned process 失败：{exc}")
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        except OSError as exc:
-            failures.append(f"发送 SIGKILL 失败：{exc}")
-    try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        failures.append("强制终止后最终 wait 超时。")
-    except OSError as exc:
-        failures.append(f"强制终止后最终 wait 失败：{exc}")
-    return _confirm_owned_process_terminated(
-        process,
-        failures,
-        tree_termination_failed=tree_termination_failed,
-    )
-
-
-def _confirm_owned_process_terminated(
-    process: subprocess.Popen[bytes],
-    failures: list[str],
     *,
-    tree_termination_failed: bool = False,
+    windows_job: NamedWindowsJob | None = None,
 ) -> ProcessTerminationResult:
-    try:
-        process_alive = process.poll() is None or is_process_alive(process.pid)
-    except Exception as exc:
-        failures.append(f"无法确认 owned process PID 是否存活：{exc}")
-        process_alive = True
-    process_group_alive = False
-    if not _is_windows_platform():
-        try:
-            process_group_alive = _is_posix_process_group_alive(process.pid)
-        except OSError as exc:
-            failures.append(f"无法确认 owned process group 是否存活：{exc}")
-            process_group_alive = True
-    if tree_termination_failed:
-        failures.append("taskkill 未能确认 owned process tree 已终止。")
-    if process_alive:
-        failures.append(f"owned process PID {process.pid} 仍存活。")
-    if process_group_alive:
-        failures.append(f"owned process group {process.pid} 仍存活。")
-    if process_alive or process_group_alive or tree_termination_failed:
-        return ProcessTerminationResult(False, "；".join(failures))
-    if failures:
-        return ProcessTerminationResult(
-            True,
-            "owned process tree 已确认退出；终止过程中出现非致命诊断："
-            + "；".join(failures),
+    if _is_windows_platform():
+        return _terminate_windows_process(
+            process,
+            grace_seconds,
+            windows_job,
+            subprocess.run,
         )
-    return ProcessTerminationResult(True, "owned process tree 已确认退出。")
+    return _terminate_posix_process(
+        process,
+        grace_seconds,
+        is_process_alive,
+        _is_posix_process_group_alive,
+        signal.SIGTERM,
+        signal.SIGKILL,
+    )
 
 
 def _is_posix_process_group_alive(process_group_id: int) -> bool:
@@ -909,56 +903,16 @@ def _linux_process_group_states(
 
 
 def _run_windows_taskkill(pid: int, *, force: bool, timeout: float) -> str | None:
-    command = ["taskkill", "/PID", str(pid), "/T"]
-    if force:
-        command.append("/F")
-    mode = "强制 taskkill" if force else "taskkill"
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            check=False,
-            text=True, errors="replace",
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        return f"{mode} 调用超时。"
-    except OSError as exc:
-        return f"{mode} 调用失败：{exc}"
-    if result.returncode == 0:
-        return None
-    diagnostic = (result.stderr or result.stdout or "").strip()
-    suffix = f"：{diagnostic}" if diagnostic else ""
-    return f"{mode} 退出码 {result.returncode}{suffix}"
+    return _taskkill_windows_process_tree(
+        pid,
+        force=force,
+        timeout=timeout,
+        runner=subprocess.run,
+    )
 
 
 def _is_windows_platform() -> bool:
     return os.name == "nt"
-
-
-def _is_windows_process_alive(pid: int) -> bool:
-    import ctypes
-    from ctypes import wintypes
-
-    process_query_limited_information = 0x1000
-    still_active = 259
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == still_active
-    finally:
-        kernel32.CloseHandle(handle)
 
 
 def _read_execution_lease(path: Path, attempts: int = 5) -> ExecutionLease:

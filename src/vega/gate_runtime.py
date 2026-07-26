@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from .git_read import run_git_text
 from .loop_evidence import validate_reflect_evidence_freshness
 from .models import GateReason, GateResult, GateState
 from .project_config import (
@@ -602,17 +602,7 @@ def _read_text(path: Path) -> str:
 
 
 def _git(repo_path: Path, command: list[str]) -> str:
-    result = subprocess.run(
-        command,
-        cwd=repo_path,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    return (result.stdout or "") + (result.stderr or "")
+    return run_git_text(repo_path, command)
 
 
 def _matched_paths(paths: list[str], keywords: list[str]) -> list[str]:

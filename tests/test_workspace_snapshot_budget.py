@@ -38,6 +38,30 @@ def test_untracked_content_hashing_respects_file_budget(
     assert first.untracked_manifest_sha256 == second.untracked_manifest_sha256
 
 
+def test_zero_byte_untracked_file_consumes_file_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath("0-empty.bin").write_bytes(b"")
+    repo.joinpath("1-data.bin").write_bytes(b"value")
+    opened: list[str] = []
+    original_open = Path.open
+
+    def tracking_open(path: Path, *args, **kwargs):
+        if path.suffix == ".bin":
+            opened.append(path.name)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(workspace_check_module, "MAX_UNTRACKED_CONTENT_FILES", 1)
+    monkeypatch.setattr(Path, "open", tracking_open)
+
+    snapshot = capture_review_workspace(repo)
+
+    assert opened == ["0-empty.bin"]
+    assert snapshot.untracked_content_complete is False
+
+
 def test_untracked_content_hashing_respects_single_file_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -85,6 +109,34 @@ def test_untracked_content_hashing_respects_total_byte_budget(
     assert opened == ["a.bin", "a.bin"]
     assert first.untracked_content_complete is False
     assert first.untracked_manifest_sha256 == second.untracked_manifest_sha256
+
+
+def test_ignored_content_hashing_exposes_incomplete_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath(".gitignore").write_text("*.tmp\n", encoding="utf-8")
+    _git(repo, "add", "--", ".gitignore")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "ignore temp files",
+    )
+    for index in range(3):
+        repo.joinpath(f"{index}.tmp").write_text(f"value-{index}\n", encoding="utf-8")
+
+    monkeypatch.setattr(workspace_check_module, "MAX_IGNORED_CONTENT_FILES", 1)
+
+    snapshot = capture_review_workspace(repo)
+
+    assert snapshot.ignored_content_complete is False
+    assert len(snapshot.ignored_manifest_sha256) == 64
 
 
 def test_untracked_content_change_during_read_marks_snapshot_incomplete(
@@ -222,7 +274,19 @@ def test_review_snapshot_reuses_status_paths_and_preserves_rename_identity(
         "notes.txt",
     )
     assert snapshot.untracked_files == ("notes.txt",)
-    assert len(commands) == 6
+    assert len(commands) == 7
+    assert (
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-dir",
+    ) in commands
+    assert (
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ) in commands
     assert not any("--name-only" in command for command in commands)
     assert not any(
         command[:4] == ("git", "ls-files", "--others", "--exclude-standard")

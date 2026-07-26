@@ -11,6 +11,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from .execution_control import ExecutionLease
+from .loop_integrity import (
+    LoopArtifactIntegrity,
+    validate_project_config_failure_payload,
+    validate_verification_failure_kind_schema,
+)
 from .models import (
     GateResult,
     LoopAutomationState,
@@ -56,92 +61,9 @@ class EvidenceFreshness:
 
 
 @dataclass(frozen=True)
-class LoopArtifactIntegrity:
-    valid: bool
-    issues: tuple[str, ...]
-    review_verdicts: tuple[ReviewVerdict, ...] = ()
-    verification_results: tuple[dict[str, Any], ...] = ()
-    risk_gate_results: tuple[GateResult, ...] = ()
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "valid": self.valid,
-            "issues": list(self.issues),
-            "review_verdict_count": len(self.review_verdicts),
-            "verification_result_count": len(self.verification_results),
-            "risk_gate_result_count": len(self.risk_gate_results),
-        }
-
-
-@dataclass(frozen=True)
 class LoopEvidenceValidationSnapshot:
     artifact_integrity: LoopArtifactIntegrity
     evidence_freshness: EvidenceFreshness
-
-
-def trusted_verification_passed(
-    state: LoopAutomationState,
-    artifact_integrity: LoopArtifactIntegrity,
-) -> bool:
-    """只有最新轮次存在受信、非空且全通过的结构化验证时才返回真。
-
-    自动成功必须依赖与最新 iteration 绑定并经过完整性校验的 artifact，不能只相信
-    state 中可被单独改写的 `verification_status`，也不能把前序轮次的通过结果沿用到
-    后续代码变更。
-    """
-    if not artifact_integrity.valid or not state.iterations:
-        return False
-    latest = state.iterations[-1]
-    if latest.lifecycle != "completed" or latest.verification_status != "passed":
-        return False
-    if latest.verification_failed_count != 0:
-        return False
-
-    for payload in artifact_integrity.verification_results:
-        if payload.get("iteration") != latest.iteration:
-            continue
-        command_count = payload.get("command_count")
-        failed_count = payload.get("failed_count")
-        selected_command_count = payload.get("selected_command_count")
-        skipped_commands = payload.get("skipped_commands")
-        commands = payload.get("commands")
-        results = payload.get("results")
-        return (
-            _is_positive_int(command_count)
-            and failed_count == 0
-            and selected_command_count == command_count
-            and skipped_commands == []
-            and payload.get("interruption_status") is None
-            and payload.get("interruption_command") is None
-            and payload.get("interruption_reason") is None
-            and isinstance(commands, list)
-            and len(commands) == command_count
-            and isinstance(results, list)
-            and len(results) == command_count
-            and all(
-                isinstance(item, dict)
-                and item.get("status") == "passed"
-                and item.get("interruption_status") is None
-                and item.get("interruption_reason") is None
-                for item in results
-            )
-        )
-    return False
-
-
-def latest_verification_failed(
-    state: LoopAutomationState,
-    artifact_integrity: LoopArtifactIntegrity,
-) -> bool:
-    """只根据最新轮次的受信结构化结果判断验证失败。"""
-
-    if not artifact_integrity.valid or not state.iterations:
-        return False
-    latest_iteration = state.iterations[-1].iteration
-    for payload in reversed(artifact_integrity.verification_results):
-        if payload.get("iteration") == latest_iteration:
-            return _is_positive_int(payload.get("failed_count"))
-    return False
 
 
 def validate_reflect_evidence_freshness(
@@ -175,13 +97,7 @@ def validate_reflect_evidence_freshness(
             source_run=source_dir.name,
         )
 
-    schema_version = evidence.get("schema_version")
-    if schema_version not in {2, 3}:
-        issues.append("source_evidence_schema_unsupported")
-    if schema_version == 3:
-        for key in ("staged_diff_sha256", "unstaged_diff_sha256"):
-            if not _is_sha256(evidence.get(key)):
-                issues.append(f"{key}_invalid")
+    issues.extend(_review_evidence_schema_issues(evidence))
     snapshot_id = str(evidence.get("snapshot_id") or "")
     snapshot_payload = {key: value for key, value in evidence.items() if key != "snapshot_id"}
     if not snapshot_id or snapshot_id != _sha256_json(snapshot_payload):
@@ -258,6 +174,25 @@ def validate_reflect_evidence_freshness(
         source_run=source_dir.name,
         snapshot_id=snapshot_id,
     )
+
+
+def _review_evidence_schema_issues(evidence: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+    schema_version = evidence.get("schema_version")
+    if schema_version not in {2, 3, 4}:
+        issues.append("source_evidence_schema_unsupported")
+    if schema_version in {3, 4}:
+        for key in ("staged_diff_sha256", "unstaged_diff_sha256"):
+            if not _is_sha256(evidence.get(key)):
+                issues.append(f"{key}_invalid")
+    if schema_version == 4:
+        if evidence.get("ignored_content_complete") not in {True, False}:
+            issues.append("ignored_content_complete_invalid")
+        if not _is_sha256(evidence.get("git_control_sha256")):
+            issues.append("git_control_sha256_invalid")
+        if evidence.get("git_control_complete") is not True:
+            issues.append("source_git_control_incomplete")
+    return issues
 
 
 def validate_review_evidence_freshness(
@@ -885,6 +820,7 @@ def _validate_iteration_verification(
     selected_command_count = payload.get("selected_command_count")
     skipped_commands = payload.get("skipped_commands")
     interruption_status = payload.get("interruption_status")
+    failure_kind = payload.get("failure_kind")
     artifact_version = payload.get("artifact_version")
     expected_run_id = iteration_dir.parent.parent.name
     recorded_run_id = payload.get("run_id")
@@ -930,6 +866,13 @@ def _validate_iteration_verification(
             "termination-unconfirmed",
         }:
             issues.append(f"{prefix}_verification_interruption_status_invalid")
+    validate_verification_failure_kind_schema(
+        artifact_version,
+        failure_kind,
+        iteration.verification_failure_kind,
+        prefix,
+        issues,
+    )
 
     if isinstance(commands, list) and _is_non_negative_int(command_count):
         if command_count != len(commands):
@@ -970,9 +913,25 @@ def _validate_iteration_verification(
         if failed_count != iteration.verification_failed_count:
             issues.append(f"{prefix}_verification_iteration_failed_count_mismatch")
     if _is_non_negative_int(command_count) and _is_non_negative_int(failed_count):
-        expected_status = _verification_status(command_count, failed_count)
+        expected_status = _verification_status(
+            command_count,
+            failed_count,
+            failure_kind if isinstance(failure_kind, str) else None,
+        )
         if iteration.verification_status != expected_status:
             issues.append(f"{prefix}_verification_iteration_status_mismatch")
+    validate_project_config_failure_payload(
+        payload,
+        failure_kind,
+        commands,
+        command_results,
+        command_count,
+        failed_count,
+        selected_command_count,
+        skipped_commands,
+        prefix,
+        issues,
+    )
     if iteration.verification_status == "passed" and artifact_version == 2:
         if selected_command_count != command_count:
             issues.append(f"{prefix}_verification_selected_command_count_mismatch")
@@ -1167,7 +1126,13 @@ def _review_state_allows_verdict(state: ReviewState, verdict: str) -> bool:
     }
 
 
-def _verification_status(command_count: int, failed_count: int) -> str:
+def _verification_status(
+    command_count: int,
+    failed_count: int,
+    failure_kind: str | None = None,
+) -> str:
+    if failure_kind is not None:
+        return "failed"
     if command_count == 0:
         return "skipped"
     if failed_count:

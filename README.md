@@ -141,8 +141,9 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 ## 开发验证
 
 ```powershell
-python -m compileall src
+python -m compileall src scripts/check_repository_hygiene.py
+python scripts/check_repository_hygiene.py --base-ref origin/main
 python -m pytest
-ruff check src tests
+ruff check src tests scripts/check_repository_hygiene.py
 git diff --check
 ```

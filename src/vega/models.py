@@ -11,6 +11,8 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from .redaction import redact_value
+from .review_contract import ReviewFinding as ReviewFinding
+from .review_contract import ReviewVerdict as ReviewVerdict
 
 
 def _save_model(path: Path, model: BaseModel) -> None:
@@ -295,22 +297,6 @@ class ReflectState(BaseModel):
         _save_model(path, self)
 
 
-class ReviewFinding(BaseModel):
-    severity: Literal["blocker", "major", "minor", "suggestion"] = "minor"
-    file: str = ""
-    line: int = Field(default=0, ge=0)
-    title: str
-    evidence: str = ""
-    recommendation: str = ""
-
-
-class ReviewVerdict(BaseModel):
-    verdict: Literal["approve", "request_changes", "needs_human"] = "needs_human"
-    summary: str
-    findings: list[ReviewFinding] = Field(default_factory=list)
-    checked_items: list[str] = Field(default_factory=list)
-
-
 class ReviewState(BaseModel):
     run_id: str
     status: Literal["created", "running", "success", "failed", "needs_human"] = "created"
@@ -379,6 +365,7 @@ class LoopIterationState(BaseModel):
     scope_gate_pre_review_report_sha256: str | None = None
     verification_status: Literal["skipped", "passed", "failed"] = "skipped"
     verification_failed_count: int = 0
+    verification_failure_kind: Literal["project_config_invalid"] | None = None
     reflect_run: str | None = None
     risk_gate_status: Literal["skipped", "success", "failed"] = "skipped"
     risk_gate_source_run: str | None = None

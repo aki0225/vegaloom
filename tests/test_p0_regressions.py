@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -150,6 +151,78 @@ class IndexHidingWorker:
             status="success",
             output="worker hid one path with an index flag",
             command=["index-hiding-worker"],
+        )
+
+
+class IgnoredContentMutatingWorker:
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        del prompt, sandbox, timeout_seconds, execution_context
+        ignored = repo_path / "cache.tmp"
+        original_stat = ignored.stat()
+        ignored.write_text("bravo\n", encoding="utf-8", newline="\n")
+        os.utime(
+            ignored,
+            ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+        )
+        readme = repo_path / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8") + "worker change\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        return RunnerResult(
+            status="success",
+            output="worker changed ignored content",
+            command=["ignored-content-mutating-worker"],
+        )
+
+
+class GitControlMutatingWorker:
+    def __init__(self, target: str) -> None:
+        self.target = target
+
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        del prompt, sandbox, timeout_seconds, execution_context
+        if self.target == "exclude":
+            exclude = repo_path / ".git" / "info" / "exclude"
+            exclude.write_text(
+                exclude.read_text(encoding="utf-8") + "\nworker-hidden.tmp\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            repo_path.joinpath("worker-hidden.tmp").write_text(
+                "hidden by worker\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+        else:
+            _git(repo_path, "config", "core.excludesFile", "worker-ignore-rules")
+        readme = repo_path / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8") + "worker change\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        return RunnerResult(
+            status="success",
+            output=f"worker changed git {self.target}",
+            command=["git-control-mutating-worker"],
         )
 
 
@@ -823,6 +896,94 @@ def test_auto_worker_index_flags_cannot_hide_forbidden_path_from_scope_gate(
     assert result["changed_files"] == ["README.md"]
 
 
+def test_auto_worker_cannot_mutate_existing_ignored_content_before_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = "\n".join(
+        [
+            "version: 1",
+            "scope:",
+            "  allowed_paths:",
+            "    - README.md",
+            "verification:",
+            "  commands:",
+            '    - python -c "print(\'must not run\')"',
+            "  max_commands: 1",
+        ]
+    ) + "\n"
+    workspace, repo = _init_repo(
+        tmp_path,
+        config=config,
+        files={
+            ".gitignore": "*.tmp\n",
+            "cache.tmp": "alpha\n",
+        },
+    )
+    reviewer = CountingReviewer()
+
+    def verification_must_not_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("ignored 内容变化后不应启动 verification")
+
+    monkeypatch.setattr("vega.loop_runtime.run_project_verification", verification_must_not_run)
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=IgnoredContentMutatingWorker(),
+        reviewer_runner=reviewer,
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
+
+    state = _read_json(run_dir / "state.json")
+    workspace_check = _read_json(run_dir / "iterations" / "01" / "workspace-check.json")
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "workspace_check_failed"
+    assert reviewer.calls == 0
+    assert workspace_check["baseline_ignored_changed"] is True
+    assert workspace_check["git_control_changed"] is False
+
+
+@pytest.mark.parametrize("target", ["exclude", "config"])
+def test_auto_worker_cannot_mutate_git_control_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+) -> None:
+    config = "\n".join(
+        [
+            "version: 1",
+            "scope:",
+            "  allowed_paths:",
+            "    - README.md",
+            "verification:",
+            "  commands:",
+            '    - python -c "print(\'must not run\')"',
+            "  max_commands: 1",
+        ]
+    ) + "\n"
+    workspace, repo = _init_repo(tmp_path, config=config)
+    reviewer = CountingReviewer()
+
+    def verification_must_not_run(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("Git 控制文件变化后不应启动 verification")
+
+    monkeypatch.setattr("vega.loop_runtime.run_project_verification", verification_must_not_run)
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=GitControlMutatingWorker(target),
+        reviewer_runner=reviewer,
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
+
+    state = _read_json(run_dir / "state.json")
+    workspace_check = _read_json(run_dir / "iterations" / "01" / "workspace-check.json")
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "workspace_check_failed"
+    assert reviewer.calls == 0
+    assert workspace_check["git_control_changed"] is True
+
+
 def test_assist_continue_cannot_bypass_scope_gate(tmp_path: Path) -> None:
     config = "\n".join(
         [
@@ -1241,6 +1402,44 @@ def test_auto_scope_glob_allows_nested_markdown_file(tmp_path: Path) -> None:
     assert reviewer.calls == 1
     assert result["status"] == "success"
     assert result["changed_files"] == ["docs/guides/guide.md"]
+
+
+def test_auto_scope_glob_honors_git_core_ignorecase(tmp_path: Path) -> None:
+    config = "\n".join(
+        [
+            "version: 1",
+            "scope:",
+            "  forbidden_paths:",
+            "    - docs/**",
+        ]
+    ) + "\n"
+    workspace, repo = _init_repo(
+        tmp_path,
+        config=config,
+        files={"Docs/leak.md": "# Leak\n"},
+    )
+    _git(repo, "config", "core.ignorecase", "true")
+    reviewer = CountingReviewer()
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=PathWorker("Docs/leak.md", "worker change"),
+        reviewer_runner=reviewer,
+    ).start(_brief(repo), "auto", max_iterations=1, verify=False)
+
+    state = _read_json(run_dir / "state.json")
+    result = _read_json(run_dir / "iterations" / "01" / "scope-gate-result.json")
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "scope_gate_failed"
+    assert reviewer.calls == 0
+    assert result["status"] == "failed"
+    assert result["violations"] == [
+        {
+            "code": "forbidden_path",
+            "path": "Docs/leak.md",
+            "matched_patterns": ["docs/**"],
+        }
+    ]
 
 
 @pytest.mark.parametrize(

@@ -148,6 +148,100 @@ def test_history_scan_catches_path_removed_by_later_commit(
     assert str(repo) not in captured.err
 
 
+def test_eval_history_rewrite_is_rejected_even_when_later_restored(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    evidence = repo / "eval" / "real-world-runs.md"
+    evidence.parent.mkdir()
+    evidence.write_text("failed\n", encoding="utf-8", newline="\n")
+    _commit_all(repo, "base evidence")
+    base_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    evidence.write_text("success\n", encoding="utf-8", newline="\n")
+    _commit_all(repo, "rewrite evidence")
+    evidence.write_text("failed\n", encoding="utf-8", newline="\n")
+    _commit_all(repo, "restore evidence")
+
+    violations = hygiene.scan_history(repo, base_sha)
+
+    assert any(item.rule == "eval-not-append-only" for item in violations)
+
+
+def test_eval_worktree_rewrite_is_rejected(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    evidence = repo / "eval" / "real-world-runs.md"
+    evidence.parent.mkdir()
+    evidence.write_text("failed\n", encoding="utf-8", newline="\n")
+    _commit_all(repo, "base evidence")
+
+    evidence.write_text("success\n", encoding="utf-8", newline="\n")
+
+    violations = hygiene.scan_worktree(repo)
+
+    assert any(item.rule == "eval-not-append-only" for item in violations)
+
+
+def test_eval_tail_append_and_new_file_are_allowed(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    evidence = repo / "eval" / "real-world-runs.md"
+    evidence.parent.mkdir()
+    evidence.write_text("failed\n", encoding="utf-8", newline="\n")
+    _commit_all(repo, "base evidence")
+    base_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    with evidence.open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write("next run\n")
+    repo.joinpath("eval", "new-case.jsonl").write_text(
+        '{"status":"failed"}\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    assert not any(
+        item.rule == "eval-not-append-only"
+        for item in hygiene.scan_worktree(repo)
+    )
+
+    _commit_all(repo, "append evidence")
+
+    assert not any(
+        item.rule == "eval-not-append-only"
+        for item in hygiene.scan_history(repo, base_sha)
+    )
+
+
+def test_eval_worktree_line_ending_conversion_is_not_a_rewrite(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    evidence = repo / "eval" / "real-world-runs.md"
+    evidence.parent.mkdir()
+    evidence.write_text("failed\n", encoding="utf-8", newline="\n")
+    _commit_all(repo, "base evidence")
+
+    evidence.write_bytes(b"failed\r\nnext run\r\n")
+
+    assert not any(
+        item.rule == "eval-not-append-only"
+        for item in hygiene.scan_worktree(repo)
+    )
+
+
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],

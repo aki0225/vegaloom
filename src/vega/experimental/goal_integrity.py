@@ -5,14 +5,14 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from ..finish_policy import decide_finish_status
 from ..loop_evidence import (
     _load_json_object,
     _load_loop_state,
     _normalized_path,
-    latest_verification_failed,
-    trusted_verification_passed,
     validate_loop_artifact_integrity,
 )
+from ..loop_integrity import latest_verification_failed, trusted_verification_passed
 from ..models import GateResult, GateState
 
 
@@ -59,7 +59,7 @@ def validate_finish_summary_integrity(
         if trusted_integrity.review_verdicts
         else None
     )
-    expected_status = _trusted_finish_status(
+    expected_status = decide_finish_status(
         loop_status,
         latest_verdict,
         latest_verification_failed(state, trusted_integrity),
@@ -204,32 +204,6 @@ def _declared_integrity_issues(payload: dict[str, Any], trusted_integrity: Any) 
         ),
     )
     return [issue for issue, invalid in checks if invalid]
-
-
-def _trusted_finish_status(
-    loop_status: str,
-    latest_verdict: str | None,
-    has_verification_failures: bool,
-    *,
-    verification_passed: bool,
-    evidence_fresh: bool,
-    artifact_integrity_valid: bool,
-) -> str:
-    if not artifact_integrity_valid:
-        return "needs_human"
-    if not evidence_fresh:
-        return "needs_human"
-    if has_verification_failures:
-        return "needs_fix"
-    if not verification_passed:
-        return "needs_human"
-    if loop_status == "success" and latest_verdict == "approve":
-        return "ready_to_commit"
-    if latest_verdict == "request_changes":
-        return "needs_fix"
-    if loop_status in {"failed", "needs_human"}:
-        return "needs_human"
-    return "incomplete"
 
 
 def _int_or_none(value: object) -> int | None:

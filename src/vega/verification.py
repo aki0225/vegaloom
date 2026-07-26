@@ -27,6 +27,7 @@ VerificationInterruptionStatus = Literal[
     "stopped",
     "termination-unconfirmed",
 ]
+VerificationFailureKind = Literal["project_config_invalid"]
 
 
 @dataclass
@@ -35,13 +36,14 @@ class VerificationRunResult:
     result_path: Path
     command_count: int
     failed_count: int
+    failure_kind: VerificationFailureKind | None = None
     interruption_status: VerificationInterruptionStatus | None = None
     interruption_command: str | None = None
     interruption_reason: str | None = None
 
     @property
     def has_failures(self) -> bool:
-        return self.failed_count > 0
+        return self.failed_count > 0 or self.failure_kind is not None
 
     @property
     def was_interrupted(self) -> bool:
@@ -66,7 +68,11 @@ def run_project_verification(
     output_dir.mkdir(parents=True, exist_ok=True)
     config_check = check_project_config(repo_path)
     if config_check.has_errors:
-        return _write_verification_config_failure(output_dir, config_check)
+        return _write_verification_config_failure(
+            output_dir,
+            config_check,
+            iteration=iteration,
+        )
 
     profile = build_project_profile(workspace, repo_path)
     config = load_project_config(repo_path)
@@ -131,6 +137,7 @@ def run_project_verification(
         "repo_path": str(repo_path.resolve()),
         "config_path": config.source_path,
         "config_check": config_check.model_dump(),
+        "failure_kind": None,
         "commands": completed_commands,
         "results": results,
         "command_count": len(results),
@@ -183,27 +190,26 @@ def select_verification_commands(
 def _write_verification_config_failure(
     output_dir: Path,
     config_check: Any,
+    *,
+    iteration: int,
 ) -> VerificationRunResult:
     text = redact_text(render_project_config_check(config_check))
+    run_id = _find_parent_run_id(output_dir)
+    shell_kind = current_verification_shell_kind()
     payload = redact_value({
+        "artifact_version": 2,
+        "run_id": run_id,
+        "iteration": iteration,
+        "shell_kind": shell_kind,
         "repo_path": config_check.repo_path,
         "config_path": config_check.source_path,
         "config_check": config_check.model_dump(),
-        "commands": ["<vega config check>"],
-        "results": [
-            {
-                "command": "<vega config check>",
-                "status": "failed",
-                "returncode": None,
-                "duration_seconds": 0.0,
-                "output": text,
-                "interruption_status": None,
-                "interruption_reason": None,
-            }
-        ],
-        "command_count": 1,
-        "failed_count": 1,
-        "selected_command_count": 1,
+        "failure_kind": "project_config_invalid",
+        "commands": [],
+        "results": [],
+        "command_count": 0,
+        "failed_count": 0,
+        "selected_command_count": 0,
         "skipped_commands": [],
         "interruption_status": None,
         "interruption_command": None,
@@ -232,8 +238,9 @@ def _write_verification_config_failure(
     return VerificationRunResult(
         summary_path=summary_path,
         result_path=result_path,
-        command_count=1,
-        failed_count=1,
+        command_count=0,
+        failed_count=0,
+        failure_kind="project_config_invalid",
     )
 
 

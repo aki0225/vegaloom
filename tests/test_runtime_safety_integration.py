@@ -15,6 +15,7 @@ from vega.gate_runtime import GateRuntime
 from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput
+from vega.project_config import check_project_config
 from vega.recovery_runtime import render_recovery_report
 from vega.reflect_runtime import ReflectRuntime
 from vega.review_runtime import ReviewRuntime
@@ -226,6 +227,104 @@ def test_verification_redacts_secret_from_command_and_output(tmp_path: Path) -> 
     artifacts = _read_tree(output_dir)
     assert FAKE_SECRET not in artifacts
     assert "[REDACTED]" in artifacts
+
+
+@pytest.mark.parametrize("flow", ["auto", "continue"])
+def test_loop_attributes_project_config_failure_without_fake_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flow: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "version: 1\nverification:\n  commands:\n    - python -c \\\n",
+        encoding="utf-8",
+    )
+    config_check = check_project_config(repo)
+    repo.joinpath(".vega.yaml").unlink()
+    reviewer = QueueRunner([_review_json("approve")])
+    monkeypatch.setattr(
+        "vega.verification.check_project_config",
+        lambda _: config_check,
+    )
+
+    runtime = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeRunner(["worker complete"]),
+        reviewer_runner=reviewer,
+    )
+    brief = BriefInput(
+        mode="bug",
+        text="Fix the README behavior.",
+        source="test",
+        repo_path=str(repo),
+    )
+    if flow == "auto":
+        run_dir = runtime.start(
+            brief,
+            "auto",
+            max_iterations=1,
+            verify=True,
+        )
+    else:
+        run_dir = runtime.start(
+            brief,
+            "assist",
+            max_iterations=1,
+            verify=True,
+        )
+        repo.joinpath("README.md").write_text(
+            "# Demo\nworker completed\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        run_dir = runtime.continue_assist(run_dir.name, repo, verify=True)
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    iteration = state["iterations"][0]
+    iteration_dir = run_dir / "iterations" / "01"
+    verification = json.loads(
+        iteration_dir.joinpath("verification-result.json").read_text(encoding="utf-8")
+    )
+    trace_items = [
+        json.loads(line)
+        for line in run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    report = run_dir.joinpath("final-report.md").read_text(encoding="utf-8")
+
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "project_config_invalid"
+    assert not any(item.startswith("FAIL:") for item in state["eval_results"])
+    assert iteration["verification_status"] == "failed"
+    assert iteration["verification_failed_count"] == 0
+    assert iteration["verification_failure_kind"] == "project_config_invalid"
+    assert verification["failure_kind"] == "project_config_invalid"
+    assert verification["commands"] == []
+    assert verification["results"] == []
+    assert verification["command_count"] == 0
+    assert verification["failed_count"] == 0
+    assert reviewer.prompts == []
+    assert not iteration_dir.joinpath("reflect-run.txt").exists()
+    assert not iteration_dir.joinpath("review-verdict.json").exists()
+    assert "项目配置预检失败" in report
+    assert "未执行任何验证命令" in report
+    assert "验证命令失败" not in report
+    assert any(
+        item.get("event") == "verification_finished"
+        and item.get("failure_kind") == "project_config_invalid"
+        for item in trace_items
+    )
+    assert any(
+        item.get("event") == "project_config_invalid"
+        for item in trace_items
+    )
+    status_payload = run_status_payload(workspace, run_dir.name)
+    assert any("项目配置预检失败" in item for item in status_payload["next_steps"])
+    assert any("未执行任何验证命令" in item for item in status_payload["next_steps"])
+    assert not any("自动验证失败" in item for item in status_payload["next_steps"])
 
 
 def test_verification_propagates_bounded_progress_reporter(
