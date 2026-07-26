@@ -1,0 +1,22 @@
+{
+  "case_class": "stale_evidence",
+  "case_id": "MA2B-C11",
+  "initial_workspace_ref": {
+    "relative_path": "initial-workspace.json",
+    "sha256": "3d3baaa6d930f4fd9b0eb07776110021d22bc536921f21126eb1e8fe30d490f3"
+  },
+  "package_role": "pilot_case",
+  "project_policy_ref": {
+    "relative_path": "project-policy.json",
+    "sha256": "e4905a0927f77c0d74539e193ffba7523c9a5ccb252eef07312aaedb89683ad0"
+  },
+  "schema_version": 1,
+  "task_ref": {
+    "relative_path": "task.json",
+    "sha256": "48fc1fc9deef0c87787f0f4e58da4248b82d0125f2f6ccada327f8d7e854288b"
+  },
+  "verification_manifest_ref": {
+    "relative_path": "verification-manifest.json",
+    "sha256": "d0f5440d61e85ab247fdadc07b2ed0235f76bf7fa814604be716b38954a7d89f"
+  }
+}

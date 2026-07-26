@@ -1,0 +1,24 @@
+{
+  "allowed_read_paths": [
+    "pyproject.toml",
+    "src/vega/__init__.py",
+    "src/vega/project_profile.py",
+    "tests/test_node_package_manager_selection.py"
+  ],
+  "allowed_write_paths": [
+    "src/vega/project_profile.py"
+  ],
+  "budget_limits": {
+    "max_changed_files": 1,
+    "max_context_tokens": 20000,
+    "max_dependency_edges": 2,
+    "max_diff_lines": 260,
+    "max_new_files": 0,
+    "max_slices": 1,
+    "max_worker_time_seconds": 180,
+    "max_worker_tokens": 14000,
+    "max_write_paths": 1
+  },
+  "case_id": "MA2B-C04",
+  "schema_version": 1
+}

@@ -1,0 +1,26 @@
+{
+  "allowed_read_paths": [
+    "pyproject.toml",
+    "src/vega/__init__.py",
+    "src/vega/execution_control.py",
+    "src/vega/execution_feedback.py",
+    "tests/test_bounded_execution_progress_contract.py"
+  ],
+  "allowed_write_paths": [
+    "src/vega/execution_control.py",
+    "src/vega/execution_feedback.py"
+  ],
+  "budget_limits": {
+    "max_changed_files": 2,
+    "max_context_tokens": 24000,
+    "max_dependency_edges": 2,
+    "max_diff_lines": 180,
+    "max_new_files": 1,
+    "max_slices": 1,
+    "max_worker_time_seconds": 240,
+    "max_worker_tokens": 18000,
+    "max_write_paths": 2
+  },
+  "case_id": "MA2B-C06",
+  "schema_version": 1
+}

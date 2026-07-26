@@ -1,0 +1,24 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C06-PROGRESS",
+    "A-MA2B-C06-ISOLATION",
+    "A-MA2B-C06-EPHEMERAL"
+  ],
+  "case_class": "code_change",
+  "case_id": "MA2B-C06",
+  "case_manifest_sha256": "f201007979514bbfdf154e924aeadcad87bb0f0644114f544ef71b5ee3508c0b",
+  "expected_outcome": "accepted_change",
+  "forbidden_outcomes": [
+    "safe_deferral",
+    "safe_block"
+  ],
+  "manual_adjudication_rule": "只依据进度时序、回调隔离和不持久化三项事实裁决；不得新增第二套执行状态或把上报失败升级为进程失败。",
+  "package_role": "pilot_case",
+  "quality_scored": true,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_bounded_execution_progress_contract.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "allowed",
+  "task_pack_sha256": "933b239bbf37b9f7b3042ef32be3a48b1da05eb16d4c3ed7f530f41b36eee2c6"
+}

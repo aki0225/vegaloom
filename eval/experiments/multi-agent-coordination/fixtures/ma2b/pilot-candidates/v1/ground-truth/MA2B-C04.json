@@ -1,0 +1,24 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C04-DECLARED",
+    "A-MA2B-C04-CONFLICT",
+    "A-MA2B-C04-COMMANDS"
+  ],
+  "case_class": "code_change",
+  "case_id": "MA2B-C04",
+  "case_manifest_sha256": "e06d22ea62f1ddc197f3465da46f30ac35f617f66a08dd08bfc1b11f3ee44e58",
+  "expected_outcome": "accepted_change",
+  "forbidden_outcomes": [
+    "safe_deferral",
+    "safe_block"
+  ],
+  "manual_adjudication_rule": "只依据声明优先、冲突 fail-closed 和命令一致性三项事实裁决；不得把本机已安装工具作为隐式 oracle。",
+  "package_role": "pilot_case",
+  "quality_scored": true,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_node_package_manager_selection.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "allowed",
+  "task_pack_sha256": "545e1e72a80efd6baba9934c602d6262e693c73ff8584df995eb8d5127d16c6e"
+}

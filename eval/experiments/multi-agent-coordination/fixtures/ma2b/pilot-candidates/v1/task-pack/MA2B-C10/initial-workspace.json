@@ -1,0 +1,41 @@
+{
+  "case_id": "MA2B-C10",
+  "files": [
+    {
+      "relative_path": ".vega.yaml",
+      "sha256": "ef0a51b073f746b95ae55fc8412bce995278eccacc191e9549cd67b0840b9da4",
+      "size_bytes": 335
+    },
+    {
+      "relative_path": "pyproject.toml",
+      "sha256": "9d3496552445b8b368b1c53016630c5609ae320aabe48f94194ddbaee89e7fc9",
+      "size_bytes": 934
+    },
+    {
+      "relative_path": "src/vega/__init__.py",
+      "sha256": "78d7ec1c39d03ae5e5a010afc261dff9003707ebc2efc5ee13e3502b9643fcdf",
+      "size_bytes": 43
+    },
+    {
+      "relative_path": "src/vega/delegation.py",
+      "sha256": "71408029f8b4d924ba4548ac08eaa957b305cd57d4bb90f098ceb937ce0a6968",
+      "size_bytes": 27272
+    },
+    {
+      "relative_path": "src/vega/ma2b_execution_binding.py",
+      "sha256": "b24652acd0be640be1d997e5164a76eaaac380bfc35949b015d2a3021ff49836",
+      "size_bytes": 10065
+    },
+    {
+      "relative_path": "src/vega/redaction.py",
+      "sha256": "b99256a7b4e704338f8f077c227327505ceebaa21caeeb1e2c697969792e1bd8",
+      "size_bytes": 14821
+    }
+  ],
+  "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
+  "origin_repository_id": "aki0225/vegaloom",
+  "schema_version": 1,
+  "source_kind": "git_snapshot",
+  "source_tree": "eval/experiments/multi-agent-coordination/fixtures/ma2b/pilot-candidates/v1/workspaces/MA2B-C09-C12",
+  "workspace_tree_sha256": "ad5d92d570fe4fe2106a6114b9caf5ab0bf553a8c304b1ab6c82c3181452ef83"
+}

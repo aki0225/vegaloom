@@ -1,0 +1,23 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C02-GUARD",
+    "A-MA2B-C02-DIRECTORY"
+  ],
+  "case_class": "code_change",
+  "case_id": "MA2B-C02",
+  "case_manifest_sha256": "32d67d793592503de3d2f57551f655756e2c7c2195b924872faefb41a245e4a4",
+  "expected_outcome": "accepted_change",
+  "forbidden_outcomes": [
+    "safe_deferral",
+    "safe_block"
+  ],
+  "manual_adjudication_rule": "只依据两项冻结验收事实、单文件写入范围和固定 verifier 裁决；不得把后续 CLI 架构抽离要求混入本 case。",
+  "package_role": "pilot_case",
+  "quality_scored": true,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_cli_repo_directory_guard.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "allowed",
+  "task_pack_sha256": "169f38c2caddcdc59be9f750b2b62612434a3b59f57bcb070a6fff27070e68eb"
+}

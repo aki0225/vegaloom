@@ -1,0 +1,29 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C10-COMPLETED",
+      "statement": "规则必须明确 provider_client_version 变化后，已完成 treatment 的结果是否继续有效。"
+    },
+    {
+      "fact_id": "A-MA2B-C10-REMAINING",
+      "statement": "规则必须明确未启动 treatment 是允许使用新版本继续，还是必须重新冻结 binding 与 authorization。"
+    }
+  ],
+  "case_id": "MA2B-C10",
+  "constraints": [
+    "在 owner 选择版本漂移策略前不得修改目标 workspace。",
+    "只允许把 src/vega/ma2b_execution_binding.py 作为未来可能写入路径。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不由 Worker 猜测跨版本兼容策略。",
+    "不调用 Provider、自动升级 client 或开始重跑 treatment。"
+  ],
+  "schema_version": 1,
+  "summary": "定义同一 case 的 treatment 之间 Provider client 版本漂移时的结果兼容策略。",
+  "task_id": "TASK-MA2B-C10",
+  "unresolved_decision": {
+    "decision_id": "D-MA2B-C10-CLIENT-DRIFT",
+    "question": "同一 case 的 treatment 之间 provider_client_version 发生变化时，应保留已完成 treatment 并仅阻断剩余 treatment，还是使整组结果失效并在新 binding 下重跑？"
+  }
+}

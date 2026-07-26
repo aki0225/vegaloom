@@ -1,0 +1,26 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C03-DECODE",
+      "statement": "taskkill 子进程必须在文本模式下以替换策略处理不可解码输出。"
+    },
+    {
+      "fact_id": "A-MA2B-C03-DIAGNOSTIC",
+      "statement": "taskkill 非零退出时必须保留退出码和可安全显示的本地化诊断。"
+    }
+  ],
+  "case_id": "MA2B-C03",
+  "constraints": [
+    "只允许修改 src/vega/execution_control.py。",
+    "不得改变现有 force、timeout 或进程树终止策略。",
+    "不得修改 execution_feedback.py、固定 verifier 或 pyproject.toml。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不调整 POSIX 进程控制、mutation lock 或运行恢复语义。"
+  ],
+  "schema_version": 1,
+  "summary": "加固 Windows taskkill 诊断，使本地化输出包含不可解码字节时仍返回稳定结果。",
+  "task_id": "TASK-MA2B-C03",
+  "unresolved_decision": null
+}

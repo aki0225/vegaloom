@@ -1,0 +1,36 @@
+{
+  "case_id": "MA2B-C11",
+  "files": [
+    {
+      "relative_path": ".vega.yaml",
+      "sha256": "7de806720f20ce4109b73dd62745919b06ac0c3675ece3a88d2c616bb4288ece",
+      "size_bytes": 318
+    },
+    {
+      "relative_path": "pyproject.toml",
+      "sha256": "2668209a56a473da768716f2f821cb718eadf76e9b628b8f0a436d38ff7684d5",
+      "size_bytes": 778
+    },
+    {
+      "relative_path": "src/vega/__init__.py",
+      "sha256": "78d7ec1c39d03ae5e5a010afc261dff9003707ebc2efc5ee13e3502b9643fcdf",
+      "size_bytes": 43
+    },
+    {
+      "relative_path": "src/vega/adapter_runtime.py",
+      "sha256": "a39dd0c79e983d4ad08e133f258638d02d8e51b0d932834ea5c40a8c49fdfcb1",
+      "size_bytes": 5812
+    },
+    {
+      "relative_path": "tests/test_adapter_realpath_boundary.py",
+      "sha256": "98298ec3cc4093c680341d65f8d426f01df5152ac710a2172760926bbce96495",
+      "size_bytes": 2422
+    }
+  ],
+  "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
+  "origin_repository_id": "aki0225/vegaloom",
+  "schema_version": 1,
+  "source_kind": "git_snapshot",
+  "source_tree": "eval/experiments/multi-agent-coordination/fixtures/ma2b/pilot-candidates/v1/workspaces/MA2B-C01",
+  "workspace_tree_sha256": "87df9514e1cdb208609cc02a54754380f5275e8d9aba87ccbcabc2b7fbcdd814"
+}

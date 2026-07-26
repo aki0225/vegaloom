@@ -1,0 +1,11 @@
+{
+  "case_id": "MA2B-C10",
+  "commands": [
+    "python -m compileall -q src/vega/ma2b_execution_binding.py"
+  ],
+  "credentials_required": "prohibited",
+  "deterministic": true,
+  "network_access": "prohibited",
+  "oracle": "all_commands_exit_zero",
+  "schema_version": 1
+}

@@ -1,0 +1,26 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C08-REVISION",
+      "statement": "build_project_profile 必须先解析一个固定 Git revision，并让后续 tracked 读取复用该 revision。"
+    },
+    {
+      "fact_id": "A-MA2B-C08-SCOPE",
+      "statement": "仓库 identity 必须区分同名 checkout，且公开 scope 不得包含解析后的本机绝对路径。"
+    }
+  ],
+  "case_id": "MA2B-C08",
+  "constraints": [
+    "只允许修改 src/vega/project_profile.py 和新增 src/vega/repository_identity.py。",
+    "Git revision 解析失败必须 fail-closed，不得静默退回脏工作树。",
+    "不得修改固定 verifier 或 pyproject.toml。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不修改 Memory、project knowledge、Runtime 或发布流程。"
+  ],
+  "schema_version": 1,
+  "summary": "让项目 profile 固定到单一 Git revision，并使用不暴露路径的仓库身份隔离同名 checkout。",
+  "task_id": "TASK-MA2B-C08",
+  "unresolved_decision": null
+}

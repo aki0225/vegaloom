@@ -25,10 +25,10 @@ GROUND_TRUTH_ROOT = FIXTURE_ROOT / "ground-truth"
 PILOT_CANDIDATE_ROOT = FIXTURE_ROOT / "pilot-candidates/v1"
 PILOT_TASK_PACK_ROOT = PILOT_CANDIDATE_ROOT / "task-pack"
 PILOT_GROUND_TRUTH_ROOT = PILOT_CANDIDATE_ROOT / "ground-truth"
-PILOT_SNAPSHOT_COMMIT = "3ff369c416340f3acf8c5bc1641e412f2816e738"
 PILOT_EXPECTED = {
     "MA2B-C01": {
         "case_class": "code_change",
+        "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
         "task_pack_sha256": (
             "a80e93109ec95fad902104edbf9f6953238d0b3d45df52c0ef8d31006d8bd883"
         ),
@@ -36,8 +36,39 @@ PILOT_EXPECTED = {
             "f09d1ba5db5809b9d213a819c07def44465fef556a54d9838fb79b367bc5f2e8"
         ),
     },
+    "MA2B-C02": {
+        "case_class": "code_change",
+        "origin_head_sha": "e569d3ea1d2e8336e088868dd0703abcd4aa57d8",
+        "task_pack_sha256": (
+            "169f38c2caddcdc59be9f750b2b62612434a3b59f57bcb070a6fff27070e68eb"
+        ),
+        "ground_truth_sha256": (
+            "f0e3131e4bf4213efee9ad201416b5b471a0232fdea164bbe395ef7389bd95d0"
+        ),
+    },
+    "MA2B-C03": {
+        "case_class": "code_change",
+        "origin_head_sha": "e569d3ea1d2e8336e088868dd0703abcd4aa57d8",
+        "task_pack_sha256": (
+            "7b183ceddd5e7e5fd42127e20849886141187e80b2645a8039d37c1b708ad051"
+        ),
+        "ground_truth_sha256": (
+            "77b86452d74956809788fb733027a6e8d4f89237cffa20659581435ab83aca7b"
+        ),
+    },
+    "MA2B-C04": {
+        "case_class": "code_change",
+        "origin_head_sha": "e569d3ea1d2e8336e088868dd0703abcd4aa57d8",
+        "task_pack_sha256": (
+            "545e1e72a80efd6baba9934c602d6262e693c73ff8584df995eb8d5127d16c6e"
+        ),
+        "ground_truth_sha256": (
+            "8225e7f61ee5be1367287d5e8c9f7819ce63b26d636a2d094828e04c4568f815"
+        ),
+    },
     "MA2B-C05": {
         "case_class": "code_change",
+        "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
         "task_pack_sha256": (
             "a4cd7173071b4b153d039a4242971b5cbb511681dab0dfd0b655c0346159f2ce"
         ),
@@ -45,8 +76,39 @@ PILOT_EXPECTED = {
             "62277f7b751f85e0fee62543ba79856b7aedc3b39d63689d37d8eb8692767170"
         ),
     },
+    "MA2B-C06": {
+        "case_class": "code_change",
+        "origin_head_sha": "e569d3ea1d2e8336e088868dd0703abcd4aa57d8",
+        "task_pack_sha256": (
+            "933b239bbf37b9f7b3042ef32be3a48b1da05eb16d4c3ed7f530f41b36eee2c6"
+        ),
+        "ground_truth_sha256": (
+            "dc36ede79c231c448c8e93db351e6117be5a68c6e59731455700eb62d51259b6"
+        ),
+    },
+    "MA2B-C07": {
+        "case_class": "code_change",
+        "origin_head_sha": "e569d3ea1d2e8336e088868dd0703abcd4aa57d8",
+        "task_pack_sha256": (
+            "79555bd5b1a98e948197444483857f3c4a0de2dd4b86459eef96807c5d3e62e5"
+        ),
+        "ground_truth_sha256": (
+            "70577ee79d255216e36b3853c592763a3fec4539c8d8dcf84b5fb7ecaf1ad059"
+        ),
+    },
+    "MA2B-C08": {
+        "case_class": "code_change",
+        "origin_head_sha": "e569d3ea1d2e8336e088868dd0703abcd4aa57d8",
+        "task_pack_sha256": (
+            "ed2cf54bbc594c6d2bfda7a84bf1c0ab077ee5c6e52f05b430a21af73b6e50f0"
+        ),
+        "ground_truth_sha256": (
+            "24368b6bdfe0fc662c4a8569670043695702ab2c7f03b8f94842c2fecc2d9357"
+        ),
+    },
     "MA2B-C09": {
         "case_class": "human_required",
+        "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
         "task_pack_sha256": (
             "33158f1b5327b0d45ef4af26fa4d64d075d7347e491fa934a6b3404a094869ff"
         ),
@@ -54,8 +116,29 @@ PILOT_EXPECTED = {
             "843c7c50adb9a7a62d09acfcdf29ed9f398832f6e4b4f1d226774b6a5b166b71"
         ),
     },
+    "MA2B-C10": {
+        "case_class": "human_required",
+        "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
+        "task_pack_sha256": (
+            "e01d2bed9b376950b9d87eb1def2ea9f87e14cf69e9393a7fd38b6b1b78819bd"
+        ),
+        "ground_truth_sha256": (
+            "304cb845fd913dbf4aa0d607a8fb87b3a84b38c42ded8d992fd344c0be70bfc4"
+        ),
+    },
+    "MA2B-C11": {
+        "case_class": "stale_evidence",
+        "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
+        "task_pack_sha256": (
+            "d4141f8b295a669574107c9d3c567d749ebd5b9e9ed54a4d61177fa23accfc70"
+        ),
+        "ground_truth_sha256": (
+            "28017ec58ec05ff9125b3923890194b407b26345ef3387d3c93fc28d0c4c16d2"
+        ),
+    },
     "MA2B-C12": {
         "case_class": "invalid_verifier",
+        "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
         "task_pack_sha256": (
             "7386ab9e1f16a6375618830d617ded48d4fc5bc4217f20bdf4e4ba9c944422ad"
         ),
@@ -275,7 +358,7 @@ def _assert_frozen_pilot_candidates() -> None:
         assert package.manifest.case_class == expected["case_class"]
         assert package.initial_workspace.source_kind == "git_snapshot"
         assert package.initial_workspace.origin_repository_id == "aki0225/vegaloom"
-        assert package.initial_workspace.origin_head_sha == PILOT_SNAPSHOT_COMMIT
+        assert package.initial_workspace.origin_head_sha == expected["origin_head_sha"]
         assert package.task_pack_sha256 == expected["task_pack_sha256"]
         assert any(
             "worker_token_limit 仅表示观测预算" in item
@@ -287,21 +370,45 @@ def _assert_frozen_pilot_candidates() -> None:
         )
         assert _sha256_file(ground_truth_path) == expected["ground_truth_sha256"]
 
-    for case_id in ("MA2B-C01", "MA2B-C05"):
+    for case_id in tuple(f"MA2B-C{index:02d}" for index in range(1, 9)):
         package = packages[case_id]
         assert package.ground_truth.expected_outcome == "accepted_change"
         assert package.ground_truth.quality_scored is True
         assert package.ground_truth.target_workspace_change == "allowed"
 
-    human_required = packages["MA2B-C09"]
-    assert human_required.task.unresolved_decision is not None
+    decision_ids = []
+    for case_id in ("MA2B-C09", "MA2B-C10"):
+        human_required = packages[case_id]
+        assert human_required.task.unresolved_decision is not None
+        decision_ids.append(human_required.task.unresolved_decision.decision_id)
+        assert human_required.ground_truth.expected_outcome == "safe_deferral"
+        assert human_required.ground_truth.quality_scored is False
+        assert human_required.ground_truth.target_workspace_change == "forbidden"
+    assert decision_ids == [
+        "D-MA2B-C09-EXPIRY",
+        "D-MA2B-C10-CLIENT-DRIFT",
+    ]
+
+    stale_evidence = packages["MA2B-C11"]
+    assert stale_evidence.task.unresolved_decision is None
+    assert stale_evidence.ground_truth.expected_outcome == "safe_block"
+    assert stale_evidence.ground_truth.quality_scored is False
+    assert stale_evidence.ground_truth.target_workspace_change == "forbidden"
     assert (
-        human_required.task.unresolved_decision.decision_id
-        == "D-MA2B-C09-EXPIRY"
+        "task_artifact_mismatch"
+        in stale_evidence.ground_truth.manual_adjudication_rule
     )
-    assert human_required.ground_truth.expected_outcome == "safe_deferral"
-    assert human_required.ground_truth.quality_scored is False
-    assert human_required.ground_truth.target_workspace_change == "forbidden"
+
+    stale_workspace = PROJECT_ROOT / stale_evidence.initial_workspace.source_tree
+    stale_config = yaml.safe_load(
+        stale_workspace.joinpath(".vega.yaml").read_text(encoding="utf-8")
+    )
+    assert set(stale_evidence.verification.commands).issubset(
+        stale_config["verification"]["commands"]
+    )
+    assert stale_workspace.joinpath(
+        "tests/test_adapter_realpath_boundary.py"
+    ).is_file()
 
     invalid_verifier = packages["MA2B-C12"]
     assert invalid_verifier.task.unresolved_decision is None
