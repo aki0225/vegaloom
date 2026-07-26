@@ -3,12 +3,17 @@
 > 日期：2026-07-25<br>
 > 分支：`experiment/ma2b-planner-worker-pilot`<br>
 > 当前状态：`readiness_gate_fake_verified / real_execution_blocked`
+>
+> 2026-07-26 状态更新：候选隔离根已冻结完整 12-case，并可生成固定
+> `case_set_sha256`。readiness 合同与 12-case gate 未放宽；当前仍因正式 execution
+> binding 和 authorization 缺失而 `blocked`。详见
+> `MA-2B-PILOT-INPUT-QUALIFICATION-V1.md`。
 
 ## 一、边界
 
-本 Slice 只把已冻结的本地合同串成真实 Pilot 启动前的 readiness gate，不创建真实
-`MA2B-Cxx` task-pack，不创建真实 execution binding，不读取 Provider 凭据，不调用 Planner、
-Worker、Reviewer 或 Provider。
+本 Slice 只把已冻结的本地合同串成真实 Pilot 启动前的 readiness gate；在该 Slice 时点不创建
+真实 `MA2B-Cxx` task-pack，也不创建真实 execution binding，不读取 Provider 凭据，不调用
+Planner、Worker、Reviewer 或 Provider。后续候选 task-pack 不改变这些执行边界。
 
 `check_ma2b_pilot_readiness()` 的默认行为是 fail-closed：只要缺任一真实前置 artifact，结果就是
 `blocked`。

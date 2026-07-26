@@ -3,6 +3,9 @@
 > 日期：2026-07-25<br>
 > 分支：`experiment/ma2b-planner-worker-pilot`<br>
 > 当前状态：`execution_binding_and_pricing_schema_fake_verified / real_execution_blocked`
+>
+> 2026-07-26 状态更新：12 个候选 task-pack 与 ground truth 已在隔离根冻结，但尚未迁入
+> readiness 默认根；真实 pricing、execution binding 和 authorization 仍缺失，执行状态不变。
 
 ## 一、边界
 
@@ -14,7 +17,7 @@ Provider，也不授权 Pilot 执行。
 
 - `eval/experiments/multi-agent-coordination/MA-2B-execution-binding.md`；
 - pricing manifest artifact；
-- 12 个 `MA2B-Cxx` task-pack 与 ground truth；
+- 将已冻结的 12 个候选 task-pack 与 ground truth 迁入正式默认根；
 - owner 或独立复审后的明确执行授权。
 
 ## 二、已冻结的校验
@@ -52,6 +55,6 @@ execution binding 与 pricing manifest 的组合还必须满足：
 
 ## 四、停止线
 
-本 Slice 不允许把 schema 通过解释为 `execution_authorized`。只要还缺真实 `MA2B-Cxx` task-pack、
-pricing manifest artifact、execution binding artifact 或复审授权，状态必须保持
-`real_execution_blocked`。
+本 Slice 不允许把 schema 通过解释为 `execution_authorized`。只要候选 task-pack 尚未迁入
+正式默认根，或仍缺 pricing manifest artifact、execution binding artifact、复审授权，状态
+必须保持 `real_execution_blocked`。

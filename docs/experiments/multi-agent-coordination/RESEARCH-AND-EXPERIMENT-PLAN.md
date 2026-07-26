@@ -293,6 +293,10 @@ budget:
 `worker_token_observation_budget`。现有字段名为了 schema v1 兼容暂时保留，但不能宣称
 Provider 会在达到该值时被 Runtime 硬终止；实际超额只进入成本与容量观测。
 
+同日的输入资格更新已在候选隔离根冻结 `MA2B-C01`～`MA2B-C12`，固定
+`case_set_sha256=33b2caa335b417b47ee45bb5de7051aef20682bbf938eddf5d2e4ad5d3d4f137`。
+这只解除 case 缺失问题，不代表 execution binding、authorization 或 Provider 执行已获批准。
+
 `schema_version` 表达数据格式版本，`plan_revision` 表达同一业务计划的修订次数，二者不能
 混用。首版计划必须是 `plan_revision = 1` 且没有 parent；后续 revision 必须绑定父计划
 artifact、变化原因和失效 slice。新 revision 必须重新绑定当前 workspace / policy snapshot，

@@ -5,6 +5,11 @@
 > 实现提交：`e8243896afd4fc35fe1b950779721d95c4109833`
 > 状态：`fixture_contract_implemented / pilot_cases_not_frozen`
 > 真实 Provider：仍禁止
+>
+> 2026-07-26 状态更新：候选隔离根已按
+> `MA-2B-PILOT-INPUT-QUALIFICATION-V1.md` 冻结 `MA2B-C01`～`MA2B-C12`。
+> 本文的 `pilot_cases_not_frozen` 与“当前没有真实 Cxx”仅描述本合同原始 Slice 时点；
+> 正式默认根、pricing、execution binding、authorization 和 Provider 执行仍未授权。
 
 ## 一、这次冻结的范围
 
@@ -109,8 +114,9 @@ case-manifest hash 和确定性 task-pack hash，避免循环引用。
 - reviewer 已完成 treatment、模型和成本盲化；
 - worktree、run root、Provider session 与缓存已经完成三路隔离。
 
-因此，当前没有真实 `MA2B-C01`～`MA2B-C12`，也没有 pricing、Provider 或 execution
-binding。
+因此，在本合同原始 Slice 时点没有真实 `MA2B-C01`～`MA2B-C12`，也没有 pricing、
+Provider 或 execution binding。后续候选输入状态由
+`MA-2B-PILOT-INPUT-QUALIFICATION-V1.md` supersede。
 
 ## 六、下一步
 
