@@ -17,6 +17,7 @@ from vega.runner import RunnerResult
 class RecordingRunner:
     def __init__(self) -> None:
         self.prompts: list[str] = []
+        self.execution_contexts: list[object] = []
 
     def run(
         self,
@@ -28,6 +29,7 @@ class RecordingRunner:
         execution_context=None,
     ) -> RunnerResult:
         self.prompts.append(prompt)
+        self.execution_contexts.append(execution_context)
         return RunnerResult(
             status="success",
             output=json.dumps(
@@ -80,6 +82,25 @@ def test_review_evidence_binds_all_reviewer_inputs(tmp_path: Path) -> None:
 
     assert len(runner.prompts) == 1
     assert _read_json(review_run / "state.json")["status"] == "success"
+
+
+def test_standalone_review_propagates_progress_reporter(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_repo(repo)
+    brief_run = _make_brief_run(tmp_path)
+    reflect_run = ReflectRuntime(tmp_path).run(repo, source_run=brief_run.name)
+    runner = RecordingRunner()
+
+    def reporter(step: str, elapsed: int) -> None:
+        del step, elapsed
+
+    ReviewRuntime(
+        tmp_path,
+        runner=runner,
+        progress_reporter=reporter,
+    ).run(repo, reflect_run.name)
+
+    assert runner.execution_contexts[0].progress_reporter is reporter
 
 
 @pytest.mark.parametrize(

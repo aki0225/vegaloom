@@ -5,8 +5,38 @@ from pathlib import Path
 
 import typer
 
+from .loop_runtime import LoopAutomationRuntime
 from .redaction import redact_text
+from .review_runtime import ReviewRuntime
 from .run_status import render_run_status
+
+_PROGRESS_STEP_LABELS = {
+    "worker": "worker",
+    "reviewer": "reviewer",
+    "verification": "verification",
+}
+
+
+def report_execution_progress(step: str, elapsed_seconds: int) -> None:
+    label = _PROGRESS_STEP_LABELS.get(step, "runner")
+    typer.echo(
+        f"[vega] {label} 运行中，已用时 {max(0, elapsed_seconds)} 秒",
+        err=True,
+    )
+
+
+def make_loop_runtime(workspace: Path) -> LoopAutomationRuntime:
+    return LoopAutomationRuntime(
+        workspace,
+        progress_reporter=report_execution_progress,
+    )
+
+
+def make_review_runtime(workspace: Path) -> ReviewRuntime:
+    return ReviewRuntime(
+        workspace,
+        progress_reporter=report_execution_progress,
+    )
 
 
 def require_repo_directory(repo: Path) -> Path:

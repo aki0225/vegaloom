@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 import vega.execution_control as execution_control
+import vega.execution_feedback as execution_feedback
 from vega.execution_control import (
     ExecutionLease,
     RunnerExecutionContext,
@@ -127,6 +128,66 @@ def test_owned_process_redacts_output_before_persisting_and_returning(tmp_path: 
     assert fake_secret not in persisted_output
     assert fake_secret not in execution_payload
     assert "prompt should only go to stdin" not in execution_payload
+
+
+def test_owned_process_reports_bounded_progress_without_persisting_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, int]] = []
+    monkeypatch.setattr(execution_feedback, "PROGRESS_INTERVAL_SECONDS", 0.03)
+    context = RunnerExecutionContext(
+        execution_dir=tmp_path / "runs" / "progress" / "executions" / "worker",
+        run_id="progress",
+        step="worker",
+        heartbeat_interval_seconds=0.01,
+        lease_timeout_seconds=0.5,
+        progress_reporter=lambda step, elapsed: events.append((step, elapsed)),
+    )
+
+    result = run_owned_process(
+        [sys.executable, "-c", "import time; time.sleep(0.12)"],
+        "",
+        tmp_path,
+        5,
+        context,
+    )
+
+    execution_payload = context.execution_dir.joinpath("execution.json").read_text(
+        encoding="utf-8"
+    )
+    assert result.status == "success"
+    assert events[0] == ("worker", 0)
+    assert len(events) >= 2
+    assert all(step == "worker" and elapsed >= 0 for step, elapsed in events)
+    assert "progress_reporter" not in execution_payload
+
+    def broken_reporter(step: str, elapsed: int) -> None:
+        raise RuntimeError(f"progress failed: {step}/{elapsed}")
+
+    broken_context = RunnerExecutionContext(
+        execution_dir=tmp_path / "runs" / "broken-progress" / "executions" / "reviewer",
+        run_id="broken-progress",
+        step="reviewer",
+        heartbeat_interval_seconds=0.01,
+        lease_timeout_seconds=0.5,
+        progress_reporter=broken_reporter,
+    )
+    broken_result = run_owned_process(
+        [sys.executable, "-c", "print('review completed')"],
+        "",
+        tmp_path,
+        5,
+        broken_context,
+    )
+    broken_lease = ExecutionLease.model_validate_json(
+        broken_context.execution_dir.joinpath("execution.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert broken_result.status == "success"
+    assert "review completed" in broken_result.output
+    assert broken_lease.status == "completed"
 
 
 def test_owned_process_persists_partial_output_after_keyboard_interrupt(tmp_path: Path) -> None:

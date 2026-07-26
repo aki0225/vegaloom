@@ -20,7 +20,7 @@ from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import LoopAutomationState
 from vega.project_config import check_project_config
 from vega.recovery_runtime import RecoveryRuntime
-from vega.run_status import latest_run_dir, run_status_payload
+from vega.run_status import latest_run_dir, render_run_status, run_status_payload
 from vega.run_utils import resolve_run_dir
 from vega.tools import git_tools
 from vega.verification import run_project_verification
@@ -66,6 +66,7 @@ def _write_execution(
     step: str,
     status: str,
     last_heartbeat: str,
+    child_pid: int | None = None,
 ) -> None:
     execution_dir = run_dir / "executions" / name
     execution_dir.mkdir(parents=True)
@@ -73,6 +74,7 @@ def _write_execution(
         run_id=run_dir.name,
         step=step,
         owner_pid=os.getpid(),
+        child_pid=child_pid,
         command=[step],
         started_at=last_heartbeat,
         last_heartbeat=last_heartbeat,
@@ -512,8 +514,8 @@ def test_loop_cli_returns_nonzero_for_failed_run(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("vega.cli._ensure_git_ready", lambda _: None)
     monkeypatch.setattr(
-        "vega.cli.LoopAutomationRuntime",
-        lambda **_: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
+        "vega.cli.make_loop_runtime",
+        lambda _: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
     )
 
     result = CliRunner().invoke(
@@ -549,8 +551,8 @@ def test_initial_assist_waiting_for_worker_keeps_zero_exit_code(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("vega.cli._ensure_git_ready", lambda _: None)
     monkeypatch.setattr(
-        "vega.cli.LoopAutomationRuntime",
-        lambda **_: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
+        "vega.cli.make_loop_runtime",
+        lambda _: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
     )
 
     result = CliRunner().invoke(
@@ -606,8 +608,8 @@ def test_auto_loop_cli_only_returns_zero_for_success(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("vega.cli._ensure_git_ready", lambda _: None)
     monkeypatch.setattr(
-        "vega.cli.LoopAutomationRuntime",
-        lambda **_: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
+        "vega.cli.make_loop_runtime",
+        lambda _: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
     )
 
     result = CliRunner().invoke(
@@ -647,8 +649,8 @@ def test_do_assist_waiting_for_worker_keeps_zero_exit_code(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("vega.cli._ensure_git_ready", lambda _: None)
     monkeypatch.setattr(
-        "vega.cli.LoopAutomationRuntime",
-        lambda **_: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
+        "vega.cli.make_loop_runtime",
+        lambda _: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
     )
 
     result = CliRunner().invoke(
@@ -692,8 +694,8 @@ def test_loop_continue_only_returns_zero_for_success(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("vega.cli._ensure_git_ready", lambda _: None)
     monkeypatch.setattr(
-        "vega.cli.LoopAutomationRuntime",
-        lambda **_: SimpleNamespace(
+        "vega.cli.make_loop_runtime",
+        lambda _: SimpleNamespace(
             continue_assist=lambda *args, **kwargs: run_dir
         ),
     )
@@ -729,8 +731,8 @@ def test_auto_loop_cli_reports_corrupt_result_state(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("vega.cli._ensure_git_ready", lambda _: None)
     monkeypatch.setattr(
-        "vega.cli.LoopAutomationRuntime",
-        lambda **_: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
+        "vega.cli.make_loop_runtime",
+        lambda _: SimpleNamespace(start=lambda *args, **kwargs: run_dir),
     )
 
     result = CliRunner().invoke(
@@ -875,6 +877,77 @@ def test_status_prefers_active_execution_over_newer_terminal(tmp_path: Path) -> 
 
     assert execution["status"] == "running"
     assert execution["step"] == "worker"
+
+
+def test_status_text_keeps_active_owned_child_pid(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "active-child-loop"
+    run_dir.mkdir(parents=True)
+    _loop_state(tmp_path / "repo", run_dir.name).save(run_dir / "state.json")
+    _write_execution(
+        run_dir,
+        "worker",
+        step="worker",
+        status="running",
+        last_heartbeat="2026-07-11T01:00:00+00:00",
+        child_pid=24680,
+    )
+
+    text = render_run_status(tmp_path, run_dir.name)
+
+    assert "- owned child PID：`24680`" in text
+    assert "历史 owned child PID" not in text
+
+
+def test_status_text_marks_terminal_child_pid_as_audit_history(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "terminal-child-loop"
+    run_dir.mkdir(parents=True)
+    _loop_state(tmp_path / "repo", run_dir.name).save(run_dir / "state.json")
+    _write_execution(
+        run_dir,
+        "worker",
+        step="worker",
+        status="completed",
+        last_heartbeat="2026-07-11T01:00:00+00:00",
+        child_pid=24680,
+    )
+
+    text = render_run_status(tmp_path, run_dir.name)
+
+    assert "- 历史 owned child PID（仅供审计，不表示当前存活）：`24680`" in text
+    assert "- owned child PID：`24680`" not in text
+
+
+def test_status_text_terminal_without_child_pid_reports_not_recorded_and_preserves_payload(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "terminal-no-child-loop"
+    run_dir.mkdir(parents=True)
+    _loop_state(tmp_path / "repo", run_dir.name).save(run_dir / "state.json")
+    heartbeat = "2026-07-11T01:00:00+00:00"
+    _write_execution(
+        run_dir,
+        "worker",
+        step="worker",
+        status="failed",
+        last_heartbeat=heartbeat,
+    )
+
+    text = render_run_status(tmp_path, run_dir.name)
+    payload = run_status_payload(tmp_path, run_dir.name)
+
+    assert "- 历史 owned child PID（仅供审计，不表示当前存活）：`未记录`" in text
+    assert "尚未启动" not in text
+    assert payload["execution"] == {
+        "status": "failed",
+        "step": "worker",
+        "iteration": None,
+        "owner_pid": os.getpid(),
+        "child_pid": None,
+        "termination_unconfirmed": False,
+        "last_heartbeat": heartbeat,
+        "deadline": heartbeat,
+        "path": str((run_dir / "executions" / "worker" / "execution.json").resolve()),
+    }
 
 
 def test_status_sorts_active_execution_heartbeat_as_utc(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import vega.execution_feedback as execution_feedback
 from vega.change_plan_runtime import ChangePlanRuntime
 from vega.decision import DecisionStore
 from vega.execution_control import ExecutionRecoveryInspection, OwnedProcessResult
@@ -225,6 +226,41 @@ def test_verification_redacts_secret_from_command_and_output(tmp_path: Path) -> 
     artifacts = _read_tree(output_dir)
     assert FAKE_SECRET not in artifacts
     assert "[REDACTED]" in artifacts
+
+
+def test_verification_propagates_bounded_progress_reporter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                '    - python -c "import time; time.sleep(0.12)"',
+                "  max_commands: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    events: list[tuple[str, int]] = []
+    monkeypatch.setattr(execution_feedback, "PROGRESS_INTERVAL_SECONDS", 0.03)
+
+    result = run_project_verification(
+        workspace,
+        repo,
+        workspace / "verification",
+        progress_reporter=lambda step, elapsed: events.append((step, elapsed)),
+    )
+
+    assert not result.has_failures
+    assert events[0] == ("verification", 0)
+    assert len(events) >= 2
 
 
 def test_verification_temp_placeholder_isolates_iterations_and_commands(
@@ -614,8 +650,9 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
         output_dir: Path,
         *,
         iteration: int,
+        progress_reporter=None,
     ):
-        del workspace_path
+        del workspace_path, progress_reporter
         seen_iterations.append(iteration)
         output_dir.mkdir(parents=True, exist_ok=True)
         result_status = "timeout" if interruption_status == "timed_out" else "failed"

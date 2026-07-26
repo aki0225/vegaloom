@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import ValidationError
 
@@ -180,11 +180,12 @@ class ReviewRuntime:
         self,
         workspace: Path,
         runner: Runner | None = None,
-        timeout_seconds: int = 900,
+        timeout_seconds: int = 900, progress_reporter: Callable[[str, int], None] | None = None,
     ) -> None:
         self.workspace = workspace
         self.runner = runner
         self.timeout_seconds = timeout_seconds
+        self.progress_reporter = progress_reporter
 
     def run(
         self,
@@ -227,7 +228,6 @@ class ReviewRuntime:
         state.current_step = "collect"
         state.save(run_dir / "state.json")
         trace.write("review_started", repo_path=str(repo_path.resolve()), source_run=source_run, runner=runner_name)
-
         inputs = collect_review_inputs(
             self.workspace,
             repo_path,
@@ -282,7 +282,6 @@ class ReviewRuntime:
                 risk_gate_result.recommendation if risk_gate_result else None
             ),
         )
-
         state.current_step = "run_reviewer"
         state.save(run_dir / "state.json")
         prompt = run_dir.joinpath("review-prompt.md").read_text(encoding="utf-8")
@@ -320,6 +319,7 @@ class ReviewRuntime:
                 execution_dir=run_dir / "executions" / "reviewer",
                 run_id=run_id,
                 step="reviewer",
+                progress_reporter=self.progress_reporter,
             )
             reviewer_started = True
             result = runner.run(
