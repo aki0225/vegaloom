@@ -1,0 +1,12 @@
+{"event":"loop_started","task_mode":"bug","automation_mode":"auto","repo_path":"<isolated-target>"}
+{"event":"worker_started","iteration":1,"runner":"codex-exec"}
+{"event":"worker_finished","iteration":1,"status":"success"}
+{"event":"workspace_check_finished","iteration":1,"status":"passed","new_untracked_count":0}
+{"event":"scope_gate_finished","iteration":1,"phase":"pre_verification","status":"success","changed_files":["pycodestyle.py"]}
+{"event":"verification_finished","iteration":1,"commands":2,"failed":0,"interruption_status":null}
+{"event":"scope_gate_finished","iteration":1,"phase":"post_verification","status":"success","changed_files":["pycodestyle.py"]}
+{"event":"reflect_finished","iteration":1,"status":"success"}
+{"event":"scope_gate_finished","iteration":1,"phase":"pre_review","status":"success","changed_files":["pycodestyle.py"]}
+{"event":"risk_gate_finished","iteration":1,"status":"success","risk":"low","recommendation":"self-check"}
+{"event":"review_finished","iteration":1,"status":"success","verdict":"approve"}
+{"event":"run_finished","status":"success"}

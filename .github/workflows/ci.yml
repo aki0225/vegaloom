@@ -109,9 +109,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "691" ]]; then
+          if [[ "$node_count" != "700" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 691 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 700 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"

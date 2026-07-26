@@ -1,0 +1,37 @@
+diff --git a/src/click/testing.py b/src/click/testing.py
+index 5ddca62..3e6264b 100644
+--- a/src/click/testing.py
++++ b/src/click/testing.py
+@@ -119,7 +118,0 @@ class _NamedTextIOWrapper(io.TextIOWrapper):
+-    def __next__(self) -> str:  # type: ignore
+-        try:
+-            line = super().__next__()
+-        except StopIteration as e:
+-            raise EOFError() from e
+-        return line
+-
+@@ -335,0 +329,8 @@ class CliRunner:
++        def input_readline() -> str:
++            line = text_input.readline()
++
++            if line == "":
++                raise EOFError()
++
++            return line.rstrip("\r\n")
++
+@@ -351 +352 @@ class CliRunner:
+-            val = next(text_input).rstrip("\r\n")
++            val = input_readline()
+@@ -360 +361 @@ class CliRunner:
+-            return next(text_input).rstrip("\r\n")
++            return input_readline()
+diff --git a/tests/test_chain.py b/tests/test_chain.py
+index 484d361..119d35b 100644
+--- a/tests/test_chain.py
++++ b/tests/test_chain.py
+@@ -166,2 +166,3 @@ def test_pipeline(runner, args, input, expect):
+-    # last two lines are '' and 'Aborted!'
+-    assert result.output.splitlines()[:-2] == expect
++    assert result.exit_code == 0
++    assert result.exception is None
++    assert result.output.splitlines() == expect

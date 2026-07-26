@@ -1,0 +1,31 @@
+{
+  "artifact_kind": "sanitized-gate-summary",
+  "scope_gate": {
+    "pre_verification": {
+      "status": "success",
+      "changed_files": [
+        "pycodestyle.py"
+      ],
+      "violations": []
+    },
+    "post_verification": {
+      "status": "success",
+      "changed_files": [
+        "pycodestyle.py"
+      ],
+      "violations": []
+    },
+    "pre_review": {
+      "status": "success",
+      "changed_files": [
+        "pycodestyle.py"
+      ],
+      "violations": []
+    }
+  },
+  "risk_gate": {
+    "status": "success",
+    "risk": "low",
+    "recommendation": "self-check"
+  }
+}

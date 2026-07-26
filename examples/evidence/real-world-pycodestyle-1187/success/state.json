@@ -1,0 +1,27 @@
+{
+  "artifact_kind": "sanitized-state-excerpt",
+  "run_id": "20260725-183327-094687-bug-loop",
+  "status": "success",
+  "task_mode": "bug",
+  "automation_mode": "auto",
+  "repo_path": "<isolated-target>",
+  "input_source": "<followup-task-input>",
+  "current_step": "done",
+  "current_iteration": 1,
+  "max_iterations": 2,
+  "iterations": [
+    {
+      "iteration": 1,
+      "worker_status": "success",
+      "workspace_status": "passed",
+      "scope_gate_status": "success",
+      "verification_status": "passed",
+      "risk_gate_status": "success",
+      "risk_gate_risk": "low",
+      "reviewer_status": "success",
+      "verdict": "approve",
+      "findings_count": 0
+    }
+  ],
+  "memory_proposals": []
+}

@@ -1,0 +1,12 @@
+{
+  "verdict": "approve",
+  "summary": "EOF 仅保留在 prompt 读取路径，stdin 文件迭代恢复正常的 StopIteration 语义；变更满足明确行为合同。",
+  "findings": [],
+  "checked_items": [
+    "stdin 链式文件迭代零状态完成且不输出 Aborted!",
+    "tests/test_chain.py 覆盖输出、异常和退出码",
+    "diff 仅涉及两条允许路径",
+    "未见新增依赖、联网、凭据或破坏性操作风险"
+  ],
+  "review_context_path": "review-context.json"
+}

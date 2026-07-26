@@ -1,0 +1,15 @@
+{
+  "artifact_kind": "sanitized-review-context-summary",
+  "changed_files": [
+    "pycodestyle.py"
+  ],
+  "agents_files": [
+    "AGENTS.md"
+  ],
+  "memory_hit_count": 0,
+  "contains_worker_chat": false,
+  "evidence_consistent": true,
+  "workspace_changed_during_review": false,
+  "absolute_paths_omitted": true,
+  "workspace_fingerprints_omitted": true
+}
