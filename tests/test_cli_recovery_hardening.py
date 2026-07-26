@@ -347,6 +347,47 @@ def test_auto_cli_rejects_unknown_runner_before_creating_run(
     assert not tmp_path.joinpath("runs").exists()
 
 
+def test_all_repo_cli_entries_reject_regular_file_before_creating_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_file = tmp_path / "README.md"
+    repo_file.write_text("# not a repository directory\n", encoding="utf-8")
+    task_file = tmp_path / "task.md"
+    task_file.write_text("# Task\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    repo_arg = repo_file.name
+    task_arg = task_file.name
+
+    commands = [
+        ["config", "check", "--repo", repo_arg, "--json"],
+        ["run", "engineering-change", "--task", task_arg, "--repo", repo_arg],
+        ["profile", "--repo", repo_arg],
+        ["reflect", "--repo", repo_arg],
+        ["plan", "--repo", repo_arg, "--text", "规划修复"],
+        ["review-pack", "--repo", repo_arg, "--run", "missing-run"],
+        ["review", "--repo", repo_arg, "--run", "missing-run", "--runner", "none"],
+        ["gate", "--repo", repo_arg, "--run", "missing-run"],
+        ["goal", "start", "--repo", repo_arg, "--text", "完成修复"],
+        ["adapters", "init", "codex", "--repo", repo_arg],
+        ["brief", "bug", "--repo", repo_arg, "--text", "修复问题"],
+        ["brief", "feature", "--repo", repo_arg, "--text", "新增功能"],
+        ["loop", "bug", "--repo", repo_arg, "--text", "修复问题", "--mode", "assist"],
+        ["loop", "feature", "--repo", repo_arg, "--text", "新增功能", "--mode", "assist"],
+        ["do", "bug", "--repo", repo_arg, "--text", "修复问题", "--mode", "assist"],
+        ["do", "feature", "--repo", repo_arg, "--text", "新增功能", "--mode", "assist"],
+        ["loop", "continue", "--repo", repo_arg, "--run", "missing-run"],
+    ]
+
+    for command in commands:
+        result = CliRunner().invoke(app, command, catch_exceptions=False)
+
+        assert result.exit_code != 0, command
+        assert "目标仓库路径必须是目录" in result.output, command
+        assert "Traceback" not in result.output, command
+        assert not tmp_path.joinpath("runs").exists(), command
+
+
 @pytest.mark.parametrize(
     ("command", "sensitive_name"),
     [

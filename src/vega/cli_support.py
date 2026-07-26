@@ -5,7 +5,20 @@ from pathlib import Path
 
 import typer
 
+from .redaction import redact_text
 from .run_status import render_run_status
+
+
+def require_repo_directory(repo: Path) -> Path:
+    if not repo.exists():
+        raise typer.BadParameter(f"目标仓库路径不存在：{redact_text(str(repo))}")
+    try:
+        resolved = repo.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise typer.BadParameter("无法解析目标仓库路径。") from exc
+    if not resolved.is_dir():
+        raise typer.BadParameter(f"目标仓库路径必须是目录：{redact_text(str(repo))}")
+    return resolved
 
 
 def read_engineering_change_status(run_dir: Path) -> str:
