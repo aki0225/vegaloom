@@ -15,10 +15,11 @@
 
 ## Follow-up 案例
 
-follow-up 在运行前加入 reviewer 指出的正反例：
+据本地运行记录，follow-up 在运行前加入 reviewer 指出的正反例；当前公开 Git 历史不能独立
+证明该先后顺序：
 
 - `int == type(obj)`、`str != type(obj)` 与 `MyType == type(result)` 报告 `E721`。
 - `expected == type(obj)` 与 `value != type(other)` 不报告 `E721`。
 - `type(obj) is int` 与 `isinstance(obj, int)` 不报告 `E721`。
 
-这使 follow-up 成为新的预先声明行为合同，不应回写为“初始合同本来就已覆盖”。
+这使 follow-up 成为扩展后的行为合同，不应回写为“初始合同本来就已覆盖”。

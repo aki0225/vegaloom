@@ -11,8 +11,8 @@
   },
   "relationship_to_previous_case": {
     "previous_case": "RW-PYC-1187-REJECT-20260725",
-    "kind": "new_preregistered_followup",
-    "reason": "The reviewer finding was converted into explicit positive and negative behavior checks before this run started."
+    "kind": "expanded_contract_followup",
+    "reason": "Local run records state that the reviewer finding was converted into explicit positive and negative behavior checks before this run; the public Git history does not independently prove that ordering."
   },
   "run": {
     "mode": "auto",
