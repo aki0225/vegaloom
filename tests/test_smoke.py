@@ -1185,6 +1185,9 @@ def test_review_pack_generates_isolated_context_from_reflect_run(tmp_path) -> No
     assert "## Project Profile" not in prompt
     assert "## Project Knowledge" not in prompt
     assert prompt.count("测试必须说明结果") == 1
+    assert "只使用已存在的文件、diff、测试摘要、日志和项目上下文" in prompt
+    assert "不要自行运行验证命令或补造证据" in prompt
+    assert "不要运行测试、构建、安装依赖、格式化、代码生成" in prompt
     metrics = json.loads(run_dir.joinpath("review-prompt-metrics.json").read_text(encoding="utf-8"))
     assert metrics["chars"] == len(prompt)
     assert metrics["status"] == "within_budget"
