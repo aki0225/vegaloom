@@ -919,6 +919,7 @@ def _run_windows_taskkill(pid: int, *, force: bool, timeout: float) -> str | Non
             capture_output=True,
             check=False,
             text=True,
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
