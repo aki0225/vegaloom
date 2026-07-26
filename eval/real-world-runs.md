@@ -98,3 +98,33 @@ fail-closed 的记录与成功记录同等保留：它验证的是"证据不足�
 pycodestyle #1187 follow-up 的“执行前冻结合同”来自本地运行记录；当前公开 Git 历史同时引入
 合同与结果，不能独立证明两者的先后顺序。Click #2939 则保留了先预注册、后追加结果的两个
 独立提交，可通过公开提交顺序核对。
+
+## 2026-07-26 主线自举验证：`--repo` 普通文件拒绝
+
+该条目记录 Vega 使用当前主线 runtime 审查旧版 Vega 修复的 assist Dogfood，不计入真实 Issue
+成功率，也不改写此前路径过长、验证超时和人工停止的负结果。
+
+- 最终 run：`20260726-163845-755884-bug-loop`。
+- 目标 Bug 基线：`80ece20`；运行前加入独立的 Windows `taskkill` 输出解码修复
+  `82baf94`，但不包含待验证的 `--repo` 修复。
+- 最终 run 复用了此前 worker 已生成的同一补丁，因此 `worker_status=skipped`。该结果验证的是
+  assist 接管、验证、门禁、隔离 reviewer 和 Finish，不是一次新的模型生成能力样本。
+- 补丁只修改 `src/vega/cli.py`、`src/vega/cli_support.py` 和
+  `tests/test_cli_recovery_hardening.py`；pre-verification、post-verification 和 pre-review
+  三阶段 scope gate 均通过。
+- 10 条预注册验证命令全部通过：5 个 pytest 分片合计
+  `714 passed, 5 skipped`，另有 `compileall`、仓库卫生检查、Ruff 和
+  `git diff --check` 通过。
+- Windows 本机的 pytest cache provider 会在 session finish 阶段阻塞；本次 fixture 通过
+  `PYTEST_ADDOPTS=-p no:cacheprovider` 让嵌套 pytest 同样禁用缓存，并将单命令超时预先设置为
+  900 秒。测试文件覆盖保持完整，没有删减用例。
+- 主命令按约 25 秒间隔持续输出 verification/reviewer 进度；长分片没有再表现为无反馈等待。
+- risk gate 判定为 `low / self-check`；独立只读 reviewer 返回 `approve` 且 findings 为 0。
+  reviewer 前后的可信工作区指纹一致，Finish 状态为 `ready_to_commit`。
+- 两个测试分片仍记录到 10 条 `PytestUnhandledThreadExceptionWarning`，来源是其他 Windows
+  子进程文本解码路径收到非 UTF-8 输出。它们未改变退出码或 reviewer 结论，但属于后续应独立
+  修复的兼容性风险，不能被本次成功状态掩盖。
+
+该样例证明当前主线能够在 Windows 慢测试环境中完成有进度、可追溯、fail-closed 的
+assist 验证与隔离审查闭环。它不能证明新 worker 每次都能生成正确补丁，也不能证明所有
+Windows 子进程解码问题已经解决。

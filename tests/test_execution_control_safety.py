@@ -445,6 +445,36 @@ def test_windows_taskkill_nonzero_keeps_stop_execution_active(
     assert not inspection.can_recover
 
 
+def test_windows_taskkill_replaces_undecodable_localized_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_kwargs: dict[str, object] = {}
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        observed_kwargs.update(kwargs)
+        if kwargs.get("errors") != "replace":
+            raise UnicodeDecodeError(
+                "utf-8",
+                b"\xb3",
+                0,
+                1,
+                "invalid start byte",
+            )
+        return SimpleNamespace(
+            returncode=5,
+            stdout="",
+            stderr="localized output \ufffd",
+        )
+
+    monkeypatch.setattr(execution_control.subprocess, "run", fake_run)
+
+    result = execution_control._run_windows_taskkill(4242, force=False, timeout=1)
+
+    assert observed_kwargs["text"] is True
+    assert observed_kwargs["errors"] == "replace"
+    assert result == "taskkill \u9000\u51fa\u7801 5\uff1alocalized output \ufffd"
+
+
 def test_recovery_rejects_persisted_unconfirmed_process_tree(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
