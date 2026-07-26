@@ -93,9 +93,8 @@ def run(
     _reject_sensitive_input_path(task, "--task")
     if not task.exists():
         raise typer.BadParameter(f"任务文件不存在：{_safe_path_display(task)}")
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
-    _ensure_git_ready(repo.resolve())
+    repo = _require_repo_directory(repo)
+    _ensure_git_ready(repo)
 
     workspace = Path.cwd()
     try:
@@ -104,7 +103,7 @@ def run(
         raise typer.BadParameter(str(exc)) from exc
 
     runtime = EngineeringChangeRuntime(workspace=workspace, loop_spec=spec)
-    run_dir = runtime.run(task_file=task.resolve(), repo_path=repo.resolve())
+    run_dir = runtime.run(task_file=task.resolve(), repo_path=repo)
     status = read_engineering_change_status(run_dir)
     if status == "success":
         typer.echo(f"运行成功：status={status}，run={run_dir}")
@@ -116,9 +115,8 @@ def run(
 @app.command("profile")
 def profile(repo: Path = typer.Option(..., "--repo", help="目标仓库路径。")) -> None:
     """生成项目画像，识别技术栈、测试命令、入口和项目规则。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
-    run_dir = ProjectProfileRuntime(workspace=Path.cwd()).run(repo.resolve())
+    repo = _require_repo_directory(repo)
+    run_dir = ProjectProfileRuntime(workspace=Path.cwd()).run(repo)
     typer.echo(f"项目画像生成完成：{run_dir}")
     exit_if_failed(run_dir)
 
@@ -136,13 +134,12 @@ def reflect(
     ),
 ) -> None:
     """基于当前 diff、测试日志和项目知识生成执行后复盘。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
-    _ensure_git_ready(repo.resolve())
+    repo = _require_repo_directory(repo)
+    _ensure_git_ready(repo)
     if test_log and not test_log.exists():
         raise typer.BadParameter(f"测试日志不存在：{_safe_path_display(test_log)}")
     run_dir = ReflectRuntime(workspace=Path.cwd()).run(
-        repo.resolve(),
+        repo,
         source_run=run,
         test_log=test_log.resolve() if test_log else None,
         note=note,
@@ -163,12 +160,11 @@ def plan_change(
     scope: str | None = typer.Option(None, "--scope", help="scope profile，例如 small、refactor、migration。"),
 ) -> None:
     """为大目标生成 change-plan，不直接修改目标仓库。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
+    repo = _require_repo_directory(repo)
     content, source = _load_brief_input(input_path, text)
     try:
         run_dir = ChangePlanRuntime(workspace=Path.cwd()).run(
-            repo.resolve(),
+            repo,
             goal_text=content,
             input_source=source,
             scope_profile=scope,
@@ -186,11 +182,10 @@ def review_pack(
     run: str = typer.Option(..., "--run", help="reflect run_id 或 runs/<run_id>。"),
 ) -> None:
     """基于 reflect run 生成隔离 reviewer 的上下文包。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
-    _ensure_git_ready(repo.resolve())
+    repo = _require_repo_directory(repo)
+    _ensure_git_ready(repo)
     try:
-        run_dir = ReviewPackRuntime(workspace=Path.cwd()).run(repo.resolve(), run)
+        run_dir = ReviewPackRuntime(workspace=Path.cwd()).run(repo, run)
     except FileNotFoundError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"review pack 生成完成：{run_dir}")
@@ -207,12 +202,11 @@ def review(
     runner: str = typer.Option("codex-exec", "--runner", help="reviewer runner：codex-exec 或 none。"),
 ) -> None:
     """调用隔离 reviewer 审查当前 reflect run。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
-    _ensure_git_ready(repo.resolve())
+    repo = _require_repo_directory(repo)
+    _ensure_git_ready(repo)
     _ensure_runner_ready(runner, "reviewer")
     try:
-        run_dir = ReviewRuntime(workspace=Path.cwd()).run(repo.resolve(), run, runner_name=runner)
+        run_dir = ReviewRuntime(workspace=Path.cwd()).run(repo, run, runner_name=runner)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"review 运行完成：{run_dir}")
@@ -228,11 +222,10 @@ def gate(
     json_output: bool = typer.Option(False, "--json", help="输出机器可读 JSON。"),
 ) -> None:
     """基于 reflect run 评估风险门禁，判断是否适合 self-check、isolated-review 或 human-review。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
-    _ensure_git_ready(repo.resolve())
+    repo = _require_repo_directory(repo)
+    _ensure_git_ready(repo)
     try:
-        run_dir = GateRuntime(workspace=Path.cwd()).run(repo.resolve(), run, scope_profile=scope)
+        run_dir = GateRuntime(workspace=Path.cwd()).run(repo, run, scope_profile=scope)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     if json_output:
@@ -249,9 +242,8 @@ def config_check(
     json_output: bool = typer.Option(False, "--json", help="输出机器可读 JSON。"),
 ) -> None:
     """只读检查 `.vega.yaml` 是否能被 runtime 安全理解。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
-    result = check_project_config(repo.resolve())
+    repo = _require_repo_directory(repo)
+    result = check_project_config(repo)
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
     else:
@@ -323,11 +315,10 @@ def goal_start(
     scope: str | None = typer.Option(None, "--scope", help="scope profile，例如 refactor、migration。"),
 ) -> None:
     """创建 goal contract 和状态文件，不调用 worker。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
+    repo = _require_repo_directory(repo)
     content, source = _load_brief_input(input_path, text)
     try:
-        run_dir = _goal_runtime().start(repo.resolve(), content, source, scope)
+        run_dir = _goal_runtime().start(repo, content, source, scope)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"goal 创建完成：{run_dir}")
@@ -555,10 +546,9 @@ def adapters_init(
     """生成工具侧轻量 skill adapter，不安装 hook，不修改全局配置。"""
     from .experimental.adapter_runtime import init_adapter, render_adapter_init_summary
 
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
+    repo = _require_repo_directory(repo)
     try:
-        result = init_adapter(repo.resolve(), target, force=force)
+        result = init_adapter(repo, target, force=force)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(render_adapter_init_summary(result))
@@ -767,16 +757,15 @@ def loop_continue(
     verify: bool = typer.Option(True, "--verify/--no-verify", help="未提供 --test-log 时自动执行验证命令。"),
 ) -> None:
     """在主会话/人工完成修改后，继续 needs_human loop 的 reflect + review。"""
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
-    _ensure_git_ready(repo.resolve())
+    repo = _require_repo_directory(repo)
+    _ensure_git_ready(repo)
     if test_log and not test_log.exists():
         raise typer.BadParameter(f"测试日志不存在：{_safe_path_display(test_log)}")
     _ensure_runner_ready(reviewer, "reviewer")
     try:
         run_dir = LoopAutomationRuntime(workspace=Path.cwd()).continue_assist(
             run,
-            repo.resolve(),
+            repo,
             reviewer_name=reviewer,
             test_log=test_log.resolve() if test_log else None,
             note=note,
@@ -791,14 +780,13 @@ def loop_continue(
 
 
 def _run_brief(mode: str, repo: Path, input_path: Path | None, text: str | None) -> None:
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
+    repo = _require_repo_directory(repo)
     content, source = _load_brief_input(input_path, text)
     brief_input = BriefInput(
         mode=mode,  # type: ignore[arg-type]
         text=content,
         source=source,
-        repo_path=str(repo.resolve()),
+        repo_path=str(repo),
     )
     run_dir = BriefRuntime(workspace=Path.cwd()).run(brief_input)
     typer.echo(f"brief 生成完成：{run_dir}")
@@ -821,11 +809,10 @@ def _run_loop(
     *,
     allow_initial_assist_wait: bool,
 ) -> None:
-    if not repo.exists():
-        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
+    repo = _require_repo_directory(repo)
     if automation_mode not in {"assist", "auto"}:
         raise typer.BadParameter("--mode 只能是 assist 或 auto")
-    _ensure_git_ready(repo.resolve())
+    _ensure_git_ready(repo)
     _validate_runner_name(worker, "worker")
     _validate_runner_name(reviewer, "reviewer")
     if automation_mode == "auto":
@@ -836,7 +823,7 @@ def _run_loop(
         mode=task_mode,  # type: ignore[arg-type]
         text=content,
         source=source,
-        repo_path=str(repo.resolve()),
+        repo_path=str(repo),
     )
     try:
         run_dir = LoopAutomationRuntime(workspace=Path.cwd()).start(
@@ -894,6 +881,20 @@ def _validate_runner_name(runner: str, role: str) -> str:
             "none、prompt-only、codex、codex-exec。"
         )
     return normalized
+
+
+def _require_repo_directory(repo: Path) -> Path:
+    if not repo.exists():
+        raise typer.BadParameter(f"目标仓库路径不存在：{_safe_path_display(repo)}")
+    try:
+        resolved = repo.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise typer.BadParameter("无法解析目标仓库路径。") from exc
+    if not resolved.is_dir():
+        raise typer.BadParameter(
+            f"目标仓库路径必须是目录：{_safe_path_display(repo)}"
+        )
+    return resolved
 
 
 def _ensure_git_ready(repo: Path) -> None:

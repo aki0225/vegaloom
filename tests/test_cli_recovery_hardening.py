@@ -347,6 +347,45 @@ def test_auto_cli_rejects_unknown_runner_before_creating_run(
     assert not tmp_path.joinpath("runs").exists()
 
 
+def test_all_repo_cli_entries_reject_regular_file_before_creating_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_file = tmp_path / "README.md"
+    repo_file.write_text("# not a repository directory\n", encoding="utf-8")
+    task_file = tmp_path / "task.md"
+    task_file.write_text("# Task\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    commands = [
+        ["config", "check", "--repo", str(repo_file), "--json"],
+        ["run", "engineering-change", "--task", str(task_file), "--repo", str(repo_file)],
+        ["profile", "--repo", str(repo_file)],
+        ["reflect", "--repo", str(repo_file)],
+        ["plan", "--repo", str(repo_file), "--text", "规划修复"],
+        ["review-pack", "--repo", str(repo_file), "--run", "missing-run"],
+        ["review", "--repo", str(repo_file), "--run", "missing-run", "--runner", "none"],
+        ["gate", "--repo", str(repo_file), "--run", "missing-run"],
+        ["goal", "start", "--repo", str(repo_file), "--text", "完成修复"],
+        ["adapters", "init", "codex", "--repo", str(repo_file)],
+        ["brief", "bug", "--repo", str(repo_file), "--text", "修复问题"],
+        ["brief", "feature", "--repo", str(repo_file), "--text", "新增功能"],
+        ["loop", "bug", "--repo", str(repo_file), "--text", "修复问题", "--mode", "assist"],
+        ["loop", "feature", "--repo", str(repo_file), "--text", "新增功能", "--mode", "assist"],
+        ["do", "bug", "--repo", str(repo_file), "--text", "修复问题", "--mode", "assist"],
+        ["do", "feature", "--repo", str(repo_file), "--text", "新增功能", "--mode", "assist"],
+        ["loop", "continue", "--repo", str(repo_file), "--run", "missing-run"],
+    ]
+
+    for command in commands:
+        result = CliRunner().invoke(app, command, catch_exceptions=False)
+
+        assert result.exit_code != 0, command
+        assert "目标仓库路径必须是目录" in result.output, command
+        assert "Traceback" not in result.output, command
+        assert not tmp_path.joinpath("runs").exists(), command
+
+
 @pytest.mark.parametrize(
     ("command", "sensitive_name"),
     [
