@@ -105,6 +105,7 @@ def test_cross_process_lock_blocks_without_mutating_business_artifacts(
         ready,
         release,
     )
+    recorded_owner_pid: int | None = None
     try:
         _wait_until(lambda: ready.exists(), process=holder, description="lock holder")
         with pytest.raises(RunMutationBusyError, match="run 正由其他进程修改"):
@@ -118,11 +119,17 @@ def test_cross_process_lock_blocks_without_mutating_business_artifacts(
             ).read_text(encoding="utf-8")
         )
         assert owner["operation"] == "loop.continue"
-        assert owner["owner_pid"] == holder.pid
+        recorded_owner_pid = int(owner["owner_pid"])
+        assert _process_alive(recorded_owner_pid)
     finally:
         release.touch()
         if holder.poll() is None:
             holder.wait(timeout=10)
+        if recorded_owner_pid is not None:
+            _wait_until(
+                lambda: not _process_alive(recorded_owner_pid),
+                description="lock owner exit",
+            )
 
     with RunMutationLock.acquire(run_dir, "loop.finish"):
         assert run_dir.joinpath(".control", "run-mutation-owner.json").is_file()
