@@ -13,14 +13,13 @@ from .cli_support import (
     echo_run_status,
     exit_for_loop_result,
     exit_if_failed,
-    read_engineering_change_status,
+    make_loop_runtime, make_review_runtime, read_engineering_change_status,
     require_repo_directory,
 )
 from .decision import append_run_decision, list_run_decisions
 from .execution_control import request_stop_for_run
 from .finish_runtime import FinishRuntime
 from .gate_runtime import GateRuntime
-from .loop_runtime import LoopAutomationRuntime
 from .memory_artifacts import MemoryProposalStore
 from .models import BriefInput
 from .project_config import check_project_config, render_project_config_check
@@ -28,7 +27,7 @@ from .project_profile import ProjectProfileRuntime
 from .redaction import redact_text, sensitive_path_reason
 from .reflect_runtime import ReflectRuntime
 from .recovery_runtime import RecoveryRuntime
-from .review_runtime import ReviewPackRuntime, ReviewRuntime
+from .review_runtime import ReviewPackRuntime
 from .run_status import latest_run_dir, render_run_status, run_status_payload
 from .run_utils import resolve_run_dir
 from .tools.git_tools import run_git
@@ -207,7 +206,7 @@ def review(
     _ensure_git_ready(repo)
     _ensure_runner_ready(runner, "reviewer")
     try:
-        run_dir = ReviewRuntime(workspace=Path.cwd()).run(repo, run, runner_name=runner)
+        run_dir = make_review_runtime(Path.cwd()).run(repo, run, runner_name=runner)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"review 运行完成：{run_dir}")
@@ -764,7 +763,7 @@ def loop_continue(
         raise typer.BadParameter(f"测试日志不存在：{_safe_path_display(test_log)}")
     _ensure_runner_ready(reviewer, "reviewer")
     try:
-        run_dir = LoopAutomationRuntime(workspace=Path.cwd()).continue_assist(
+        run_dir = make_loop_runtime(Path.cwd()).continue_assist(
             run,
             repo,
             reviewer_name=reviewer,
@@ -827,7 +826,7 @@ def _run_loop(
         repo_path=str(repo),
     )
     try:
-        run_dir = LoopAutomationRuntime(workspace=Path.cwd()).start(
+        run_dir = make_loop_runtime(Path.cwd()).start(
             brief_input,
             automation_mode=automation_mode,  # type: ignore[arg-type]
             worker_name=worker,

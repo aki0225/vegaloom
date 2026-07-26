@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from pydantic import ValidationError
 
@@ -98,11 +98,13 @@ class LoopAutomationRuntime:
         worker_runner: Runner | None = None,
         reviewer_runner: Runner | None = None,
         timeout_seconds: int = 900,
+        progress_reporter: Callable[[str, int], None] | None = None,
     ) -> None:
         self.workspace = workspace
         self.worker_runner = worker_runner
         self.reviewer_runner = reviewer_runner
         self.timeout_seconds = timeout_seconds
+        self.progress_reporter = progress_reporter
 
     def start(
         self,
@@ -182,7 +184,6 @@ class LoopAutomationRuntime:
             repo_path=brief_input.repo_path,
         )
         _write_project_policy_snapshot(run_dir, state.project_policy_snapshot)
-
         brief_run = BriefRuntime(self.workspace).run(brief_input)
         state.brief_run = run_name(brief_run)
         # brief 子 run 已形成后立即绑定根状态。若随后崩溃，recovery 至少能判断
@@ -238,7 +239,6 @@ class LoopAutomationRuntime:
                 trace,
             )
             return run_dir
-
         run_dir = self._run_auto_iterations(
             run_dir,
             state,
@@ -405,7 +405,6 @@ class LoopAutomationRuntime:
                 current_step=current_step,
             )
             return run_dir
-
         state.current_step = "scope_gate"
         state.save(run_dir / "state.json")
         scope_evidence = write_loop_scope_gate_evidence(
@@ -443,7 +442,6 @@ class LoopAutomationRuntime:
                 current_step="scope_gate_failed",
             )
             return run_dir
-
         auto_test_log = test_log
         if verify and auto_test_log is None:
             state.current_step = "verify"
@@ -453,6 +451,7 @@ class LoopAutomationRuntime:
                 repo,
                 iteration_dir,
                 iteration=iteration_number,
+                progress_reporter=self.progress_reporter,
             )
             verification_status = _verification_status(verification.command_count, verification.failed_count)
             verification_failed_count = verification.failed_count
@@ -799,7 +798,6 @@ class LoopAutomationRuntime:
             worker_name,
             options=config.runner.codex_exec.worker,
         )
-
         for iteration_number in range(1, state.max_iterations + 1):
             iteration_state = LoopIterationState(
                 iteration=iteration_number,
@@ -920,6 +918,7 @@ class LoopAutomationRuntime:
                     run_id=state.run_id,
                     step="worker",
                     iteration=iteration_number,
+                    progress_reporter=self.progress_reporter,
                 ),
             )
             _write_text_artifact(
@@ -1132,7 +1131,6 @@ class LoopAutomationRuntime:
                     current_step="scope_gate_failed",
                 )
                 return run_dir
-
             verification_log: Path | None = None
             verification_status = "skipped"
             verification_failed_count = 0
@@ -1144,6 +1142,7 @@ class LoopAutomationRuntime:
                     repo_path,
                     iteration_dir,
                     iteration=iteration_number,
+                    progress_reporter=self.progress_reporter,
                 )
                 verification_log = verification.summary_path
                 verification_status = _verification_status(verification.command_count, verification.failed_count)
@@ -1635,6 +1634,7 @@ class LoopAutomationRuntime:
                 run_id=loop_run_dir.name,
                 step="reviewer",
                 iteration=iteration,
+                progress_reporter=self.progress_reporter,
             ),
             project_config=config,
             precomputed_risk_gate=PrecomputedReviewRiskGate(

@@ -4,7 +4,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from .execution_control import RunnerExecutionContext, run_owned_process
 from .project_config import (
@@ -56,6 +56,7 @@ def run_project_verification(
     iteration: int = 1,
     max_commands: int | None = None,
     timeout_seconds: int | None = None,
+    progress_reporter: Callable[[str, int], None] | None = None,
 ) -> VerificationRunResult:
     """按项目画像执行最小验证命令，并把结果写成可交给 reflect/reviewer 的日志。
 
@@ -110,6 +111,7 @@ def run_project_verification(
                 heartbeat_interval_seconds=0.2,
                 lease_timeout_seconds=2.0,
                 terminate_grace_seconds=0.25,
+                progress_reporter=progress_reporter,
             ),
         )
         results.append(result)

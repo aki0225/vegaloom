@@ -1465,6 +1465,40 @@ def test_loop_assist_continue_generates_fix_prompt_from_review_findings(tmp_path
     assert reviewer.calls[0]["sandbox"] == "read-only"
 
 
+def test_loop_runtime_propagates_progress_reporter_to_worker_and_reviewer(
+    tmp_path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    worker = TrackedChangeRunner(["worker done"])
+    reviewer = StaticRunner([_review_json("approve")])
+
+    def reporter(step: str, elapsed: int) -> None:
+        del step, elapsed
+
+    runtime = LoopAutomationRuntime(
+        tmp_path,
+        worker_runner=worker,
+        reviewer_runner=reviewer,
+        progress_reporter=reporter,
+    )
+
+    runtime.start(
+        BriefInput(
+            mode="bug",
+            text="验证进度回调透传",
+            source="inline-text",
+            repo_path=str(repo_dir),
+        ),
+        "auto",
+        max_iterations=1,
+        verify=False,
+    )
+
+    assert worker.calls[0]["execution_context"].progress_reporter is reporter
+    assert reviewer.calls[0]["execution_context"].progress_reporter is reporter
+
+
 def test_loop_continue_rejects_repo_mismatch_without_mutating_run(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
     other_repo = tmp_path / "other-repo"

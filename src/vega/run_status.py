@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .decision import DecisionStore
+from .execution_feedback import render_owned_child_pid_line
 from .execution_control import (
     ACTIVE_EXECUTION_STATUSES,
     ExecutionRecord,
@@ -53,7 +54,9 @@ def render_run_status(workspace: Path, run: str) -> str:
     if execution:
         lines.extend([
             f"- execution：`{execution['status']}` / `{execution['step']}`",
-            f"- owned child PID：`{execution['child_pid'] or '尚未启动'}`",
+            render_owned_child_pid_line(
+                execution["status"] in ACTIVE_EXECUTION_STATUSES, execution["child_pid"]
+            ),
             f"- 最后心跳：`{execution['last_heartbeat']}`",
         ])
         if execution.get("termination_unconfirmed"):
@@ -631,9 +634,7 @@ def _latest_execution_payload(run_dir: Path) -> dict[str, Any] | None:
     if not records:
         return None
     active_records = [
-        record
-        for record in records
-        if record.lease.status in ACTIVE_EXECUTION_STATUSES
+        record for record in records if record.lease.status in ACTIVE_EXECUTION_STATUSES
     ]
     record = max(active_records or records, key=_execution_heartbeat_utc)
     lease = record.lease
@@ -654,9 +655,7 @@ def _execution_heartbeat_utc(record: ExecutionRecord) -> datetime:
     try:
         parsed = datetime.fromisoformat(record.lease.last_heartbeat)
     except ValueError as exc:
-        raise ValueError(
-            f"execution 记录 `{record.path}` 的 last_heartbeat 不是有效 ISO 时间。"
-        ) from exc
+        raise ValueError(f"execution 记录 `{record.path}` 的 last_heartbeat 不是有效 ISO 时间。") from exc
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)

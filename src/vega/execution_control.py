@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .execution_feedback import ExecutionProgressReporter, ExecutionProgressTicker
 
 ExecutionStatus = Literal[
     "starting",
@@ -75,6 +76,7 @@ class RunnerExecutionContext:
     heartbeat_interval_seconds: float = 1.0
     lease_timeout_seconds: float = 10.0
     terminate_grace_seconds: float = 3.0
+    progress_reporter: ExecutionProgressReporter | None = None
 
     def __post_init__(self) -> None:
         if self.heartbeat_interval_seconds <= 0:
@@ -240,23 +242,21 @@ def run_owned_process(
     stdout/stderr 直接落盘，避免长输出填满 PIPE 后阻塞。停止和超时只作用于本函数
     启动并写入 execution.json 的 PID，不扫描或终止系统中的其他 Codex/Node 进程。
     """
-
     controller = ExecutionController(context)
     controller.prepare(command, timeout_seconds)
     process: subprocess.Popen[bytes] | None = None
     deadline = time.monotonic() + timeout_seconds
     next_heartbeat = time.monotonic()
+    progress = ExecutionProgressTicker(context.step, context.progress_reporter)
     status: Literal["success", "error", "timed_out", "stopped"] = "error"
     error: str | None = None
     stdin_writer: threading.Thread | None = None
     output = ""
     termination_unconfirmed = False
-
     process_environment = None
     if environment is not None:
         process_environment = os.environ.copy()
         process_environment.update(environment)
-
     with tempfile.TemporaryFile("w+b") as output_file:
         try:
             process = subprocess.Popen(
@@ -269,8 +269,8 @@ def run_owned_process(
                 **_process_group_options(),
             )
             controller.child_started(process.pid)
+            progress.started()
             stdin_writer = _start_stdin_writer(process, input_text)
-
             while process.poll() is None:
                 request = controller.read_stop_request()
                 if request is not None:
@@ -290,7 +290,6 @@ def run_owned_process(
                             f"{termination.detail}；原因：{request.reason}"
                         )
                     break
-
                 now = time.monotonic()
                 if now >= deadline:
                     termination = _terminate_owned_process(
@@ -312,6 +311,7 @@ def run_owned_process(
                 if now >= next_heartbeat:
                     controller.heartbeat()
                     next_heartbeat = now + context.heartbeat_interval_seconds
+                progress.tick(now)
                 time.sleep(min(0.1, context.heartbeat_interval_seconds))
 
             if not termination_unconfirmed and status not in {"stopped", "timed_out"}:
