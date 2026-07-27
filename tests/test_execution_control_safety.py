@@ -514,6 +514,7 @@ def test_recovery_rechecks_unconfirmed_named_job_before_blocking(
             status="running",
         ),
     )
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(
         execution_control,
         "_probe_process",

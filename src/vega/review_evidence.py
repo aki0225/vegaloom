@@ -303,11 +303,15 @@ def _changed_files_snapshot_issues(
         changed_files
     ):
         issues.append("changed_files_hash_mismatch")
-    if (
-        current_snapshot is not None
-        and tuple(changed_files) != current_snapshot.changed_files
-    ):
-        issues.append("changed_files_workspace_mismatch")
+    if current_snapshot is not None:
+        untracked_files = set(current_snapshot.untracked_files)
+        current_tracked_files = tuple(
+            path
+            for path in current_snapshot.changed_files
+            if path not in untracked_files
+        )
+        if tuple(changed_files) != current_tracked_files:
+            issues.append("changed_files_workspace_mismatch")
     return issues
 
 

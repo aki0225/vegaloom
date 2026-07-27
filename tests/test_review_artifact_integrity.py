@@ -574,6 +574,7 @@ def test_standalone_review_rejects_any_untracked_file(tmp_path: Path) -> None:
     assert runner.prompts == []
     assert "source_untracked_files_present" in context["evidence_issues"]
     assert "current_untracked_files_present" in context["evidence_issues"]
+    assert "changed_files_workspace_mismatch" not in context["evidence_issues"]
     assert marker not in _read_tree(review_run)
 
 

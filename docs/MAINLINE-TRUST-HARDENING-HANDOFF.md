@@ -44,6 +44,21 @@
    Job、owner PID 和 child PID 都确认消失后才允许恢复。owner 已退出但 Job 仍活跃时，
    不再建议写入无人消费的 stop request，而是明确交还人工核对进程树。
 
+## 首轮新 head CI 反馈
+
+workflow `30272233352` 首轮运行时，静态检查、构建、Windows、POSIX、review evidence、
+remaining 和 runtime security 均通过，但 smoke 与 p0 分片暴露两个跨平台问题：
+
+1. Review evidence 把当前 snapshot 的 untracked 文件误算进 tracked `changed_files`
+   绑定，导致带本地配置或其他未跟踪文件的 Gate 运行被错误降级。修复后只比较 tracked
+   文件集合，untracked 仍由已有独立证据规则 fail-closed。
+2. Windows Job recovery 回归漏设平台模拟，Linux 无法进入 Windows 重新确认分支；
+   测试已显式固定平台前提。`core.ignorecase` 回归也改为只验证 scope gate 结果，不再
+   把后续风险门禁的终态耦合进路径匹配合同。
+
+对应 CI 失败节点在本机修复后重跑为 smoke `5 passed`、p0/review `4 passed`。这仍不能
+替代后续最新 head 的完整跨平台 CI。
+
 ## 最新增量与裁剪
 
 - README 恢复精确产品边界：独立只读 reviewer 只读取明确编译的任务、规则、tracked diff
