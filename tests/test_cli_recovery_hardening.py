@@ -301,7 +301,8 @@ def test_git_dubious_ownership_error_is_actionable(
 
     assert returncode == 128
     assert "safe.directory" in stderr
-    assert "不会自动修改全局 Git 配置" in stderr
+    assert "VEGA_GIT_SAFE_DIRECTORY" in stderr
+    assert "git config --global" not in stderr
 
 
 def test_auto_cli_fails_before_creating_run_when_codex_is_missing(
