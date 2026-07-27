@@ -25,8 +25,10 @@ from .execution_process import (
     create_windows_job_for_execution as _create_execution_job,
     get_process_creation_token as _process_creation_token,
     is_process_alive as _process_is_alive,
+    linux_process_group_states,
     owned_process_tree_is_active as _owned_process_tree_is_active,
     owned_process_tree_may_be_active as _owned_process_tree_may_be_active,
+    posix_process_group_is_alive,
     probe_process as _process_probe,
     probe_windows_job as _windows_job_probe,
     process_group_options as _platform_process_group_options,
@@ -501,6 +503,16 @@ def request_stop_for_run(run_dir: Path, reason: str) -> ExecutionRecord:
             f"{stale_reason}；当前 run 的 active execution 均无存活执行主体，"
             "请使用 recover 接管现场。"
         )
+    owner_probe = _probe_process(
+        record.lease.owner_pid,
+        record.lease.owner_creation_token,
+    )
+    if owner_probe.status != "alive":
+        raise ValueError(
+            "active execution 的原 owner 已退出或无法确认存活，"
+            "stop request 已无执行者可消费；"
+            "请人工核对并终止剩余 owned process tree，确认现场稳定后再执行 recover。"
+        )
     request = StopRequest(
         reason=normalized_reason,
         requested_at=_now().isoformat(),
@@ -669,7 +681,8 @@ def inspect_execution_for_recovery(run_dir: Path) -> ExecutionRecoveryInspection
             )
         return ExecutionRecoveryInspection(
             False,
-            "active execution 至少一个 owned/child PID 仍存活；"
+            "active execution 至少一个 owner/child PID 仍存活，"
+            "或 Job/POSIX process group 尚未退出；"
             "请先使用 vega stop 请求安全停止。",
             record,
         )
@@ -678,7 +691,7 @@ def inspect_execution_for_recovery(run_dir: Path) -> ExecutionRecoveryInspection
         record
         for record in records
         if record.lease.status in TERMINAL_EXECUTION_STATUSES
-        and _execution_has_live_owned_pid(record.lease)
+        and _terminal_execution_has_live_process_tree(record.lease)
     ]
     if live_terminal_records:
         record = max(
@@ -688,7 +701,7 @@ def inspect_execution_for_recovery(run_dir: Path) -> ExecutionRecoveryInspection
         return ExecutionRecoveryInspection(
             False,
             f"terminal execution 已标记为 {record.lease.status}，"
-            "但 owned/child PID 仍存活；已拒绝 recovery，避免并发接管。",
+            "但 owned process tree 仍存活；已拒绝 recovery，避免并发接管。",
             record,
         )
 
@@ -724,9 +737,13 @@ def _active_execution_stale_reason(lease: ExecutionLease) -> str | None:
         return None
     owner_probe = _probe_process(lease.owner_pid, lease.owner_creation_token)
     child_probe = _execution_child_probe(lease)
-    if owner_probe.status != "gone" or child_probe.status != "gone":
+    if (
+        owner_probe.status != "gone"
+        or child_probe.status != "gone"
+        or _execution_posix_process_group_is_active(lease)
+    ):
         # heartbeat/deadline 过期不足以证明执行主体已经退出。只要任一 owned PID
-        # 仍存活或身份无法确认，recover 就可能与原进程并发写状态，必须保守阻止。
+        # 或 POSIX 进程组仍存活，recover 就可能与原进程并发写状态，必须保守阻止。
         return None
 
     now = _now()
@@ -741,13 +758,15 @@ def _active_execution_stale_reason(lease: ExecutionLease) -> str | None:
     return None
 
 
-def _execution_has_live_owned_pid(lease: ExecutionLease) -> bool:
+def _terminal_execution_has_live_process_tree(lease: ExecutionLease) -> bool:
     job_probe = _execution_windows_job_probe(lease)
     if windows_job_blocks_recovery(job_probe):
         return True
-    owner_probe = _probe_process(lease.owner_pid, lease.owner_creation_token)
     child_probe = _execution_child_probe(lease)
-    return owner_probe.status != "gone" or child_probe.status != "gone"
+    return (
+        child_probe.status != "gone"
+        or _execution_posix_process_group_is_active(lease)
+    )
 
 
 def _execution_windows_job_probe(lease: ExecutionLease) -> WindowsJobProbe | None:
@@ -771,18 +790,20 @@ def _active_windows_job_recovery_summary(lease: ExecutionLease) -> str | None:
 
 
 def _termination_unconfirmed_reconfirmed(lease: ExecutionLease) -> bool:
-    if (
-        not lease.termination_unconfirmed
-        or not _is_windows_platform()
-        or lease.windows_job_name is None
-    ):
-        return False
-    job_probe = _execution_windows_job_probe(lease)
-    if job_probe is None or job_probe.status not in {"empty", "gone"}:
+    if not lease.termination_unconfirmed:
         return False
     owner_probe = _probe_process(lease.owner_pid, lease.owner_creation_token)
     child_probe = _execution_child_probe(lease)
-    return owner_probe.status == "gone" and child_probe.status == "gone"
+    if owner_probe.status != "gone" or child_probe.status != "gone":
+        return False
+    if _is_windows_platform():
+        if lease.windows_job_name is None:
+            return False
+        job_probe = _execution_windows_job_probe(lease)
+        return job_probe is not None and job_probe.status in {"empty", "gone"}
+    if lease.child_pid is None:
+        return False
+    return not _execution_posix_process_group_is_active(lease)
 
 
 def _termination_unconfirmed_blocks_recovery(lease: ExecutionLease) -> bool:
@@ -793,6 +814,30 @@ def _execution_child_probe(lease: ExecutionLease) -> ProcessProbe:
     if lease.child_pid is None:
         return ProcessProbe("gone")
     return _probe_process(lease.child_pid, lease.child_creation_token)
+
+
+def _execution_posix_process_group_is_active(lease: ExecutionLease) -> bool:
+    if _is_windows_platform() or lease.child_pid is None:
+        return False
+    try:
+        return _is_posix_process_group_alive(lease.child_pid)
+    except OSError:
+        return True
+
+
+def _linux_process_group_states(
+    process_group_id: int,
+    proc_root: Path = Path("/proc"),
+) -> list[str] | None:
+    return linux_process_group_states(process_group_id, proc_root)
+
+
+def _is_posix_process_group_alive(process_group_id: int) -> bool:
+    return posix_process_group_is_alive(
+        process_group_id,
+        signal_probe=os.killpg,
+        states_probe=_linux_process_group_states,
+    )
 
 
 def _probe_windows_job(job_name: str) -> WindowsJobProbe:
@@ -896,55 +941,6 @@ def _terminate_owned_process(
         signal.SIGTERM,
         signal.SIGKILL,
     )
-
-
-def _is_posix_process_group_alive(process_group_id: int) -> bool:
-    try:
-        os.killpg(process_group_id, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    linux_states = _linux_process_group_states(process_group_id)
-    if linux_states:
-        # Zombie/dead 进程已不能继续执行或写文件，不应把已终止的进程树误报为存活。
-        return any(state not in {"Z", "X", "x"} for state in linux_states)
-    return True
-
-
-def _linux_process_group_states(
-    process_group_id: int,
-    proc_root: Path = Path("/proc"),
-) -> list[str] | None:
-    if not proc_root.is_dir():
-        return None
-    states: list[str] = []
-    try:
-        entries = list(proc_root.iterdir())
-    except OSError:
-        return None
-    for entry in entries:
-        if not entry.name.isdigit():
-            continue
-        try:
-            stat = entry.joinpath("stat").read_text(encoding="utf-8")
-        except (FileNotFoundError, ProcessLookupError):
-            continue
-        except OSError:
-            continue
-        command_end = stat.rfind(")")
-        if command_end < 0:
-            continue
-        fields = stat[command_end + 1 :].split()
-        if len(fields) < 3:
-            continue
-        try:
-            member_group_id = int(fields[2])
-        except ValueError:
-            continue
-        if member_group_id == process_group_id:
-            states.append(fields[0])
-    return states
 
 
 def _run_windows_taskkill(pid: int, *, force: bool, timeout: float) -> str | None:

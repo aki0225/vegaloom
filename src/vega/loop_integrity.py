@@ -13,6 +13,7 @@ class LoopArtifactIntegrity:
     review_verdicts: tuple[ReviewVerdict, ...] = ()
     verification_results: tuple[dict[str, Any], ...] = ()
     risk_gate_results: tuple[GateResult, ...] = ()
+    reviewed_workspace_fingerprint: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -21,6 +22,7 @@ class LoopArtifactIntegrity:
             "review_verdict_count": len(self.review_verdicts),
             "verification_result_count": len(self.verification_results),
             "risk_gate_result_count": len(self.risk_gate_results),
+            "reviewed_workspace_fingerprint": self.reviewed_workspace_fingerprint,
         }
 
 
@@ -49,6 +51,7 @@ def trusted_verification_passed(
         failed_count = payload.get("failed_count")
         selected_command_count = payload.get("selected_command_count")
         skipped_commands = payload.get("skipped_commands")
+        workspace_fingerprint = payload.get("workspace_fingerprint")
         commands = payload.get("commands")
         results = payload.get("results")
         return (
@@ -60,6 +63,9 @@ def trusted_verification_passed(
             and payload.get("interruption_status") is None
             and payload.get("interruption_command") is None
             and payload.get("interruption_reason") is None
+            and _is_sha256(workspace_fingerprint)
+            and workspace_fingerprint
+            == artifact_integrity.reviewed_workspace_fingerprint
             and isinstance(commands, list)
             and len(commands) == command_count
             and isinstance(results, list)
@@ -101,7 +107,11 @@ def validate_verification_failure_kind_schema(
     prefix: str,
     issues: list[str],
 ) -> None:
-    if artifact_version == 2 and failure_kind not in {None, "project_config_invalid"}:
+    if artifact_version == 2 and failure_kind not in {
+        None,
+        "project_config_invalid",
+        "workspace_capture_failed",
+    }:
         issues.append(f"{prefix}_verification_failure_kind_invalid")
     if failure_kind != expected_failure_kind:
         issues.append(f"{prefix}_verification_failure_kind_mismatch")
@@ -141,6 +151,59 @@ def validate_project_config_failure_payload(
         issues.append(f"{prefix}_verification_config_failure_interrupted")
 
 
+def validated_review_workspace_fingerprint(
+    child_context: dict[str, Any] | None,
+    verdict: str,
+    issues: list[str],
+    prefix: str,
+) -> str:
+    if child_context is None or verdict != "approve":
+        return ""
+    review_fingerprints = [
+        child_context.get("source_workspace_fingerprint"),
+        child_context.get("current_workspace_fingerprint"),
+        child_context.get("reviewer_start_workspace_fingerprint"),
+        child_context.get("reviewer_end_workspace_fingerprint"),
+    ]
+    if not all(_is_sha256(item) for item in review_fingerprints) or len(
+        set(review_fingerprints)
+    ) != 1:
+        issues.append(f"{prefix}_child_review_workspace_fingerprint_invalid")
+        return ""
+    return str(review_fingerprints[0])
+
+
+def validate_verification_workspace_fingerprint(
+    payload: dict[str, Any],
+    prefix: str,
+    issues: list[str],
+) -> None:
+    if payload.get("failure_kind") == "workspace_capture_failed":
+        if payload.get("workspace_fingerprint") is not None:
+            issues.append(f"{prefix}_verification_workspace_fingerprint_unexpected")
+        error_type = payload.get("workspace_capture_error_type")
+        if not isinstance(error_type, str) or not error_type:
+            issues.append(f"{prefix}_verification_workspace_capture_error_invalid")
+        if payload.get("selected_command_count") != payload.get("command_count"):
+            issues.append(f"{prefix}_verification_workspace_capture_commands_incomplete")
+        if payload.get("skipped_commands") != []:
+            issues.append(f"{prefix}_verification_workspace_capture_skipped_commands")
+        if any(
+            payload.get(field) is not None
+            for field in (
+                "interruption_status",
+                "interruption_command",
+                "interruption_reason",
+            )
+        ):
+            issues.append(f"{prefix}_verification_workspace_capture_interrupted")
+        return
+    if not _is_sha256(payload.get("workspace_fingerprint")):
+        issues.append(f"{prefix}_verification_workspace_fingerprint_invalid")
+    if payload.get("workspace_capture_error_type") is not None:
+        issues.append(f"{prefix}_verification_workspace_capture_error_unexpected")
+
+
 def _uses_current_verification_artifact(
     state: LoopAutomationState,
     payload: dict[str, Any],
@@ -155,3 +218,11 @@ def _uses_current_verification_artifact(
 
 def _is_positive_int(value: object) -> bool:
     return type(value) is int and value > 0
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value.lower())
+    )

@@ -13,8 +13,10 @@ from pydantic import ValidationError
 from .execution_control import ExecutionLease
 from .loop_integrity import (
     LoopArtifactIntegrity,
+    validate_verification_workspace_fingerprint,
     validate_project_config_failure_payload,
     validate_verification_failure_kind_schema,
+    validated_review_workspace_fingerprint,
 )
 from .models import (
     GateResult,
@@ -361,6 +363,7 @@ def validate_loop_artifact_integrity(
     verdicts: list[ReviewVerdict] = []
     verification_results: list[dict[str, Any]] = []
     risk_gate_results: list[GateResult] = []
+    reviewed_workspace_fingerprints: dict[int, str] = {}
     expected_iteration_dirs: set[Path] = set()
     seen_iterations: set[int] = set()
     latest_iteration = state.iterations[-1].iteration if state.iterations else 0
@@ -442,7 +445,7 @@ def validate_loop_artifact_integrity(
         issues.extend(f"{prefix}_{issue}" for issue in gate_integrity.issues)
         if gate_integrity.result is not None:
             risk_gate_results.append(gate_integrity.result)
-        _validate_iteration_review(
+        reviewed_workspace_fingerprints[iteration.iteration] = _validate_iteration_review(
             workspace,
             repo_path,
             iteration_dir,
@@ -492,6 +495,10 @@ def validate_loop_artifact_integrity(
         review_verdicts=verdicts,
         verification_results=verification_results,
         risk_gate_results=risk_gate_results,
+        reviewed_workspace_fingerprint=reviewed_workspace_fingerprints.get(
+            latest_iteration,
+            "",
+        ),
     )
 
 
@@ -675,13 +682,13 @@ def _validate_iteration_review(
     iteration: LoopIterationState,
     issues: list[str],
     verdicts: list[ReviewVerdict],
-) -> None:
+) -> str:
     prefix = f"iteration_{iteration.iteration:02d}"
     local_verdict_path = iteration_dir / "review-verdict.json"
     if iteration.verdict is None:
         if local_verdict_path.exists():
             issues.append(f"{prefix}_review_verdict_unexpected")
-        return
+        return ""
     review_issue_start = len(issues)
     local_verdict, local_verdict_issue = _load_review_verdict(local_verdict_path)
     if local_verdict_issue:
@@ -693,13 +700,13 @@ def _validate_iteration_review(
             issues.append(f"{prefix}_local_review_findings_count_mismatch")
     if not iteration.review_run:
         issues.append(f"{prefix}_review_run_missing")
-        return
+        return ""
 
     try:
         review_dir = resolve_run_dir(workspace, iteration.review_run)
     except (FileNotFoundError, ValueError):
         issues.append(f"{prefix}_review_run_unavailable")
-        return
+        return ""
 
     child_state_path = review_dir / "state.json"
     child_context_path = review_dir / "review-context.json"
@@ -737,6 +744,13 @@ def _validate_iteration_review(
     if child_verdict and child_verdict.verdict != iteration.verdict:
         issues.append(f"{prefix}_child_review_verdict_mismatch")
 
+    reviewed_workspace_fingerprint = validated_review_workspace_fingerprint(
+        child_context,
+        iteration.verdict,
+        issues,
+        prefix,
+    )
+
     for local_name, child_path, issue_name in (
         ("review-state.json", child_state_path, "review_state_hash_mismatch"),
         ("review-context.json", child_context_path, "review_context_hash_mismatch"),
@@ -753,6 +767,8 @@ def _validate_iteration_review(
 
     if local_verdict and len(issues) == review_issue_start:
         verdicts.append(local_verdict)
+        return reviewed_workspace_fingerprint
+    return ""
 
 
 def _validate_interrupted_iteration(
@@ -834,6 +850,7 @@ def _validate_iteration_verification(
             issues.append(f"{prefix}_verification_iteration_binding_mismatch")
         if shell_kind not in {"cmd", "posix-sh"}:
             issues.append(f"{prefix}_verification_shell_kind_invalid")
+        validate_verification_workspace_fingerprint(payload, prefix, issues)
     if not isinstance(payload.get("repo_path"), str):
         issues.append(f"{prefix}_verification_repo_missing")
     elif _normalized_path(payload["repo_path"]) != _normalized_path(repo_path):
@@ -1158,6 +1175,7 @@ def _artifact_integrity(
     review_verdicts: list[ReviewVerdict] | None = None,
     verification_results: list[dict[str, Any]] | None = None,
     risk_gate_results: list[GateResult] | None = None,
+    reviewed_workspace_fingerprint: str = "",
 ) -> LoopArtifactIntegrity:
     unique_issues = tuple(dict.fromkeys(issues))
     return LoopArtifactIntegrity(
@@ -1166,6 +1184,7 @@ def _artifact_integrity(
         review_verdicts=tuple(review_verdicts or []),
         verification_results=tuple(verification_results or []),
         risk_gate_results=tuple(risk_gate_results or []),
+        reviewed_workspace_fingerprint=reviewed_workspace_fingerprint,
     )
 
 

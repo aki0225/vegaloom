@@ -20,11 +20,13 @@ import vega.execution_feedback as execution_feedback
 import vega.execution_process as execution_process
 from vega.execution_control import (
     ExecutionLease,
+    OwnedProcessResult,
     RunnerExecutionContext,
     inspect_execution_for_recovery,
     request_stop_for_run,
     run_owned_process,
 )
+from vega.runner import CodexExecRunner
 
 
 def test_execution_model_temp_path_preserves_windows_path_budget(
@@ -65,6 +67,35 @@ def test_execution_model_temp_paths_are_unique_within_one_process(
 
     assert execution_temp.parent == stop_temp.parent
     assert execution_temp != stop_temp
+
+
+def test_codex_exec_runner_propagates_termination_unconfirmed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr(
+        "vega.runner.run_owned_process",
+        lambda *args, **kwargs: OwnedProcessResult(
+            status="error",
+            output="partial output",
+            error="owned process tree 终止未确认",
+            returncode=None,
+            termination_unconfirmed=True,
+        ),
+    )
+
+    result = CodexExecRunner().run(
+        "test prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "error"
+    assert result.termination_unconfirmed is True
 
 
 def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> None:
@@ -535,6 +566,97 @@ def test_recovery_rechecks_unconfirmed_named_job_before_blocking(
     assert "已重新确认退出" in inspection.summary
 
 
+def test_posix_recovery_uses_child_pid_as_process_group_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "posix-live-group"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    child_pid = 2222
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=1111,
+            child_pid=child_pid,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=2)).isoformat(),
+            last_heartbeat=(now - timedelta(minutes=1)).isoformat(),
+            lease_expires_at=(now - timedelta(seconds=30)).isoformat(),
+            deadline=(now - timedelta(seconds=10)).isoformat(),
+            status="running",
+        ),
+    )
+    probed_groups: list[int] = []
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_is_posix_process_group_alive",
+        lambda pgid: probed_groups.append(pgid) or True,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert not inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+    assert probed_groups == [child_pid]
+
+
+def test_posix_recovery_reconfirms_unconfirmed_tree_after_owner_root_and_group_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "posix-unconfirmed-gone"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    child_pid = 3333
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=1111,
+            child_pid=child_pid,
+            termination_unconfirmed=True,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=2)).isoformat(),
+            last_heartbeat=(now - timedelta(minutes=1)).isoformat(),
+            lease_expires_at=(now - timedelta(seconds=30)).isoformat(),
+            deadline=(now - timedelta(seconds=10)).isoformat(),
+            status="running",
+        ),
+    )
+    probed_groups: list[int] = []
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_is_posix_process_group_alive",
+        lambda pgid: probed_groups.append(pgid) or False,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+    assert probed_groups
+    assert set(probed_groups) == {child_pid}
+    assert "已重新确认退出" in inspection.summary
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Object 专项回归")
 def test_windows_detached_grandchild_prevents_success_and_is_terminated_on_timeout(
     tmp_path: Path,
@@ -767,6 +889,50 @@ def test_stop_prefers_latest_live_active_execution_over_newer_stale_record(
     assert record.path == live_path
     assert live_path.with_name("stop-request.json").exists()
     assert not stale_path.with_name("stop-request.json").exists()
+
+
+def test_stop_does_not_write_request_when_owner_is_gone_but_child_is_alive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "stop-without-owner"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    owner_pid = 1111
+    child_pid = 2222
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=owner_pid,
+            child_pid=child_pid,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=1)).isoformat(),
+            last_heartbeat=now.isoformat(),
+            lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+            deadline=(now + timedelta(minutes=2)).isoformat(),
+            status="running",
+        ),
+    )
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda pid, _: execution_control.ProcessProbe(
+            "gone" if pid == owner_pid else "alive"
+        ),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_is_posix_process_group_alive",
+        lambda pgid: pgid == child_pid,
+    )
+
+    with pytest.raises(ValueError, match="无执行者可消费"):
+        request_stop_for_run(run_dir, "stop orphaned tree")
+
+    assert not execution_path.with_name("stop-request.json").exists()
 
 
 def test_windows_taskkill_nonzero_keeps_stop_execution_active(

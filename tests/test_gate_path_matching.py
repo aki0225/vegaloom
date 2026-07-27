@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -162,11 +163,17 @@ def test_scope_glob_case_mode_is_explicit() -> None:
 
 def test_filesystem_case_probe_matches_existing_directory_semantics(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "ScopeProbeRepo"
     repo.mkdir()
     alternate = repo.with_name("scopeProbeRepo")
     expected = alternate.exists() and repo.samefile(alternate)
+    monkeypatch.setattr(
+        os.path,
+        "normcase",
+        (lambda value: value) if expected else (lambda value: value.casefold()),
+    )
 
     assert filesystem_is_case_insensitive(repo) is expected
     assert list(repo.iterdir()) == []

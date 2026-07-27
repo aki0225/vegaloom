@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from fnmatch import fnmatchcase
 from functools import lru_cache
 from pathlib import Path
@@ -58,6 +57,25 @@ def scope_paths_are_case_insensitive(repo_path: Path) -> bool:
 
 
 def filesystem_is_case_insensitive(repo_path: Path) -> bool:
-    """使用宿主平台路径规则，避免仓库配置或路径别名放宽 scope。"""
-    repo_path.resolve(strict=True)
-    return os.path.normcase("A") == os.path.normcase("a")
+    """只读探测目标路径本身，避免宿主默认规则误判挂载卷的大小写语义。"""
+    resolved = repo_path.resolve(strict=True)
+    current = resolved
+    while current != current.parent:
+        alternate_name = _swap_first_ascii_letter_case(current.name)
+        if alternate_name != current.name:
+            alternate = current.with_name(alternate_name)
+            try:
+                return alternate.exists() and current.samefile(alternate)
+            except OSError as exc:
+                raise RuntimeError("无法探测目标文件系统的大小写语义") from exc
+        current = current.parent
+    raise RuntimeError("目标路径没有可用于大小写探测的名称")
+
+
+def _swap_first_ascii_letter_case(value: str) -> str:
+    for index, character in enumerate(value):
+        if "a" <= character <= "z":
+            return value[:index] + character.upper() + value[index + 1 :]
+        if "A" <= character <= "Z":
+            return value[:index] + character.lower() + value[index + 1 :]
+    return value

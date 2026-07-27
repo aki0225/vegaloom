@@ -3,14 +3,20 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 import vega.execution_feedback as execution_feedback
+import vega.review_runtime as review_runtime_module
 from vega.change_plan_runtime import ChangePlanRuntime
 from vega.decision import DecisionStore
-from vega.execution_control import ExecutionRecoveryInspection, OwnedProcessResult
+from vega.execution_control import (
+    ExecutionLease,
+    ExecutionRecoveryInspection,
+    OwnedProcessResult,
+)
 from vega.gate_runtime import GateRuntime
 from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime
@@ -118,6 +124,28 @@ class IgnoredFileMutatingReviewer:
             status="success",
             output=_review_json("approve"),
             command=["ignored-file-mutating-reviewer"],
+        )
+
+
+class TerminationUnconfirmedRunner:
+    def __init__(self, output: str) -> None:
+        self.output = output
+
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        return RunnerResult(
+            status="error",
+            output=self.output,
+            error="owned process tree 终止未确认",
+            command=["termination-unconfirmed-runner"],
+            termination_unconfirmed=True,
         )
 
 
@@ -325,6 +353,89 @@ def test_loop_attributes_project_config_failure_without_fake_command(
     assert any("项目配置预检失败" in item for item in status_payload["next_steps"])
     assert any("未执行任何验证命令" in item for item in status_payload["next_steps"])
     assert not any("自动验证失败" in item for item in status_payload["next_steps"])
+
+
+@pytest.mark.parametrize("flow", ["auto", "continue"])
+def test_loop_pauses_with_structured_artifacts_when_verification_workspace_capture_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flow: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    reviewer = QueueRunner([_review_json("approve")])
+    monkeypatch.setattr(
+        "vega.verification.capture_review_workspace",
+        lambda _: (_ for _ in ()).throw(RuntimeError("workspace capture failed")),
+    )
+
+    runtime = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeRunner(["worker complete"]),
+        reviewer_runner=reviewer,
+    )
+    brief = BriefInput(
+        mode="bug",
+        text="Fix the README behavior.",
+        source="test",
+        repo_path=str(repo),
+    )
+    if flow == "auto":
+        run_dir = runtime.start(
+            brief,
+            "auto",
+            max_iterations=1,
+            verify=True,
+        )
+    else:
+        run_dir = runtime.start(
+            brief,
+            "assist",
+            max_iterations=1,
+            verify=True,
+        )
+        repo.joinpath("README.md").write_text(
+            "# Demo\nworker completed\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        run_dir = runtime.continue_assist(run_dir.name, repo, verify=True)
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    iteration = state["iterations"][0]
+    iteration_dir = run_dir / "iterations" / "01"
+    verification = json.loads(
+        iteration_dir.joinpath("verification-result.json").read_text(encoding="utf-8")
+    )
+    trace_items = [
+        json.loads(line)
+        for line in run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "verification_workspace_capture_failed"
+    assert iteration["verification_status"] == "failed"
+    assert iteration["verification_failure_kind"] == "workspace_capture_failed"
+    assert verification["failure_kind"] == "workspace_capture_failed"
+    assert verification["workspace_fingerprint"] is None
+    assert verification["workspace_capture_error_type"] == "RuntimeError"
+    assert iteration_dir.joinpath("verification-summary.md").exists()
+    assert iteration_dir.joinpath("test-summary.md").exists()
+    assert not iteration_dir.joinpath("reflect-run.txt").exists()
+    assert not iteration_dir.joinpath("review-verdict.json").exists()
+    assert reviewer.prompts == []
+    assert any(
+        item.get("event") == "verification_workspace_capture_failed"
+        for item in trace_items
+    )
+    assert trace_items[-1]["event"] == "run_paused"
+    assert "工作区指纹采集失败" in iteration_dir.joinpath(
+        "verification-summary.md"
+    ).read_text(encoding="utf-8")
+    status_payload = run_status_payload(workspace, run_dir.name)
+    assert any("工作区指纹采集失败" in item for item in status_payload["next_steps"])
 
 
 def test_verification_propagates_bounded_progress_reporter(
@@ -863,6 +974,141 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
         next_steps = run_status_payload(workspace, run_dir.name)["next_steps"]
         assert any("终止未确认" in item for item in next_steps)
         assert any("不允许重复 stop 或自动 recover" in item for item in next_steps)
+
+
+@pytest.mark.parametrize("termination_unconfirmed", [False, True])
+def test_loop_continue_rejects_execution_tree_that_has_not_safely_disappeared(
+    tmp_path: Path,
+    termination_unconfirmed: bool,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    runtime = LoopAutomationRuntime(workspace)
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="Fix the README behavior.",
+            source="test",
+            repo_path=str(repo),
+        ),
+        "assist",
+        verify=False,
+    )
+    now = datetime.now(UTC)
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    execution_path.parent.mkdir(parents=True)
+    execution_path.write_text(
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=os.getpid(),
+            child_pid=os.getpid(),
+            termination_unconfirmed=termination_unconfirmed,
+            command=["worker"],
+            started_at=now.isoformat(),
+            last_heartbeat=now.isoformat(),
+            lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+            deadline=(now + timedelta(minutes=2)).isoformat(),
+            status="running",
+        ).model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="拒绝 continue"):
+        runtime.continue_assist(run_dir.name, repo, verify=False)
+
+    assert not run_dir.joinpath("iterations", "01").exists()
+
+
+def test_worker_termination_unconfirmed_skips_output_and_workspace_followup(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    marker = "WORKER_OUTPUT_MUST_NOT_BE_CONSUMED"
+    reviewer = QueueRunner([_review_json("approve")])
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TerminationUnconfirmedRunner(marker),
+        reviewer_runner=reviewer,
+    ).start(
+        BriefInput(
+            mode="bug",
+            text="Fix the README behavior.",
+            source="test",
+            repo_path=str(repo),
+        ),
+        "auto",
+        max_iterations=1,
+        verify=False,
+    )
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    iteration_dir = run_dir / "iterations" / "01"
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "worker_termination_unconfirmed"
+    assert state["iterations"][0]["worker_status"] == "failed"
+    assert marker not in iteration_dir.joinpath("worker-output.txt").read_text(
+        encoding="utf-8"
+    )
+    assert not iteration_dir.joinpath("workspace-check.json").exists()
+    assert not iteration_dir.joinpath("verification-result.json").exists()
+    assert reviewer.prompts == []
+
+
+def test_reviewer_termination_unconfirmed_does_not_parse_or_persist_verdict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    reflect_run = ReflectRuntime(workspace).run(repo)
+    marker = "REVIEWER_APPROVE_MUST_NOT_BE_CONSUMED"
+    reviewer_output = json.dumps(
+        {
+            "verdict": "approve",
+            "summary": marker,
+            "findings": [],
+            "checked_items": ["scope"],
+        }
+    )
+    capture_calls = 0
+    original_capture = review_runtime_module.capture_review_workspace
+
+    def capture_once_before_runner(repo_path: Path):
+        nonlocal capture_calls
+        capture_calls += 1
+        return original_capture(repo_path)
+
+    monkeypatch.setattr(
+        review_runtime_module,
+        "capture_review_workspace",
+        capture_once_before_runner,
+    )
+
+    review_run = ReviewRuntime(
+        workspace,
+        runner=TerminationUnconfirmedRunner(reviewer_output),
+    ).run(repo, reflect_run.name)
+
+    state = json.loads(review_run.joinpath("state.json").read_text(encoding="utf-8"))
+    verdict = json.loads(
+        review_run.joinpath("review-verdict.json").read_text(encoding="utf-8")
+    )
+    runner_output = review_run.joinpath("review-runner-output.txt").read_text(
+        encoding="utf-8"
+    )
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "termination_unconfirmed"
+    assert verdict["verdict"] == "needs_human"
+    assert "终止未确认" in verdict["summary"]
+    assert marker not in runner_output
+    # Review 输入和授权各捕获一次；终止未确认后不得再捕获第三次结束快照。
+    assert capture_calls == 2
 
 
 def test_review_blocks_untracked_config_without_leaking_content(

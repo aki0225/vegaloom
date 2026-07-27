@@ -5,6 +5,7 @@ import os
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from ctypes import wintypes
@@ -159,6 +160,67 @@ def is_process_alive(pid: int, *, windows: bool) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def posix_process_group_is_alive(
+    process_group_id: int,
+    *,
+    signal_probe: Callable[[int, int], None],
+    states_probe: Callable[[int], list[str] | None],
+) -> bool:
+    try:
+        signal_probe(process_group_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    linux_states = states_probe(process_group_id)
+    if linux_states:
+        # Zombie/dead 进程已不能继续执行或写文件，不应把已终止的进程树误报为存活。
+        return any(state not in {"Z", "X", "x"} for state in linux_states)
+    return True
+
+
+def linux_process_group_states(
+    process_group_id: int,
+    proc_root: Path = Path("/proc"),
+) -> list[str] | None:
+    if not proc_root.is_dir():
+        return None
+    states: list[str] = []
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = entry.joinpath("stat").read_text(encoding="utf-8")
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        except OSError:
+            continue
+        parsed = _parse_linux_process_group_stat(stat)
+        if parsed is None:
+            continue
+        state, member_group_id = parsed
+        if member_group_id == process_group_id:
+            states.append(state)
+    return states
+
+
+def _parse_linux_process_group_stat(stat: str) -> tuple[str, int] | None:
+    command_end = stat.rfind(")")
+    if command_end < 0:
+        return None
+    fields = stat[command_end + 1 :].split()
+    if len(fields) < 3:
+        return None
+    try:
+        return fields[0], int(fields[2])
+    except ValueError:
+        return None
 
 
 def probe_process(

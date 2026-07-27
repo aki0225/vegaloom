@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+import vega.git_read as git_read_module
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -131,6 +133,61 @@ def test_git_reads_trust_only_the_selected_repository(
             "--short",
         ]
     ]
+
+
+def test_controlled_git_reads_disable_replace_objects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[dict[str, object]] = []
+
+    def fake_run(command: list[str], **kwargs: object):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setenv("GIT_NO_REPLACE_OBJECTS", "0")
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
+
+    git_read_module.run_git_capture(repo, ["git", "status", "--short"])
+
+    assert calls[0]["env"]["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_run_git_text_requires_success_and_returns_only_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    results = iter(
+        [
+            subprocess.CompletedProcess(
+                ["git"],
+                0,
+                stdout=b"trusted evidence\n",
+                stderr=b"warning is not evidence\n",
+            ),
+            subprocess.CompletedProcess(
+                ["git"],
+                1,
+                stdout=b"partial output\n",
+                stderr=b"fatal: read failed\n",
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        git_read_module,
+        "run_git_capture",
+        lambda repo_path, command: next(results),
+    )
+
+    assert git_read_module.run_git_text(repo, ["git", "status"]) == (
+        "trusted evidence\n"
+    )
+    with pytest.raises(RuntimeError, match="fatal: read failed"):
+        git_read_module.run_git_text(repo, ["git", "status"])
 
 
 def test_ruff_lint_selection_is_explicit_and_stable() -> None:

@@ -74,7 +74,7 @@ Stage 0 的三个已确认维护缺口按以下顺序完成：
 ### M-004：主线可信执行维护
 
 - 优先级：`P0/P1`
-- 状态：`active` / Draft PR `#20`
+- 状态：`active` / Ready for Review PR `#20`
 - 分支：`codex/mainline-trust-hardening`
 - 来源：Stage 3 冻结后，真实 dogfood 与独立审查又复现了主线可信执行缺口；这是一项
   新增维护决策，不属于原 Assurance Stage，也不代表启动 Stage 4。

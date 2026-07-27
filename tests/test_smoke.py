@@ -1471,6 +1471,43 @@ def test_parse_review_verdict_rejects_extra_fields() -> None:
     assert "无法解析" in verdict.summary
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "verdict": "approve",
+            "summary": " ",
+            "findings": [],
+            "checked_items": ["scope"],
+        },
+        {
+            "verdict": "approve",
+            "summary": "looks good",
+            "findings": [],
+            "checked_items": [],
+        },
+        {
+            "verdict": "approve",
+            "summary": "looks good",
+            "findings": [
+                {
+                    "severity": "major",
+                    "title": "仍有主要问题",
+                }
+            ],
+            "checked_items": ["scope"],
+        },
+    ],
+)
+def test_parse_review_verdict_rejects_invalid_approve_contract(
+    payload: dict[str, object],
+) -> None:
+    verdict = parse_review_verdict(json.dumps(payload, ensure_ascii=False))
+
+    assert verdict.verdict == "needs_human"
+    assert "无法解析" in verdict.summary
+
+
 def test_loop_assist_continue_generates_fix_prompt_from_review_findings(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
     _init_changed_git_repo(repo_dir)

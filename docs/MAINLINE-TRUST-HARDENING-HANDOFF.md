@@ -3,9 +3,9 @@
 > 日期：2026-07-27
 > 分支：`codex/mainline-trust-hardening`
 > 基线：`origin/main@7805bba`
-> Draft PR：`#20`
-> 状态：本文不固定易过期的分支 head；每次推送后必须以 PR `#20` 最新 head 的 CI 为准，
-> 不能复用旧提交的成功结果
+> PR：`#20`
+> 状态：PR 已进入 Ready for Review。本文不固定易过期的分支 head；每次推送后必须以
+> PR `#20` 最新 head 的 CI 为准，不能复用旧提交的成功结果
 
 ## 本轮结果
 
@@ -43,6 +43,28 @@
 6. 带命名 Windows Job 的 `termination_unconfirmed` 会在 recovery 时重新探测；只有
    Job、owner PID 和 child PID 都确认消失后才允许恢复。owner 已退出但 Job 仍活跃时，
    不再建议写入无人消费的 stop request，而是明确交还人工核对进程树。
+
+## 二次独立审阅后的有界补强
+
+最新 head 全绿后又执行了一轮独立 diff 审阅，只修复能够稳定复现且属于 `M-004` 既定
+边界的问题，没有新增 Stage 或实验能力：
+
+1. `verification-result.json` 绑定验证命令结束时的完整工作区 fingerprint；最终
+   `ready_to_commit` 要求该 fingerprint 与 reviewer 实际审查的工作区完全一致。
+   verification 后即使只修改 allowlist 内文件，也不能复用旧验证结果。
+2. `termination_unconfirmed` 从 owned process 结果贯通到 runner、worker 和 reviewer。
+   未确认终止时不读取 runner 输出，不继续工作区检查、verification 或采用 reviewer
+   verdict。
+3. POSIX recovery 使用 child PID 作为 process group ID 探测后台后代；owner、根进程和
+   进程组全部退出后才允许重新确认。终态 execution 只检查残留 child/Job/进程组，不会
+   因同一 CLI owner 仍存活而阻止正常 continue。
+4. `approve` 必须包含非空摘要和至少一个 `checked_item`，且不能同时携带
+   `blocker`/`major` finding。
+5. 受控 Git 读取禁用 replace objects，文本读取失败时 fail-closed；scope 大小写语义
+   改为只读探测目标文件系统，而不是仅依据宿主操作系统默认规则。
+6. verification 命令结束后的工作区指纹采集失败时，写出
+   `workspace_capture_failed` 结构化结果；auto 与 continue 都保留完整 artifact 和终态
+   trace，并暂停为 `needs_human`，不再停留在 `running/verify` 或进入 Reflect/reviewer。
 
 ## 首轮新 head CI 反馈
 
@@ -82,36 +104,39 @@ remaining 和 runtime security 均通过，但 smoke 与 p0 分片暴露两个�
 - 删除重复的 junction 端到端测试、独立 metadata budget 测试和无分支价值的 legacy
   参数组合；仓库卫生测试复用统一 Git 初始化 helper。
 - 不新增 Runtime、数据库、Memory、Adapter、Goal、Assurance 或多 Agent 能力。
+- `metadata_bounded` 仍只证明有限元数据与清单稳定，不证明能够抵抗恶意本地写者伪造
+  同长度内容和时间戳；本 PR 不把它升级成操作系统级文件完整性保证。
+- 本 PR 不承诺安全执行恶意仓库自定义的 Git filter、外部 include 或 hook。Vega 的
+  reviewer sandbox 和证据边界不等于“打开任意恶意仓库也安全”的 OS 隔离。
 
 ## 当前验证证据
 
 ### 已通过
 
 ```text
-本机 .venv Python 3.12.10 collect-only: 815 tests collected
+本机 Python 3.12.10 collect-only: 832 tests collected
 compileall -f: passed
 Ruff: passed
 git diff --check: passed
 repository hygiene against origin/main: passed
 architecture growth: passed
-  C901 46 -> 40
+  C901 46 -> 39
   Python modules 55 -> 69
-architecture against current branch HEAD: passed
-  C901 40 -> 40
-  Python modules 69 -> 69
+architecture against current branch HEAD: 提交后复核
 ```
 
 当前增量的定向验证：
 
 ```text
-新增 6 类行为合同回归: 7 passed
+execution control safety: 31 passed, 1 skipped
+runtime safety integration: 28 passed, 1 skipped
 scope path matching: 52 passed
-workspace snapshot budget: 17 passed
-review artifact integrity: 16 passed + 15 passed，覆盖全部 31 nodes
-execution control safety: 9 passed + 1 skipped、10 passed、8 passed，覆盖全部 28 nodes
-POSIX 后台后代真实回归: Windows 本机 skipped，必须由 Linux CI 真正执行
-scope gate P0 邻接回归: 8 + 4 + 4 + 5 = 21 passed
-跨模块 consumers: 7 passed
+review fingerprint / approve contract 精确回归: 6 passed
+verification 后工作区变化回归: 1 passed
+recovery continue 回归: 1 passed
+受控 Git replace/text 读取回归: 2 passed
+verification 工作区指纹采集失败（auto/continue）: 2 passed
+architecture growth 单元合同: 41 passed；self-HEAD 节点待提交后复核
 ```
 
 ### 本机未形成全量通过结论
@@ -121,7 +146,13 @@ Python，一次使用项目 `.venv`。相关进程已按本轮命令范围清理
 **未通过**。关闭第三方 pytest 插件和 cacheprovider 后，受影响的单节点与邻接节点均
 快速通过；该模式会因为项目仍声明 `cache_dir` 产生一个预期的 pytest 配置 warning。
 
-因此最新提交的合并证据仍必须等待 Draft PR 的新 CI：
+本轮还确认 pytest 9 的 cacheprovider 会在本机 session finish 阶段卡在
+`tempfile.mkdtemp`；测试节点已显示通过也不能替代最终汇总。关闭 cacheprovider 后，
+execution control、runtime safety、scope 与精确回归均得到正常退出和明确计数。
+`tests/test_assurance_verification_semantics.py` 与 `tests/test_review_artifact_integrity.py`
+整文件运行仍超过 60 秒，因此只记录上面的精确节点结果，不把超时当成通过。
+
+因此本机不把上述超时命令记为全量通过。PR `#20` 的每个新 head 仍必须重新完成：
 
 - Python 3.11 全量测试。
 - Python 3.12 collect 守卫与 29 文件分片。
@@ -137,9 +168,11 @@ git pull --ff-only origin codex/mainline-trust-hardening
 git status -sb
 ```
 
-1. 先核对 Draft PR `#20` 最新 head 的全部 CI job，不要新建分支。
+1. 先核对 PR `#20` 最新 head 的全部 CI job，不要新建分支。
 2. CI 失败时保留日志，只修与本 PR 直接相关的失败，不再扩展新信任模型。
-3. CI 全绿后做一次独立 PR diff 与公开仓库卫生复核，再标记 Ready for Review。
-4. 合并后停止横向基础设施扩张，转入真实代码任务的成功率、耗时、token 成本、人工接管
+3. CI 全绿后做一次独立 PR diff 与公开仓库卫生复核。
+4. 最新 head 的 CI 和独立 diff 复核均通过后，由维护者决定是否合并；不要复用旧 head
+   的成功结果。
+5. 合并后停止横向基础设施扩张，转入真实代码任务的成功率、耗时、token 成本、人工接管
    和恢复体验验证。
-5. MA 与 Assurance 实验继续留在独立实验分支，不带入本 PR。
+6. MA 与 Assurance 实验继续留在独立实验分支，不带入本 PR。

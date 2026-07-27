@@ -365,7 +365,9 @@ class LoopIterationState(BaseModel):
     scope_gate_pre_review_report_sha256: str | None = None
     verification_status: Literal["skipped", "passed", "failed"] = "skipped"
     verification_failed_count: int = 0
-    verification_failure_kind: Literal["project_config_invalid"] | None = None
+    verification_failure_kind: (
+        Literal["project_config_invalid", "workspace_capture_failed"] | None
+    ) = None
     reflect_run: str | None = None
     risk_gate_status: Literal["skipped", "success", "failed"] = "skipped"
     risk_gate_source_run: str | None = None

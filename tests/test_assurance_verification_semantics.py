@@ -13,6 +13,7 @@ from vega.loop_integrity import LoopArtifactIntegrity, latest_verification_faile
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.runner import RunnerResult
+from vega.workspace_check import capture_review_workspace
 
 
 class TrackedChangeWorker:
@@ -392,7 +393,7 @@ def test_latest_skipped_verification_cannot_reuse_previous_pass(
 
 @pytest.mark.parametrize(
     "mutation",
-    ["missing", "tampered", "incomplete", "interrupted"],
+    ["missing", "missing_fingerprint", "tampered", "incomplete", "interrupted"],
 )
 def test_all_completion_layers_reject_broken_structured_verification(
     tmp_path: Path,
@@ -411,6 +412,14 @@ def test_all_completion_layers_reject_broken_structured_verification(
     result_path = run_dir / "iterations" / "01" / "verification-result.json"
     if mutation == "missing":
         result_path.unlink()
+    elif mutation == "missing_fingerprint":
+        result = _read_json(result_path)
+        result.pop("workspace_fingerprint")
+        result_path.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
     elif mutation == "tampered":
         result = _read_json(result_path)
         result["command_count"] = 0
@@ -469,6 +478,11 @@ def test_all_completion_layers_reject_broken_structured_verification(
     assert finish["finish_status"] == "needs_human"
     assert loop_evidence.completion_eligible is False
     assert finish_evidence.completion_eligible is False
+    if mutation == "missing_fingerprint":
+        assert (
+            "iteration_01_verification_workspace_fingerprint_invalid"
+            in finish["artifact_integrity"]["issues"]
+        )
 
 
 @pytest.mark.parametrize(
@@ -541,6 +555,57 @@ def test_success_finalization_fails_closed_when_evidence_changes_before_eval(
     assert expected_eval_fragment in (run_dir / "eval.md").read_text(encoding="utf-8")
     assert [item["status"] for item in terminal_events] == ["failed"]
     assert trace[-1] == terminal_events[0]
+
+
+def test_workspace_change_after_verification_cannot_auto_succeed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, repo = _init_repo(tmp_path, with_verification_config=True)
+    original_verification = loop_runtime_module.run_project_verification
+    verification_fingerprint = ""
+
+    def verify_then_mutate(*args, **kwargs):
+        nonlocal verification_fingerprint
+        result = original_verification(*args, **kwargs)
+        verification_fingerprint = capture_review_workspace(repo).fingerprint
+        readme = repo / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8") + "changed after verification\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        return result
+
+    monkeypatch.setattr(
+        loop_runtime_module,
+        "run_project_verification",
+        verify_then_mutate,
+    )
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeWorker(),
+        reviewer_runner=ApprovingReviewer(),
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
+    state = _read_json(run_dir / "state.json")
+    finish = _finish(workspace, run_dir)
+    review_context = _read_json(
+        workspace / "runs" / state["iterations"][0]["review_run"] / "review-context.json"
+    )
+    verification = _read_json(
+        run_dir / "iterations" / "01" / "verification-result.json"
+    )
+
+    assert verification_fingerprint
+    assert state["status"] != "success"
+    assert finish["verification_passed"] is False
+    assert finish["finish_status"] != "ready_to_commit"
+    assert verification["workspace_fingerprint"] == verification_fingerprint
+    assert (
+        review_context["reviewer_end_workspace_fingerprint"]
+        != verification_fingerprint
+    )
 
 
 def test_latest_passed_verification_supersedes_previous_failure_for_finish_and_goal(

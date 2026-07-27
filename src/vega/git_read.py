@@ -32,16 +32,10 @@ def run_git_text(
     repo_path: Path,
     command: list[str],
 ) -> str:
-    result = run_git_capture(repo_path, command)
-    stdout = coerce_git_output_bytes(result.stdout).decode(
+    return run_git_bytes(repo_path, command).decode(
         "utf-8",
         errors="replace",
     )
-    stderr = coerce_git_output_bytes(result.stderr).decode(
-        "utf-8",
-        errors="replace",
-    )
-    return stdout + stderr
 
 
 def run_git_capture(
@@ -115,6 +109,7 @@ def git_read_environment() -> dict[str, str]:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_NO_REPLACE_OBJECTS": "1",
             "GIT_OPTIONAL_LOCKS": "0",
             "GIT_PAGER": "cat",
             "PAGER": "cat",

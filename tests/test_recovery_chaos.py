@@ -133,6 +133,7 @@ class StaticReviewer:
                     "verdict": "approve",
                     "summary": "恢复后的独立 iteration 证据完整。",
                     "findings": [],
+                    "checked_items": ["scope", "tests", "recovery evidence"],
                 },
                 ensure_ascii=False,
             ),

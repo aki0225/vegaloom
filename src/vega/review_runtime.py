@@ -336,6 +336,7 @@ class ReviewRuntime:
             inputs,
             reviewer_started=reviewer_started,
             reviewer_start_fingerprint=reviewer_start_fingerprint,
+            termination_unconfirmed=result.termination_unconfirmed,
         )
         state.runner_status = result.status
         run_dir.joinpath("review-runner-output.txt").write_text(
@@ -347,7 +348,7 @@ class ReviewRuntime:
             result,
             step="reviewer",
         )
-        verdict = parse_review_verdict(result.output, result.error)
+        verdict = _review_verdict_from_result(result)
         verdict = _enforce_complete_review_evidence(
             verdict,
             [*inputs["truncated_sections"], *pre_review_evidence_issues],
@@ -366,12 +367,13 @@ class ReviewRuntime:
             "review_runner_finished",
             runner=runner_name,
             status=result.status,
+            termination_unconfirmed=result.termination_unconfirmed,
             verdict=verdict.verdict,
             findings=len(verdict.findings),
         )
         trace.write(
             "review_workspace_checked",
-            changed=bool(review_execution_issues),
+            changed=inputs["workspace_changed_during_review"],
             issues=review_execution_issues,
             start_fingerprint=inputs["reviewer_start_workspace_fingerprint"],
             end_fingerprint=inputs["reviewer_end_workspace_fingerprint"],
@@ -380,22 +382,15 @@ class ReviewRuntime:
         state.current_step = "eval"
         run_dir.joinpath("eval.md").write_text("# Eval\n\n(pending)\n", encoding="utf-8")
         eval_results = run_review_pack_eval(run_dir, REVIEW_ARTIFACTS)
-        if review_execution_issues:
-            eval_results.append("FAIL: reviewer 执行期间工作区发生变化或无法完成快照校验")
-        elif pre_review_evidence_issues:
-            pass
-        elif metrics.exceeded:
-            eval_results.append("FAIL: reviewer prompt 超过上下文预算，未启动外部 runner")
-        elif risk_gate_result is None:
-            eval_results.append("FAIL: review 风险门禁评估失败，未启动外部 runner")
-        elif risk_gate_result.recommendation == "human-review":
-            eval_results.append("FAIL: review 风险门禁要求人工审查，不能作为自动通过结论")
-        elif result.status == "skipped":
-            eval_results.append("PASS: runner=none 已跳过外部审查")
-        elif verdict.verdict == "needs_human":
-            eval_results.append("FAIL: reviewer 输出需要人工处理")
-        else:
-            eval_results.append("PASS: reviewer 输出 verdict 可解析")
+        _append_review_eval_outcome(
+            eval_results,
+            result=result,
+            review_execution_issues=review_execution_issues,
+            pre_review_evidence_issues=pre_review_evidence_issues,
+            metrics=metrics,
+            risk_gate_result=risk_gate_result,
+            verdict=verdict,
+        )
         run_dir.joinpath("eval.md").write_text(render_eval(eval_results), encoding="utf-8")
         state.eval_results = eval_results
         state.artifacts = [
@@ -404,7 +399,10 @@ class ReviewRuntime:
             *([budget_artifact] if budget_artifact else []),
         ]
         state.verdict = verdict.verdict
-        if review_execution_issues:
+        if result.termination_unconfirmed:
+            state.status = "needs_human"
+            state.current_step = "termination_unconfirmed"
+        elif review_execution_issues:
             state.status = "needs_human"
             state.current_step = "workspace_changed_during_review"
         elif pre_review_evidence_issues:
@@ -794,13 +792,65 @@ def parse_review_verdict(output: str, error: str | None = None) -> ReviewVerdict
         return _needs_human_verdict(message)
 
 
+def _review_verdict_from_result(result: RunnerResult) -> ReviewVerdict:
+    if result.termination_unconfirmed:
+        return _needs_human_verdict(
+            "reviewer owned process tree 终止未确认，未读取或采用 runner 输出。"
+        )
+    return parse_review_verdict(result.output, result.error)
+
+
+def _append_review_eval_outcome(
+    eval_results: list[str],
+    *,
+    result: RunnerResult,
+    review_execution_issues: list[str],
+    pre_review_evidence_issues: list[str],
+    metrics: PromptMetrics,
+    risk_gate_result: GateResult | None,
+    verdict: ReviewVerdict,
+) -> None:
+    if result.termination_unconfirmed:
+        eval_results.append(
+            "FAIL: reviewer owned process tree 终止未确认，未读取或采用 runner 输出"
+        )
+    elif review_execution_issues:
+        eval_results.append("FAIL: reviewer 执行期间工作区发生变化或无法完成快照校验")
+    elif pre_review_evidence_issues:
+        return
+    elif metrics.exceeded:
+        eval_results.append("FAIL: reviewer prompt 超过上下文预算，未启动外部 runner")
+    elif risk_gate_result is None:
+        eval_results.append("FAIL: review 风险门禁评估失败，未启动外部 runner")
+    elif risk_gate_result.recommendation == "human-review":
+        eval_results.append("FAIL: review 风险门禁要求人工审查，不能作为自动通过结论")
+    elif result.status == "skipped":
+        eval_results.append("PASS: runner=none 已跳过外部审查")
+    elif verdict.verdict == "needs_human":
+        eval_results.append("FAIL: reviewer 输出需要人工处理")
+    else:
+        eval_results.append("PASS: reviewer 输出 verdict 可解析")
+
+
 def render_runner_output(result: RunnerResult) -> str:
     lines = ["# Runner Output", "", f"- status: `{result.status}`"]
+    if result.termination_unconfirmed:
+        lines.append("- termination_unconfirmed: `true`")
     if result.command:
         lines.extend(["", "## Command", "", "```text", " ".join(result.command), "```"])
     if result.error:
         lines.extend(["", "## Error", "", result.error])
-    lines.extend(["", "## Output", "", "```text", result.output.strip(), "```"])
+    if result.termination_unconfirmed:
+        lines.extend(
+            [
+                "",
+                "## Output",
+                "",
+                "owned process tree 终止未确认，未读取或复制 runner 输出。",
+            ]
+        )
+    else:
+        lines.extend(["", "## Output", "", "```text", result.output.strip(), "```"])
     return redact_text("\n".join(lines).rstrip() + "\n")
 
 
@@ -810,9 +860,18 @@ def _write_runner_status_report(
     *,
     step: str,
 ) -> str | None:
-    if result.status not in {"error", "timed_out", "stopped"}:
+    if (
+        not result.termination_unconfirmed
+        and result.status not in {"error", "timed_out", "stopped"}
+    ):
         return None
-    if result.status == "timed_out":
+    if result.termination_unconfirmed:
+        filename = "runner-error-report.md"
+        title = "Runner Termination Report"
+        conclusion = (
+            "reviewer owned process tree 终止未确认，未读取或采用 runner 输出。"
+        )
+    elif result.status == "timed_out":
         filename = "timeout-report.md"
         title = "Timeout Report"
         conclusion = "reviewer 单次执行已超时，未把超时视为审查通过。"
@@ -966,10 +1025,14 @@ def _capture_post_review_workspace(
     *,
     reviewer_started: bool,
     reviewer_start_fingerprint: str,
+    termination_unconfirmed: bool = False,
 ) -> list[str]:
     issues: list[str] = []
     end_fingerprint = reviewer_start_fingerprint
-    if reviewer_started:
+    if termination_unconfirmed:
+        end_fingerprint = ""
+        issues.append("reviewer_termination_unconfirmed")
+    elif reviewer_started:
         try:
             end_fingerprint = capture_review_workspace(repo_path).fingerprint
         except (OSError, RuntimeError, subprocess.SubprocessError):
@@ -979,7 +1042,9 @@ def _capture_post_review_workspace(
                 issues.append("workspace_changed_during_review")
     inputs["reviewer_start_workspace_fingerprint"] = reviewer_start_fingerprint
     inputs["reviewer_end_workspace_fingerprint"] = end_fingerprint
-    inputs["workspace_changed_during_review"] = bool(issues)
+    inputs["workspace_changed_during_review"] = (
+        "workspace_changed_during_review" in issues
+    )
     inputs["review_execution_issues"] = issues
     inputs["evidence_issues"] = list(dict.fromkeys([*inputs["evidence_issues"], *issues]))
     inputs["evidence_consistent"] = not inputs["evidence_issues"]
@@ -1001,6 +1066,10 @@ def _enforce_unchanged_review_workspace(
         summary = "reviewer 执行期间工作区发生变化，审查结论已失效。"
         title = "Reviewer 执行期间工作区发生变化"
         recommendation = "保留现场并重新执行 reflect/review，由人工确认变化来源。"
+    elif "reviewer_termination_unconfirmed" in issues:
+        summary = "reviewer owned process tree 终止未确认，审查结论不可采用。"
+        title = "Reviewer 进程树终止未确认"
+        recommendation = "人工核对 execution 证据和系统进程，确认现场稳定后重新审查。"
     else:
         summary = "reviewer 返回后无法完成工作区快照校验，不能信任自动审查结论。"
         title = "Reviewer 返回后的工作区快照校验失败"
@@ -1030,9 +1099,14 @@ def _enforce_unchanged_review_workspace(
 def _redact_runner_result(result: RunnerResult) -> RunnerResult:
     return RunnerResult(
         status=result.status,
-        output=redact_text(result.output),
+        output=(
+            ""
+            if result.termination_unconfirmed
+            else redact_text(result.output)
+        ),
         error=redact_text(result.error) if result.error else None,
         command=[redact_text(item) for item in (result.command or [])],
+        termination_unconfirmed=result.termination_unconfirmed,
     )
 
 

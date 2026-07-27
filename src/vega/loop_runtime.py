@@ -9,7 +9,7 @@ from typing import Any, Callable, Literal
 from pydantic import ValidationError
 
 from .brief_runtime import BriefRuntime
-from .execution_control import RunnerExecutionContext
+from .execution_control import RunnerExecutionContext, inspect_execution_for_recovery
 from .gate_runtime import evaluate_risk, render_gate_report
 from .loop_evidence import validate_loop_evidence_snapshot
 from .loop_integrity import trusted_verification_passed
@@ -56,7 +56,7 @@ from .risk_gate_evidence import (
 )
 from .run_lock import RunMutationLock
 from .run_utils import create_run_dir, resolve_run_dir, run_name
-from .runner import Runner, RunnerStatus, make_runner
+from .runner import Runner, RunnerResult, RunnerStatus, make_runner
 from .scope_gate import (
     LoopScopeGateEvidence,
     scope_gate_state_fields,
@@ -308,6 +308,7 @@ class LoopAutomationRuntime:
             raise ValueError(
                 f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}"
             )
+        _require_execution_recoverable(run_dir)
         _require_recovery_trace_binding(run_dir, state)
         _require_loop_initialization(self.workspace, run_dir, state, repo)
         if _project_policy_changed(repo, state.project_policy_snapshot):
@@ -939,35 +940,32 @@ class LoopAutomationRuntime:
                     progress_reporter=self.progress_reporter,
                 ),
             )
+            worker_output = (
+                worker_result.error or ""
+                if worker_result.termination_unconfirmed
+                else worker_result.output or worker_result.error or ""
+            )
             _write_text_artifact(
                 iteration_dir / "worker-output.txt",
-                worker_result.output or worker_result.error or "",
+                worker_output,
             )
-            trace.write("worker_finished", iteration=iteration_number, status=worker_result.status)
-            if worker_result.status in {"timed_out", "stopped"}:
-                iteration_state = _update_iteration_state(
-                    iteration_state,
-                    worker_status=worker_result.status,
-                )
-                state.iterations.append(iteration_state)
-                _write_execution_interruption_report(
-                    iteration_dir,
-                    step="worker",
-                    status=worker_result.status,
-                    reason=worker_result.error,
-                )
-                conclusion = (
-                    "worker 单次执行超时，已停止后续验证和审查。"
-                    if worker_result.status == "timed_out"
-                    else "worker 已按 stop request 停止，已停止后续验证和审查。"
-                )
-                _write_final_report(run_dir, state, None, conclusion)
-                self._save_loop_done(
+            trace.write(
+                "worker_finished",
+                iteration=iteration_number,
+                status=worker_result.status,
+                termination_unconfirmed=worker_result.termination_unconfirmed,
+            )
+            if worker_result.termination_unconfirmed or worker_result.status in {
+                "timed_out",
+                "stopped",
+            }:
+                self._finish_interrupted_worker(
                     run_dir,
                     state,
-                    "needs_human",
+                    iteration_dir,
+                    iteration_state,
+                    worker_result,
                     trace,
-                    current_step=worker_result.status,
                 )
                 return run_dir
             if worker_result.status != "success":
@@ -1511,6 +1509,58 @@ class LoopAutomationRuntime:
         self._save_loop_done(run_dir, state, "needs_human", trace)
         return run_dir
 
+    def _finish_interrupted_worker(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        iteration_dir: Path,
+        iteration_state: LoopIterationState,
+        worker_result: RunnerResult,
+        trace: TraceWriter,
+    ) -> None:
+        if worker_result.termination_unconfirmed:
+            worker_status = "failed"
+            _write_runner_error_report(
+                iteration_dir,
+                step="worker",
+                reason=worker_result.error,
+                workspace_status="未检查：owned process tree 终止未确认。",
+                termination_unconfirmed=True,
+            )
+            conclusion = (
+                "worker owned process tree 终止未确认；未读取 runner 输出，"
+                "也未继续工作区检查、验证或审查。"
+            )
+            current_step = "worker_termination_unconfirmed"
+        else:
+            worker_status = worker_result.status
+            _write_execution_interruption_report(
+                iteration_dir,
+                step="worker",
+                status=worker_result.status,
+                reason=worker_result.error,
+            )
+            conclusion = (
+                "worker 单次执行超时，已停止后续验证和审查。"
+                if worker_result.status == "timed_out"
+                else "worker 已按 stop request 停止，已停止后续验证和审查。"
+            )
+            current_step = worker_result.status
+        state.iterations.append(
+            _update_iteration_state(
+                iteration_state,
+                worker_status=worker_status,
+            )
+        )
+        _write_final_report(run_dir, state, None, conclusion)
+        self._save_loop_done(
+            run_dir,
+            state,
+            "needs_human",
+            trace,
+            current_step=current_step,
+        )
+
     def _pause_for_project_policy_change_after_reflect(
         self,
         run_dir: Path,
@@ -1602,8 +1652,8 @@ class LoopAutomationRuntime:
                 scope_evidence=scope_evidence,
             )
             return True
-        if verification.failure_kind == "project_config_invalid":
-            self._pause_for_project_config_invalid(
+        if verification.failure_kind is not None:
+            self._pause_for_verification_failure(
                 run_dir,
                 state,
                 iteration_dir,
@@ -1679,7 +1729,7 @@ class LoopAutomationRuntime:
             current_step=current_step,
         )
 
-    def _pause_for_project_config_invalid(
+    def _pause_for_verification_failure(
         self,
         run_dir: Path,
         state: LoopAutomationState,
@@ -1689,31 +1739,35 @@ class LoopAutomationRuntime:
         verification: VerificationRunResult,
         trace: TraceWriter,
     ) -> None:
-        if verification.failure_kind != "project_config_invalid":
-            raise ValueError("project config failure 缺少专属 failure_kind")
-
+        failure_kind = verification.failure_kind
+        if failure_kind == "project_config_invalid":
+            event = failure_kind
+            conclusion = "项目配置预检失败，未执行任何验证命令，也未继续 Reflect 或 reviewer。"
+        elif failure_kind == "workspace_capture_failed":
+            event = "verification_workspace_capture_failed"
+            conclusion = (
+                "verification 工作区指纹采集失败，证据无法绑定当前现场，"
+                "已停止 Reflect 和 reviewer。"
+            )
+        else:
+            raise ValueError("verification failure 缺少受支持的 failure_kind")
         _copy_if_exists(verification.summary_path, iteration_dir / "test-summary.md")
         state.current_iteration = iteration_number
         state.iterations.append(iteration_state)
         trace.write(
-            "project_config_invalid",
+            event,
             iteration=iteration_number,
-            failure_kind=verification.failure_kind,
+            failure_kind=failure_kind,
             commands=verification.command_count,
             failed=verification.failed_count,
         )
-        _write_final_report(
-            run_dir,
-            state,
-            None,
-            "项目配置预检失败，未执行任何验证命令，也未继续 Reflect 或 reviewer。",
-        )
+        _write_final_report(run_dir, state, None, conclusion)
         self._save_loop_done(
             run_dir,
             state,
             "needs_human",
             trace,
-            current_step="project_config_invalid",
+            current_step=event,
         )
 
     def _run_review(
@@ -2409,6 +2463,15 @@ def _require_loop_initialization(
         )
 
 
+def _require_execution_recoverable(run_dir: Path) -> None:
+    inspection = inspect_execution_for_recovery(run_dir)
+    if not inspection.can_recover:
+        raise ValueError(
+            "当前 loop 仍有未安全消失的 execution，已拒绝 continue："
+            f"{inspection.summary}"
+        )
+
+
 def _require_recovery_trace_binding(
     run_dir: Path,
     state: LoopAutomationState,
@@ -2892,8 +2955,31 @@ def _write_runner_error_report(
     step: str,
     reason: str | None,
     workspace_status: str,
+    termination_unconfirmed: bool = False,
 ) -> Path:
     path = iteration_dir / "runner-error-report.md"
+    if termination_unconfirmed:
+        _write_text_artifact(
+            path,
+            "\n".join(
+                [
+                    "# Runner Termination Report",
+                    "",
+                    f"- 步骤：`{step}`",
+                    "- 状态：`termination-unconfirmed`",
+                    f"- 原因：{reason or '未提供'}",
+                    "",
+                    "## 结论",
+                    "",
+                    "- owned process tree 的终止未被确认，不能按普通 runner error 继续处理。",
+                    "- runner 输出、工作区检查、verification 和 review 均未继续消费。",
+                    "- execution 证据和目标仓库现场已保留，必须人工确认进程与工作区状态。",
+                    "- Vega 未自动回滚、清理、提交、推送或发布。",
+                ]
+            ).rstrip()
+            + "\n",
+        )
+        return path
     _write_text_artifact(
         path,
         "\n".join(
@@ -2969,6 +3055,20 @@ def _write_final_report(
                 "- verification：`failed`",
                 "- failure kind：`project_config_invalid`",
                 "- 项目配置预检失败，未执行任何验证命令。",
+            ]
+        )
+    elif (
+        latest_iteration
+        and latest_iteration.verification_failure_kind == "workspace_capture_failed"
+    ):
+        lines.extend(
+            [
+                "",
+                "## 验证门禁",
+                "",
+                "- verification：`failed`",
+                "- failure kind：`workspace_capture_failed`",
+                "- 工作区指纹采集失败，本轮验证证据不能绑定或复用。",
             ]
         )
     elif latest_iteration and latest_iteration.verification_status == "failed":
