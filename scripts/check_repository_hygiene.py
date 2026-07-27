@@ -78,6 +78,14 @@ class GitTreeEntry:
     relative_path: str
 
 
+@dataclass(frozen=True)
+class GitIndexEntry:
+    mode: str
+    object_id: str
+    stage: int
+    relative_path: str
+
+
 class HygieneCheckError(RuntimeError):
     """仓库卫生检查无法可靠完成。"""
 
@@ -167,7 +175,12 @@ def find_sensitive_filename_violation(
     )
 
 
-def scan_worktree(repo_root: Path) -> list[HygieneViolation]:
+def scan_worktree(
+    repo_root: Path,
+    *,
+    head_commit: str | None = None,
+) -> list[HygieneViolation]:
+    trusted_head = head_commit or _read_head_commit(repo_root)
     violations: list[HygieneViolation] = []
     for relative_path in _tracked_paths(repo_root):
         filename_violation = find_sensitive_filename_violation(relative_path)
@@ -178,13 +191,81 @@ def scan_worktree(repo_root: Path) -> list[HygieneViolation]:
         text = _decode_text(data)
         if text is not None:
             violations.extend(find_text_violations(relative_path, text))
-    violations.extend(_eval_worktree_violations(repo_root))
+    violations.extend(_eval_worktree_violations(repo_root, trusted_head))
     return violations
 
 
-def scan_history(repo_root: Path, base_ref: str) -> list[HygieneViolation]:
+def scan_index(
+    repo_root: Path,
+    *,
+    head_commit: str | None = None,
+) -> list[HygieneViolation]:
+    """直接检查下一次 commit 会消费的 index blob，而不是同名工作区文件。"""
+    trusted_head = head_commit or _read_head_commit(repo_root)
+    _, entries = _index_snapshot(repo_root)
+    violations: list[HygieneViolation] = []
+    stage_zero_entries: dict[str, GitIndexEntry] = {}
+    readable_object_ids: list[str] = []
+
+    for entry in entries:
+        filename_violation = find_sensitive_filename_violation(entry.relative_path)
+        if filename_violation is not None:
+            violations.append(filename_violation)
+        if entry.stage != 0:
+            violations.append(_index_unmerged_violation(entry.relative_path))
+            continue
+        stage_zero_entries[entry.relative_path] = entry
+        expected_type = _index_entry_object_type(entry)
+        if expected_type == "unknown":
+            violations.append(_index_unreadable_violation(entry.relative_path))
+            continue
+        if expected_type != "blob":
+            # gitlink 的 commit 对象不要求存在于 superproject；这里只检查路径和 mode。
+            continue
+        readable_object_ids.append(entry.object_id)
+
+    objects = _read_git_objects(repo_root, readable_object_ids)
+    for entry in stage_zero_entries.values():
+        expected_type = _index_entry_object_type(entry)
+        if expected_type != "blob":
+            continue
+        current_object = objects.get(entry.object_id)
+        if current_object is None:
+            violations.append(_index_unreadable_violation(entry.relative_path))
+            continue
+        object_type, data = current_object
+        if expected_type != object_type:
+            violations.append(_index_unreadable_violation(entry.relative_path))
+            continue
+        text = _decode_text(data)
+        if text is not None:
+            violations.extend(find_text_violations(entry.relative_path, text))
+
+    violations.extend(
+        _eval_index_violations(
+            repo_root,
+            trusted_head,
+            stage_zero_entries,
+            objects,
+        )
+    )
+    return violations
+
+
+def scan_history(
+    repo_root: Path,
+    base_ref: str,
+    *,
+    head_commit: str | None = None,
+) -> list[HygieneViolation]:
     base_sha = _resolve_base_ref(repo_root, base_ref)
-    commit_output = _run_git(repo_root, "rev-list", "--reverse", f"{base_sha}..HEAD")
+    trusted_head = head_commit or _read_head_commit(repo_root)
+    commit_output = _run_git(
+        repo_root,
+        "rev-list",
+        "--reverse",
+        f"{base_sha}..{trusted_head}",
+    )
     commits = [line for line in commit_output.decode("ascii").splitlines() if line]
     violations: list[HygieneViolation] = []
 
@@ -229,8 +310,11 @@ def scan_history(repo_root: Path, base_ref: str) -> list[HygieneViolation]:
     return violations
 
 
-def _eval_worktree_violations(repo_root: Path) -> list[HygieneViolation]:
-    baseline = _tree_entries(repo_root, "HEAD", "eval")
+def _eval_worktree_violations(
+    repo_root: Path,
+    head_commit: str,
+) -> list[HygieneViolation]:
+    baseline = _tree_entries(repo_root, head_commit, "eval")
     violations: list[HygieneViolation] = []
     for relative_path, entry in baseline.items():
         path = repo_root.joinpath(*PurePosixPath(relative_path).parts)
@@ -242,6 +326,35 @@ def _eval_worktree_violations(repo_root: Path) -> list[HygieneViolation]:
         baseline_data = _read_git_blob(repo_root, entry.object_id)
         current_data = _read_worktree_file(repo_root, relative_path)
         if not _has_append_only_prefix(baseline_data, current_data):
+            violations.append(_eval_append_only_violation(relative_path))
+    return violations
+
+
+def _eval_index_violations(
+    repo_root: Path,
+    head_commit: str,
+    current: dict[str, GitIndexEntry],
+    objects: dict[str, tuple[str, bytes]],
+) -> list[HygieneViolation]:
+    baseline = _tree_entries(repo_root, head_commit, "eval")
+    violations: list[HygieneViolation] = []
+    for relative_path, baseline_entry in baseline.items():
+        current_entry = current.get(relative_path)
+        if (
+            current_entry is None
+            or current_entry.mode != baseline_entry.mode
+            or _index_entry_object_type(current_entry) != baseline_entry.object_type
+        ):
+            violations.append(_eval_append_only_violation(relative_path))
+            continue
+        if current_entry.object_id == baseline_entry.object_id:
+            continue
+        current_object = objects.get(current_entry.object_id)
+        if current_object is None or current_object[0] != "blob":
+            violations.append(_eval_append_only_violation(relative_path))
+            continue
+        baseline_data = _read_git_blob(repo_root, baseline_entry.object_id)
+        if not _has_append_only_prefix(baseline_data, current_object[1]):
             violations.append(_eval_append_only_violation(relative_path))
     return violations
 
@@ -293,6 +406,24 @@ def _eval_append_only_violation(
     )
 
 
+def _index_unmerged_violation(relative_path: str) -> HygieneViolation:
+    return HygieneViolation(
+        relative_path=relative_path,
+        line_number=None,
+        rule="index-unmerged",
+        message="Git index 包含未解决冲突，无法可靠检查下一次提交候选",
+    )
+
+
+def _index_unreadable_violation(relative_path: str) -> HygieneViolation:
+    return HygieneViolation(
+        relative_path=relative_path,
+        line_number=None,
+        rule="index-entry-unreadable",
+        message="Git index 条目缺少可验证对象，无法可靠检查下一次提交候选",
+    )
+
+
 def _tree_entries(
     repo_root: Path,
     revision: str,
@@ -339,6 +470,16 @@ def _git_entry_kind(entry: GitTreeEntry) -> str:
     if entry.object_type != "blob":
         return entry.object_type
     return "symlink" if entry.mode == "120000" else "file"
+
+
+def _index_entry_object_type(entry: GitIndexEntry) -> str:
+    if entry.mode in {"100644", "100755", "120000"}:
+        return "blob"
+    if entry.mode == "160000":
+        return "commit"
+    if entry.mode == "040000":
+        return "tree"
+    return "unknown"
 
 
 def _worktree_entry_kind(path: Path) -> str:
@@ -389,6 +530,88 @@ def _tracked_paths(repo_root: Path) -> list[str]:
         "--exclude-standard",
     )
     return sorted(_decode_nul_paths(output))
+
+
+def _index_snapshot(
+    repo_root: Path,
+) -> tuple[bytes, list[GitIndexEntry]]:
+    stage_output = _run_git(repo_root, "ls-files", "--stage", "-z")
+    entries: list[GitIndexEntry] = []
+    for record in stage_output.split(b"\0"):
+        if not record:
+            continue
+        metadata, separator, raw_path = record.partition(b"\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            raise HygieneCheckError("无法解析 Git index 条目")
+        try:
+            stage = int(fields[2].decode("ascii"))
+        except ValueError as exc:
+            raise HygieneCheckError("Git index stage 不合法") from exc
+        entries.append(
+            GitIndexEntry(
+                mode=fields[0].decode("ascii"),
+                object_id=fields[1].decode("ascii"),
+                stage=stage,
+                relative_path=raw_path.decode(
+                    "utf-8",
+                    errors="surrogateescape",
+                ),
+            )
+        )
+    return stage_output, entries
+
+
+def _read_git_objects(
+    repo_root: Path,
+    object_ids: list[str],
+) -> dict[str, tuple[str, bytes]]:
+    unique_object_ids = list(dict.fromkeys(object_ids))
+    if not unique_object_ids:
+        return {}
+    request = b"".join(
+        object_id.encode("ascii") + b"\n"
+        for object_id in unique_object_ids
+    )
+    result = subprocess.run(
+        ["git", "cat-file", "--batch"],
+        cwd=repo_root,
+        input=request,
+        capture_output=True,
+        env=_git_read_environment(),
+        check=False,
+    )
+    if result.returncode != 0:
+        raise HygieneCheckError("Git 命令失败：cat-file --batch")
+
+    objects: dict[str, tuple[str, bytes]] = {}
+    output = result.stdout
+    offset = 0
+    for expected_object_id in unique_object_ids:
+        header_end = output.find(b"\n", offset)
+        if header_end < 0:
+            raise HygieneCheckError("无法解析 Git 对象批量输出")
+        header = output[offset:header_end]
+        offset = header_end + 1
+        fields = header.split()
+        if len(fields) != 3:
+            raise HygieneCheckError("Git index 对象不存在或格式不合法")
+        object_id = fields[0].decode("ascii")
+        object_type = fields[1].decode("ascii")
+        try:
+            size = int(fields[2].decode("ascii"))
+        except ValueError as exc:
+            raise HygieneCheckError("Git 对象大小不合法") from exc
+        if object_id != expected_object_id or size < 0:
+            raise HygieneCheckError("Git 对象批量输出与 index 不一致")
+        data_end = offset + size
+        if data_end >= len(output) or output[data_end:data_end + 1] != b"\n":
+            raise HygieneCheckError("Git 对象批量输出长度不合法")
+        objects[object_id] = (object_type, output[offset:data_end])
+        offset = data_end + 1
+    if offset != len(output):
+        raise HygieneCheckError("Git 对象批量输出包含额外数据")
+    return objects
 
 
 def _changed_paths(repo_root: Path, commit: str) -> list[str]:
@@ -469,17 +692,48 @@ def _resolve_base_ref(repo_root: Path, base_ref: str) -> str:
     return output.decode("ascii").strip()
 
 
+def _read_head_commit(repo_root: Path) -> str:
+    return _run_git(
+        repo_root,
+        "rev-parse",
+        "--verify",
+        "HEAD^{commit}",
+    ).decode("ascii").strip()
+
+
 def _run_git(repo_root: Path, *args: str) -> bytes:
     result = subprocess.run(
         ["git", *args],
         cwd=repo_root,
         capture_output=True,
+        env=_git_read_environment(),
         check=False,
     )
     if result.returncode != 0:
         command = " ".join(args[:2])
         raise HygieneCheckError(f"Git 命令失败：{command}")
     return result.stdout
+
+
+def _git_read_environment() -> dict[str, str]:
+    # Git 可通过 GIT_* 重定向仓库、index、对象库或配置。
+    # 卫生检查必须读取 --repo 指向的真实提交候选，不能继承调用方的重定向。
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith("GIT_")
+    }
+    environment.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_PAGER": "cat",
+            "PAGER": "cat",
+        }
+    )
+    return environment
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -503,9 +757,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         repo_root = args.repo.resolve(strict=True)
-        violations = scan_worktree(repo_root)
+        head_before = _read_head_commit(repo_root)
+        index_before, _ = _index_snapshot(repo_root)
+        violations = scan_index(repo_root, head_commit=head_before)
+        violations.extend(scan_worktree(repo_root, head_commit=head_before))
         if args.base_ref:
-            violations.extend(scan_history(repo_root, args.base_ref))
+            violations.extend(
+                scan_history(
+                    repo_root,
+                    args.base_ref,
+                    head_commit=head_before,
+                )
+            )
+        index_after, _ = _index_snapshot(repo_root)
+        head_after = _read_head_commit(repo_root)
+        if head_after != head_before:
+            raise HygieneCheckError("Git HEAD 在仓库卫生检查期间发生变化")
+        if index_after != index_before:
+            raise HygieneCheckError("Git index 在仓库卫生检查期间发生变化")
     except (HygieneCheckError, OSError) as exc:
         print(f"仓库路径与私密文件卫生检查无法完成：{exc}", file=sys.stderr)
         return 2

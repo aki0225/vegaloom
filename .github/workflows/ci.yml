@@ -109,9 +109,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "712" ]]; then
+          if [[ "$node_count" != "812" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 712 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 812 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -199,10 +199,12 @@ jobs:
               tests/test_finish_artifact_integrity.py
               tests/test_runtime_safety_integration.py
               tests/test_security_evidence.py
+              tests/test_workspace_manifest_containment.py
           - name: semantics-evidence-review
             test_timeout: 58
             files: >-
               tests/test_success_semantics.py
+              tests/test_finish_policy.py
               tests/test_evidence_freshness.py
               tests/test_review_artifact_integrity.py
               tests/test_assurance_verification_semantics.py
@@ -279,6 +281,7 @@ jobs:
             tests/test_assurance_stage2_sqlite_experiment.py `
             tests/test_assurance_stage2_expand_contract_experiment.py `
             tests/test_assurance_stage3_dml_backfill_experiment.py `
+            tests/test_workspace_manifest_containment.py `
             tests/test_runtime_safety_integration.py::test_windows_verification_preserves_nested_python_quotes `
             tests/test_execution_control_safety.py `
             tests/test_run_mutation_lock.py

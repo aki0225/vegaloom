@@ -32,7 +32,7 @@ from .review_evidence import review_evidence_issues as _review_evidence_issues
 from .run_utils import create_run_dir, resolve_run_dir
 from .runner import Runner, RunnerResult, make_runner
 from .trace import TraceWriter
-from .workspace_check import capture_review_workspace
+from .workspace_check import capture_review_workspace, ignored_coverage_level
 
 REVIEW_PACK_ARTIFACTS = [
     "state.json",
@@ -573,6 +573,9 @@ def collect_review_inputs(
         ]
         if truncated
     ]
+    source_ignored_coverage_level = ignored_coverage_level(
+        source_evidence.get("ignored_manifest_complete"), source_evidence.get("ignored_content_complete")
+    )
     return {
         "repo_path": str(repo),
         "repo_name": repo.name,
@@ -602,14 +605,8 @@ def collect_review_inputs(
             source_evidence.get("untracked_content_complete", False)
         ),
         "current_untracked_content_complete": current_snapshot.untracked_content_complete,
-        "source_ignored_content_complete": bool(
-            source_evidence.get("ignored_content_complete", False)
-        ),
-        "current_ignored_content_complete": current_snapshot.ignored_content_complete,
-        "source_git_control_complete": bool(
-            source_evidence.get("git_control_complete", False)
-        ),
-        "current_git_control_complete": current_snapshot.git_control_complete,
+        "source_ignored_coverage_level": source_ignored_coverage_level,
+        "current_ignored_coverage_level": current_snapshot.ignored_coverage_level,
         "reviewer_start_workspace_fingerprint": "",
         "reviewer_end_workspace_fingerprint": "",
         "workspace_changed_during_review": False,
@@ -640,7 +637,10 @@ def render_review_checklist() -> str:
 
 def render_review_pack(inputs: dict[str, Any]) -> str:
     risk_gate = inputs.get("risk_gate")
-    risk_gate_note: list[str] = []
+    risk_gate_note = [
+        f"- ignored 证据覆盖：Reflect `{inputs['source_ignored_coverage_level']}`，当前 "
+        f"`{inputs['current_ignored_coverage_level']}`；`metadata_bounded` 仅表示稳定元数据检测。"
+    ]
     if isinstance(risk_gate, dict) and risk_gate.get("status") == "success":
         try:
             result = GateResult.model_validate(risk_gate.get("result"))

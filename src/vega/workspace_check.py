@@ -24,6 +24,10 @@ from .workspace_inventory import (
     safe_path_for_report as _safe_path_for_report,
     untracked_paths as _untracked_paths,
 )
+from .workspace_status import (
+    parse_porcelain_v1_paths as _parse_porcelain_v1_paths,
+    parse_porcelain_v2_status as _parse_porcelain_v2_status,
+)
 
 
 MAX_IGNORED_METADATA_FILES = 4096
@@ -44,6 +48,7 @@ class WorkspaceSnapshot:
     head_sha: str = ""
     untracked_manifest_sha256: str = ""
     ignored_manifest_sha256: str = ""
+    ignored_manifest_complete: bool = False
     ignored_content_complete: bool = False
     git_control_sha256: str = ""
     git_control_complete: bool = False
@@ -54,13 +59,11 @@ class WorkspaceSnapshot:
         """启动前已有 tracked diff 时，auto worker 无法安全归因本轮成果。"""
         return bool(self.tracked_files)
 
-
 @dataclass(frozen=True)
 class ReviewWorkspaceSnapshot:
     fingerprint: str
     head_sha: str
     status_sha256: str
-    full_diff_sha256: str
     staged_diff_sha256: str
     unstaged_diff_sha256: str
     untracked_manifest_sha256: str
@@ -73,9 +76,17 @@ class ReviewWorkspaceSnapshot:
     untracked_files: tuple[str, ...]
     unsafe_index_paths: tuple[str, ...] = ()
     untracked_content_complete: bool = False
+    ignored_manifest_complete: bool = False
     ignored_content_complete: bool = False
     git_control_sha256: str = ""
     git_control_complete: bool = False
+
+    @property
+    def ignored_coverage_level(self) -> str:
+        return ignored_coverage_level(
+            self.ignored_manifest_complete,
+            self.ignored_content_complete,
+        )
 
 
 @dataclass(frozen=True)
@@ -103,6 +114,8 @@ class WorkspaceCheckResult(BaseModel):
     baseline_tracked_files: list[str] = Field(default_factory=list)
     baseline_untracked_changed: bool = False
     baseline_ignored_changed: bool = False
+    baseline_ignored_manifest_complete: bool = False
+    current_ignored_manifest_complete: bool = False
     baseline_ignored_content_complete: bool = False
     current_ignored_content_complete: bool = False
     git_control_changed: bool = False
@@ -123,6 +136,7 @@ class _CurrentWorkspaceInventory:
     head_sha: str
     raw_status: str
     ignored_manifest_sha256: str
+    ignored_manifest_complete: bool
     ignored_content_complete: bool
     git_control_sha256: str
     git_control_complete: bool
@@ -158,9 +172,16 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
     untracked_files = list(tracked_snapshot.untracked_files)
     try:
         ignored_files, ignored_capture_complete = _ignored_paths(repo)
-        ignored_manifest_sha256, ignored_content_complete = _ignored_manifest(
+        (
+            ignored_manifest_sha256,
+            ignored_metadata_complete,
+            ignored_content_complete,
+        ) = _ignored_manifest(
             repo,
             ignored_files,
+        )
+        ignored_manifest_complete = (
+            ignored_capture_complete and ignored_metadata_complete
         )
         git_control_sha256, git_control_complete = _git_control_manifest(repo)
     except RuntimeError as exc:
@@ -179,12 +200,13 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
         head_sha=tracked_snapshot.head_sha,
         untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
         ignored_manifest_sha256=ignored_manifest_sha256,
-        ignored_content_complete=(
-            ignored_capture_complete and ignored_content_complete
-        ),
+        ignored_manifest_complete=ignored_manifest_complete,
+        ignored_content_complete=ignored_content_complete,
         git_control_sha256=git_control_sha256,
         git_control_complete=git_control_complete,
-        capture_complete=git_control_complete,
+        capture_complete=(
+            ignored_manifest_complete and git_control_complete
+        ),
     )
 
 
@@ -214,9 +236,16 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         repo,
         untracked_files,
     )
-    ignored_manifest_sha256, ignored_content_complete = _ignored_manifest(
+    (
+        ignored_manifest_sha256,
+        ignored_metadata_complete,
+        ignored_content_complete,
+    ) = _ignored_manifest(
         repo,
         ignored_files,
+    )
+    ignored_manifest_complete = (
+        ignored_capture_complete and ignored_metadata_complete
     )
     git_control_sha256, git_control_complete = _git_control_manifest(repo)
     status_sha256 = _sha256(status)
@@ -233,7 +262,8 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
             f"untracked={untracked_manifest_sha256}",
             f"untracked_content_complete={untracked_content_complete}",
             f"ignored={ignored_manifest_sha256}",
-            f"ignored_content_complete={ignored_capture_complete and ignored_content_complete}",
+            f"ignored_manifest_complete={ignored_manifest_complete}",
+            f"ignored_content_complete={ignored_content_complete}",
             f"git_control={git_control_sha256}",
             f"git_control_complete={git_control_complete}",
             f"index_flags={_sha256(index_flags)}",
@@ -243,7 +273,6 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         fingerprint=_sha256(fingerprint_payload),
         head_sha=head_sha,
         status_sha256=status_sha256,
-        full_diff_sha256=full_diff_sha256,
         staged_diff_sha256=staged_diff_sha256,
         unstaged_diff_sha256=unstaged_diff_sha256,
         untracked_manifest_sha256=untracked_manifest_sha256,
@@ -256,9 +285,8 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         untracked_files=tuple(untracked_files),
         unsafe_index_paths=tuple(unsafe_index_paths),
         untracked_content_complete=untracked_content_complete,
-        ignored_content_complete=(
-            ignored_capture_complete and ignored_content_complete
-        ),
+        ignored_manifest_complete=ignored_manifest_complete,
+        ignored_content_complete=ignored_content_complete,
         git_control_sha256=git_control_sha256,
         git_control_complete=git_control_complete,
     )
@@ -378,6 +406,10 @@ def evaluate_workspace(
         ],
         baseline_untracked_changed=assessment.baseline_untracked_changed,
         baseline_ignored_changed=assessment.baseline_ignored_changed,
+        baseline_ignored_manifest_complete=bool(
+            baseline and baseline.ignored_manifest_complete
+        ),
+        current_ignored_manifest_complete=current.ignored_manifest_complete,
         baseline_ignored_content_complete=bool(
             baseline and baseline.ignored_content_complete
         ),
@@ -396,18 +428,24 @@ def _capture_current_workspace_inventory(repo: Path) -> _CurrentWorkspaceInvento
     head_sha = read_head_sha(repo)
     raw_status = _git_status(repo)
     ignored_files, ignored_capture_complete = _ignored_paths(repo)
-    ignored_manifest_sha256, ignored_content_complete = _ignored_manifest(
+    (
+        ignored_manifest_sha256,
+        ignored_metadata_complete,
+        ignored_content_complete,
+    ) = _ignored_manifest(
         repo,
         ignored_files,
+    )
+    ignored_manifest_complete = (
+        ignored_capture_complete and ignored_metadata_complete
     )
     git_control_sha256, git_control_complete = _git_control_manifest(repo)
     return _CurrentWorkspaceInventory(
         head_sha=head_sha,
         raw_status=raw_status,
         ignored_manifest_sha256=ignored_manifest_sha256,
-        ignored_content_complete=(
-            ignored_capture_complete and ignored_content_complete
-        ),
+        ignored_manifest_complete=ignored_manifest_complete,
+        ignored_content_complete=ignored_content_complete,
         git_control_sha256=git_control_sha256,
         git_control_complete=git_control_complete,
     )
@@ -466,16 +504,29 @@ def _assess_workspace_controls(
         assessment.reasons.append(
             "worker 修改了 Git 控制文件；已拒绝使用可能被改写的忽略或 diff 语义。"
         )
-    if baseline.ignored_manifest_sha256 != current.ignored_manifest_sha256:
+    if not (
+        baseline.ignored_manifest_complete
+        and current.ignored_manifest_complete
+    ):
+        assessment.status = "failed"
+        assessment.reasons.append(
+            "无法完整构建 ignored 清单，不能信任其变更比较。"
+        )
+    elif baseline.ignored_manifest_sha256 != current.ignored_manifest_sha256:
         assessment.baseline_ignored_changed = True
         assessment.status = "failed"
         assessment.reasons.append("worker 新增、修改或删除了 ignored 路径。")
-    if not (
-        baseline.ignored_content_complete and current.ignored_content_complete
+    if (
+        baseline.ignored_manifest_complete
+        and current.ignored_manifest_complete
+        and not (
+            baseline.ignored_content_complete
+            and current.ignored_content_complete
+        )
     ):
         assessment.reasons.append(
-            "ignored 路径集合已纳入指纹，但内容读取受敏感路径或预算限制；"
-            "该证据不构成对恶意本地写者的完整文件系统证明。"
+            "ignored 路径与元数据清单完整，但部分内容因敏感路径或预算限制未读取；"
+            "自动决策依赖稳定元数据比较，不将其表述为恶意本地写者的完整文件系统证明。"
         )
 
 
@@ -517,6 +568,8 @@ def render_workspace_check(result: WorkspaceCheckResult) -> str:
         f"- 启动前已有 tracked diff：`{str(result.baseline_tracked_changes_present).lower()}`",
         f"- 启动前未跟踪文件发生变化：`{str(result.baseline_untracked_changed).lower()}`",
         f"- ignored 路径发生变化：`{str(result.baseline_ignored_changed).lower()}`",
+        f"- ignored 基线清单完整：`{str(result.baseline_ignored_manifest_complete).lower()}`",
+        f"- ignored 当前清单完整：`{str(result.current_ignored_manifest_complete).lower()}`",
         f"- ignored 基线内容完整：`{str(result.baseline_ignored_content_complete).lower()}`",
         f"- ignored 当前内容完整：`{str(result.current_ignored_content_complete).lower()}`",
         f"- Git 控制文件发生变化：`{str(result.git_control_changed).lower()}`",
@@ -656,151 +709,6 @@ def _unsafe_index_paths(payload: bytes) -> list[str]:
     return list(dict.fromkeys(paths))
 
 
-def _parse_porcelain_v1_paths(payload: bytes) -> tuple[list[str], list[str]]:
-    """从已采集的 porcelain v1 状态中提取 tracked 与 untracked 路径。
-
-    reviewer 快照已经需要读取这份稳定机器格式，无需再启动三次 Git 进程分别枚举
-    staged、unstaged 和 untracked 路径。rename 的 NUL 格式先给目标路径、再给源路径；
-    两者都属于实际变更范围。copy 只记录新增目标路径，源路径内容没有发生变化。
-    """
-    tokens = [item for item in payload.split(b"\0") if item]
-    tracked: list[str] = []
-    untracked: list[str] = []
-    index = 0
-    while index < len(tokens):
-        raw_record = tokens[index]
-        index += 1
-        if len(raw_record) < 4 or raw_record[2:3] != b" ":
-            raise RuntimeError("porcelain v1 路径记录不完整")
-        xy = raw_record[:2].decode("ascii", errors="replace")
-        path = raw_record[3:].decode("utf-8", errors="replace")
-        if xy == "??":
-            untracked.append(path)
-            continue
-        if xy == "!!":
-            continue
-
-        change_kind = next(
-            (status for status in xy if status in {"R", "C"}),
-            None,
-        )
-        if change_kind is not None:
-            if index >= len(tokens):
-                raise RuntimeError("porcelain v1 rename/copy 记录缺少源路径")
-            original_path = tokens[index].decode("utf-8", errors="replace")
-            index += 1
-            if change_kind == "R":
-                tracked.extend([original_path, path])
-            else:
-                tracked.append(path)
-            continue
-        tracked.append(path)
-    return (
-        list(dict.fromkeys(tracked)),
-        list(dict.fromkeys(untracked)),
-    )
-
-
-def _parse_porcelain_v2_status(
-    payload: bytes,
-) -> tuple[str, list[str], list[str], list[str]]:
-    """解析 `git status --porcelain=v2 -z --branch` 的稳定机器格式。"""
-    tokens = [item for item in payload.split(b"\0") if item]
-    head_sha = ""
-    staged: list[str] = []
-    unstaged: list[str] = []
-    untracked: list[str] = []
-    index = 0
-    while index < len(tokens):
-        record = tokens[index].decode("utf-8", errors="replace")
-        index += 1
-        if record.startswith("# branch.oid "):
-            head_sha = record.removeprefix("# branch.oid ").strip()
-            continue
-        if record.startswith("# "):
-            continue
-        if record.startswith("1 "):
-            parts = record.split(" ", 8)
-            if len(parts) != 9 or len(parts[1]) != 2:
-                raise RuntimeError("porcelain v2 普通路径记录不完整")
-            _append_status_paths(staged, unstaged, parts[1], parts[8])
-            continue
-        if record.startswith("2 "):
-            parts = record.split(" ", 9)
-            if len(parts) != 10 or len(parts[1]) != 2 or index >= len(tokens):
-                raise RuntimeError("porcelain v2 rename/copy 记录不完整")
-            original_path = tokens[index].decode("utf-8", errors="replace")
-            index += 1
-            change_kind = parts[8][:1]
-            _append_status_paths(
-                staged,
-                unstaged,
-                parts[1],
-                parts[9],
-                original_path=original_path,
-                change_kind=change_kind,
-            )
-            continue
-        if record.startswith("u "):
-            parts = record.split(" ", 10)
-            if len(parts) != 11:
-                raise RuntimeError("porcelain v2 unmerged 记录不完整")
-            staged.append(parts[10])
-            unstaged.append(parts[10])
-            continue
-        if record.startswith("? "):
-            untracked.append(record[2:])
-            continue
-        if record.startswith("! "):
-            continue
-        raise RuntimeError("porcelain v2 包含未知记录类型")
-    if not head_sha or head_sha == "(initial)":
-        raise RuntimeError("git HEAD 不可用")
-    return (
-        head_sha,
-        list(dict.fromkeys(staged)),
-        list(dict.fromkeys(unstaged)),
-        list(dict.fromkeys(untracked)),
-    )
-
-
-def _append_status_paths(
-    staged: list[str],
-    unstaged: list[str],
-    xy: str,
-    path: str,
-    *,
-    original_path: str | None = None,
-    change_kind: str | None = None,
-) -> None:
-    staged_status, unstaged_status = xy
-    if staged_status != ".":
-        _append_changed_path(staged, staged_status, path, original_path, change_kind)
-    if unstaged_status != ".":
-        _append_changed_path(
-            unstaged,
-            unstaged_status,
-            path,
-            original_path,
-            change_kind,
-        )
-
-
-def _append_changed_path(
-    target: list[str],
-    status: str,
-    path: str,
-    original_path: str | None,
-    change_kind: str | None,
-) -> None:
-    effective_kind = status if status in {"R", "C"} else change_kind
-    if effective_kind == "R" and original_path is not None:
-        target.extend([original_path, path])
-    else:
-        # Copy 的源路径没有发生修改；普通增删改也只记录当前路径。
-        target.append(path)
-
-
 def read_head_sha(repo_path: Path) -> str:
     """读取当前提交身份；没有可解析 HEAD 时由调用方 fail-closed。"""
     return _read_head_sha(repo_path, run_git_bytes=_run_git_bytes)
@@ -823,26 +731,27 @@ def _untracked_manifest(
     repo_path: Path,
     paths: list[str],
 ) -> tuple[str, bool]:
-    return build_content_manifest(
+    result = build_content_manifest(
         repo_path,
         paths,
-        version="untracked-v2",
+        version="untracked-v3",
         budget=ContentManifestBudget(
             max_content_files=MAX_UNTRACKED_CONTENT_FILES,
             max_file_bytes=MAX_UNTRACKED_FILE_BYTES,
             max_content_bytes=MAX_UNTRACKED_CONTENT_BYTES,
         ),
     )
+    return result.sha256, result.content_complete
 
 
 def _ignored_manifest(
     repo_path: Path,
     paths: list[str],
-) -> tuple[str, bool]:
-    return build_content_manifest(
+) -> tuple[str, bool, bool]:
+    result = build_content_manifest(
         repo_path,
         paths,
-        version="ignored-v3",
+        version="ignored-v4",
         budget=ContentManifestBudget(
             max_content_files=MAX_IGNORED_CONTENT_FILES,
             max_file_bytes=MAX_IGNORED_FILE_BYTES,
@@ -850,6 +759,22 @@ def _ignored_manifest(
             max_metadata_files=MAX_IGNORED_METADATA_FILES,
         ),
     )
+    return (
+        result.sha256,
+        result.metadata_complete,
+        result.content_complete,
+    )
+
+
+def ignored_coverage_level(
+    manifest_complete: object,
+    content_complete: object,
+) -> str:
+    if manifest_complete is not True:
+        return "incomplete"
+    if content_complete is True:
+        return "full_content"
+    return "metadata_bounded"
 
 
 def _git_control_manifest(repo_path: Path) -> tuple[str, bool]:

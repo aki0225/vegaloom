@@ -11,10 +11,7 @@ from pydantic import ValidationError
 from .brief_runtime import BriefRuntime
 from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk, render_gate_report
-from .loop_evidence import (
-    validate_loop_artifact_integrity,
-    validate_loop_evidence_freshness,
-)
+from .loop_evidence import validate_loop_evidence_snapshot
 from .loop_integrity import trusted_verification_passed
 from .loop_prompts import (
     build_worker_prompt,
@@ -1937,15 +1934,18 @@ def run_loop_eval(
                 "FAIL: completed iteration 不得携带 interruption metadata："
                 f"{iteration.iteration:02d}"
             )
+        recompute_current = (
+            iteration.iteration == latest_iteration and effective_status != "success"
+        )
         results.extend(
             _loop_iteration_evidence_checks(
                 iteration_dir,
                 iteration,
                 # 前序 Reflect 已被后续 worker 合法改变时，使用终态工作区重算会把
-                # 历史证据误判为失效。只对最终 iteration 重算；前序 iteration 仍校验
-                # result/report/state/trace 的绑定，终态自动结论仍无法靠同步降级放行。
-                workspace=workspace if iteration.iteration == latest_iteration else None,
-                repo_path=repo_path if iteration.iteration == latest_iteration else None,
+                # 历史证据误判为失效。success 的最终 iteration 由后面的联合快照统一
+                # 重算，避免对同一风险结论重复执行；非 success 仍在这里重算当前工作区。
+                workspace=workspace if recompute_current else None,
+                repo_path=repo_path if recompute_current else None,
                 trace_path=run_dir / "trace.jsonl",
                 scope_gate_required=state.scope_gate_required,
                 expected_head_sha=state.initial_head_sha,
@@ -1958,6 +1958,17 @@ def run_loop_eval(
     if effective_status == "success":
         latest = state.iterations[-1]
         iteration_dir = run_dir / "iterations" / f"{latest.iteration:02d}"
+        validation_snapshot = None
+        validation_error = ""
+        try:
+            validation_snapshot = validate_loop_evidence_snapshot(
+                workspace,
+                repo_path,
+                run_dir,
+                state=state,
+            )
+        except Exception as exc:  # noqa: BLE001 - eval 必须把重算异常转成 FAIL
+            validation_error = type(exc).__name__
         if latest.lifecycle != "completed":
             results.append("FAIL: success loop 的最新 iteration 必须为 completed")
         else:
@@ -1975,19 +1986,13 @@ def run_loop_eval(
         if latest.verification_status != "passed" or latest.verification_failed_count:
             results.append("FAIL: success loop 的最新 verification 必须为 passed")
         else:
-            try:
-                artifact_integrity = validate_loop_artifact_integrity(
-                    workspace,
-                    repo_path,
-                    run_dir,
-                    state=state,
-                )
-            except Exception as exc:  # noqa: BLE001 - eval 必须把重算异常转成 FAIL
+            if validation_snapshot is None:
                 results.append(
                     "FAIL: success loop 的最新 verification 完整性重算异常："
-                    f"{type(exc).__name__}"
+                    f"{validation_error}"
                 )
             else:
+                artifact_integrity = validation_snapshot.artifact_integrity
                 if trusted_verification_passed(state, artifact_integrity):
                     results.append(
                         "PASS: success loop 的最新 verification 存在受信结构化通过证据"
@@ -2015,18 +2020,13 @@ def run_loop_eval(
             iteration_dir / "diff-summary.md"
         ):
             results.append("FAIL: success loop 没有可审查的 tracked diff")
-        try:
-            freshness = validate_loop_evidence_freshness(
-                workspace,
-                repo_path,
-                run_dir,
-            )
-        except Exception as exc:  # noqa: BLE001 - eval 必须把新鲜度异常转成 FAIL
+        if validation_snapshot is None:
             results.append(
                 "FAIL: success loop reviewer 证据新鲜度重算异常："
-                f"{type(exc).__name__}"
+                f"{validation_error}"
             )
         else:
+            freshness = validation_snapshot.evidence_freshness
             if freshness.fresh:
                 results.append("PASS: success loop reviewer 证据仍与当前工作区一致")
             else:

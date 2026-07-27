@@ -33,9 +33,13 @@ from .project_config import (
     scope_policy_sha256,
 )
 from .risk_gate_evidence import validate_iteration_risk_gate_artifacts
+from .review_evidence import review_evidence_schema_issues
 from .run_utils import resolve_run_dir
 from .scope_gate import validate_iteration_scope_gate_artifacts
-from .workspace_check import capture_review_workspace
+from .workspace_check import (
+    ReviewWorkspaceSnapshot,
+    capture_review_workspace,
+)
 
 
 @dataclass(frozen=True)
@@ -71,16 +75,17 @@ def validate_reflect_evidence_freshness(
     repo_path: Path,
     source_run: str,
     *,
-    current_workspace_fingerprint: str | None = None,
+    current_workspace_snapshot: ReviewWorkspaceSnapshot | None = None,
 ) -> EvidenceFreshness:
     repo = repo_path.resolve()
     source_dir = resolve_run_dir(workspace, source_run)
     state = _read_json(source_dir / "state.json")
     evidence = _read_json(source_dir / "review-evidence.json")
-    current_fingerprint, snapshot_issues = _current_workspace_fingerprint(
+    current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
         repo,
-        current_workspace_fingerprint,
+        current_workspace_snapshot,
     )
+    current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
     issues = list(snapshot_issues)
     if str(state.get("run_id") or "") != source_dir.name:
         issues.append("source_run_id_mismatch")
@@ -97,7 +102,12 @@ def validate_reflect_evidence_freshness(
             source_run=source_dir.name,
         )
 
-    issues.extend(_review_evidence_schema_issues(evidence))
+    issues.extend(
+        review_evidence_schema_issues(
+            evidence,
+            current_snapshot,
+        )
+    )
     snapshot_id = str(evidence.get("snapshot_id") or "")
     snapshot_payload = {key: value for key, value in evidence.items() if key != "snapshot_id"}
     if not snapshot_id or snapshot_id != _sha256_json(snapshot_payload):
@@ -176,41 +186,23 @@ def validate_reflect_evidence_freshness(
     )
 
 
-def _review_evidence_schema_issues(evidence: dict[str, Any]) -> list[str]:
-    issues: list[str] = []
-    schema_version = evidence.get("schema_version")
-    if schema_version not in {2, 3, 4}:
-        issues.append("source_evidence_schema_unsupported")
-    if schema_version in {3, 4}:
-        for key in ("staged_diff_sha256", "unstaged_diff_sha256"):
-            if not _is_sha256(evidence.get(key)):
-                issues.append(f"{key}_invalid")
-    if schema_version == 4:
-        if evidence.get("ignored_content_complete") not in {True, False}:
-            issues.append("ignored_content_complete_invalid")
-        if not _is_sha256(evidence.get("git_control_sha256")):
-            issues.append("git_control_sha256_invalid")
-        if evidence.get("git_control_complete") is not True:
-            issues.append("source_git_control_incomplete")
-    return issues
-
-
 def validate_review_evidence_freshness(
     workspace: Path,
     repo_path: Path,
     review_run: str,
     *,
-    current_workspace_fingerprint: str | None = None,
+    current_workspace_snapshot: ReviewWorkspaceSnapshot | None = None,
 ) -> EvidenceFreshness:
     repo = repo_path.resolve()
     review_dir = resolve_run_dir(workspace, review_run)
     state, state_issue = _load_review_state(review_dir / "state.json")
     context, context_issue = _load_json_object(review_dir / "review-context.json")
     verdict, verdict_issue = _load_review_verdict(review_dir / "review-verdict.json")
-    current_fingerprint, snapshot_issues = _current_workspace_fingerprint(
+    current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
         repo,
-        current_workspace_fingerprint,
+        current_workspace_snapshot,
     )
+    current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
     issues = list(snapshot_issues)
     if state_issue:
         issues.append(f"review_state_{state_issue}")
@@ -242,7 +234,7 @@ def validate_review_evidence_freshness(
                 workspace,
                 repo,
                 source_run,
-                current_workspace_fingerprint=current_fingerprint,
+                current_workspace_snapshot=current_snapshot,
             )
         except FileNotFoundError:
             issues.append("source_reflect_missing")
@@ -608,7 +600,11 @@ def _validate_loop_evidence_freshness(
         if state is not None
         else _read_json(loop_dir / "state.json")
     )
-    current_fingerprint, snapshot_issues = _current_workspace_fingerprint(repo, None)
+    current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
+        repo,
+        None,
+    )
+    current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
     issues = list(snapshot_issues)
     if str(state_payload.get("run_id") or "") != loop_dir.name:
         issues.append("loop_run_id_mismatch")
@@ -634,7 +630,7 @@ def _validate_loop_evidence_freshness(
             workspace,
             repo,
             review_run,
-            current_workspace_fingerprint=current_fingerprint,
+            current_workspace_snapshot=current_snapshot,
         )
     except FileNotFoundError:
         issues.append("trusted_review_missing")
@@ -1255,16 +1251,17 @@ def _is_string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _current_workspace_fingerprint(
+def _capture_current_workspace_snapshot(
     repo_path: Path,
-    current_workspace_fingerprint: str | None,
-) -> tuple[str, list[str]]:
-    if current_workspace_fingerprint is not None:
-        return current_workspace_fingerprint, []
+    current_workspace_snapshot: ReviewWorkspaceSnapshot | None,
+) -> tuple[ReviewWorkspaceSnapshot | None, list[str]]:
+    if current_workspace_snapshot is not None:
+        return current_workspace_snapshot, []
     try:
-        return capture_review_workspace(repo_path).fingerprint, []
+        snapshot = capture_review_workspace(repo_path)
     except (OSError, RuntimeError, subprocess.SubprocessError):
-        return "", ["workspace_snapshot_failed"]
+        return None, ["workspace_snapshot_failed"]
+    return snapshot, []
 
 
 def _freshness(

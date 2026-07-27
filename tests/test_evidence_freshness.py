@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+import vega.loop_evidence as loop_evidence_module
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
 from vega.experimental.goal_runtime import GoalRuntime
@@ -279,6 +281,93 @@ def test_gate_records_failure_for_stale_reflect_snapshot(tmp_path: Path) -> None
     gate_run = GateRuntime(workspace).run(repo, reflect_run.name)
 
     _assert_failed_gate_run(gate_run, "workspace_changed_since_reflect")
+
+
+def test_gate_rejects_incomplete_ignored_evidence(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    reflect_run = ReflectRuntime(workspace).run(repo)
+    state_path = reflect_run / "state.json"
+    evidence_path = reflect_run / "review-evidence.json"
+    state = _read_json(state_path)
+    evidence = _read_json(evidence_path)
+    evidence["ignored_manifest_complete"] = False
+    evidence["snapshot_id"] = _sha256_json(
+        {key: value for key, value in evidence.items() if key != "snapshot_id"}
+    )
+    state["review_snapshot_id"] = evidence["snapshot_id"]
+    _write_json(state_path, state)
+    _write_json(evidence_path, evidence)
+
+    gate_run = GateRuntime(workspace).run(repo, reflect_run.name)
+
+    _assert_failed_gate_run(gate_run, "source_ignored_manifest_incomplete")
+
+
+def test_reflect_freshness_rejects_legacy_review_evidence_schema(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    reflect_run = ReflectRuntime(workspace).run(repo)
+    state_path = reflect_run / "state.json"
+    evidence_path = reflect_run / "review-evidence.json"
+    state = _read_json(state_path)
+    evidence = _read_json(evidence_path)
+    evidence["schema_version"] = 4
+    evidence["ignored_content_complete"] = False
+    evidence.pop("ignored_manifest_complete")
+    evidence["snapshot_id"] = _sha256_json(
+        {key: value for key, value in evidence.items() if key != "snapshot_id"}
+    )
+    state["review_snapshot_id"] = evidence["snapshot_id"]
+    _write_json(state_path, state)
+    _write_json(evidence_path, evidence)
+
+    freshness = loop_evidence_module.validate_reflect_evidence_freshness(
+        workspace,
+        repo,
+        reflect_run.name,
+    )
+
+    assert freshness.fresh is False
+    assert "legacy_review_evidence_requires_refresh" in freshness.issues
+
+
+def test_reflect_freshness_rejects_current_incomplete_ignored_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    reflect_run = ReflectRuntime(workspace).run(repo)
+    original_capture = loop_evidence_module.capture_review_workspace
+
+    def incomplete_capture(repo_path: Path):
+        return replace(
+            original_capture(repo_path),
+            ignored_manifest_complete=False,
+        )
+
+    monkeypatch.setattr(
+        loop_evidence_module,
+        "capture_review_workspace",
+        incomplete_capture,
+    )
+
+    freshness = loop_evidence_module.validate_reflect_evidence_freshness(
+        workspace,
+        repo,
+        reflect_run.name,
+    )
+
+    assert freshness.fresh is False
+    assert "current_ignored_manifest_incomplete" in freshness.issues
 
 
 def test_gate_records_failure_for_reflect_with_mismatched_directory_identity(

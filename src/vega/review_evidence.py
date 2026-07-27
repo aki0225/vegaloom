@@ -9,7 +9,40 @@ from typing import Any
 from .redaction import redact_value
 from .workspace_check import ReviewWorkspaceSnapshot
 
-SUPPORTED_REVIEW_EVIDENCE_SCHEMAS = frozenset({2, 3, 4})
+REVIEW_EVIDENCE_SCHEMA_VERSION = 5
+LEGACY_REVIEW_EVIDENCE_SCHEMAS = frozenset({2, 3, 4})
+
+
+def review_evidence_schema_issues(
+    evidence: dict[str, Any],
+    current_snapshot: ReviewWorkspaceSnapshot | None,
+) -> list[str]:
+    """统一校验 Review evidence schema，并在可用时绑定当前工作区。"""
+    schema_version = evidence.get("schema_version")
+    if type(schema_version) is not int:
+        return ["source_evidence_schema_unsupported"]
+    if schema_version != REVIEW_EVIDENCE_SCHEMA_VERSION:
+        if schema_version in LEGACY_REVIEW_EVIDENCE_SCHEMAS:
+            return ["legacy_review_evidence_requires_refresh"]
+        return ["source_evidence_schema_unsupported"]
+
+    issues: list[str] = []
+    issues.extend(_tracked_diff_hash_issues(evidence, current_snapshot))
+
+    source_content_complete = evidence.get("ignored_content_complete")
+    if evidence.get("ignored_manifest_complete") is not True:
+        issues.append("source_ignored_manifest_incomplete")
+    if type(source_content_complete) is not bool:
+        issues.append("ignored_content_complete_invalid")
+    issues.extend(
+        _ignored_snapshot_binding_issues(
+            evidence,
+            current_snapshot,
+            source_content_complete,
+        )
+    )
+    issues.extend(_git_control_issues(evidence, current_snapshot))
+    return issues
 
 
 def make_review_evidence(
@@ -28,7 +61,7 @@ def make_review_evidence(
 ) -> dict[str, object]:
     evidence = redact_value(
         {
-            "schema_version": 4,
+            "schema_version": REVIEW_EVIDENCE_SCHEMA_VERSION,
             "captured_at": datetime.now(UTC).isoformat(),
             "source_run": review_source_run,
             "upstream_source_run": upstream_source_run,
@@ -41,6 +74,7 @@ def make_review_evidence(
             "untracked_manifest_sha256": workspace_snapshot.untracked_manifest_sha256,
             "untracked_content_complete": workspace_snapshot.untracked_content_complete,
             "ignored_manifest_sha256": workspace_snapshot.ignored_manifest_sha256,
+            "ignored_manifest_complete": workspace_snapshot.ignored_manifest_complete,
             "ignored_content_complete": workspace_snapshot.ignored_content_complete,
             "git_control_sha256": workspace_snapshot.git_control_sha256,
             "git_control_complete": workspace_snapshot.git_control_complete,
@@ -81,8 +115,7 @@ def review_evidence_issues(
     if not source_evidence:
         return _unique(issues)
 
-    schema_version = source_evidence.get("schema_version")
-    issues.extend(_schema_issues(schema_version, source_evidence, current_snapshot))
+    issues.extend(review_evidence_schema_issues(source_evidence, current_snapshot))
     issues.extend(
         _source_identity_issues(
             repo_path,
@@ -138,52 +171,87 @@ def _initial_evidence_issues(
     return issues
 
 
-def _schema_issues(
-    schema_version: object,
-    source_evidence: dict[str, Any],
-    current_snapshot: ReviewWorkspaceSnapshot,
-) -> list[str]:
-    issues: list[str] = []
-    if schema_version not in SUPPORTED_REVIEW_EVIDENCE_SCHEMAS:
-        issues.append("source_evidence_schema_unsupported")
-    if schema_version in {3, 4}:
-        issues.extend(_tracked_diff_hash_issues(source_evidence, current_snapshot))
-    if schema_version == 4:
-        issues.extend(_schema_v4_issues(source_evidence, current_snapshot))
-    return issues
-
-
 def _tracked_diff_hash_issues(
     source_evidence: dict[str, Any],
-    current_snapshot: ReviewWorkspaceSnapshot,
+    current_snapshot: ReviewWorkspaceSnapshot | None,
 ) -> list[str]:
     issues: list[str] = []
     for key, current_hash in (
-        ("staged_diff_sha256", current_snapshot.staged_diff_sha256),
-        ("unstaged_diff_sha256", current_snapshot.unstaged_diff_sha256),
+        (
+            "staged_diff_sha256",
+            current_snapshot.staged_diff_sha256 if current_snapshot else None,
+        ),
+        (
+            "unstaged_diff_sha256",
+            current_snapshot.unstaged_diff_sha256 if current_snapshot else None,
+        ),
     ):
-        if not _matches_sha256(source_evidence.get(key), current_hash):
-            issues.append(f"{key}_mismatch")
+        issues.extend(_hash_binding_issues(source_evidence.get(key), key, current_hash))
     return issues
 
 
-def _schema_v4_issues(
+def _ignored_snapshot_binding_issues(
     source_evidence: dict[str, Any],
-    current_snapshot: ReviewWorkspaceSnapshot,
+    current_snapshot: ReviewWorkspaceSnapshot | None,
+    source_content_complete: object,
 ) -> list[str]:
     issues: list[str] = []
-    if source_evidence.get("ignored_content_complete") not in {True, False}:
-        issues.append("ignored_content_complete_invalid")
-    if not _matches_sha256(
-        source_evidence.get("git_control_sha256"),
-        current_snapshot.git_control_sha256,
+    current_hash = (
+        current_snapshot.ignored_manifest_sha256
+        if current_snapshot is not None
+        else None
+    )
+    issues.extend(
+        _hash_binding_issues(
+            source_evidence.get("ignored_manifest_sha256"),
+            "ignored_manifest_sha256",
+            current_hash,
+        )
+    )
+    if current_snapshot is None:
+        return issues
+    if not current_snapshot.ignored_manifest_complete:
+        issues.append("current_ignored_manifest_incomplete")
+    if (
+        type(source_content_complete) is bool
+        and source_content_complete is not current_snapshot.ignored_content_complete
     ):
-        issues.append("git_control_sha256_mismatch")
+        issues.append("ignored_content_complete_mismatch")
+    return issues
+
+
+def _git_control_issues(
+    source_evidence: dict[str, Any],
+    current_snapshot: ReviewWorkspaceSnapshot | None,
+) -> list[str]:
+    issues: list[str] = []
+    current_hash = (
+        current_snapshot.git_control_sha256
+        if current_snapshot is not None
+        else None
+    )
+    issues.extend(
+        _hash_binding_issues(
+            source_evidence.get("git_control_sha256"),
+            "git_control_sha256",
+            current_hash,
+        )
+    )
     if source_evidence.get("git_control_complete") is not True:
         issues.append("source_git_control_incomplete")
-    if not current_snapshot.git_control_complete:
+    if current_snapshot is not None and not current_snapshot.git_control_complete:
         issues.append("current_git_control_incomplete")
     return issues
+
+
+def _hash_binding_issues(
+    value: object,
+    key: str,
+    current_hash: str | None,
+) -> list[str]:
+    if current_hash is None:
+        return [] if _is_sha256_value(value) else [f"{key}_invalid"]
+    return [] if _matches_sha256(value, current_hash) else [f"{key}_mismatch"]
 
 
 def _source_identity_issues(
@@ -284,6 +352,14 @@ def _workspace_binding_issues(
 
 def _matches_sha256(value: object, current_hash: str) -> bool:
     return isinstance(value, str) and len(value) == 64 and value == current_hash
+
+
+def _is_sha256_value(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value.lower())
+    )
 
 
 def _sha256_json_value(payload: object) -> str:

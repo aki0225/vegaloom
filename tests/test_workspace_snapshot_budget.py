@@ -9,7 +9,11 @@ import pytest
 from vega.experimental.inspection import context_loader
 from vega import workspace_check as workspace_check_module
 from vega.experimental.inspection.context_loader import load_target_context
-from vega.workspace_check import capture_review_workspace
+from vega.workspace_check import (
+    capture_review_workspace,
+    evaluate_workspace,
+    snapshot_workspace,
+)
 
 
 def test_untracked_content_hashing_respects_file_budget(
@@ -135,8 +139,68 @@ def test_ignored_content_hashing_exposes_incomplete_budget(
 
     snapshot = capture_review_workspace(repo)
 
+    assert snapshot.ignored_manifest_complete is True
     assert snapshot.ignored_content_complete is False
+    assert snapshot.ignored_coverage_level == "metadata_bounded"
     assert len(snapshot.ignored_manifest_sha256) == 64
+
+
+def test_workspace_check_fails_when_ignored_manifest_is_incomplete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath(".gitignore").write_text("*.tmp\n", encoding="utf-8")
+    _git(repo, "add", "--", ".gitignore")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "ignore temp files",
+    )
+    for index in range(2):
+        repo.joinpath(f"{index}.tmp").write_text(f"value-{index}\n", encoding="utf-8")
+    monkeypatch.setattr(workspace_check_module, "MAX_IGNORED_METADATA_FILES", 1)
+
+    baseline = snapshot_workspace(repo)
+    result = evaluate_workspace(repo, baseline=baseline)
+
+    assert baseline.ignored_manifest_complete is False
+    assert baseline.ignored_content_complete is False
+    assert baseline.capture_complete is False
+    assert result.status == "failed"
+    assert any("无法完整构建 ignored 清单" in reason for reason in result.reasons)
+    assert not any(
+        "路径与元数据清单完整" in reason
+        for reason in result.reasons
+    )
+
+
+def test_incomplete_ignored_path_enumeration_is_exposed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    original_ignored_paths = workspace_check_module._ignored_paths
+
+    def incomplete_ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
+        paths, _ = original_ignored_paths(repo_path)
+        return paths, False
+
+    monkeypatch.setattr(
+        workspace_check_module,
+        "_ignored_paths",
+        incomplete_ignored_paths,
+    )
+
+    snapshot = capture_review_workspace(repo)
+
+    assert snapshot.ignored_manifest_complete is False
+    assert snapshot.ignored_coverage_level == "incomplete"
 
 
 def test_untracked_content_change_during_read_marks_snapshot_incomplete(

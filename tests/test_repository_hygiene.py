@@ -119,11 +119,7 @@ def test_history_scan_catches_path_removed_by_later_commit(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init")
-    _git(repo, "config", "user.email", "test@example.com")
-    _git(repo, "config", "user.name", "Test")
+    repo = _init_repo(tmp_path)
     guide = repo / "guide.md"
     guide.write_text("使用 docs/guide.md\n", encoding="utf-8")
     _commit_all(repo, "base")
@@ -148,14 +144,185 @@ def test_history_scan_catches_path_removed_by_later_commit(
     assert str(repo) not in captured.err
 
 
+def test_staged_text_violation_cannot_be_hidden_by_safe_worktree(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    guide = repo / "guide.md"
+    guide.write_text("use docs/guide.md\n", encoding="utf-8")
+    _commit_all(repo, "base")
+
+    alternate_index = tmp_path / "safe-alternate.index"
+    monkeypatch.setenv("GIT_INDEX_FILE", str(alternate_index))
+    _git(repo, "read-tree", "HEAD")
+    assert _git(repo, "show", ":guide.md").stdout == "use docs/guide.md\n"
+
+    monkeypatch.delenv("GIT_INDEX_FILE")
+    leaked_path = _windows_path("Users", "alice", "repo")
+    guide.write_text(f"local path: {leaked_path}\n", encoding="utf-8")
+    _git(repo, "add", "--", "guide.md")
+    guide.write_text("use docs/guide.md\n", encoding="utf-8")
+
+    assert leaked_path in _git(repo, "show", ":guide.md").stdout
+    monkeypatch.setenv("GIT_INDEX_FILE", str(alternate_index))
+    assert leaked_path not in _git(repo, "show", ":guide.md").stdout
+
+    exit_code = hygiene.main(["--repo", str(repo), "--base-ref", "HEAD"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Windows 盘符绝对路径" in captured.err
+    assert leaked_path not in captured.err
+
+
+def test_gitlink_without_local_commit_object_is_allowed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath("guide.md").write_text("use docs/guide.md\n", encoding="utf-8")
+    _commit_all(repo, "base")
+    missing_commit = "1" * 40
+
+    _git(
+        repo,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"160000,{missing_commit},vendor/dependency",
+    )
+    missing = subprocess.run(
+        ["git", "cat-file", "-e", missing_commit],
+        cwd=repo,
+        capture_output=True,
+        check=False,
+    )
+    assert missing.returncode != 0
+
+    exit_code = hygiene.main(["--repo", str(repo), "--base-ref", "HEAD"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "仓库路径与私密文件卫生检查通过" in captured.out
+
+
+def test_intent_to_add_content_is_checked_from_worktree(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath("guide.md").write_text("use docs/guide.md\n", encoding="utf-8")
+    _commit_all(repo, "base")
+    leaked_path = _windows_path("Users", "alice", "repo")
+    draft = repo / "draft.md"
+    draft.write_text(f"local path: {leaked_path}\n", encoding="utf-8")
+    _git(repo, "add", "-N", "--", "draft.md")
+
+    assert _git(repo, "diff", "--cached", "--name-only").stdout == ""
+
+    exit_code = hygiene.main(["--repo", str(repo), "--base-ref", "HEAD"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Windows 盘符绝对路径" in captured.err
+    assert leaked_path not in captured.err
+
+
+def test_main_detects_index_change_during_later_scans(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath("guide.md").write_text("use docs/guide.md\n", encoding="utf-8")
+    _commit_all(repo, "base")
+
+    def mutate_index_during_worktree_scan(
+        repo_root: Path,
+        *,
+        head_commit: str | None = None,
+    ):
+        assert head_commit
+        repo_root.joinpath("late.md").write_text("safe\n", encoding="utf-8")
+        _git(repo_root, "add", "--", "late.md")
+        return []
+
+    monkeypatch.setattr(
+        hygiene,
+        "scan_worktree",
+        mutate_index_during_worktree_scan,
+    )
+
+    exit_code = hygiene.main(["--repo", str(repo)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "Git index 在仓库卫生检查期间发生变化" in captured.err
+
+
+def test_main_detects_head_change_during_check(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath("guide.md").write_text("use docs/guide.md\n", encoding="utf-8")
+    _commit_all(repo, "base")
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    head_reads = iter([head, "f" * 40])
+    monkeypatch.setattr(
+        hygiene,
+        "_read_head_commit",
+        lambda repo_root: next(head_reads),
+    )
+
+    exit_code = hygiene.main(["--repo", str(repo)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "Git HEAD 在仓库卫生检查期间发生变化" in captured.err
+
+
+def test_unmerged_index_fails_closed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _init_repo(tmp_path)
+    guide = repo / "guide.md"
+    guide.write_text("base\n", encoding="utf-8")
+    _commit_all(repo, "base")
+    base_branch = _git(repo, "branch", "--show-current").stdout.strip()
+
+    _git(repo, "switch", "-c", "other")
+    guide.write_text("other\n", encoding="utf-8")
+    _commit_all(repo, "other change")
+    _git(repo, "switch", base_branch)
+    guide.write_text("current\n", encoding="utf-8")
+    _commit_all(repo, "current change")
+
+    merge = subprocess.run(
+        ["git", "merge", "other"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert merge.returncode != 0
+    assert _git(repo, "ls-files", "--unmerged").stdout
+
+    exit_code = hygiene.main(["--repo", str(repo)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Git index 包含未解决冲突" in captured.err
+
+
 def test_eval_history_rewrite_is_rejected_even_when_later_restored(
     tmp_path: Path,
 ) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init")
-    _git(repo, "config", "user.email", "test@example.com")
-    _git(repo, "config", "user.name", "Test")
+    repo = _init_repo(tmp_path)
     evidence = repo / "eval" / "real-world-runs.md"
     evidence.parent.mkdir()
     evidence.write_text("failed\n", encoding="utf-8", newline="\n")
@@ -173,11 +340,7 @@ def test_eval_history_rewrite_is_rejected_even_when_later_restored(
 
 
 def test_eval_worktree_rewrite_is_rejected(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init")
-    _git(repo, "config", "user.email", "test@example.com")
-    _git(repo, "config", "user.name", "Test")
+    repo = _init_repo(tmp_path)
     evidence = repo / "eval" / "real-world-runs.md"
     evidence.parent.mkdir()
     evidence.write_text("failed\n", encoding="utf-8", newline="\n")
@@ -190,12 +353,42 @@ def test_eval_worktree_rewrite_is_rejected(tmp_path: Path) -> None:
     assert any(item.rule == "eval-not-append-only" for item in violations)
 
 
+@pytest.mark.parametrize(
+    "staged_change",
+    [
+        pytest.param("rewrite", id="暂存改写"),
+        pytest.param("deletion", id="暂存删除"),
+    ],
+)
+def test_eval_index_violation_cannot_be_hidden_by_worktree(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    staged_change: str,
+) -> None:
+    repo = _init_repo(tmp_path)
+    evidence = repo / "eval" / "real-world-runs.md"
+    evidence.parent.mkdir()
+    evidence.write_text("failed\n", encoding="utf-8", newline="\n")
+    _commit_all(repo, "base evidence")
+
+    if staged_change == "rewrite":
+        evidence.write_text("success\n", encoding="utf-8", newline="\n")
+        _git(repo, "add", "--", "eval/real-world-runs.md")
+        evidence.write_text("failed\n", encoding="utf-8", newline="\n")
+        assert _git(repo, "show", ":eval/real-world-runs.md").stdout == "success\n"
+    else:
+        _git(repo, "rm", "--cached", "--", "eval/real-world-runs.md")
+        assert evidence.read_text(encoding="utf-8") == "failed\n"
+
+    exit_code = hygiene.main(["--repo", str(repo), "--base-ref", "HEAD"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "eval/ 证据文件只允许尾部追加" in captured.err
+
+
 def test_eval_tail_append_and_new_file_are_allowed(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init")
-    _git(repo, "config", "user.email", "test@example.com")
-    _git(repo, "config", "user.name", "Test")
+    repo = _init_repo(tmp_path)
     evidence = repo / "eval" / "real-world-runs.md"
     evidence.parent.mkdir()
     evidence.write_text("failed\n", encoding="utf-8", newline="\n")
@@ -209,10 +402,21 @@ def test_eval_tail_append_and_new_file_are_allowed(tmp_path: Path) -> None:
         encoding="utf-8",
         newline="\n",
     )
+    _git(
+        repo,
+        "add",
+        "--",
+        "eval/real-world-runs.md",
+        "eval/new-case.jsonl",
+    )
 
     assert not any(
         item.rule == "eval-not-append-only"
         for item in hygiene.scan_worktree(repo)
+    )
+    assert not any(
+        item.rule == "eval-not-append-only"
+        for item in hygiene.scan_index(repo)
     )
 
     _commit_all(repo, "append evidence")
@@ -224,11 +428,7 @@ def test_eval_tail_append_and_new_file_are_allowed(tmp_path: Path) -> None:
 
 
 def test_eval_worktree_line_ending_conversion_is_not_a_rewrite(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init")
-    _git(repo, "config", "user.email", "test@example.com")
-    _git(repo, "config", "user.name", "Test")
+    repo = _init_repo(tmp_path)
     evidence = repo / "eval" / "real-world-runs.md"
     evidence.parent.mkdir()
     evidence.write_text("failed\n", encoding="utf-8", newline="\n")
@@ -250,6 +450,15 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         check=True,
     )
+
+
+def _init_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    return repo
 
 
 def _commit_all(repo: Path, message: str) -> None:

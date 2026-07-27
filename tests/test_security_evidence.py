@@ -371,6 +371,9 @@ def test_ignored_sensitive_file_content_is_not_opened(
 
     snapshot = capture_review_workspace(repo)
 
+    assert snapshot.ignored_manifest_complete is True
+    assert snapshot.ignored_content_complete is False
+    assert snapshot.ignored_coverage_level == "metadata_bounded"
     assert len(snapshot.ignored_manifest_sha256) == 64
 
 
