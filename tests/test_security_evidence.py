@@ -679,7 +679,7 @@ def test_gate_git_reads_use_hardened_environment(
         ["git", "status", "--short", "--untracked-files=all"],
     )
 
-    assert output == "statuswarning"
+    assert output == "status"
     command, kwargs = calls[0]
     assert ["-c", f"core.excludesFile={os.devnull}"] == command[1:3]
     assert "core.fsmonitor=false" in command

@@ -180,7 +180,7 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
     )
 
     result = run_owned_process(
-        [sys.executable, "-c", "import time; time.sleep(0.12)"],
+        [sys.executable, "-c", "import time; time.sleep(0.3)"],
         "",
         tmp_path,
         5,
@@ -1024,7 +1024,7 @@ def test_windows_taskkill_replaces_undecodable_localized_output(
     assert result == "taskkill \u9000\u51fa\u7801 5\uff1alocalized output \ufffd"
 
 
-def test_recovery_rejects_persisted_unconfirmed_process_tree(
+def test_recovery_rejects_persisted_unconfirmed_live_process_group(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1048,7 +1048,16 @@ def test_recovery_rejects_persisted_unconfirmed_process_tree(
             reason="owned process tree termination unconfirmed",
         ),
     )
-    monkeypatch.setattr(execution_control, "is_process_alive", lambda _: False)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_is_posix_process_group_alive",
+        lambda _: True,
+    )
 
     inspection = inspect_execution_for_recovery(run_dir)
 

@@ -196,7 +196,7 @@ def test_recovery_rejects_expired_lease_while_owned_pid_is_alive(tmp_path: Path)
     assert "PID" in inspection.summary
 
 
-def test_recovery_rejects_terminal_execution_while_owned_pid_is_alive(tmp_path: Path) -> None:
+def test_recovery_rejects_terminal_execution_while_child_pid_is_alive(tmp_path: Path) -> None:
     execution_dir = tmp_path / "runs" / "terminal-live" / "executions" / "worker"
     execution_dir.mkdir(parents=True)
     now = datetime.now(UTC)
@@ -204,6 +204,7 @@ def test_recovery_rejects_terminal_execution_while_owned_pid_is_alive(tmp_path: 
         run_id="terminal-live",
         step="worker",
         owner_pid=os.getpid(),
+        child_pid=os.getpid(),
         command=["worker"],
         started_at=(now - timedelta(minutes=1)).isoformat(),
         last_heartbeat=now.isoformat(),
@@ -222,7 +223,7 @@ def test_recovery_rejects_terminal_execution_while_owned_pid_is_alive(tmp_path: 
     assert inspection.record is not None
     assert inspection.record.path == execution_path
     assert "terminal execution" in inspection.summary
-    assert "PID 仍存活" in inspection.summary
+    assert "process tree 仍存活" in inspection.summary
 
 
 def test_recovery_rejects_corrupt_execution_record(tmp_path: Path) -> None:
