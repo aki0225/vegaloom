@@ -3,10 +3,17 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from vega import gate_runtime as gate_runtime_module
+from vega import git_read as git_read_module
+from vega import project_config as project_config_module
+from vega import project_knowledge as project_knowledge_module
+from vega import project_profile as project_profile_module
+from vega import reflect_runtime as reflect_runtime_module
+from vega import repository_identity as repository_identity_module
 from vega import workspace_check as workspace_check_module
 from vega.brief_runtime import BriefRuntime
 from vega.models import BriefInput
@@ -15,6 +22,7 @@ from vega.project_knowledge import load_agents_instructions
 from vega.project_profile import build_project_profile
 from vega.redaction import REDACTION_TEXT, redact_text
 from vega.experimental.inspection.runtime import EngineeringChangeRuntime
+from vega.tools import git_tools as git_tools_module
 from vega.workspace_check import capture_review_workspace, evaluate_workspace
 
 
@@ -363,6 +371,9 @@ def test_ignored_sensitive_file_content_is_not_opened(
 
     snapshot = capture_review_workspace(repo)
 
+    assert snapshot.ignored_manifest_complete is True
+    assert snapshot.ignored_content_complete is False
+    assert snapshot.ignored_coverage_level == "metadata_bounded"
     assert len(snapshot.ignored_manifest_sha256) == 64
 
 
@@ -390,6 +401,322 @@ def test_ignored_content_hashing_respects_file_budget(
     assert len(opened) == 1
 
 
+def test_git_reads_disable_external_config_and_diff_drivers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
+
+    workspace_check_module._run_git_bytes(
+        repo,
+        ["git", "status", "--porcelain=v1"],
+    )
+    commands: list[list[str]] = []
+
+    def fake_run_git_bytes(
+        repo_path: Path,
+        command: list[str],
+        *,
+        allowed_returncodes: tuple[int, ...] = (0,),
+    ) -> bytes:
+        del repo_path, allowed_returncodes
+        commands.append(command)
+        return b""
+
+    monkeypatch.setattr(workspace_check_module, "_run_git_bytes", fake_run_git_bytes)
+    workspace_check_module.collect_tracked_diff_parts(repo, ["--binary"])
+
+    actual_command, kwargs = calls[0]
+    assert ["-c", f"core.excludesFile={os.devnull}"] == actual_command[1:3]
+    assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert kwargs["env"]["GIT_ATTR_NOSYSTEM"] == "1"
+    assert all("--no-ext-diff" in command for command in commands)
+    assert all("--no-textconv" in command for command in commands)
+
+
+def test_git_read_environment_removes_parent_git_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    variables = (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_KEY_0",
+        "GIT_CONFIG_VALUE_0",
+        "GIT_UNRECOGNIZED_PARENT_OVERRIDE",
+    )
+    for variable in variables:
+        monkeypatch.setenv(variable, "untrusted-parent-value")
+
+    environment = git_read_module.git_read_environment()
+
+    assert all(variable not in environment for variable in variables)
+
+
+def test_git_read_environment_replaces_controlled_git_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for variable in (
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_ATTR_NOSYSTEM",
+        "GIT_OPTIONAL_LOCKS",
+        "GIT_PAGER",
+    ):
+        monkeypatch.setenv(variable, "untrusted-parent-value")
+
+    environment = git_read_module.git_read_environment()
+
+    assert environment["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert environment["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert environment["GIT_ATTR_NOSYSTEM"] == "1"
+    assert environment["GIT_OPTIONAL_LOCKS"] == "0"
+    assert environment["GIT_PAGER"] == "cat"
+
+
+def test_git_read_ignores_parent_repository_redirect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_repo = tmp_path / "expected"
+    redirected_repo = tmp_path / "redirected"
+    _init_repo(expected_repo, {"README.md": "# Expected\n"})
+    _init_repo(redirected_repo, {"README.md": "# Redirected\n"})
+    expected_head = _git(expected_repo, "rev-parse", "HEAD").strip()
+    redirected_head = _git(redirected_repo, "rev-parse", "HEAD").strip()
+    assert expected_head != redirected_head
+    monkeypatch.setenv("GIT_DIR", str(redirected_repo / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(redirected_repo))
+
+    actual_head = workspace_check_module.read_head_sha(expected_repo)
+
+    assert actual_head == expected_head
+
+
+def test_explicit_matching_safe_directory_is_scoped_to_git_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[tuple[list[str], dict[str, object], str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        environment = kwargs["env"]
+        config_path = Path(environment["GIT_CONFIG_GLOBAL"])
+        calls.append(
+            (
+                command,
+                kwargs,
+                config_path.read_text(encoding="utf-8"),
+            )
+        )
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setenv("VEGA_GIT_SAFE_DIRECTORY", str(repo))
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
+
+    git_read_module.run_git_capture(repo, ["git", "status", "--short"])
+
+    command, environment, config_text = calls[0][0], calls[0][1]["env"], calls[0][2]
+    config_path = Path(environment["GIT_CONFIG_GLOBAL"])
+    assert command == git_read_module.harden_git_read_command(
+        ["git", "status", "--short"]
+    )
+    assert config_text == (
+        f'[safe]\n\tdirectory = "{repo.resolve().as_posix()}"\n'
+    )
+    assert not config_path.exists()
+    assert "VEGA_GIT_SAFE_DIRECTORY" not in environment
+
+
+def test_explicit_matching_safe_directory_uses_isolated_global_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo with spaces"
+    repo.mkdir()
+    monkeypatch.setenv("VEGA_GIT_SAFE_DIRECTORY", str(repo))
+
+    output = git_read_module.run_git_bytes(
+        repo,
+        ["git", "config", "--show-scope", "--get-all", "safe.directory"],
+    ).decode("utf-8")
+
+    assert output == f"global\t{repo.resolve().as_posix()}\n"
+
+
+def test_safe_directory_config_rejects_control_characters() -> None:
+    unsafe_path = Path("repo\n[include]")
+
+    with pytest.raises(RuntimeError, match="不得包含控制字符"):
+        git_read_module.create_safe_directory_global_config(unsafe_path)
+
+
+def test_safe_directory_config_cleanup_failure_is_reported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    original_unlink = Path.unlink
+
+    def fail_safe_config_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        if path.name.startswith("vega-git-safe-"):
+            original_unlink(path, *args, **kwargs)
+            raise OSError("cleanup failed")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setenv("VEGA_GIT_SAFE_DIRECTORY", str(repo))
+    monkeypatch.setattr(
+        git_read_module.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=b"",
+            stderr=b"",
+        ),
+    )
+    monkeypatch.setattr(Path, "unlink", fail_safe_config_cleanup)
+
+    with pytest.raises(RuntimeError, match="无法清理隔离的 Git safe.directory 配置"):
+        git_read_module.run_git_capture(repo, ["git", "status", "--short"])
+
+
+def test_explicit_safe_directory_must_match_target_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    other = tmp_path / "other"
+    repo.mkdir()
+    other.mkdir()
+    monkeypatch.setenv("VEGA_GIT_SAFE_DIRECTORY", str(other))
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("不匹配的信任目录不得启动 Git")
+
+    monkeypatch.setattr(git_read_module.subprocess, "run", fail_if_called)
+
+    with pytest.raises(RuntimeError, match="必须与目标仓库完全一致"):
+        git_read_module.run_git_capture(repo, ["git", "status", "--short"])
+
+
+def test_explicit_safe_directory_rejects_invalid_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    missing = tmp_path / "missing"
+    file_path = tmp_path / "file.txt"
+    repo.mkdir()
+    file_path.write_text("not a directory\n", encoding="utf-8")
+
+    for invalid_value in ("relative/repo", str(missing), str(file_path)):
+        monkeypatch.setenv("VEGA_GIT_SAFE_DIRECTORY", invalid_value)
+        with pytest.raises(RuntimeError):
+            git_read_module.run_git_capture(repo, ["git", "status", "--short"])
+
+
+def test_reflect_git_reads_use_hardened_environment_and_diff_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
+
+    reflect_runtime_module.collect_git_reflection(repo)
+
+    assert calls
+    for command, kwargs in calls:
+        assert ["-c", f"core.excludesFile={os.devnull}"] == command[1:3]
+        assert "core.fsmonitor=false" in command
+        assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+        assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+        assert kwargs["env"]["GIT_ATTR_NOSYSTEM"] == "1"
+    diff_commands = [command for command, _ in calls if "diff" in command]
+    assert diff_commands
+    assert all("--no-ext-diff" in command for command in diff_commands)
+    assert all("--no-textconv" in command for command in diff_commands)
+
+
+def test_gate_git_reads_use_hardened_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout=b"status", stderr=b"warning")
+
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
+
+    output = gate_runtime_module._git(
+        repo,
+        ["git", "status", "--short", "--untracked-files=all"],
+    )
+
+    assert output == "status"
+    command, kwargs = calls[0]
+    assert ["-c", f"core.excludesFile={os.devnull}"] == command[1:3]
+    assert "core.fsmonitor=false" in command
+    assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert kwargs["env"]["GIT_ATTR_NOSYSTEM"] == "1"
+
+
+@pytest.mark.parametrize(
+    "module",
+    [
+        gate_runtime_module,
+        project_config_module,
+        project_knowledge_module,
+        project_profile_module,
+        reflect_runtime_module,
+        repository_identity_module,
+        git_tools_module,
+    ],
+)
+def test_production_git_read_modules_do_not_bypass_hardened_client(
+    module: ModuleType,
+) -> None:
+    assert module.__file__ is not None
+    module_path = Path(module.__file__)
+    source = module_path.read_text(encoding="utf-8")
+
+    assert "subprocess.run(" not in source
+
+
+def test_allowed_git_diff_checks_disable_external_drivers() -> None:
+    for check_id in ("git.diff", "git.diff_check"):
+        command = git_tools_module.ALLOWED_CHECKS[check_id]
+        assert "--no-ext-diff" in command
+        assert "--no-textconv" in command
+
+
 def test_workspace_check_reports_dubious_ownership_without_modifying_git_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -406,14 +733,15 @@ def test_workspace_check_reports_dubious_ownership_without_modifying_git_config(
             stderr="fatal: detected dubious ownership in repository",
         )
 
-    monkeypatch.setattr(workspace_check_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
 
     result = evaluate_workspace(repo)
     diagnostic = "\n".join(result.reasons)
 
     assert result.status == "failed"
     assert "safe.directory" in diagnostic
-    assert "不会自动修改全局 Git 配置" in diagnostic
+    assert "VEGA_GIT_SAFE_DIRECTORY" in diagnostic
+    assert "git config --global" not in diagnostic
     assert all(command[:2] != ["git", "config"] for command in commands)
 
 
@@ -425,11 +753,11 @@ def test_workspace_check_accepts_string_git_output_from_test_double(
     repo.mkdir()
 
     def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
-        if command[1:3] == ["rev-parse", "--verify"]:
+        if command[-3:] == ["rev-parse", "--verify", "HEAD"]:
             return SimpleNamespace(returncode=0, stdout="a" * 40, stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(workspace_check_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
 
     assert workspace_check_module.read_head_sha(repo) == "a" * 40
 

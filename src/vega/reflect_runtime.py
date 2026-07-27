@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import subprocess
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from .agents_proposal import render_agents_md_proposals
+from .git_read import run_git_text
 from .memory_artifacts import MemoryProposalStore, make_memory_proposal_id
 from .models import BriefInput, BriefState, MemoryProposal, ProjectKnowledge, ReflectState
 from .project_config import load_project_config
 from .project_context import write_project_context
 from .project_knowledge import load_project_knowledge
-from .redaction import assert_not_sensitive_path, redact_text, redact_value
+from .redaction import assert_not_sensitive_path, redact_text
+from .review_evidence import make_review_evidence as _make_review_evidence
 from .repository_identity import repository_scope
 from .run_utils import create_run_dir, resolve_run_dir
 from .trace import TraceWriter
@@ -273,68 +273,6 @@ def collect_git_reflection(repo_path: Path) -> dict[str, str]:
     }
 
 
-def _make_review_evidence(
-    workspace_snapshot: ReviewWorkspaceSnapshot,
-    test_summary: str,
-    full_diff: str,
-    changed_files: list[str],
-    *,
-    review_source_run: str,
-    upstream_source_run: str | None,
-    source_brief: str,
-    reflection: str,
-    diff_summary: str,
-    source_brief_issues: list[str],
-    source_brief_diagnostics: list[str],
-) -> dict[str, object]:
-    evidence = redact_value(
-        {
-            "schema_version": 3,
-            "captured_at": datetime.now(UTC).isoformat(),
-            "source_run": review_source_run,
-            "upstream_source_run": upstream_source_run,
-            "workspace_fingerprint": workspace_snapshot.fingerprint,
-            "head_sha": workspace_snapshot.head_sha,
-            "status_sha256": workspace_snapshot.status_sha256,
-            "full_diff_sha256": _sha256_text(full_diff),
-            "staged_diff_sha256": workspace_snapshot.staged_diff_sha256,
-            "unstaged_diff_sha256": workspace_snapshot.unstaged_diff_sha256,
-            "untracked_manifest_sha256": workspace_snapshot.untracked_manifest_sha256,
-            "untracked_content_complete": workspace_snapshot.untracked_content_complete,
-            "ignored_manifest_sha256": workspace_snapshot.ignored_manifest_sha256,
-            "test_summary_sha256": _sha256_text(test_summary),
-            "changed_files": changed_files,
-            "changed_files_sha256": _sha256_json_value(changed_files),
-            "source_brief_sha256": _sha256_text(source_brief),
-            "source_brief_evidence_issues": source_brief_issues,
-            "source_brief_evidence_diagnostics": source_brief_diagnostics,
-            "reflection_sha256": _sha256_text(reflection),
-            "diff_summary_sha256": _sha256_text(diff_summary),
-            "untracked_files": list(workspace_snapshot.untracked_files),
-        }
-    )
-    evidence["snapshot_id"] = _sha256_json(evidence)
-    return evidence
-
-
-def _sha256_json(payload: dict[str, object]) -> str:
-    return _sha256_json_value(payload)
-
-
-def _sha256_json_value(payload: object) -> str:
-    serialized = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return _sha256_text(serialized)
-
-
-def _sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
 def render_diff_summary(
     git_data: dict[str, str],
     changed_files: list[str],
@@ -448,17 +386,7 @@ def _first_non_empty_line(text: str) -> str:
 
 
 def _run_git(repo_path: Path, command: list[str]) -> str:
-    result = subprocess.run(
-        command,
-        cwd=repo_path,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    return (result.stdout or "") + (result.stderr or "")
+    return run_git_text(repo_path, command)
 
 
 def _read_optional_log(

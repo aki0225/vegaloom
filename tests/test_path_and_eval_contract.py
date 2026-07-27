@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from vega import git_read as git_read_module
 from vega.experimental.inspection.context_loader import load_target_context, parse_target_files
 from vega.run_status import latest_run_dir
 from vega.run_utils import create_run_dir, resolve_run_dir
@@ -282,7 +283,7 @@ def test_repo_run_check_allowlist_matches_public_contract(
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr(git_tools.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
     broker = ToolBroker(tmp_path)
 
     for check_id in ["git.status", "git.diff", "git.diff_check"]:
@@ -292,9 +293,10 @@ def test_repo_run_check_allowlist_matches_public_contract(
 
     assert rejected.status == "error"
     assert calls == [
-        ["git", "status", "--short"],
-        ["git", "diff", "--stat"],
-        ["git", "diff", "--check"],
+        git_read_module.harden_git_read_command(
+            git_tools.ALLOWED_CHECKS[check_id]
+        )
+        for check_id in ["git.status", "git.diff", "git.diff_check"]
     ]
 
 

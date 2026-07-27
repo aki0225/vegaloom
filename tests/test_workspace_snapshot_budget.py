@@ -9,7 +9,11 @@ import pytest
 from vega.experimental.inspection import context_loader
 from vega import workspace_check as workspace_check_module
 from vega.experimental.inspection.context_loader import load_target_context
-from vega.workspace_check import capture_review_workspace
+from vega.workspace_check import (
+    capture_review_workspace,
+    evaluate_workspace,
+    snapshot_workspace,
+)
 
 
 def test_untracked_content_hashing_respects_file_budget(
@@ -36,6 +40,30 @@ def test_untracked_content_hashing_respects_file_budget(
     assert opened == ["0.txt", "0.txt"]
     assert first.untracked_content_complete is False
     assert first.untracked_manifest_sha256 == second.untracked_manifest_sha256
+
+
+def test_zero_byte_untracked_file_consumes_file_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath("0-empty.bin").write_bytes(b"")
+    repo.joinpath("1-data.bin").write_bytes(b"value")
+    opened: list[str] = []
+    original_open = Path.open
+
+    def tracking_open(path: Path, *args, **kwargs):
+        if path.suffix == ".bin":
+            opened.append(path.name)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(workspace_check_module, "MAX_UNTRACKED_CONTENT_FILES", 1)
+    monkeypatch.setattr(Path, "open", tracking_open)
+
+    snapshot = capture_review_workspace(repo)
+
+    assert opened == ["0-empty.bin"]
+    assert snapshot.untracked_content_complete is False
 
 
 def test_untracked_content_hashing_respects_single_file_budget(
@@ -85,6 +113,94 @@ def test_untracked_content_hashing_respects_total_byte_budget(
     assert opened == ["a.bin", "a.bin"]
     assert first.untracked_content_complete is False
     assert first.untracked_manifest_sha256 == second.untracked_manifest_sha256
+
+
+def test_ignored_content_hashing_exposes_incomplete_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath(".gitignore").write_text("*.tmp\n", encoding="utf-8")
+    _git(repo, "add", "--", ".gitignore")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "ignore temp files",
+    )
+    for index in range(3):
+        repo.joinpath(f"{index}.tmp").write_text(f"value-{index}\n", encoding="utf-8")
+
+    monkeypatch.setattr(workspace_check_module, "MAX_IGNORED_CONTENT_FILES", 1)
+
+    snapshot = capture_review_workspace(repo)
+
+    assert snapshot.ignored_manifest_complete is True
+    assert snapshot.ignored_content_complete is False
+    assert snapshot.ignored_coverage_level == "metadata_bounded"
+    assert len(snapshot.ignored_manifest_sha256) == 64
+
+
+def test_workspace_check_fails_when_ignored_manifest_is_incomplete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath(".gitignore").write_text("*.tmp\n", encoding="utf-8")
+    _git(repo, "add", "--", ".gitignore")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "ignore temp files",
+    )
+    for index in range(2):
+        repo.joinpath(f"{index}.tmp").write_text(f"value-{index}\n", encoding="utf-8")
+    monkeypatch.setattr(workspace_check_module, "MAX_IGNORED_METADATA_FILES", 1)
+
+    baseline = snapshot_workspace(repo)
+    result = evaluate_workspace(repo, baseline=baseline)
+
+    assert baseline.ignored_manifest_complete is False
+    assert baseline.ignored_content_complete is False
+    assert baseline.capture_complete is False
+    assert result.status == "failed"
+    assert any("无法完整构建 ignored 清单" in reason for reason in result.reasons)
+    assert not any(
+        "路径与元数据清单完整" in reason
+        for reason in result.reasons
+    )
+
+
+def test_incomplete_ignored_path_enumeration_is_exposed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    original_ignored_paths = workspace_check_module._ignored_paths
+
+    def incomplete_ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
+        paths, _ = original_ignored_paths(repo_path)
+        return paths, False
+
+    monkeypatch.setattr(
+        workspace_check_module,
+        "_ignored_paths",
+        incomplete_ignored_paths,
+    )
+
+    snapshot = capture_review_workspace(repo)
+
+    assert snapshot.ignored_manifest_complete is False
+    assert snapshot.ignored_coverage_level == "incomplete"
 
 
 def test_untracked_content_change_during_read_marks_snapshot_incomplete(
@@ -148,6 +264,35 @@ def test_small_untracked_file_content_change_updates_manifest(
     assert after.untracked_content_complete is True
     assert before.untracked_manifest_sha256 != after.untracked_manifest_sha256
     assert before.fingerprint != after.fingerprint
+
+
+def test_existing_tracked_diff_does_not_skip_untracked_baseline_check(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath("README.md").write_text(
+        "# Demo\nexisting diff\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    local_file = repo / "local.txt"
+    local_file.write_text("before\n", encoding="utf-8", newline="\n")
+    baseline = snapshot_workspace(repo)
+
+    local_file.write_text("after\n", encoding="utf-8", newline="\n")
+    result = evaluate_workspace(
+        repo,
+        baseline=baseline,
+        allow_existing_tracked_diff=True,
+    )
+
+    assert result.status == "failed"
+    assert result.baseline_tracked_changes_present is True
+    assert result.baseline_untracked_changed is True
+    assert any(
+        "worker 修改或删除了启动前已存在的未跟踪文件" in reason
+        for reason in result.reasons
+    )
 
 
 def test_sensitive_untracked_file_is_not_opened_and_is_not_content_complete(
@@ -222,7 +367,19 @@ def test_review_snapshot_reuses_status_paths_and_preserves_rename_identity(
         "notes.txt",
     )
     assert snapshot.untracked_files == ("notes.txt",)
-    assert len(commands) == 6
+    assert len(commands) == 7
+    assert (
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-dir",
+    ) in commands
+    assert (
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ) in commands
     assert not any("--name-only" in command for command in commands)
     assert not any(
         command[:4] == ("git", "ls-files", "--others", "--exclude-standard")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import tomllib
 from datetime import datetime
@@ -9,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from .extensions import search_memory
+from .git_read import coerce_git_output_bytes, run_git_capture
 from .models import ProfileState, ProjectProfile
 from .project_config import (
     ProjectConfigCheckResult,
@@ -411,25 +411,17 @@ def _read_project_file(
         except (OSError, UnicodeError):
             return None
 
-    git_env = {
-        **os.environ,
-        "GIT_CEILING_DIRECTORIES": str(repo.parent.resolve()),
-    }
     try:
-        result = subprocess.run(
+        result = run_git_capture(
+            repo,
             ["git", "show", f"{tracked_revision}:{relative_path}"],
-            cwd=repo,
-            capture_output=True,
-            timeout=30,
-            check=False,
-            env=git_env,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(
             f"无法读取 tracked project profile 文件 `{redact_text(relative_path)}`。"
         ) from exc
     if result.returncode != 0:
-        diagnostic = (result.stderr or b"").decode(
+        diagnostic = coerce_git_output_bytes(result.stderr).decode(
             "utf-8",
             errors="replace",
         ).strip()
@@ -438,7 +430,10 @@ def _read_project_file(
             "无法读取 tracked project profile 文件 "
             f"`{redact_text(relative_path)}`。{suffix}"
         )
-    return (result.stdout or b"").decode("utf-8", errors="replace")
+    return coerce_git_output_bytes(result.stdout).decode(
+        "utf-8",
+        errors="replace",
+    )
 
 
 def _detect_test_commands(
@@ -529,19 +524,13 @@ def _tracked_files(repo: Path, revision: str | None) -> set[str]:
         return set()
     command = ["git", "ls-tree", "-r", "--name-only", "-z", revision, "--"]
     try:
-        result = subprocess.run(
-            command,
-            cwd=repo,
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
+        result = run_git_capture(repo, command)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(
             f"无法读取 tracked project profile revision `{redact_text(revision)}`。"
         ) from exc
     if result.returncode != 0:
-        diagnostic = (result.stderr or b"").decode(
+        diagnostic = coerce_git_output_bytes(result.stderr).decode(
             "utf-8",
             errors="replace",
         ).strip()
@@ -552,7 +541,7 @@ def _tracked_files(repo: Path, revision: str | None) -> set[str]:
         )
     return {
         item.decode("utf-8", errors="replace")
-        for item in (result.stdout or b"").split(b"\0")
+        for item in coerce_git_output_bytes(result.stdout).split(b"\0")
         if item
     }
 

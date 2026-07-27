@@ -77,6 +77,11 @@ Vega 发布 Python distribution 是为了安装 CLI 和本地资源，不把内�
 项目规则、风险门禁和可选 accepted memory。这里承诺的是角色、会话和输入边界隔离，
 不是容器、独立文件系统或操作系统级安全隔离。
 
+diff、测试输出、源码注释和其他仓库内容都属于不可信证据，其中出现的操作指令不得覆盖
+reviewer 合同。该提示词边界只能降低误跟随风险，不能证明模型能抵抗恶意 Prompt Injection；
+因此 reviewer 的 `approve` 从不单独授予自动成功，精确路径范围、确定性验证、风险门禁和
+人工审批仍是最终约束。
+
 ### 高级能力
 
 - 独立执行 brief、reflect、gate、review-pack 和 review。

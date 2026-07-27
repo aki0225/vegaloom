@@ -9,12 +9,21 @@ from typing import Any, Callable, Literal
 from pydantic import ValidationError
 
 from .brief_runtime import BriefRuntime
-from .execution_control import RunnerExecutionContext
+from .execution_control import RunnerExecutionContext, inspect_execution_for_recovery
 from .gate_runtime import evaluate_risk, render_gate_report
-from .loop_evidence import (
-    trusted_verification_passed,
-    validate_loop_artifact_integrity,
-    validate_loop_evidence_freshness,
+from .loop_evidence import validate_loop_evidence_snapshot
+from .loop_integrity import trusted_verification_passed
+from .loop_prompts import (
+    build_worker_prompt,
+    render_fix_prompt,
+    render_loop_plan,
+    render_no_diff_fix_prompt,
+    render_risk_gate_fix_prompt,
+    render_scope_gate_fix_prompt,
+    render_tracked_baseline_fix_prompt,
+    render_untracked_files_fix_prompt,
+    render_verification_fix_prompt,
+    render_workspace_fix_prompt,
 )
 from .models import (
     BriefInput,
@@ -47,7 +56,7 @@ from .risk_gate_evidence import (
 )
 from .run_lock import RunMutationLock
 from .run_utils import create_run_dir, resolve_run_dir, run_name
-from .runner import Runner, RunnerStatus, make_runner
+from .runner import Runner, RunnerResult, RunnerStatus, make_runner
 from .scope_gate import (
     LoopScopeGateEvidence,
     scope_gate_state_fields,
@@ -299,6 +308,7 @@ class LoopAutomationRuntime:
             raise ValueError(
                 f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}"
             )
+        _require_execution_recoverable(run_dir)
         _require_recovery_trace_binding(run_dir, state)
         _require_loop_initialization(self.workspace, run_dir, state, repo)
         if _project_policy_changed(repo, state.project_policy_snapshot):
@@ -443,6 +453,8 @@ class LoopAutomationRuntime:
             )
             return run_dir
         auto_test_log = test_log
+        verification: VerificationRunResult | None = None
+        verification_failure_kind = None
         if verify and auto_test_log is None:
             state.current_step = "verify"
             state.save(run_dir / "state.json")
@@ -453,28 +465,22 @@ class LoopAutomationRuntime:
                 iteration=iteration_number,
                 progress_reporter=self.progress_reporter,
             )
-            verification_status = _verification_status(verification.command_count, verification.failed_count)
+            verification_status = _verification_status(
+                verification.command_count,
+                verification.failed_count,
+                verification.failure_kind,
+            )
             verification_failed_count = verification.failed_count
+            verification_failure_kind = verification.failure_kind
             trace.write(
                 "verification_finished",
                 iteration=iteration_number,
                 commands=verification.command_count,
                 failed=verification.failed_count,
+                failure_kind=verification.failure_kind,
                 interruption_status=verification.interruption_status,
             )
             auto_test_log = verification.summary_path
-            if verification.was_interrupted:
-                self._pause_for_verification_interruption(
-                    run_dir,
-                    state,
-                    iteration_dir,
-                    iteration_number,
-                    verification,
-                    trace,
-                    worker_status="skipped",
-                    scope_evidence=scope_evidence,
-                )
-                return run_dir
         else:
             verification_status = "skipped"
             verification_failed_count = 0
@@ -482,7 +488,20 @@ class LoopAutomationRuntime:
             iteration_state,
             verification_status=verification_status,
             verification_failed_count=verification_failed_count,
+            verification_failure_kind=verification_failure_kind,
         )
+        if self._pause_for_terminal_verification_result(
+            run_dir,
+            state,
+            iteration_dir,
+            iteration_number,
+            iteration_state,
+            verification,
+            trace,
+            worker_status="skipped",
+            scope_evidence=scope_evidence,
+        ):
+            return run_dir
 
         current_policy = project_policy_snapshot(repo)
         if _project_policy_changed(repo, state.project_policy_snapshot):
@@ -921,35 +940,32 @@ class LoopAutomationRuntime:
                     progress_reporter=self.progress_reporter,
                 ),
             )
+            worker_output = (
+                worker_result.error or ""
+                if worker_result.termination_unconfirmed
+                else worker_result.output or worker_result.error or ""
+            )
             _write_text_artifact(
                 iteration_dir / "worker-output.txt",
-                worker_result.output or worker_result.error or "",
+                worker_output,
             )
-            trace.write("worker_finished", iteration=iteration_number, status=worker_result.status)
-            if worker_result.status in {"timed_out", "stopped"}:
-                iteration_state = _update_iteration_state(
-                    iteration_state,
-                    worker_status=worker_result.status,
-                )
-                state.iterations.append(iteration_state)
-                _write_execution_interruption_report(
-                    iteration_dir,
-                    step="worker",
-                    status=worker_result.status,
-                    reason=worker_result.error,
-                )
-                conclusion = (
-                    "worker 单次执行超时，已停止后续验证和审查。"
-                    if worker_result.status == "timed_out"
-                    else "worker 已按 stop request 停止，已停止后续验证和审查。"
-                )
-                _write_final_report(run_dir, state, None, conclusion)
-                self._save_loop_done(
+            trace.write(
+                "worker_finished",
+                iteration=iteration_number,
+                status=worker_result.status,
+                termination_unconfirmed=worker_result.termination_unconfirmed,
+            )
+            if worker_result.termination_unconfirmed or worker_result.status in {
+                "timed_out",
+                "stopped",
+            }:
+                self._finish_interrupted_worker(
                     run_dir,
                     state,
-                    "needs_human",
+                    iteration_dir,
+                    iteration_state,
+                    worker_result,
                     trace,
-                    current_step=worker_result.status,
                 )
                 return run_dir
             if worker_result.status != "success":
@@ -1134,6 +1150,8 @@ class LoopAutomationRuntime:
             verification_log: Path | None = None
             verification_status = "skipped"
             verification_failed_count = 0
+            verification_failure_kind = None
+            verification: VerificationRunResult | None = None
             if verify:
                 state.current_step = "verify"
                 state.save(run_dir / "state.json")
@@ -1145,34 +1163,41 @@ class LoopAutomationRuntime:
                     progress_reporter=self.progress_reporter,
                 )
                 verification_log = verification.summary_path
-                verification_status = _verification_status(verification.command_count, verification.failed_count)
+                verification_status = _verification_status(
+                    verification.command_count,
+                    verification.failed_count,
+                    verification.failure_kind,
+                )
                 verification_failed_count = verification.failed_count
+                verification_failure_kind = verification.failure_kind
                 trace.write(
                     "verification_finished",
                     iteration=iteration_number,
                     commands=verification.command_count,
                     failed=verification.failed_count,
+                    failure_kind=verification.failure_kind,
                     interruption_status=verification.interruption_status,
                 )
-                if verification.was_interrupted:
-                    self._pause_for_verification_interruption(
-                        run_dir,
-                        state,
-                        iteration_dir,
-                        iteration_number,
-                        verification,
-                        trace,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        scope_evidence=scope_evidence,
-                    )
-                    return run_dir
             iteration_state = _update_iteration_state(
                 iteration_state,
                 verification_status=verification_status,
                 verification_failed_count=verification_failed_count,
+                verification_failure_kind=verification_failure_kind,
             )
+            if self._pause_for_terminal_verification_result(
+                run_dir,
+                state,
+                iteration_dir,
+                iteration_number,
+                iteration_state,
+                verification,
+                trace,
+                worker_status="success",
+                workspace_status=workspace_check.status,
+                workspace_new_files_count=workspace_check.new_untracked_count,
+                scope_evidence=scope_evidence,
+            ):
+                return run_dir
 
             current_policy = project_policy_snapshot(repo_path)
             if _project_policy_changed(repo_path, state.project_policy_snapshot):
@@ -1484,6 +1509,58 @@ class LoopAutomationRuntime:
         self._save_loop_done(run_dir, state, "needs_human", trace)
         return run_dir
 
+    def _finish_interrupted_worker(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        iteration_dir: Path,
+        iteration_state: LoopIterationState,
+        worker_result: RunnerResult,
+        trace: TraceWriter,
+    ) -> None:
+        if worker_result.termination_unconfirmed:
+            worker_status = "failed"
+            _write_runner_error_report(
+                iteration_dir,
+                step="worker",
+                reason=worker_result.error,
+                workspace_status="未检查：owned process tree 终止未确认。",
+                termination_unconfirmed=True,
+            )
+            conclusion = (
+                "worker owned process tree 终止未确认；未读取 runner 输出，"
+                "也未继续工作区检查、验证或审查。"
+            )
+            current_step = "worker_termination_unconfirmed"
+        else:
+            worker_status = worker_result.status
+            _write_execution_interruption_report(
+                iteration_dir,
+                step="worker",
+                status=worker_result.status,
+                reason=worker_result.error,
+            )
+            conclusion = (
+                "worker 单次执行超时，已停止后续验证和审查。"
+                if worker_result.status == "timed_out"
+                else "worker 已按 stop request 停止，已停止后续验证和审查。"
+            )
+            current_step = worker_result.status
+        state.iterations.append(
+            _update_iteration_state(
+                iteration_state,
+                worker_status=worker_status,
+            )
+        )
+        _write_final_report(run_dir, state, None, conclusion)
+        self._save_loop_done(
+            run_dir,
+            state,
+            "needs_human",
+            trace,
+            current_step=current_step,
+        )
+
     def _pause_for_project_policy_change_after_reflect(
         self,
         run_dir: Path,
@@ -1543,6 +1620,50 @@ class LoopAutomationRuntime:
             trace,
             current_step="project_policy_changed",
         )
+
+    def _pause_for_terminal_verification_result(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        iteration_dir: Path,
+        iteration_number: int,
+        iteration_state: LoopIterationState,
+        verification: VerificationRunResult | None,
+        trace: TraceWriter,
+        *,
+        worker_status: Literal["skipped", "success"],
+        workspace_status: Literal["skipped", "passed", "failed"] = "skipped",
+        workspace_new_files_count: int = 0,
+        scope_evidence: LoopScopeGateEvidence | None = None,
+    ) -> bool:
+        if verification is None:
+            return False
+        if verification.was_interrupted:
+            self._pause_for_verification_interruption(
+                run_dir,
+                state,
+                iteration_dir,
+                iteration_number,
+                verification,
+                trace,
+                worker_status=worker_status,
+                workspace_status=workspace_status,
+                workspace_new_files_count=workspace_new_files_count,
+                scope_evidence=scope_evidence,
+            )
+            return True
+        if verification.failure_kind is not None:
+            self._pause_for_verification_failure(
+                run_dir,
+                state,
+                iteration_dir,
+                iteration_number,
+                iteration_state,
+                verification,
+                trace,
+            )
+            return True
+        return False
 
     def _pause_for_verification_interruption(
         self,
@@ -1608,6 +1729,47 @@ class LoopAutomationRuntime:
             current_step=current_step,
         )
 
+    def _pause_for_verification_failure(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        iteration_dir: Path,
+        iteration_number: int,
+        iteration_state: LoopIterationState,
+        verification: VerificationRunResult,
+        trace: TraceWriter,
+    ) -> None:
+        failure_kind = verification.failure_kind
+        if failure_kind == "project_config_invalid":
+            event = failure_kind
+            conclusion = "项目配置预检失败，未执行任何验证命令，也未继续 Reflect 或 reviewer。"
+        elif failure_kind == "workspace_capture_failed":
+            event = "verification_workspace_capture_failed"
+            conclusion = (
+                "verification 工作区指纹采集失败，证据无法绑定当前现场，"
+                "已停止 Reflect 和 reviewer。"
+            )
+        else:
+            raise ValueError("verification failure 缺少受支持的 failure_kind")
+        _copy_if_exists(verification.summary_path, iteration_dir / "test-summary.md")
+        state.current_iteration = iteration_number
+        state.iterations.append(iteration_state)
+        trace.write(
+            event,
+            iteration=iteration_number,
+            failure_kind=failure_kind,
+            commands=verification.command_count,
+            failed=verification.failed_count,
+        )
+        _write_final_report(run_dir, state, None, conclusion)
+        self._save_loop_done(
+            run_dir,
+            state,
+            "needs_human",
+            trace,
+            current_step=event,
+        )
+
     def _run_review(
         self,
         repo_path: Path,
@@ -1655,6 +1817,10 @@ class LoopAutomationRuntime:
         if verdict.verdict == "approve":
             if not _latest_verification_passed(state):
                 latest = state.iterations[-1] if state.iterations else None
+                project_config_invalid = bool(
+                    latest
+                    and latest.verification_failure_kind == "project_config_invalid"
+                )
                 verification_failed = bool(
                     latest
                     and latest.verification_status == "failed"
@@ -1669,9 +1835,13 @@ class LoopAutomationRuntime:
                     state,
                     verdict,
                     (
-                        "验证命令失败，reviewer approve 不能覆盖确定性失败。"
-                        if verification_failed
-                        else "缺少受信的结构化验证通过证据，不能自动通过。"
+                        "项目配置预检失败，未执行任何验证命令。"
+                        if project_config_invalid
+                        else (
+                            "验证命令失败，reviewer approve 不能覆盖确定性失败。"
+                            if verification_failed
+                            else "缺少受信的结构化验证通过证据，不能自动通过。"
+                        )
                     ),
                 )
                 self._save_loop_done(
@@ -1680,9 +1850,13 @@ class LoopAutomationRuntime:
                     "needs_human",
                     trace,
                     current_step=(
-                        "verification_failed"
-                        if verification_failed
-                        else "verification_unverified"
+                        "project_config_invalid"
+                        if project_config_invalid
+                        else (
+                            "verification_failed"
+                            if verification_failed
+                            else "verification_unverified"
+                        )
                     ),
                 )
                 return
@@ -1737,266 +1911,6 @@ class LoopAutomationRuntime:
         state.status = status
         state.artifacts = artifacts
         _finalize_loop_eval(run_dir, state, status, artifacts, trace)
-
-
-def render_loop_plan(
-    brief_input: BriefInput,
-    automation_mode: str,
-    max_iterations: int,
-) -> str:
-    return "\n".join(
-        [
-            "# Loop Plan",
-            "",
-            f"- 任务类型：`{brief_input.mode}`",
-            f"- 自动化模式：`{automation_mode}`",
-            f"- 最大迭代轮数：`{max_iterations}`",
-            "",
-            "## 流程",
-            "",
-            "1. 生成 agent brief，编译 AGENTS.md 和已接受 memory。",
-            "2. 生成 project-context.md，稳定注入项目画像、验证命令、AGENTS.md 和 accepted memory。",
-            "3. auto 模式先确认启动前不存在 tracked diff，再启动 worker。",
-            "4. worker 结束后检查工作区污染，超过预算则停止并交给人工判断。",
-            "5. 执行 verification 前的精确路径范围门禁；越界 diff 不进入后续流程。",
-            "6. 自动执行项目画像识别出的最小验证命令。",
-            "7. 验证后再次执行精确路径范围门禁；验证脚本造成越界也不进入 Reflect。",
-            "8. Reflect 收集当前 diff、验证日志和复盘材料；其确定性检查失败时停止。",
-            "9. Reflect 后再次执行精确路径范围门禁，绑定即将进入 review 的工作区状态。",
-            "10. 运行风险/变更预算门禁；需要人工确认时不启动自动 reviewer。",
-            "11. 隔离 reviewer 使用只读 runner 审查 review-pack。",
-            "12. approve 则生成 final-report；request_changes 则生成 fix-prompt。",
-            "",
-            "## 禁止动作",
-            "",
-            "- 不自动 commit / push / release。",
-            "- 不自动接受 memory proposal。",
-            "- reviewer 只读，不修改目标仓库。",
-        ]
-    ).rstrip() + "\n"
-
-
-def build_worker_prompt(
-    brief_input: BriefInput,
-    brief_run: Path,
-    previous_verdict: ReviewVerdict | None,
-    iteration: int,
-) -> tuple[str, dict[str, str]]:
-    brief_text = redact_text(
-        brief_run.joinpath("agent-brief.md").read_text(encoding="utf-8", errors="replace")
-    )
-    project_context = redact_text(_read_optional_text(brief_run / "project-context.md"))
-    lines = [
-        "# Worker Prompt",
-        "",
-        f"你是第 {iteration} 轮 worker，请基于 agent brief 完成最小必要修改。",
-        "",
-        "硬性约束：",
-        "- 只修改满足需求所需的文件。",
-        "- 不要 git commit、git push、发布或改长期 memory。",
-        "- Vega 会在 worker 返回后独立执行 Runtime 策略中的固定验证命令。",
-        "- 不要运行带 `{{vega_verification_temp}}` 的 harness-owned 命令，"
-        "也不要清理 harness 临时目录。",
-        "- 如需自检，只运行不共享 harness 临时目录的最小检查，并在输出里总结结果。",
-        "- 如果需求或环境阻塞，停止并明确说明。",
-        "",
-        "## 项目上下文",
-        "",
-        project_context or "- 未找到 project-context.md，请基于仓库现状保守判断项目规范。",
-        "",
-        "## Agent Brief",
-        "",
-        brief_text,
-    ]
-    previous_findings = ""
-    if previous_verdict:
-        previous_findings = render_fix_prompt(previous_verdict, iteration)
-        lines.extend(["", "## 上一轮 Review Findings", "", previous_findings])
-    prompt = redact_text("\n".join(lines).rstrip() + "\n")
-    return prompt, {
-        "project_context": project_context,
-        "agent_brief": brief_text,
-        "previous_findings": previous_findings,
-    }
-
-
-def render_worker_prompt(
-    brief_input: BriefInput,
-    brief_run: Path,
-    previous_verdict: ReviewVerdict | None,
-    iteration: int,
-) -> str:
-    return build_worker_prompt(brief_input, brief_run, previous_verdict, iteration)[0]
-
-
-def render_fix_prompt(verdict: ReviewVerdict, next_iteration: int) -> str:
-    lines = [
-        "# Fix Prompt",
-        "",
-        f"- 下一轮：`{next_iteration}`",
-        f"- reviewer 结论：`{verdict.verdict}`",
-        f"- 摘要：{verdict.summary}",
-        "",
-        "请只修复以下被 reviewer 标出的具体问题，不要扩大范围：",
-        "",
-    ]
-    if verdict.findings:
-        for finding in verdict.findings:
-            location = f"{finding.file}:{finding.line}" if finding.file else "未指定位置"
-            lines.extend(
-                [
-                    f"- [{finding.severity}] {finding.title}",
-                    f"  - 位置：`{location}`",
-                    f"  - 证据：{finding.evidence or '未提供'}",
-                    f"  - 建议：{finding.recommendation or '未提供'}",
-                ]
-            )
-    else:
-        lines.append("- reviewer 未给出具体 finding；请人工判断是否继续。")
-    return redact_text("\n".join(lines).rstrip() + "\n")
-
-
-def render_verification_fix_prompt(next_iteration: int) -> str:
-    return "\n".join(
-        [
-            "# Fix Prompt",
-            "",
-            f"- 下一轮：`{next_iteration}`",
-            "- 阻塞原因：自动验证失败、未执行，或缺少受信的结构化通过证据。",
-            "",
-            "如存在 `verification-summary.md` 和 `test-summary.md`，请先读取并修复具体失败；",
-            "如本轮跳过验证或零命令，请补充可识别的最小验证命令并重新执行。",
-            "形成至少一条受信且全部通过的结构化验证前，Vega 不会把 reviewer approve 视为可交付状态。",
-        ]
-    ).rstrip() + "\n"
-
-
-def render_workspace_fix_prompt(next_iteration: int) -> str:
-    return "\n".join(
-        [
-            "# Fix Prompt",
-            "",
-            f"- 下一轮：`{next_iteration}`",
-            "- 阻塞原因：worker 结束后工作区污染检查失败。",
-            "",
-            "请先读取本轮 `workspace-check.md`：",
-            "- 确认新增未跟踪文件哪些是需求必须产物，哪些是 worker 误生成的临时/噪声文件。",
-            "- 手动清理无关文件，或把真实需要新增的文件纳入明确 scope 后再继续。",
-            "- Vega 不会自动删除文件，也不会自动 kill 外部进程。",
-            "",
-            "清理或确认完成后，再运行 `vega loop continue --repo <repo> --run <run>` 继续复盘与审查。",
-        ]
-    ).rstrip() + "\n"
-
-
-def render_tracked_baseline_fix_prompt(next_iteration: int) -> str:
-    return "\n".join(
-        [
-            "# Fix Prompt",
-            "",
-            f"- 下一轮：`{next_iteration}`",
-            "- 阻塞原因：启动 auto worker 前已存在 tracked diff。",
-            "",
-            "Vega 无法可靠区分这些历史修改与本轮 worker 的产物，因此没有启动 worker。",
-            "请先人工检查、提交、暂存外部变更到其他分支或恢复无关 diff；确认工作区干净后再重开 auto loop。",
-            "如果这些变更本来就是主会话/人工完成的实现，请使用 `vega loop continue` 或独立 reflect/review 流程，",
-            "不要把它们归因给新的 auto worker。",
-        ]
-    ).rstrip() + "\n"
-
-
-def render_untracked_files_fix_prompt(next_iteration: int, paths: list[str]) -> str:
-    lines = [
-        "# Fix Prompt",
-        "",
-        f"- 下一轮：`{next_iteration}`",
-        "- 阻塞原因：当前工作区存在未跟踪文件，隔离 reviewer 不会读取其内容。",
-        "",
-        "## 仅路径清单",
-        "",
-    ]
-    lines.extend(f"- `{path}`" for path in paths)
-    lines.extend(
-        [
-            "",
-            "请人工确认这些路径属于本次实现，并将需要审查的实现纳入 tracked diff 后再继续。",
-            "Vega 不会读取、删除、暂存或提交这些未跟踪文件。",
-        ]
-    )
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def render_scope_gate_fix_prompt(
-    next_iteration: int,
-    evidence: LoopScopeGateEvidence,
-) -> str:
-    result = evidence.result
-    report_artifact, result_artifact = {
-        "pre_verification": ("scope-gate-report.md", "scope-gate-result.json"),
-        "post_verification": (
-            "scope-gate-post-verification-report.md",
-            "scope-gate-post-verification-result.json",
-        ),
-        "pre_review": (
-            "scope-gate-pre-review-report.md",
-            "scope-gate-pre-review-result.json",
-        ),
-    }[result.phase]
-    lines = [
-        "# Fix Prompt",
-        "",
-        f"- 下一轮：`{next_iteration}`",
-        f"- 门禁阶段：`{result.phase}`",
-        "- 阻塞原因：当前 tracked diff 超出 `.vega.yaml` 的精确路径范围。",
-        "",
-        f"请先阅读本轮 `{report_artifact}` 与 `{result_artifact}`：",
-        "- 撤回、拆分或人工确认越界路径；不要通过修改 `.vega.yaml` 绕过本轮门禁。",
-        "- 仅保留命中 allowed_paths 且未命中 forbidden_paths 的必要修改。",
-        "- Vega 不会自动回滚、暂存、删除或提交 worker 已产生的改动。",
-    ]
-    if result.violations:
-        lines.extend(["", "## 越界路径", ""])
-        lines.extend(f"- `{violation.code}`：`{violation.path}`" for violation in result.violations)
-    elif result.failure_code:
-        lines.extend(["", f"- 门禁异常：`{result.failure_code}`"])
-    return redact_text("\n".join(lines).rstrip() + "\n")
-
-
-def render_risk_gate_fix_prompt(next_iteration: int, result: GateResult | None) -> str:
-    lines = [
-        "# Fix Prompt",
-        "",
-        f"- 下一轮：`{next_iteration}`",
-        "- 阻塞原因：风险门禁未允许继续自动隔离审查。",
-        "",
-        "请先阅读本轮 `risk-gate-report.md` 和 `risk-gate-result.json`，再决定是否缩小范围、补测试、",
-        "拆分变更或由人工完成审查。Vega 不会自动忽略预算、风险路径或项目要求。",
-    ]
-    if result:
-        lines.extend(
-            [
-                "",
-                "## 门禁结果",
-                "",
-                f"- 风险：`{result.risk}`",
-                f"- 建议：`{result.recommendation}`",
-                "- 原因：" + "、".join(reason.code for reason in result.reasons),
-            ]
-        )
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def render_no_diff_fix_prompt(next_iteration: int) -> str:
-    return "\n".join(
-        [
-            "# Fix Prompt",
-            "",
-            f"- 下一轮：`{next_iteration}`",
-            "- 阻塞原因：本轮没有可审查的 tracked diff。",
-            "",
-            "请确认 worker 是否实际完成了任务；产生明确 diff 后再继续 verification 和隔离 reviewer。",
-        ]
-    ).rstrip() + "\n"
 
 
 def run_loop_eval(
@@ -2074,15 +1988,18 @@ def run_loop_eval(
                 "FAIL: completed iteration 不得携带 interruption metadata："
                 f"{iteration.iteration:02d}"
             )
+        recompute_current = (
+            iteration.iteration == latest_iteration and effective_status != "success"
+        )
         results.extend(
             _loop_iteration_evidence_checks(
                 iteration_dir,
                 iteration,
                 # 前序 Reflect 已被后续 worker 合法改变时，使用终态工作区重算会把
-                # 历史证据误判为失效。只对最终 iteration 重算；前序 iteration 仍校验
-                # result/report/state/trace 的绑定，终态自动结论仍无法靠同步降级放行。
-                workspace=workspace if iteration.iteration == latest_iteration else None,
-                repo_path=repo_path if iteration.iteration == latest_iteration else None,
+                # 历史证据误判为失效。success 的最终 iteration 由后面的联合快照统一
+                # 重算，避免对同一风险结论重复执行；非 success 仍在这里重算当前工作区。
+                workspace=workspace if recompute_current else None,
+                repo_path=repo_path if recompute_current else None,
                 trace_path=run_dir / "trace.jsonl",
                 scope_gate_required=state.scope_gate_required,
                 expected_head_sha=state.initial_head_sha,
@@ -2095,6 +2012,17 @@ def run_loop_eval(
     if effective_status == "success":
         latest = state.iterations[-1]
         iteration_dir = run_dir / "iterations" / f"{latest.iteration:02d}"
+        validation_snapshot = None
+        validation_error = ""
+        try:
+            validation_snapshot = validate_loop_evidence_snapshot(
+                workspace,
+                repo_path,
+                run_dir,
+                state=state,
+            )
+        except Exception as exc:  # noqa: BLE001 - eval 必须把重算异常转成 FAIL
+            validation_error = type(exc).__name__
         if latest.lifecycle != "completed":
             results.append("FAIL: success loop 的最新 iteration 必须为 completed")
         else:
@@ -2112,19 +2040,13 @@ def run_loop_eval(
         if latest.verification_status != "passed" or latest.verification_failed_count:
             results.append("FAIL: success loop 的最新 verification 必须为 passed")
         else:
-            try:
-                artifact_integrity = validate_loop_artifact_integrity(
-                    workspace,
-                    repo_path,
-                    run_dir,
-                    state=state,
-                )
-            except Exception as exc:  # noqa: BLE001 - eval 必须把重算异常转成 FAIL
+            if validation_snapshot is None:
                 results.append(
                     "FAIL: success loop 的最新 verification 完整性重算异常："
-                    f"{type(exc).__name__}"
+                    f"{validation_error}"
                 )
             else:
+                artifact_integrity = validation_snapshot.artifact_integrity
                 if trusted_verification_passed(state, artifact_integrity):
                     results.append(
                         "PASS: success loop 的最新 verification 存在受信结构化通过证据"
@@ -2152,18 +2074,13 @@ def run_loop_eval(
             iteration_dir / "diff-summary.md"
         ):
             results.append("FAIL: success loop 没有可审查的 tracked diff")
-        try:
-            freshness = validate_loop_evidence_freshness(
-                workspace,
-                repo_path,
-                run_dir,
-            )
-        except Exception as exc:  # noqa: BLE001 - eval 必须把新鲜度异常转成 FAIL
+        if validation_snapshot is None:
             results.append(
                 "FAIL: success loop reviewer 证据新鲜度重算异常："
-                f"{type(exc).__name__}"
+                f"{validation_error}"
             )
         else:
+            freshness = validation_snapshot.evidence_freshness
             if freshness.fresh:
                 results.append("PASS: success loop reviewer 证据仍与当前工作区一致")
             else:
@@ -2274,8 +2191,7 @@ def _loop_iteration_evidence_checks(
         elif Path(reflect_ref).name != iteration.reflect_run:
             results.append("FAIL: reflect-run.txt 与 iteration.reflect_run 不一致")
 
-    if iteration.verification_failed_count and iteration.verification_status != "failed":
-        results.append("FAIL: verification 失败计数与状态不一致")
+    results.extend(_verification_iteration_state_checks(iteration))
     if iteration.verification_status in {"passed", "failed"}:
         if not (iteration_dir / "verification-summary.md").exists():
             results.append("FAIL: verification 状态已记录但缺少 verification-summary.md")
@@ -2374,6 +2290,20 @@ def _loop_iteration_evidence_checks(
         return results
     if iteration.reflect_run and context.get("source_run") != iteration.reflect_run:
         results.append("FAIL: review-context.json 与 iteration.reflect_run 不一致")
+    return results
+
+
+def _verification_iteration_state_checks(
+    iteration: LoopIterationState,
+) -> list[str]:
+    results: list[str] = []
+    if iteration.verification_failed_count and iteration.verification_status != "failed":
+        results.append("FAIL: verification 失败计数与状态不一致")
+    if (
+        iteration.verification_failure_kind is not None
+        and iteration.verification_status != "failed"
+    ):
+        results.append("FAIL: verification failure_kind 与状态不一致")
     return results
 
 
@@ -2530,6 +2460,15 @@ def _require_loop_initialization(
         raise ValueError(
             "loop 初始化未完成或证据不完整，已拒绝 continue："
             + ", ".join(issues)
+        )
+
+
+def _require_execution_recoverable(run_dir: Path) -> None:
+    inspection = inspect_execution_for_recovery(run_dir)
+    if not inspection.can_recover:
+        raise ValueError(
+            "当前 loop 仍有未安全消失的 execution，已拒绝 continue："
+            f"{inspection.summary}"
         )
 
 
@@ -3016,8 +2955,31 @@ def _write_runner_error_report(
     step: str,
     reason: str | None,
     workspace_status: str,
+    termination_unconfirmed: bool = False,
 ) -> Path:
     path = iteration_dir / "runner-error-report.md"
+    if termination_unconfirmed:
+        _write_text_artifact(
+            path,
+            "\n".join(
+                [
+                    "# Runner Termination Report",
+                    "",
+                    f"- 步骤：`{step}`",
+                    "- 状态：`termination-unconfirmed`",
+                    f"- 原因：{reason or '未提供'}",
+                    "",
+                    "## 结论",
+                    "",
+                    "- owned process tree 的终止未被确认，不能按普通 runner error 继续处理。",
+                    "- runner 输出、工作区检查、verification 和 review 均未继续消费。",
+                    "- execution 证据和目标仓库现场已保留，必须人工确认进程与工作区状态。",
+                    "- Vega 未自动回滚、清理、提交、推送或发布。",
+                ]
+            ).rstrip()
+            + "\n",
+        )
+        return path
     _write_text_artifact(
         path,
         "\n".join(
@@ -3081,7 +3043,35 @@ def _write_final_report(
             lines.append("- 未发现阻塞问题。")
     else:
         lines.append("- 未产生有效 reviewer verdict。")
-    if latest_iteration and latest_iteration.verification_status == "failed":
+    if (
+        latest_iteration
+        and latest_iteration.verification_failure_kind == "project_config_invalid"
+    ):
+        lines.extend(
+            [
+                "",
+                "## 验证门禁",
+                "",
+                "- verification：`failed`",
+                "- failure kind：`project_config_invalid`",
+                "- 项目配置预检失败，未执行任何验证命令。",
+            ]
+        )
+    elif (
+        latest_iteration
+        and latest_iteration.verification_failure_kind == "workspace_capture_failed"
+    ):
+        lines.extend(
+            [
+                "",
+                "## 验证门禁",
+                "",
+                "- verification：`failed`",
+                "- failure kind：`workspace_capture_failed`",
+                "- 工作区指纹采集失败，本轮验证证据不能绑定或复用。",
+            ]
+        )
+    elif latest_iteration and latest_iteration.verification_status == "failed":
         lines.extend(
             [
                 "",
@@ -3190,7 +3180,13 @@ def _new_loop_run_id(task_mode: str) -> str:
     return f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-{task_mode}-loop"
 
 
-def _verification_status(command_count: int, failed_count: int) -> Literal["skipped", "passed", "failed"]:
+def _verification_status(
+    command_count: int,
+    failed_count: int,
+    failure_kind: str | None = None,
+) -> Literal["skipped", "passed", "failed"]:
+    if failure_kind is not None:
+        return "failed"
     if command_count == 0:
         return "skipped"
     if failed_count:
@@ -3202,7 +3198,11 @@ def _latest_verification_passed(state: LoopAutomationState) -> bool:
     if not state.iterations:
         return False
     latest = state.iterations[-1]
-    return latest.verification_status == "passed" and latest.verification_failed_count == 0
+    return (
+        latest.verification_status == "passed"
+        and latest.verification_failed_count == 0
+        and latest.verification_failure_kind is None
+    )
 
 
 def _load_stable_start_policy(

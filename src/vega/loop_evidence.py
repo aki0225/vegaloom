@@ -11,6 +11,13 @@ from typing import Any
 from pydantic import ValidationError
 
 from .execution_control import ExecutionLease
+from .loop_integrity import (
+    LoopArtifactIntegrity,
+    validate_verification_workspace_fingerprint,
+    validate_project_config_failure_payload,
+    validate_verification_failure_kind_schema,
+    validated_review_workspace_fingerprint,
+)
 from .models import (
     GateResult,
     LoopAutomationState,
@@ -28,9 +35,13 @@ from .project_config import (
     scope_policy_sha256,
 )
 from .risk_gate_evidence import validate_iteration_risk_gate_artifacts
+from .review_evidence import review_evidence_schema_issues
 from .run_utils import resolve_run_dir
 from .scope_gate import validate_iteration_scope_gate_artifacts
-from .workspace_check import capture_review_workspace
+from .workspace_check import (
+    ReviewWorkspaceSnapshot,
+    capture_review_workspace,
+)
 
 
 @dataclass(frozen=True)
@@ -56,92 +67,9 @@ class EvidenceFreshness:
 
 
 @dataclass(frozen=True)
-class LoopArtifactIntegrity:
-    valid: bool
-    issues: tuple[str, ...]
-    review_verdicts: tuple[ReviewVerdict, ...] = ()
-    verification_results: tuple[dict[str, Any], ...] = ()
-    risk_gate_results: tuple[GateResult, ...] = ()
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "valid": self.valid,
-            "issues": list(self.issues),
-            "review_verdict_count": len(self.review_verdicts),
-            "verification_result_count": len(self.verification_results),
-            "risk_gate_result_count": len(self.risk_gate_results),
-        }
-
-
-@dataclass(frozen=True)
 class LoopEvidenceValidationSnapshot:
     artifact_integrity: LoopArtifactIntegrity
     evidence_freshness: EvidenceFreshness
-
-
-def trusted_verification_passed(
-    state: LoopAutomationState,
-    artifact_integrity: LoopArtifactIntegrity,
-) -> bool:
-    """只有最新轮次存在受信、非空且全通过的结构化验证时才返回真。
-
-    自动成功必须依赖与最新 iteration 绑定并经过完整性校验的 artifact，不能只相信
-    state 中可被单独改写的 `verification_status`，也不能把前序轮次的通过结果沿用到
-    后续代码变更。
-    """
-    if not artifact_integrity.valid or not state.iterations:
-        return False
-    latest = state.iterations[-1]
-    if latest.lifecycle != "completed" or latest.verification_status != "passed":
-        return False
-    if latest.verification_failed_count != 0:
-        return False
-
-    for payload in artifact_integrity.verification_results:
-        if payload.get("iteration") != latest.iteration:
-            continue
-        command_count = payload.get("command_count")
-        failed_count = payload.get("failed_count")
-        selected_command_count = payload.get("selected_command_count")
-        skipped_commands = payload.get("skipped_commands")
-        commands = payload.get("commands")
-        results = payload.get("results")
-        return (
-            _is_positive_int(command_count)
-            and failed_count == 0
-            and selected_command_count == command_count
-            and skipped_commands == []
-            and payload.get("interruption_status") is None
-            and payload.get("interruption_command") is None
-            and payload.get("interruption_reason") is None
-            and isinstance(commands, list)
-            and len(commands) == command_count
-            and isinstance(results, list)
-            and len(results) == command_count
-            and all(
-                isinstance(item, dict)
-                and item.get("status") == "passed"
-                and item.get("interruption_status") is None
-                and item.get("interruption_reason") is None
-                for item in results
-            )
-        )
-    return False
-
-
-def latest_verification_failed(
-    state: LoopAutomationState,
-    artifact_integrity: LoopArtifactIntegrity,
-) -> bool:
-    """只根据最新轮次的受信结构化结果判断验证失败。"""
-
-    if not artifact_integrity.valid or not state.iterations:
-        return False
-    latest_iteration = state.iterations[-1].iteration
-    for payload in reversed(artifact_integrity.verification_results):
-        if payload.get("iteration") == latest_iteration:
-            return _is_positive_int(payload.get("failed_count"))
-    return False
 
 
 def validate_reflect_evidence_freshness(
@@ -149,16 +77,17 @@ def validate_reflect_evidence_freshness(
     repo_path: Path,
     source_run: str,
     *,
-    current_workspace_fingerprint: str | None = None,
+    current_workspace_snapshot: ReviewWorkspaceSnapshot | None = None,
 ) -> EvidenceFreshness:
     repo = repo_path.resolve()
     source_dir = resolve_run_dir(workspace, source_run)
     state = _read_json(source_dir / "state.json")
     evidence = _read_json(source_dir / "review-evidence.json")
-    current_fingerprint, snapshot_issues = _current_workspace_fingerprint(
+    current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
         repo,
-        current_workspace_fingerprint,
+        current_workspace_snapshot,
     )
+    current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
     issues = list(snapshot_issues)
     if str(state.get("run_id") or "") != source_dir.name:
         issues.append("source_run_id_mismatch")
@@ -175,13 +104,12 @@ def validate_reflect_evidence_freshness(
             source_run=source_dir.name,
         )
 
-    schema_version = evidence.get("schema_version")
-    if schema_version not in {2, 3}:
-        issues.append("source_evidence_schema_unsupported")
-    if schema_version == 3:
-        for key in ("staged_diff_sha256", "unstaged_diff_sha256"):
-            if not _is_sha256(evidence.get(key)):
-                issues.append(f"{key}_invalid")
+    issues.extend(
+        review_evidence_schema_issues(
+            evidence,
+            current_snapshot,
+        )
+    )
     snapshot_id = str(evidence.get("snapshot_id") or "")
     snapshot_payload = {key: value for key, value in evidence.items() if key != "snapshot_id"}
     if not snapshot_id or snapshot_id != _sha256_json(snapshot_payload):
@@ -265,17 +193,18 @@ def validate_review_evidence_freshness(
     repo_path: Path,
     review_run: str,
     *,
-    current_workspace_fingerprint: str | None = None,
+    current_workspace_snapshot: ReviewWorkspaceSnapshot | None = None,
 ) -> EvidenceFreshness:
     repo = repo_path.resolve()
     review_dir = resolve_run_dir(workspace, review_run)
     state, state_issue = _load_review_state(review_dir / "state.json")
     context, context_issue = _load_json_object(review_dir / "review-context.json")
     verdict, verdict_issue = _load_review_verdict(review_dir / "review-verdict.json")
-    current_fingerprint, snapshot_issues = _current_workspace_fingerprint(
+    current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
         repo,
-        current_workspace_fingerprint,
+        current_workspace_snapshot,
     )
+    current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
     issues = list(snapshot_issues)
     if state_issue:
         issues.append(f"review_state_{state_issue}")
@@ -307,7 +236,7 @@ def validate_review_evidence_freshness(
                 workspace,
                 repo,
                 source_run,
-                current_workspace_fingerprint=current_fingerprint,
+                current_workspace_snapshot=current_snapshot,
             )
         except FileNotFoundError:
             issues.append("source_reflect_missing")
@@ -434,6 +363,7 @@ def validate_loop_artifact_integrity(
     verdicts: list[ReviewVerdict] = []
     verification_results: list[dict[str, Any]] = []
     risk_gate_results: list[GateResult] = []
+    reviewed_workspace_fingerprints: dict[int, str] = {}
     expected_iteration_dirs: set[Path] = set()
     seen_iterations: set[int] = set()
     latest_iteration = state.iterations[-1].iteration if state.iterations else 0
@@ -515,7 +445,7 @@ def validate_loop_artifact_integrity(
         issues.extend(f"{prefix}_{issue}" for issue in gate_integrity.issues)
         if gate_integrity.result is not None:
             risk_gate_results.append(gate_integrity.result)
-        _validate_iteration_review(
+        reviewed_workspace_fingerprints[iteration.iteration] = _validate_iteration_review(
             workspace,
             repo_path,
             iteration_dir,
@@ -565,6 +495,10 @@ def validate_loop_artifact_integrity(
         review_verdicts=verdicts,
         verification_results=verification_results,
         risk_gate_results=risk_gate_results,
+        reviewed_workspace_fingerprint=reviewed_workspace_fingerprints.get(
+            latest_iteration,
+            "",
+        ),
     )
 
 
@@ -673,7 +607,11 @@ def _validate_loop_evidence_freshness(
         if state is not None
         else _read_json(loop_dir / "state.json")
     )
-    current_fingerprint, snapshot_issues = _current_workspace_fingerprint(repo, None)
+    current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
+        repo,
+        None,
+    )
+    current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
     issues = list(snapshot_issues)
     if str(state_payload.get("run_id") or "") != loop_dir.name:
         issues.append("loop_run_id_mismatch")
@@ -699,7 +637,7 @@ def _validate_loop_evidence_freshness(
             workspace,
             repo,
             review_run,
-            current_workspace_fingerprint=current_fingerprint,
+            current_workspace_snapshot=current_snapshot,
         )
     except FileNotFoundError:
         issues.append("trusted_review_missing")
@@ -744,13 +682,13 @@ def _validate_iteration_review(
     iteration: LoopIterationState,
     issues: list[str],
     verdicts: list[ReviewVerdict],
-) -> None:
+) -> str:
     prefix = f"iteration_{iteration.iteration:02d}"
     local_verdict_path = iteration_dir / "review-verdict.json"
     if iteration.verdict is None:
         if local_verdict_path.exists():
             issues.append(f"{prefix}_review_verdict_unexpected")
-        return
+        return ""
     review_issue_start = len(issues)
     local_verdict, local_verdict_issue = _load_review_verdict(local_verdict_path)
     if local_verdict_issue:
@@ -762,13 +700,13 @@ def _validate_iteration_review(
             issues.append(f"{prefix}_local_review_findings_count_mismatch")
     if not iteration.review_run:
         issues.append(f"{prefix}_review_run_missing")
-        return
+        return ""
 
     try:
         review_dir = resolve_run_dir(workspace, iteration.review_run)
     except (FileNotFoundError, ValueError):
         issues.append(f"{prefix}_review_run_unavailable")
-        return
+        return ""
 
     child_state_path = review_dir / "state.json"
     child_context_path = review_dir / "review-context.json"
@@ -806,6 +744,13 @@ def _validate_iteration_review(
     if child_verdict and child_verdict.verdict != iteration.verdict:
         issues.append(f"{prefix}_child_review_verdict_mismatch")
 
+    reviewed_workspace_fingerprint = validated_review_workspace_fingerprint(
+        child_context,
+        iteration.verdict,
+        issues,
+        prefix,
+    )
+
     for local_name, child_path, issue_name in (
         ("review-state.json", child_state_path, "review_state_hash_mismatch"),
         ("review-context.json", child_context_path, "review_context_hash_mismatch"),
@@ -822,6 +767,8 @@ def _validate_iteration_review(
 
     if local_verdict and len(issues) == review_issue_start:
         verdicts.append(local_verdict)
+        return reviewed_workspace_fingerprint
+    return ""
 
 
 def _validate_interrupted_iteration(
@@ -885,6 +832,7 @@ def _validate_iteration_verification(
     selected_command_count = payload.get("selected_command_count")
     skipped_commands = payload.get("skipped_commands")
     interruption_status = payload.get("interruption_status")
+    failure_kind = payload.get("failure_kind")
     artifact_version = payload.get("artifact_version")
     expected_run_id = iteration_dir.parent.parent.name
     recorded_run_id = payload.get("run_id")
@@ -902,6 +850,7 @@ def _validate_iteration_verification(
             issues.append(f"{prefix}_verification_iteration_binding_mismatch")
         if shell_kind not in {"cmd", "posix-sh"}:
             issues.append(f"{prefix}_verification_shell_kind_invalid")
+        validate_verification_workspace_fingerprint(payload, prefix, issues)
     if not isinstance(payload.get("repo_path"), str):
         issues.append(f"{prefix}_verification_repo_missing")
     elif _normalized_path(payload["repo_path"]) != _normalized_path(repo_path):
@@ -930,6 +879,13 @@ def _validate_iteration_verification(
             "termination-unconfirmed",
         }:
             issues.append(f"{prefix}_verification_interruption_status_invalid")
+    validate_verification_failure_kind_schema(
+        artifact_version,
+        failure_kind,
+        iteration.verification_failure_kind,
+        prefix,
+        issues,
+    )
 
     if isinstance(commands, list) and _is_non_negative_int(command_count):
         if command_count != len(commands):
@@ -970,9 +926,25 @@ def _validate_iteration_verification(
         if failed_count != iteration.verification_failed_count:
             issues.append(f"{prefix}_verification_iteration_failed_count_mismatch")
     if _is_non_negative_int(command_count) and _is_non_negative_int(failed_count):
-        expected_status = _verification_status(command_count, failed_count)
+        expected_status = _verification_status(
+            command_count,
+            failed_count,
+            failure_kind if isinstance(failure_kind, str) else None,
+        )
         if iteration.verification_status != expected_status:
             issues.append(f"{prefix}_verification_iteration_status_mismatch")
+    validate_project_config_failure_payload(
+        payload,
+        failure_kind,
+        commands,
+        command_results,
+        command_count,
+        failed_count,
+        selected_command_count,
+        skipped_commands,
+        prefix,
+        issues,
+    )
     if iteration.verification_status == "passed" and artifact_version == 2:
         if selected_command_count != command_count:
             issues.append(f"{prefix}_verification_selected_command_count_mismatch")
@@ -1167,7 +1139,13 @@ def _review_state_allows_verdict(state: ReviewState, verdict: str) -> bool:
     }
 
 
-def _verification_status(command_count: int, failed_count: int) -> str:
+def _verification_status(
+    command_count: int,
+    failed_count: int,
+    failure_kind: str | None = None,
+) -> str:
+    if failure_kind is not None:
+        return "failed"
     if command_count == 0:
         return "skipped"
     if failed_count:
@@ -1197,6 +1175,7 @@ def _artifact_integrity(
     review_verdicts: list[ReviewVerdict] | None = None,
     verification_results: list[dict[str, Any]] | None = None,
     risk_gate_results: list[GateResult] | None = None,
+    reviewed_workspace_fingerprint: str = "",
 ) -> LoopArtifactIntegrity:
     unique_issues = tuple(dict.fromkeys(issues))
     return LoopArtifactIntegrity(
@@ -1205,6 +1184,7 @@ def _artifact_integrity(
         review_verdicts=tuple(review_verdicts or []),
         verification_results=tuple(verification_results or []),
         risk_gate_results=tuple(risk_gate_results or []),
+        reviewed_workspace_fingerprint=reviewed_workspace_fingerprint,
     )
 
 
@@ -1290,16 +1270,17 @@ def _is_string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _current_workspace_fingerprint(
+def _capture_current_workspace_snapshot(
     repo_path: Path,
-    current_workspace_fingerprint: str | None,
-) -> tuple[str, list[str]]:
-    if current_workspace_fingerprint is not None:
-        return current_workspace_fingerprint, []
+    current_workspace_snapshot: ReviewWorkspaceSnapshot | None,
+) -> tuple[ReviewWorkspaceSnapshot | None, list[str]]:
+    if current_workspace_snapshot is not None:
+        return current_workspace_snapshot, []
     try:
-        return capture_review_workspace(repo_path).fingerprint, []
+        snapshot = capture_review_workspace(repo_path)
     except (OSError, RuntimeError, subprocess.SubprocessError):
-        return "", ["workspace_snapshot_failed"]
+        return None, ["workspace_snapshot_failed"]
+    return snapshot, []
 
 
 def _freshness(

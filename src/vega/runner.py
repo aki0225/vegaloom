@@ -20,6 +20,7 @@ class RunnerResult:
     output: str
     error: str | None = None
     command: list[str] | None = None
+    termination_unconfirmed: bool = False
 
     def __post_init__(self) -> None:
         self.output = redact_text(self.output)
@@ -135,6 +136,7 @@ class CodexExecRunner:
             output=result.output,
             error=result.error,
             command=command,
+            termination_unconfirmed=getattr(result, "termination_unconfirmed", False),
         )
 
 

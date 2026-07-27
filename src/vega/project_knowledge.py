@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from pathlib import Path, PurePosixPath
 
 from .extensions import search_memory
+from .git_read import run_git_bytes
 from .models import AgentsInstruction, MemoryHit, ProjectKnowledge
 from .redaction import filter_sensitive_memory_entries, redact_text
 from .repository_identity import repository_scope, resolve_git_revision
@@ -385,17 +385,8 @@ def _read_git_blob(repo_path: Path, revision: str, relative_path: str) -> str:
 
 
 def _run_git(repo_path: Path, command: list[str]) -> bytes:
-    result = subprocess.run(
-        command,
-        cwd=repo_path,
-        capture_output=True,
-        timeout=30,
-        check=False,
-    )
-    if result.returncode != 0:
-        output = (result.stdout or b"") + (result.stderr or b"")
-        raise RuntimeError(output.decode("utf-8", errors="replace").strip())
-    return result.stdout or b""
+    return run_git_bytes(repo_path, command)
+
 
 def _memory_queries(repo_name: str, input_text: str, related_paths: list[str]) -> list[str]:
     queries = [repo_name]

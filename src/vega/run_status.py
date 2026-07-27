@@ -12,6 +12,10 @@ from .execution_control import (
     ExecutionRecord,
     find_execution_records,
 )
+from .run_status_guidance import (
+    latest_iteration_file as _latest_iteration_file,
+    verification_failure_next_steps as _verification_failure_next_steps,
+)
 from .run_utils import resolve_run_dir, resolve_runs_root
 
 
@@ -344,12 +348,7 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
         ]
     verdict = latest_iteration.get("verdict") if latest_iteration else None
     if latest_iteration and latest_iteration.get("verification_status") == "failed":
-        fix_prompt = _latest_iteration_file(run_dir, "fix-prompt.md")
-        verification = _latest_iteration_file(run_dir, "verification-summary.md")
-        return [
-            f"自动验证失败，先读取 `{verification}`。",
-            f"按 `{fix_prompt}` 修复后重新运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
-        ]
+        return _verification_failure_next_steps(run_dir, latest_iteration)
     if status == "success":
         if (run_dir / "finish-report.md").exists():
             return [
@@ -548,13 +547,6 @@ def _latest_iteration(state: dict[str, Any]) -> dict[str, Any]:
     if not iterations:
         return {}
     return iterations[-1]
-
-
-def _latest_iteration_file(run_dir: Path, filename: str) -> Path:
-    matches = sorted(run_dir.glob(f"iterations/*/{filename}"))
-    if not matches:
-        return run_dir / filename
-    return matches[-1]
 
 
 def _latest_iteration_artifacts(run_dir: Path, state: dict[str, Any]) -> list[str]:

@@ -3,8 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from fnmatch import fnmatchcase
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 import unicodedata
@@ -14,6 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .models import LoopIterationState, ScopeGateViolation
 from .project_config import ScopeConfig, scope_policy_sha256
 from .redaction import redact_text
+from .scope_path_matching import (
+    matching_patterns as _matching_patterns,
+    path_matches_pattern as _match_scope_path_pattern,
+    scope_paths_are_case_insensitive as _scope_paths_are_case_insensitive,
+)
 from .trace import TraceWriter
 from .workspace_check import capture_tracked_scope_snapshot
 
@@ -47,6 +50,7 @@ class ScopeGateResult(BaseModel):
     forbidden_paths: list[str] = Field(default_factory=list)
     staged_changed_files: list[str] = Field(default_factory=list)
     unstaged_changed_files: list[str] = Field(default_factory=list)
+    untracked_changed_files: list[str] = Field(default_factory=list)
     changed_files: list[str] = Field(default_factory=list)
     unsafe_index_paths: list[str] = Field(default_factory=list)
     violations: list[ScopeGateViolation] = Field(default_factory=list)
@@ -86,14 +90,16 @@ def evaluate_scope_gate(
     expected_head_sha: str | None = None,
     expected_policy_sha256: str | None = None,
 ) -> ScopeGateResult:
-    """读取 staged/unstaged tracked diff，并按精确仓库相对 glob 判定范围。
+    """读取 staged、unstaged 与 untracked 变更，并按精确仓库相对 glob 判定范围。
 
     禁止规则优先于允许规则；只要有一条越界路径，整体结果即为 failed。此函数不清理、
     不回滚、也不尝试阻止操作系统写入，只提供后续流程必须遵守的 fail-closed 决策。
     """
     policy_sha256 = scope_policy_sha256(scope)
     try:
-        snapshot = capture_tracked_scope_snapshot(repo_path.resolve())
+        repo = repo_path.resolve()
+        snapshot = capture_tracked_scope_snapshot(repo, include_untracked=True)
+        case_sensitive = not _scope_paths_are_case_insensitive(repo)
     except Exception as exc:  # noqa: BLE001 - Git 读取失败必须停止后续自动流程
         return ScopeGateResult(
             status="failed",
@@ -109,13 +115,17 @@ def evaluate_scope_gate(
 
     raw_staged_files = list(snapshot.staged_files)
     raw_unstaged_files = list(snapshot.unstaged_files)
-    changed_paths_sha256 = _changed_paths_sha256(raw_staged_files, raw_unstaged_files)
+    raw_untracked_files = list(snapshot.untracked_files)
+    changed_paths_sha256 = snapshot.changed_paths_sha256
     staged_files, staged_redacted = _safe_machine_paths(raw_staged_files)
     unstaged_files, unstaged_redacted = _safe_machine_paths(raw_unstaged_files)
+    untracked_files, untracked_redacted = _safe_machine_paths(raw_untracked_files)
     unsafe_index_paths, _ = _safe_machine_paths(
         list(snapshot.unsafe_index_paths)
     )
-    changed_files = list(dict.fromkeys([*staged_files, *unstaged_files]))
+    changed_files = list(
+        dict.fromkeys([*staged_files, *unstaged_files, *untracked_files])
+    )
     result_context = {
         "iteration": iteration,
         "phase": phase,
@@ -129,6 +139,7 @@ def evaluate_scope_gate(
         "forbidden_paths": list(scope.forbidden_paths),
         "staged_changed_files": staged_files,
         "unstaged_changed_files": unstaged_files,
+        "untracked_changed_files": untracked_files,
         "changed_files": changed_files,
         "unsafe_index_paths": unsafe_index_paths,
     }
@@ -156,12 +167,12 @@ def evaluate_scope_gate(
                 "Git 状态无法作为完整范围证据。"
             ),
         )
-    if staged_redacted or unstaged_redacted:
+    if staged_redacted or unstaged_redacted or untracked_redacted:
         return ScopeGateResult(
             status="failed",
             **result_context,
             failure_code="scope_path_identity_unsafe",
-            diagnostic="tracked diff 包含会触发脱敏的路径；无法安全保存稳定机器身份。",
+            diagnostic="工作区变更包含会触发脱敏的路径；无法安全保存稳定机器身份。",
         )
     if not scope.allowed_paths and not scope.forbidden_paths:
         return ScopeGateResult(
@@ -179,7 +190,11 @@ def evaluate_scope_gate(
                 )
             )
             continue
-        forbidden_matches = _matching_patterns(path, scope.forbidden_paths)
+        forbidden_matches = _matching_patterns(
+            path,
+            scope.forbidden_paths,
+            case_sensitive=case_sensitive,
+        )
         if forbidden_matches:
             violations.append(
                 ScopeGateViolation(
@@ -190,7 +205,11 @@ def evaluate_scope_gate(
             )
             continue
         if scope.allowed_paths:
-            allowed_matches = _matching_patterns(path, scope.allowed_paths)
+            allowed_matches = _matching_patterns(
+                path,
+                scope.allowed_paths,
+                case_sensitive=case_sensitive,
+            )
             if not allowed_matches:
                 violations.append(
                     ScopeGateViolation(
@@ -413,47 +432,17 @@ def _safe_machine_paths(paths: list[str]) -> tuple[list[str], bool]:
     return safe_paths, redacted
 
 
-def _changed_paths_sha256(staged_files: list[str], unstaged_files: list[str]) -> str:
-    payload = json.dumps(
-        {
-            "staged": staged_files,
-            "unstaged": unstaged_files,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def _matching_patterns(path: str, patterns: list[str]) -> list[str]:
-    return [pattern for pattern in patterns if _path_matches_pattern(path, pattern)]
-
-
-def _path_matches_pattern(path: str, pattern: str) -> bool:
-    """以 segment 为边界匹配 POSIX glob，`**` 仅表示零到多个完整目录段。"""
-    path_segments = tuple(path.split("/"))
-    pattern_segments = tuple(pattern.split("/"))
-
-    @lru_cache(maxsize=None)
-    def matches(path_index: int, pattern_index: int) -> bool:
-        if pattern_index == len(pattern_segments):
-            return path_index == len(path_segments)
-        current_pattern = pattern_segments[pattern_index]
-        if current_pattern == "**":
-            if pattern_index == len(pattern_segments) - 1:
-                return True
-            return any(
-                matches(next_path_index, pattern_index + 1)
-                for next_path_index in range(path_index, len(path_segments) + 1)
-            )
-        if path_index == len(path_segments):
-            return False
-        if not fnmatchcase(path_segments[path_index], current_pattern):
-            return False
-        return matches(path_index + 1, pattern_index + 1)
-
-    return matches(0, 0)
+def _path_matches_pattern(
+    path: str,
+    pattern: str,
+    *,
+    case_sensitive: bool = True,
+) -> bool:
+    return _match_scope_path_pattern(
+        path,
+        pattern,
+        case_sensitive=case_sensitive,
+    )
 
 
 def _is_safe_repo_relative_path(path: str) -> bool:
@@ -483,6 +472,7 @@ def _render_scope_gate_report(result: ScopeGateResult, result_sha256: str) -> st
         f"- index flags SHA-256：`{result.index_flags_sha256 or '无法读取'}`",
         f"- staged tracked 文件数：`{len(result.staged_changed_files)}`",
         f"- unstaged tracked 文件数：`{len(result.unstaged_changed_files)}`",
+        f"- untracked 文件数：`{len(result.untracked_changed_files)}`",
         "",
         "## 规则",
         "",
@@ -499,7 +489,7 @@ def _render_scope_gate_report(result: ScopeGateResult, result_sha256: str) -> st
             else "未配置"
         ),
         "",
-        "## 当前 tracked diff",
+        "## 当前工作区变更",
         "",
     ]
     if result.changed_files:
@@ -511,11 +501,11 @@ def _render_scope_gate_report(result: ScopeGateResult, result_sha256: str) -> st
         lines.extend(f"- `{path}`" for path in result.unsafe_index_paths)
     lines.extend(["", "## 结论", ""])
     if result.status == "skipped":
-        lines.append("- 未配置精确路径范围；为兼容既有项目，本轮未限制 tracked diff。")
+        lines.append("- 未配置精确路径范围；为兼容既有项目，本轮未限制工作区变更。")
     elif result.status == "success":
-        lines.append("- 当前 tracked diff 全部符合精确路径范围，可进入当前阶段的后续流程。")
+        lines.append("- 当前工作区变更全部符合精确路径范围，可进入当前阶段的后续流程。")
     elif result.violations:
-        lines.append("- 检测到越界 tracked diff；Vega 已停止当前阶段的后续流程。")
+        lines.append("- 检测到越界工作区变更；Vega 已停止当前阶段的后续流程。")
         for violation in result.violations:
             patterns = (
                 "、".join(f"`{item}`" for item in violation.matched_patterns)
@@ -911,6 +901,7 @@ def _result_semantics(result: ScopeGateResult) -> tuple[object, ...]:
         tuple(result.forbidden_paths),
         tuple(result.staged_changed_files),
         tuple(result.unstaged_changed_files),
+        tuple(result.untracked_changed_files),
         tuple(result.changed_files),
         tuple(result.unsafe_index_paths),
         tuple(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import _thread
+import ctypes
 import io
 import json
 import os
@@ -16,13 +17,16 @@ import pytest
 
 import vega.execution_control as execution_control
 import vega.execution_feedback as execution_feedback
+import vega.execution_process as execution_process
 from vega.execution_control import (
     ExecutionLease,
+    OwnedProcessResult,
     RunnerExecutionContext,
     inspect_execution_for_recovery,
     request_stop_for_run,
     run_owned_process,
 )
+from vega.runner import CodexExecRunner
 
 
 def test_execution_model_temp_path_preserves_windows_path_budget(
@@ -65,6 +69,35 @@ def test_execution_model_temp_paths_are_unique_within_one_process(
     assert execution_temp != stop_temp
 
 
+def test_codex_exec_runner_propagates_termination_unconfirmed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr(
+        "vega.runner.run_owned_process",
+        lambda *args, **kwargs: OwnedProcessResult(
+            status="error",
+            output="partial output",
+            error="owned process tree 终止未确认",
+            returncode=None,
+            termination_unconfirmed=True,
+        ),
+    )
+
+    result = CodexExecRunner().run(
+        "test prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "error"
+    assert result.termination_unconfirmed is True
+
+
 def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> None:
     context = RunnerExecutionContext(
         execution_dir=tmp_path / "runs" / "stdin-timeout" / "executions" / "worker",
@@ -93,6 +126,7 @@ def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> Non
     assert result.status == "timed_out"
     assert lease.status == "timed_out"
     assert elapsed < 5
+    assert all(thread.name != "vega-stdin-writer" for thread in threading.enumerate())
 
 
 def test_owned_process_redacts_output_before_persisting_and_returning(tmp_path: Path) -> None:
@@ -146,7 +180,7 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
     )
 
     result = run_owned_process(
-        [sys.executable, "-c", "import time; time.sleep(0.12)"],
+        [sys.executable, "-c", "import time; time.sleep(0.3)"],
         "",
         tmp_path,
         5,
@@ -188,6 +222,55 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
     assert broken_result.status == "success"
     assert "review completed" in broken_result.output
     assert broken_lease.status == "completed"
+
+
+def test_owned_process_tree_stays_active_for_posix_descendants() -> None:
+    process = _FakeOwnedProcess(pid=5151, wait_times_out=False)
+    process.returncode = 0
+
+    def process_group_alive(process_group_id: int) -> bool:
+        assert process.poll_calls == 1
+        return process_group_id == process.pid
+
+    assert execution_process.owned_process_tree_is_active(
+        process,
+        None,
+        process_group_alive=process_group_alive,
+    )
+    assert process.poll_calls == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process group 专项回归")
+def test_posix_background_descendant_prevents_early_success(
+    tmp_path: Path,
+) -> None:
+    child_code = "import time; time.sleep(30)"
+    root_code = (
+        "import subprocess, sys; "
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}])"
+    )
+    context = RunnerExecutionContext(
+        execution_dir=tmp_path / "runs" / "posix-descendant" / "executions" / "worker",
+        run_id="posix-descendant",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        terminate_grace_seconds=0.2,
+    )
+
+    result = run_owned_process(
+        [sys.executable, "-c", root_code],
+        "",
+        tmp_path,
+        1,
+        context,
+    )
+    lease = ExecutionLease.model_validate_json(
+        context.execution_dir.joinpath("execution.json").read_text(encoding="utf-8")
+    )
+
+    assert result.status == "timed_out"
+    assert lease.status == "timed_out"
 
 
 def test_owned_process_persists_partial_output_after_keyboard_interrupt(tmp_path: Path) -> None:
@@ -280,6 +363,423 @@ def test_recovery_rejects_older_fresh_active_execution_when_newer_terminal_exist
     assert inspection.record is not None
     assert inspection.record.path == active_path
     assert "PID 仍存活" in inspection.summary
+
+
+def test_windows_access_denied_probe_blocks_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "access-denied"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=4242,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=1)).isoformat(),
+            last_heartbeat=now.isoformat(),
+            lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+            deadline=(now + timedelta(minutes=2)).isoformat(),
+            status="running",
+        ),
+    )
+    _install_fake_windows_process_api(
+        monkeypatch,
+        open_handle=0,
+        last_error=5,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert not inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+
+
+def test_windows_recovery_allows_reused_pid_with_different_creation_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "reused-pid"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=4242,
+            owner_creation_token=100,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=1)).isoformat(),
+            last_heartbeat=now.isoformat(),
+            lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+            deadline=(now + timedelta(minutes=2)).isoformat(),
+            status="running",
+        ),
+    )
+    _install_fake_windows_process_api(
+        monkeypatch,
+        open_handle=1,
+        exit_code=259,
+        creation_token=200,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+    assert "PID" in inspection.summary
+
+
+def test_windows_recovery_keeps_legacy_lease_without_creation_token_conservative(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "legacy-lease"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=4242,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=1)).isoformat(),
+            last_heartbeat=now.isoformat(),
+            lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+            deadline=(now + timedelta(minutes=2)).isoformat(),
+            status="running",
+        ),
+    )
+    _install_fake_windows_process_api(
+        monkeypatch,
+        open_handle=1,
+        exit_code=259,
+        creation_token=200,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert not inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+
+
+def test_windows_recovery_blocks_when_named_job_still_has_descendants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "detached-descendant"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=1111,
+            owner_creation_token=100,
+            child_pid=2222,
+            child_creation_token=200,
+            windows_job_name="Local\\Vega-test-detached-descendant",
+            command=["worker"],
+            started_at=(now - timedelta(minutes=2)).isoformat(),
+            last_heartbeat=(now - timedelta(minutes=1)).isoformat(),
+            lease_expires_at=(now - timedelta(seconds=30)).isoformat(),
+            deadline=(now - timedelta(seconds=10)).isoformat(),
+            status="running",
+        ),
+    )
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_windows_job",
+        lambda _: execution_control.WindowsJobProbe("active", active_processes=1),
+        raising=False,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert not inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+    assert "Job Object" in inspection.summary
+    assert "原 execution owner 已退出" in inspection.summary
+    assert "人工核对并终止" in inspection.summary
+
+
+def test_recovery_rechecks_unconfirmed_named_job_before_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "unconfirmed-job-now-empty"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=1111,
+            owner_creation_token=100,
+            child_pid=2222,
+            child_creation_token=200,
+            windows_job_name="Local\\Vega-unconfirmed-job-now-empty",
+            termination_unconfirmed=True,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=2)).isoformat(),
+            last_heartbeat=(now - timedelta(minutes=1)).isoformat(),
+            lease_expires_at=(now - timedelta(seconds=30)).isoformat(),
+            deadline=(now - timedelta(seconds=10)).isoformat(),
+            status="running",
+        ),
+    )
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_windows_job",
+        lambda _: execution_control.WindowsJobProbe("empty", active_processes=0),
+        raising=False,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+    assert "已重新确认退出" in inspection.summary
+
+
+def test_posix_recovery_uses_child_pid_as_process_group_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "posix-live-group"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    child_pid = 2222
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=1111,
+            child_pid=child_pid,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=2)).isoformat(),
+            last_heartbeat=(now - timedelta(minutes=1)).isoformat(),
+            lease_expires_at=(now - timedelta(seconds=30)).isoformat(),
+            deadline=(now - timedelta(seconds=10)).isoformat(),
+            status="running",
+        ),
+    )
+    probed_groups: list[int] = []
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_is_posix_process_group_alive",
+        lambda pgid: probed_groups.append(pgid) or True,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert not inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+    assert probed_groups == [child_pid]
+
+
+def test_posix_recovery_reconfirms_unconfirmed_tree_after_owner_root_and_group_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "posix-unconfirmed-gone"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    child_pid = 3333
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=1111,
+            child_pid=child_pid,
+            termination_unconfirmed=True,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=2)).isoformat(),
+            last_heartbeat=(now - timedelta(minutes=1)).isoformat(),
+            lease_expires_at=(now - timedelta(seconds=30)).isoformat(),
+            deadline=(now - timedelta(seconds=10)).isoformat(),
+            status="running",
+        ),
+    )
+    probed_groups: list[int] = []
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_is_posix_process_group_alive",
+        lambda pgid: probed_groups.append(pgid) or False,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+    assert probed_groups
+    assert set(probed_groups) == {child_pid}
+    assert "已重新确认退出" in inspection.summary
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object 专项回归")
+def test_windows_detached_grandchild_prevents_success_and_is_terminated_on_timeout(
+    tmp_path: Path,
+) -> None:
+    run_id = "detached-grandchild-timeout"
+    execution_dir = tmp_path / "runs" / run_id / "executions" / "worker"
+    grandchild_pid_path = tmp_path / "grandchild.pid"
+    grandchild_code = (
+        "from pathlib import Path; import os, time; "
+        f"Path({str(grandchild_pid_path)!r}).write_text(str(os.getpid()), encoding='utf-8'); "
+        "time.sleep(30)"
+    )
+    root_code = (
+        "import subprocess, sys; "
+        "subprocess.Popen("
+        f"[sys.executable, '-c', {grandchild_code!r}], "
+        "creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP"
+        ")"
+    )
+    context = RunnerExecutionContext(
+        execution_dir=execution_dir,
+        run_id=run_id,
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        terminate_grace_seconds=0.2,
+    )
+    grandchild_pid: int | None = None
+
+    try:
+        result = run_owned_process(
+            [sys.executable, "-c", root_code],
+            "",
+            tmp_path,
+            1,
+            context,
+        )
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not grandchild_pid_path.exists():
+            time.sleep(0.02)
+        if grandchild_pid_path.exists():
+            grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+
+        lease = ExecutionLease.model_validate_json(
+            execution_dir.joinpath("execution.json").read_text(encoding="utf-8")
+        )
+        assert grandchild_pid is not None
+        assert result.status == "timed_out"
+        assert lease.status == "timed_out"
+        assert lease.windows_job_name is not None
+        assert not execution_control.is_process_alive(grandchild_pid)
+        assert execution_control._probe_windows_job(lease.windows_job_name).status == "gone"
+    finally:
+        if grandchild_pid is not None and execution_control.is_process_alive(grandchild_pid):
+            subprocess.run(
+                ["taskkill", "/PID", str(grandchild_pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Job Object 专项回归")
+@pytest.mark.parametrize("failure_stage", ["assign", "resume"])
+def test_windows_job_startup_failure_never_runs_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    run_id = f"job-startup-{failure_stage}"
+    execution_dir = tmp_path / "runs" / run_id / "executions" / "worker"
+    child_marker = tmp_path / f"{failure_stage}.started"
+    context = RunnerExecutionContext(
+        execution_dir=execution_dir,
+        run_id=run_id,
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        terminate_grace_seconds=0.1,
+    )
+
+    if failure_stage == "assign":
+        monkeypatch.setattr(
+            execution_control.NamedWindowsJob,
+            "assign_process_id",
+            lambda *_: (_ for _ in ()).throw(
+                execution_control.WindowsJobError("simulated assignment failure")
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            execution_process,
+            "resume_suspended_process",
+            lambda *_: (_ for _ in ()).throw(
+                execution_control.WindowsJobError("simulated resume failure")
+            ),
+        )
+
+    result = run_owned_process(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; "
+                f"Path({str(child_marker)!r}).write_text('started', encoding='utf-8')"
+            ),
+        ],
+        "",
+        tmp_path,
+        5,
+        context,
+    )
+
+    lease = ExecutionLease.model_validate_json(
+        execution_dir.joinpath("execution.json").read_text(encoding="utf-8")
+    )
+    assert result.status == "error"
+    assert lease.status == "failed"
+    assert lease.windows_job_name is not None
+    assert lease.child_pid is not None
+    assert not child_marker.exists()
+    assert not execution_control.is_process_alive(lease.child_pid)
+    assert execution_control._probe_windows_job(lease.windows_job_name).status == "gone"
 
 
 def test_recovery_rejects_execution_record_from_another_run(tmp_path: Path) -> None:
@@ -391,6 +891,50 @@ def test_stop_prefers_latest_live_active_execution_over_newer_stale_record(
     assert not stale_path.with_name("stop-request.json").exists()
 
 
+def test_stop_does_not_write_request_when_owner_is_gone_but_child_is_alive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "stop-without-owner"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    owner_pid = 1111
+    child_pid = 2222
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=owner_pid,
+            child_pid=child_pid,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=1)).isoformat(),
+            last_heartbeat=now.isoformat(),
+            lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+            deadline=(now + timedelta(minutes=2)).isoformat(),
+            status="running",
+        ),
+    )
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: False)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda pid, _: execution_control.ProcessProbe(
+            "gone" if pid == owner_pid else "alive"
+        ),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_is_posix_process_group_alive",
+        lambda pgid: pgid == child_pid,
+    )
+
+    with pytest.raises(ValueError, match="无执行者可消费"):
+        request_stop_for_run(run_dir, "stop orphaned tree")
+
+    assert not execution_path.with_name("stop-request.json").exists()
+
+
 def test_windows_taskkill_nonzero_keeps_stop_execution_active(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -413,6 +957,11 @@ def test_windows_taskkill_nonzero_keeps_stop_execution_active(
 
     monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(execution_control, "_process_group_options", lambda: {})
+    monkeypatch.setattr(
+        execution_control,
+        "_create_windows_job_for_execution",
+        lambda *_: None,
+    )
     monkeypatch.setattr(execution_control.subprocess, "Popen", lambda *args, **kwargs: process)
     monkeypatch.setattr(
         execution_control.subprocess,
@@ -475,7 +1024,7 @@ def test_windows_taskkill_replaces_undecodable_localized_output(
     assert result == "taskkill \u9000\u51fa\u7801 5\uff1alocalized output \ufffd"
 
 
-def test_recovery_rejects_persisted_unconfirmed_process_tree(
+def test_recovery_rejects_persisted_unconfirmed_live_process_group(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -499,7 +1048,16 @@ def test_recovery_rejects_persisted_unconfirmed_process_tree(
             reason="owned process tree termination unconfirmed",
         ),
     )
-    monkeypatch.setattr(execution_control, "is_process_alive", lambda _: False)
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_is_posix_process_group_alive",
+        lambda _: True,
+    )
 
     inspection = inspect_execution_for_recovery(run_dir)
 
@@ -532,6 +1090,33 @@ def test_windows_taskkill_failure_keeps_tree_termination_unconfirmed_when_root_e
     assert "taskkill 退出码 5" in result.detail
     assert "process tree" in result.detail
     assert taskkill_commands == [["taskkill", "/PID", str(process.pid), "/T"]]
+
+
+def test_windows_does_not_force_kill_reused_pid_after_owned_handle_exits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _FakeOwnedProcess(pid=4444, wait_times_out=False)
+    taskkill_commands: list[list[str]] = []
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(
+        execution_control.subprocess,
+        "run",
+        lambda command, **kwargs: (
+            taskkill_commands.append(command)
+            or SimpleNamespace(returncode=0, stdout="", stderr="")
+        ),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "is_process_alive",
+        lambda _: True,
+    )
+
+    result = execution_control._terminate_owned_process(process, 0.1)
+
+    assert result.succeeded
+    assert taskkill_commands == [["taskkill", "/PID", str(process.pid), "/T"]]
+    assert not process.kill_called
 
 
 def test_posix_termination_requires_owned_process_group_to_exit(
@@ -611,6 +1196,11 @@ def test_windows_final_wait_timeout_keeps_timeout_execution_active(
 
     monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(execution_control, "_process_group_options", lambda: {})
+    monkeypatch.setattr(
+        execution_control,
+        "_create_windows_job_for_execution",
+        lambda *_: None,
+    )
     monkeypatch.setattr(execution_control.subprocess, "Popen", lambda *args, **kwargs: process)
     monkeypatch.setattr(
         execution_control.subprocess,
@@ -646,8 +1236,10 @@ class _FakeOwnedProcess:
         self.returncode: int | None = None
         self.stdin = io.BytesIO()
         self.kill_called = False
+        self.poll_calls = 0
 
     def poll(self) -> int | None:
+        self.poll_calls += 1
         return self.returncode
 
     def wait(self, timeout: float | None = None) -> int:
@@ -658,6 +1250,66 @@ class _FakeOwnedProcess:
 
     def kill(self) -> None:
         self.kill_called = True
+
+
+class _FakeWindowsFunction:
+    def __init__(self, callback: object) -> None:
+        self.callback = callback
+        self.argtypes: object = None
+        self.restype: object = None
+
+    def __call__(self, *args: object) -> object:
+        return self.callback(*args)  # type: ignore[operator]
+
+
+class _FakeWindowsKernel32:
+    def __init__(
+        self,
+        *,
+        open_handle: int,
+        exit_code: int,
+        creation_token: int,
+    ) -> None:
+        self.OpenProcess = _FakeWindowsFunction(lambda *_: open_handle)
+        self.GetExitCodeProcess = _FakeWindowsFunction(
+            lambda _handle, pointer: self._set_exit_code(pointer, exit_code)
+        )
+        self.GetProcessTimes = _FakeWindowsFunction(
+            lambda _handle, creation, _exit, _kernel, _user: self._set_creation_token(
+                creation,
+                creation_token,
+            )
+        )
+        self.CloseHandle = _FakeWindowsFunction(lambda _handle: 1)
+
+    @staticmethod
+    def _set_exit_code(pointer: object, exit_code: int) -> int:
+        pointer._obj.value = exit_code  # type: ignore[attr-defined]
+        return 1
+
+    @staticmethod
+    def _set_creation_token(pointer: object, creation_token: int) -> int:
+        pointer._obj.dwLowDateTime = creation_token & 0xFFFFFFFF  # type: ignore[attr-defined]
+        pointer._obj.dwHighDateTime = creation_token >> 32  # type: ignore[attr-defined]
+        return 1
+
+
+def _install_fake_windows_process_api(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    open_handle: int,
+    last_error: int = 0,
+    exit_code: int = 0,
+    creation_token: int = 0,
+) -> None:
+    kernel32 = _FakeWindowsKernel32(
+        open_handle=open_handle,
+        exit_code=exit_code,
+        creation_token=creation_token,
+    )
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_args, **_kwargs: kernel32, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: last_error, raising=False)
 
 
 def _write_execution(path: Path, lease: ExecutionLease) -> None:

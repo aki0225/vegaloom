@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
+import vega.scope_path_matching as scope_path_matching
 from vega.gate_runtime import (
     HIGH_RISK_PATH_KEYWORDS,
     MEDIUM_RISK_PATH_KEYWORDS,
@@ -13,6 +15,10 @@ from vega.gate_runtime import (
     _matched_paths,
 )
 from vega.reflect_runtime import ReflectRuntime
+from vega.scope_path_matching import (
+    filesystem_is_case_insensitive,
+    path_matches_pattern,
+)
 
 
 @pytest.mark.parametrize(
@@ -140,6 +146,59 @@ def test_gate_flags_compound_risk_paths_as_high_risk(
     assert result["risk"] == "high"
     assert result["recommendation"] == "human-review"
     assert relative_path in high_risk_reason["evidence"]
+
+
+def test_scope_glob_case_mode_is_explicit() -> None:
+    assert not path_matches_pattern(
+        "Docs/leak.md",
+        "docs/**",
+        case_sensitive=True,
+    )
+    assert path_matches_pattern(
+        "Docs/leak.md",
+        "docs/**",
+        case_sensitive=False,
+    )
+
+
+def test_filesystem_case_probe_matches_existing_directory_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "ScopeProbeRepo"
+    repo.mkdir()
+    alternate = repo.with_name("scopeProbeRepo")
+    expected = alternate.exists() and repo.samefile(alternate)
+    monkeypatch.setattr(
+        os.path,
+        "normcase",
+        (lambda value: value) if expected else (lambda value: value.casefold()),
+    )
+
+    assert filesystem_is_case_insensitive(repo) is expected
+    assert list(repo.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("filesystem_insensitive", "expected"),
+    [
+        (True, True),
+        (False, False),
+    ],
+)
+def test_scope_case_mode_uses_filesystem_semantics_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filesystem_insensitive: bool,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr(
+        scope_path_matching,
+        "filesystem_is_case_insensitive",
+        lambda repo_path: filesystem_insensitive,
+    )
+
+    assert scope_path_matching.scope_paths_are_case_insensitive(tmp_path) is expected
 
 
 def _init_repo_with_tracked_file(repo: Path, relative_path: str) -> Path:

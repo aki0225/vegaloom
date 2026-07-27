@@ -20,12 +20,17 @@ from .project_config import (
 )
 from .project_profile import build_project_profile
 from .redaction import redact_text, redact_value
+from .workspace_check import capture_review_workspace
 
 MAX_OUTPUT_CHARS = 8000
 VerificationInterruptionStatus = Literal[
     "timed_out",
     "stopped",
     "termination-unconfirmed",
+]
+VerificationFailureKind = Literal[
+    "project_config_invalid",
+    "workspace_capture_failed",
 ]
 
 
@@ -35,13 +40,14 @@ class VerificationRunResult:
     result_path: Path
     command_count: int
     failed_count: int
+    failure_kind: VerificationFailureKind | None = None
     interruption_status: VerificationInterruptionStatus | None = None
     interruption_command: str | None = None
     interruption_reason: str | None = None
 
     @property
     def has_failures(self) -> bool:
-        return self.failed_count > 0
+        return self.failed_count > 0 or self.failure_kind is not None
 
     @property
     def was_interrupted(self) -> bool:
@@ -66,7 +72,12 @@ def run_project_verification(
     output_dir.mkdir(parents=True, exist_ok=True)
     config_check = check_project_config(repo_path)
     if config_check.has_errors:
-        return _write_verification_config_failure(output_dir, config_check)
+        return _write_verification_config_failure(
+            output_dir,
+            config_check,
+            repo_path=repo_path,
+            iteration=iteration,
+        )
 
     profile = build_project_profile(workspace, repo_path)
     config = load_project_config(repo_path)
@@ -123,14 +134,23 @@ def run_project_verification(
         (item for item in results if item["interruption_status"] is not None),
         None,
     )
+    workspace_fingerprint, workspace_capture_error_type = (
+        _capture_workspace_fingerprint(repo_path)
+    )
+    failure_kind: VerificationFailureKind | None = (
+        None if workspace_fingerprint is not None else "workspace_capture_failed"
+    )
     payload = redact_value({
         "artifact_version": 2,
         "run_id": run_id,
         "iteration": iteration,
         "shell_kind": shell_kind,
         "repo_path": str(repo_path.resolve()),
+        "workspace_fingerprint": workspace_fingerprint,
+        "workspace_capture_error_type": workspace_capture_error_type,
         "config_path": config.source_path,
         "config_check": config_check.model_dump(),
+        "failure_kind": failure_kind,
         "commands": completed_commands,
         "results": results,
         "command_count": len(results),
@@ -156,6 +176,7 @@ def run_project_verification(
         result_path=result_path,
         command_count=payload["command_count"],
         failed_count=payload["failed_count"],
+        failure_kind=payload["failure_kind"],
         interruption_status=payload["interruption_status"],
         interruption_command=payload["interruption_command"],
         interruption_reason=payload["interruption_reason"],
@@ -183,27 +204,37 @@ def select_verification_commands(
 def _write_verification_config_failure(
     output_dir: Path,
     config_check: Any,
+    *,
+    repo_path: Path,
+    iteration: int,
 ) -> VerificationRunResult:
     text = redact_text(render_project_config_check(config_check))
+    run_id = _find_parent_run_id(output_dir)
+    shell_kind = current_verification_shell_kind()
+    workspace_fingerprint, workspace_capture_error_type = (
+        _capture_workspace_fingerprint(repo_path)
+    )
+    failure_kind: VerificationFailureKind = (
+        "project_config_invalid"
+        if workspace_fingerprint is not None
+        else "workspace_capture_failed"
+    )
     payload = redact_value({
+        "artifact_version": 2,
+        "run_id": run_id,
+        "iteration": iteration,
+        "shell_kind": shell_kind,
         "repo_path": config_check.repo_path,
+        "workspace_fingerprint": workspace_fingerprint,
+        "workspace_capture_error_type": workspace_capture_error_type,
         "config_path": config_check.source_path,
         "config_check": config_check.model_dump(),
-        "commands": ["<vega config check>"],
-        "results": [
-            {
-                "command": "<vega config check>",
-                "status": "failed",
-                "returncode": None,
-                "duration_seconds": 0.0,
-                "output": text,
-                "interruption_status": None,
-                "interruption_reason": None,
-            }
-        ],
-        "command_count": 1,
-        "failed_count": 1,
-        "selected_command_count": 1,
+        "failure_kind": failure_kind,
+        "commands": [],
+        "results": [],
+        "command_count": 0,
+        "failed_count": 0,
+        "selected_command_count": 0,
         "skipped_commands": [],
         "interruption_status": None,
         "interruption_command": None,
@@ -232,8 +263,9 @@ def _write_verification_config_failure(
     return VerificationRunResult(
         summary_path=summary_path,
         result_path=result_path,
-        command_count=1,
-        failed_count=1,
+        command_count=0,
+        failed_count=0,
+        failure_kind=failure_kind,
     )
 
 
@@ -242,7 +274,27 @@ def render_verification_summary(payload: dict[str, Any]) -> str:
     if payload.get("config_path"):
         lines.append(f"- 项目策略：`{payload['config_path']}`")
         lines.append("")
+    workspace_capture_failed = (
+        payload.get("failure_kind") == "workspace_capture_failed"
+    )
+    if workspace_capture_failed:
+        lines.extend(
+            [
+                "- `FAIL`：验证结束后的工作区指纹采集失败，不能绑定或复用本轮验证证据。",
+                f"- 错误类型：`{payload.get('workspace_capture_error_type') or 'unknown'}`",
+                "",
+            ]
+        )
     if not payload["commands"]:
+        if workspace_capture_failed:
+            lines.extend(
+                [
+                    "## 结果",
+                    "",
+                    "- `FAIL`：未获得可信工作区快照，已停止 Reflect 和 reviewer。",
+                ]
+            )
+            return "\n".join(lines).rstrip() + "\n"
         lines.extend(
             [
                 "- 未识别自动验证命令；请人工补充最小验证结果。",
@@ -310,6 +362,15 @@ def render_verification_summary(payload: dict[str, Any]) -> str:
             ]
         )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _capture_workspace_fingerprint(
+    repo_path: Path,
+) -> tuple[str | None, str | None]:
+    try:
+        return capture_review_workspace(repo_path).fingerprint, None
+    except (OSError, RuntimeError) as exc:
+        return None, type(exc).__name__
 
 
 def _run_command(

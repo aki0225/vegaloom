@@ -5,14 +5,17 @@ from ..loop_evidence import (
     EvidenceFreshness,
     _freshness,
     _load_loop_state,
+    _load_review_state,
+    _load_review_verdict,
     _normalized_path,
     _read_json,
-    trusted_verification_passed,
+    _review_state_allows_verdict,
     validate_loop_artifact_integrity,
     validate_loop_evidence_freshness,
     validate_reflect_evidence_freshness,
     validate_review_evidence_freshness,
 )
+from ..loop_integrity import trusted_verification_passed
 from ..models import GoalCheckpointEvidenceType, GoalCheckpointRef
 from ..redaction import sensitive_path_reason
 from ..run_status import run_status_payload
@@ -192,12 +195,25 @@ def _completion_eligibility(
             f"evidence={freshness_summary}",
         )
     if evidence_type == "review":
-        payload = _read_json(child_dir / "review-verdict.json")
-        verdict = str(payload.get("verdict") or "unknown")
-        eligible = status == "success" and verdict == "approve" and freshness.fresh
+        review_state, state_issue = _load_review_state(child_dir / "state.json")
+        review_verdict, verdict_issue = _load_review_verdict(
+            child_dir / "review-verdict.json"
+        )
+        validated_status = review_state.status if review_state else "invalid"
+        verdict = review_verdict.verdict if review_verdict else "invalid"
+        eligible = (
+            state_issue is None
+            and verdict_issue is None
+            and review_state is not None
+            and review_verdict is not None
+            and _review_state_allows_verdict(review_state, review_verdict.verdict)
+            and review_verdict.verdict == "approve"
+            and freshness.fresh
+        )
         return (
             eligible,
-            f"review status={status}, verdict={verdict}, evidence={freshness_summary}",
+            f"review status={validated_status}, verdict={verdict}, "
+            f"evidence={freshness_summary}",
         )
     if evidence_type == "finish":
         payload = _read_json(child_dir / "finish-summary.json")

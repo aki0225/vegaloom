@@ -16,6 +16,7 @@ import pytest
 import vega
 from typer.testing import CliRunner
 
+from vega import git_read as git_read_module
 from vega.experimental.inspection import eval as eval_runner
 from vega.cli import app
 from vega.experimental.inspection.context_loader import load_target_context, parse_target_files
@@ -887,7 +888,7 @@ def test_repo_run_check_allows_only_documented_checks(tmp_path, monkeypatch) -> 
         calls.append(command)
         return SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
-    monkeypatch.setattr(git_tools.subprocess, "run", fake_run)
+    monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
     broker = ToolBroker(tmp_path)
 
     for check_id in ["git.status", "git.diff", "git.diff_check"]:
@@ -898,9 +899,10 @@ def test_repo_run_check_allows_only_documented_checks(tmp_path, monkeypatch) -> 
     rejected = broker.run_check("git.diff_name_only")
     assert rejected.status == "error"
     assert calls == [
-        ["git", "status", "--short"],
-        ["git", "diff", "--stat"],
-        ["git", "diff", "--check"],
+        git_read_module.harden_git_read_command(
+            git_tools.ALLOWED_CHECKS[check_id]
+        )
+        for check_id in ["git.status", "git.diff", "git.diff_check"]
     ]
 
 
@@ -908,7 +910,7 @@ def test_repo_run_check_rejects_non_allowlisted_check(tmp_path, monkeypatch) -> 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("non-allowlisted checks must not execute subprocess.run")
 
-    monkeypatch.setattr(git_tools.subprocess, "run", fail_if_called)
+    monkeypatch.setattr(git_read_module.subprocess, "run", fail_if_called)
 
     result = ToolBroker(tmp_path).run_check("shell.run")
 
@@ -1441,6 +1443,69 @@ def test_parse_review_verdict_ignores_codex_exec_transcript_suffix() -> None:
 
     assert verdict.verdict == "approve"
     assert verdict.summary == "测试 reviewer 结论"
+
+
+def test_parse_review_verdict_rejects_multiple_valid_candidates() -> None:
+    output = "\n".join(
+        [
+            _review_json("approve"),
+            "",
+            _review_json("request_changes"),
+        ]
+    )
+
+    verdict = parse_review_verdict(output)
+
+    assert verdict.verdict == "needs_human"
+    assert "无法解析" in verdict.summary
+    assert "多个合法 verdict 候选" in verdict.summary
+
+
+def test_parse_review_verdict_rejects_extra_fields() -> None:
+    payload = json.loads(_review_json("approve"))
+    payload["unexpected"] = True
+
+    verdict = parse_review_verdict(json.dumps(payload, ensure_ascii=False))
+
+    assert verdict.verdict == "needs_human"
+    assert "无法解析" in verdict.summary
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "verdict": "approve",
+            "summary": " ",
+            "findings": [],
+            "checked_items": ["scope"],
+        },
+        {
+            "verdict": "approve",
+            "summary": "looks good",
+            "findings": [],
+            "checked_items": [],
+        },
+        {
+            "verdict": "approve",
+            "summary": "looks good",
+            "findings": [
+                {
+                    "severity": "major",
+                    "title": "仍有主要问题",
+                }
+            ],
+            "checked_items": ["scope"],
+        },
+    ],
+)
+def test_parse_review_verdict_rejects_invalid_approve_contract(
+    payload: dict[str, object],
+) -> None:
+    verdict = parse_review_verdict(json.dumps(payload, ensure_ascii=False))
+
+    assert verdict.verdict == "needs_human"
+    assert "无法解析" in verdict.summary
 
 
 def test_loop_assist_continue_generates_fix_prompt_from_review_findings(tmp_path) -> None:
@@ -2064,10 +2129,31 @@ def test_invalid_verification_config_blocks_verification_with_clear_summary(tmp_
         "version: 1\nverification:\n  commands:\n    - python -c \\\n",
         encoding="utf-8",
     )
+    output_dir = tmp_path / "workspace" / "runs" / "run-config-invalid" / "iterations" / "03"
 
-    result = run_project_verification(tmp_path, repo_dir, tmp_path / "verification")
+    result = run_project_verification(
+        tmp_path,
+        repo_dir,
+        output_dir,
+        iteration=3,
+    )
 
     assert result.has_failures
+    assert result.failure_kind == "project_config_invalid"
+    assert result.command_count == 0
+    assert result.failed_count == 0
+    payload = json.loads(result.result_path.read_text(encoding="utf-8"))
+    assert payload["artifact_version"] == 2
+    assert payload["run_id"] == "run-config-invalid"
+    assert payload["iteration"] == 3
+    assert payload["shell_kind"] in {"cmd", "posix-sh"}
+    assert payload["failure_kind"] == "project_config_invalid"
+    assert payload["commands"] == []
+    assert payload["results"] == []
+    assert payload["command_count"] == 0
+    assert payload["failed_count"] == 0
+    assert payload["selected_command_count"] == 0
+    assert payload["skipped_commands"] == []
     text = result.summary_path.read_text(encoding="utf-8")
     assert "项目验证配置预检失败" in text
     assert "truncated_verification_command" in text

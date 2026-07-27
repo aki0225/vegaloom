@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+import vega.loop_evidence as loop_evidence_module
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
 from vega.experimental.goal_runtime import GoalRuntime
@@ -208,6 +210,50 @@ def test_human_risk_standalone_review_cannot_complete_goal_checkpoint(
         goal.checkpoint_done(goal_run.name, "01", note="不应完成")
 
 
+@pytest.mark.parametrize(
+    ("mutation", "expected_issue"),
+    [
+        ("malformed_verdict", "review_verdict_schema_invalid"),
+        ("state_verdict_mismatch", "review_state_verdict_mismatch"),
+    ],
+)
+def test_goal_review_evidence_requires_validated_review_chain(
+    tmp_path: Path,
+    mutation: str,
+    expected_issue: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    loop_run = _create_successful_loop_run(workspace, repo)
+    loop_state = _read_json(loop_run / "state.json")
+    review_run_id = loop_state["iterations"][-1]["review_run"]
+    review_run = workspace / "runs" / review_run_id
+
+    if mutation == "malformed_verdict":
+        review_run.joinpath("review-verdict.json").write_text(
+            '[{"verdict":"approve"}]\n',
+            encoding="utf-8",
+        )
+    else:
+        review_state_path = review_run / "state.json"
+        review_state = _read_json(review_state_path)
+        review_state["verdict"] = "request_changes"
+        _write_json(review_state_path, review_state)
+
+    goal = GoalRuntime(workspace)
+    goal_run = goal.start(repo, _goal_text(), "test", None)
+    goal.step(goal_run.name)
+    goal.attach(goal_run.name, "01", review_run_id, "review", "review 曾通过")
+
+    evidence = _read_json(goal_run / "goal-state.json")["checkpoint_records"][0]["refs"][0]
+    assert evidence["validated"] is True
+    assert evidence["completion_eligible"] is False
+    assert expected_issue in evidence["validation_summary"]
+    with pytest.raises(ValueError, match="缺少可完成证据"):
+        goal.checkpoint_done(goal_run.name, "01", note="不应放行")
+
+
 def test_gate_records_failure_for_reflect_from_another_repository(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     source_repo = tmp_path / "source-repo"
@@ -235,6 +281,93 @@ def test_gate_records_failure_for_stale_reflect_snapshot(tmp_path: Path) -> None
     gate_run = GateRuntime(workspace).run(repo, reflect_run.name)
 
     _assert_failed_gate_run(gate_run, "workspace_changed_since_reflect")
+
+
+def test_gate_rejects_incomplete_ignored_evidence(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    reflect_run = ReflectRuntime(workspace).run(repo)
+    state_path = reflect_run / "state.json"
+    evidence_path = reflect_run / "review-evidence.json"
+    state = _read_json(state_path)
+    evidence = _read_json(evidence_path)
+    evidence["ignored_manifest_complete"] = False
+    evidence["snapshot_id"] = _sha256_json(
+        {key: value for key, value in evidence.items() if key != "snapshot_id"}
+    )
+    state["review_snapshot_id"] = evidence["snapshot_id"]
+    _write_json(state_path, state)
+    _write_json(evidence_path, evidence)
+
+    gate_run = GateRuntime(workspace).run(repo, reflect_run.name)
+
+    _assert_failed_gate_run(gate_run, "source_ignored_manifest_incomplete")
+
+
+def test_reflect_freshness_rejects_legacy_review_evidence_schema(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    reflect_run = ReflectRuntime(workspace).run(repo)
+    state_path = reflect_run / "state.json"
+    evidence_path = reflect_run / "review-evidence.json"
+    state = _read_json(state_path)
+    evidence = _read_json(evidence_path)
+    evidence["schema_version"] = 4
+    evidence["ignored_content_complete"] = False
+    evidence.pop("ignored_manifest_complete")
+    evidence["snapshot_id"] = _sha256_json(
+        {key: value for key, value in evidence.items() if key != "snapshot_id"}
+    )
+    state["review_snapshot_id"] = evidence["snapshot_id"]
+    _write_json(state_path, state)
+    _write_json(evidence_path, evidence)
+
+    freshness = loop_evidence_module.validate_reflect_evidence_freshness(
+        workspace,
+        repo,
+        reflect_run.name,
+    )
+
+    assert freshness.fresh is False
+    assert "legacy_review_evidence_requires_refresh" in freshness.issues
+
+
+def test_reflect_freshness_rejects_current_incomplete_ignored_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    reflect_run = ReflectRuntime(workspace).run(repo)
+    original_capture = loop_evidence_module.capture_review_workspace
+
+    def incomplete_capture(repo_path: Path):
+        return replace(
+            original_capture(repo_path),
+            ignored_manifest_complete=False,
+        )
+
+    monkeypatch.setattr(
+        loop_evidence_module,
+        "capture_review_workspace",
+        incomplete_capture,
+    )
+
+    freshness = loop_evidence_module.validate_reflect_evidence_freshness(
+        workspace,
+        repo,
+        reflect_run.name,
+    )
+
+    assert freshness.fresh is False
+    assert "current_ignored_manifest_incomplete" in freshness.issues
 
 
 def test_gate_records_failure_for_reflect_with_mismatched_directory_identity(

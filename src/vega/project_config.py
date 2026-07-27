@@ -13,6 +13,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from .git_read import coerce_git_output_bytes, run_git_capture
 from .redaction import redact_text
 from .repository_identity import resolve_git_revision
 
@@ -436,19 +437,16 @@ def load_project_config(
 
 
 def _read_tracked_config(repo: Path, revision: str, name: str) -> str | None:
-    result = subprocess.run(
+    result = run_git_capture(
+        repo,
         ["git", "show", f"{revision}:{name}"],
-        cwd=repo,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        text=True,
-        timeout=30,
-        check=False,
     )
     if result.returncode != 0:
         return None
-    return result.stdout
+    return coerce_git_output_bytes(result.stdout).decode(
+        "utf-8",
+        errors="replace",
+    )
 
 
 def check_project_config(repo_path: Path) -> ProjectConfigCheckResult:

@@ -8,12 +8,15 @@ from typing import Any
 from pydantic import ValidationError
 
 from .decision import DecisionStore
+from .finish_policy import decide_finish_status
 from .loop_evidence import (
     EvidenceFreshness,
+    validate_loop_evidence_snapshot,
+)
+from .loop_integrity import (
     LoopArtifactIntegrity,
     latest_verification_failed,
     trusted_verification_passed,
-    validate_loop_evidence_snapshot,
 )
 from .memory_artifacts import MemoryProposalStore
 from .models import LoopAutomationState, ReviewVerdict
@@ -77,9 +80,9 @@ def build_finish_summary(
     )
     verification_passed = trusted_verification_passed(state, artifact_integrity)
     final_report = _read_text(run_dir / "final-report.md")
-    finish_status = _finish_status(
-        state,
-        latest_verdict,
+    finish_status = decide_finish_status(
+        state.status,
+        latest_verdict.verdict if latest_verdict else None,
         latest_verification_has_failed,
         verification_passed=verification_passed,
         evidence_fresh=evidence_freshness.fresh,
@@ -240,32 +243,6 @@ def render_finish_report(summary: dict[str, Any]) -> str:
         ]
     )
     return redact_text("\n".join(lines).rstrip() + "\n")
-
-
-def _finish_status(
-    state: LoopAutomationState,
-    latest_verdict: ReviewVerdict | None,
-    latest_verification_failed: bool = False,
-    *,
-    verification_passed: bool = False,
-    evidence_fresh: bool = True,
-    artifact_integrity_valid: bool = True,
-) -> str:
-    if not artifact_integrity_valid:
-        return "needs_human"
-    if not evidence_fresh:
-        return "needs_human"
-    if latest_verification_failed:
-        return "needs_fix"
-    if not verification_passed:
-        return "needs_human"
-    if state.status == "success" and latest_verdict and latest_verdict.verdict == "approve":
-        return "ready_to_commit"
-    if latest_verdict and latest_verdict.verdict == "request_changes":
-        return "needs_fix"
-    if state.status in {"failed", "needs_human"}:
-        return "needs_human"
-    return "incomplete"
 
 
 def _commit_checklist(

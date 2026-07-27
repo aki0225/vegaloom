@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -618,16 +619,41 @@ def test_success_finalization_checks_success_evidence_before_terminal_event(
     workspace = tmp_path / "workspace"
     repo = tmp_path / "repo"
     _init_repo(repo)
+    iteration_checks: list[dict[str, object]] = []
+    snapshot_calls = 0
+
+    def fail_iteration_check(iteration_dir, iteration, **kwargs):
+        del iteration_dir, iteration
+        iteration_checks.append(kwargs)
+        return ["FAIL: forced success evidence failure"]
+
+    def record_snapshot(*args, **kwargs):
+        nonlocal snapshot_calls
+        del args, kwargs
+        snapshot_calls += 1
+        return SimpleNamespace(
+            artifact_integrity=SimpleNamespace(
+                valid=False,
+                issues=(),
+                verification_results=(),
+            ),
+            evidence_freshness=SimpleNamespace(fresh=True, issues=()),
+        )
+
     monkeypatch.setattr(
         "vega.loop_runtime._loop_iteration_evidence_checks",
-        lambda iteration_dir, iteration, **kwargs: ["FAIL: forced success evidence failure"],
+        fail_iteration_check,
+    )
+    monkeypatch.setattr(
+        "vega.loop_runtime.validate_loop_evidence_snapshot",
+        record_snapshot,
     )
 
     run_dir = LoopAutomationRuntime(
         workspace,
         worker_runner=TrackedChangeRunner(),
         reviewer_runner=QueueRunner([_review_json("approve")]),
-    ).start(_brief(repo), "auto", max_iterations=1, verify=False)
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
 
     state = _read_json(run_dir / "state.json")
     terminal_events = [
@@ -638,6 +664,9 @@ def test_success_finalization_checks_success_evidence_before_terminal_event(
     assert state["status"] == "failed"
     assert "FAIL: forced success evidence failure" in state["eval_results"]
     assert [item["status"] for item in terminal_events] == ["failed"]
+    assert snapshot_calls == 1
+    assert iteration_checks[0]["workspace"] is None
+    assert iteration_checks[0]["repo_path"] is None
 
 
 def test_failed_review_run_cannot_promote_parent_loop_to_success(
