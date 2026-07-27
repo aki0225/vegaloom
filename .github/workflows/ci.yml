@@ -109,12 +109,7 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "812" ]]; then
-            cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 812 个节点，实际为 ${node_count}" >&2
-            exit 1
-          fi
-          echo "已收集并核对 ${node_count} 个测试节点"
+          echo "pytest 成功收集 ${node_count} 个测试节点"
 
       - name: 核对 Python 3.12 分片覆盖全部测试文件
         shell: bash

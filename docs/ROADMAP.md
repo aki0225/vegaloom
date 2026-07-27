@@ -1,11 +1,11 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-07-25
+> 更新时间：2026-07-27
 > 稳定基线：`v0.1.3`
 > 当前状态：`M-001`、`M-002`、`M-003`、Assurance Stage 1、Stage 2 两个 SQLite 个案
 > 与 Stage 3 有界 DML/Backfill 个案均已进入 `main`。它们仍不属于 Runtime 或默认能力，
-> 也不能解释为生产数据库安全证明。当前 `Now` 是冻结主线、整理交接和复习材料，不启动
-> Stage 4 或新的 Runtime/Memory/LangGraph 集成。
+> 也不能解释为生产数据库安全证明。当前 `Now` 是完成 `M-004` 主线可信执行维护，并在
+> 合并后转入真实代码任务验证；不启动 Stage 4 或新的 Runtime/Memory/LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -71,13 +71,27 @@ Stage 0 的三个已确认维护缺口按以下顺序完成：
 - 安全边界：不能删除终态完整性和新鲜度重算，只消除同一调用内的重复读取。
 - 退出条件：功能结果不变，重复 Git/subprocess 调用下降，单测可在 60 秒约束内运行。
 
-执行顺序：
+### M-004：主线可信执行维护
+
+- 优先级：`P0/P1`
+- 状态：`active` / Draft PR `#20`
+- 分支：`codex/mainline-trust-hardening`
+- 来源：Stage 3 冻结后，真实 dogfood 与独立审查又复现了主线可信执行缺口；这是一项
+  新增维护决策，不属于原 Assurance Stage，也不代表启动 Stage 4。
+- 固定范围：目标仓库与 Git 读取边界、staged/index 候选卫生、workspace/review evidence
+  完整性，以及 stop/timeout/recovery 的 owned process 边界。代码拆分只服务于这些修复，
+  不是独立重构目标。
+- 非目标：不增加新 Runtime、Stage、Memory、LangGraph、多 Reviewer 或默认实验能力；
+  不继续把新的泛化风险加入本 PR。
+- 退出条件：当前 PR 的关键回归、跨平台 CI、架构增长检查、公开仓库卫生和独立 diff
+  审查全部通过。真实任务 dogfood 在合并后单独执行，不作为继续扩张本 PR 的理由。
+
+当前路线分成两条，不把维护任务伪装成 Assurance Stage：
 
 ```text
-M-001 Adapter 边界
-  -> M-002 Node 包管理器
-  -> M-003 Finish 快照复用
-  -> Assurance Stage 1
+Assurance：Stage 1 -> Stage 2 -> Stage 3 -> 冻结，不启动 Stage 4
+主线维护：M-001 -> M-002 -> M-003 -> M-004
+M-004 合并后：真实代码任务能力与成本验证
 ```
 
 ## 三、主线阶段
@@ -244,6 +258,13 @@ opt-in 合并建议，不能自动改变默认 Linear 路径。
 Stage 1 已由最终 PR head 和合并后的主线 CI 验证并进入 `main`。下一阶段只选择数据库
 Migration 这一类 Threat 做纵向实验；在 detector、真实证据和危险/安全双生案例形成独立
 结论前，不把 AdequacyResult 接入默认成功语义。
+
+### 2026-07-27：新增 M-004，但不推进 Assurance Stage
+
+Stage 3 证据冻结后，真实 dogfood 与独立审查复现了目标仓库读取、证据新鲜度和 owned
+process 管理缺口，因此新增一次有界主线维护。它只收紧已有默认路径，不新增 Stage 或
+实验能力。M-004 完成后停止横向基础设施扩张，下一步改为真实代码任务的成功率、耗时、
+token 成本、人工接管和恢复体验验证。
 
 ## 七、更新规则
 

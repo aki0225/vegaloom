@@ -574,7 +574,7 @@ def _read_git_objects(
         for object_id in unique_object_ids
     )
     result = subprocess.run(
-        ["git", "cat-file", "--batch"],
+        _git_command(repo_root, "cat-file", "--batch"),
         cwd=repo_root,
         input=request,
         capture_output=True,
@@ -703,7 +703,7 @@ def _read_head_commit(repo_root: Path) -> str:
 
 def _run_git(repo_root: Path, *args: str) -> bytes:
     result = subprocess.run(
-        ["git", *args],
+        _git_command(repo_root, *args),
         cwd=repo_root,
         capture_output=True,
         env=_git_read_environment(),
@@ -713,6 +713,15 @@ def _run_git(repo_root: Path, *args: str) -> bytes:
         command = " ".join(args[:2])
         raise HygieneCheckError(f"Git 命令失败：{command}")
     return result.stdout
+
+
+def _git_command(repo_root: Path, *args: str) -> list[str]:
+    return [
+        "git",
+        "-c",
+        f"safe.directory={repo_root.resolve().as_posix()}",
+        *args,
+    ]
 
 
 def _git_read_environment() -> dict[str, str]:

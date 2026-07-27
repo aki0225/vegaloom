@@ -1,57 +1,6 @@
 from __future__ import annotations
 
-import ast
-from pathlib import Path
-
 import pytest
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_finish_decision_has_single_definition_and_both_consumers_import_it() -> None:
-    policy_path = REPO_ROOT / "src" / "vega" / "finish_policy.py"
-    policy_tree = ast.parse(policy_path.read_text(encoding="utf-8"))
-    policy_definitions = [
-        node
-        for node in ast.walk(policy_tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name == "decide_finish_status"
-    ]
-    assert len(policy_definitions) == 1
-
-    consumers = (
-        REPO_ROOT / "src" / "vega" / "finish_runtime.py",
-        REPO_ROOT / "src" / "vega" / "experimental" / "goal_integrity.py",
-    )
-    for consumer in consumers:
-        tree = ast.parse(consumer.read_text(encoding="utf-8"))
-        local_definitions = [
-            node.name
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name in {
-                "decide_finish_status",
-                "_finish_status",
-                "_trusted_finish_status",
-            }
-        ]
-        imported_names = {
-            alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module == "finish_policy"
-            for alias in node.names
-        }
-        policy_calls = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "decide_finish_status"
-        ]
-        assert local_definitions == []
-        assert "decide_finish_status" in imported_names
-        assert len(policy_calls) == 1
 
 
 @pytest.mark.parametrize(

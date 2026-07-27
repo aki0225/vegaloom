@@ -107,6 +107,32 @@ def test_sensitive_filenames_are_rejected_but_env_example_is_allowed() -> None:
     assert hygiene.find_sensitive_filename_violation(".env.example") is None
 
 
+def test_git_reads_trust_only_the_selected_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=b"ok", stderr=b"")
+
+    monkeypatch.setattr(hygiene.subprocess, "run", fake_run)
+
+    assert hygiene._run_git(repo, "status", "--short") == b"ok"
+    assert commands == [
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo.resolve().as_posix()}",
+            "status",
+            "--short",
+        ]
+    ]
+
+
 def test_ruff_lint_selection_is_explicit_and_stable() -> None:
     config = tomllib.loads(
         PROJECT_ROOT.joinpath("pyproject.toml").read_text(encoding="utf-8")
