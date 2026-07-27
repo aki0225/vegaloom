@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from vega.ma2b_readiness import (
+from vega.experimental.ma2b.readiness import (
     MA2B_EXECUTION_AUTHORIZATION_PATH,
     MA2B_EXECUTION_BINDING_PATH,
     MA2B_PILOT_CASE_IDS,
@@ -17,7 +17,7 @@ from vega.ma2b_readiness import (
     compute_ma2b_case_set_sha256,
     load_ma2b_execution_authorization,
 )
-from vega.ma2b_task_pack import MA2BTaskPackError
+from vega.experimental.ma2b.task_pack import MA2BTaskPackError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

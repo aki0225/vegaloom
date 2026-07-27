@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from vega.ma2b_execution_binding import (
+from vega.experimental.ma2b.execution_binding import (
     MA2BExecutionBindingError,
     load_ma2b_execution_binding,
 )

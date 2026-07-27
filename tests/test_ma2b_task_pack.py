@@ -9,7 +9,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from vega.ma2b_task_pack import (
+from vega.experimental.ma2b.task_pack import (
     MA2BCaseManifest,
     MA2BGroundTruthArtifact,
     MA2BTaskArtifact,

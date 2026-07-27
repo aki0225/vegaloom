@@ -19,7 +19,7 @@ from pydantic import (
     model_validator,
 )
 
-from .redaction import redact_text
+from ...redaction import redact_text
 
 
 MA2B_PRICING_MANIFEST_SCHEMA_VERSION = 1

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from vega.ma2b_pricing_manifest import (
+from vega.experimental.ma2b.pricing import (
     MA2BPricingManifestError,
     load_ma2b_pricing_manifest,
     parse_ma2b_pricing_manifest,

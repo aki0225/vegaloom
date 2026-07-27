@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from vega.delegation import (
+from vega.experimental.ma2b.delegation import (
     MAX_DELEGATION_INPUT_BYTES,
     DelegationValidationContext,
     PlanContract,

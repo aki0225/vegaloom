@@ -5,7 +5,6 @@ import json
 import os
 import re
 import stat
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal, Protocol
 
@@ -19,11 +18,15 @@ from pydantic import (
 )
 
 from .delegation import Sha256
-from .ma2b_execution_binding import MA2BExecutionBinding, MA2BExecutionBindingError
-from .ma2b_execution_binding import load_ma2b_execution_binding as _load_execution_binding
-from .ma2b_task_pack import MA2BCasePackage, MA2BTaskPackError
-from .ma2b_task_pack import load_ma2b_case_package as _load_case_package
-from .redaction import redact_text
+from .execution_binding import MA2BExecutionBinding, MA2BExecutionBindingError
+from .execution_binding import load_ma2b_execution_binding as _load_execution_binding
+from .readiness_validation import (
+    parse_utc_timestamp,
+    validate_authorization_binding,
+)
+from .task_pack import MA2BCasePackage, MA2BTaskPackError
+from .task_pack import load_ma2b_case_package as _load_case_package
+from ...redaction import redact_text
 
 
 MA2B_READINESS_SCHEMA_VERSION = 1
@@ -125,7 +128,7 @@ class MA2BExecutionAuthorization(BaseModel):
     @field_validator("authorized_at_utc")
     @classmethod
     def validate_utc_timestamp(cls, value: str) -> str:
-        _parse_utc_timestamp(value)
+        parse_utc_timestamp(value)
         return value
 
 
@@ -164,9 +167,60 @@ def check_ma2b_pilot_readiness(
     """汇总 MA-2B 真实执行前置条件；任何缺失都 fail-closed。"""
 
     repo = _resolve_repository_root(repo_root)
-    issues: list[str] = []
-    packages: list[MA2BCasePackage] = []
+    packages, issues = _load_pilot_cases(
+        repo,
+        task_pack_root=task_pack_root,
+        ground_truth_root=ground_truth_root,
+        case_loader=case_loader,
+    )
+    loaded_case_ids = [package.manifest.case_id for package in packages]
+    case_set_sha256 = (
+        compute_ma2b_case_set_sha256(packages)
+        if len(packages) == len(MA2B_PILOT_CASE_IDS)
+        else None
+    )
+    binding, execution_binding_sha256, binding_issues = _load_binding_state(
+        repo,
+        execution_binding_path=execution_binding_path,
+        execution_binding_loader=execution_binding_loader,
+    )
+    authorization, authorization_issues = _load_authorization_state(
+        repo,
+        authorization_path=authorization_path,
+    )
+    issues.extend(binding_issues)
+    issues.extend(authorization_issues)
+    if authorization is not None:
+        issues.extend(
+            validate_authorization_binding(
+                authorization,
+                binding=binding,
+                execution_binding_sha256=execution_binding_sha256,
+                case_set_sha256=case_set_sha256,
+            )
+        )
 
+    unique_issues = list(dict.fromkeys(issues))
+    return MA2BReadinessResult(
+        schema_version=MA2B_READINESS_SCHEMA_VERSION,
+        status="blocked" if unique_issues else "ready",
+        issue_codes=unique_issues,
+        loaded_case_ids=loaded_case_ids,
+        case_set_sha256=case_set_sha256,
+        execution_binding_loaded=binding is not None,
+        authorization_loaded=authorization is not None,
+    )
+
+
+def _load_pilot_cases(
+    repo: Path,
+    *,
+    task_pack_root: Path,
+    ground_truth_root: Path,
+    case_loader: _CasePackageLoader,
+) -> tuple[list[MA2BCasePackage], list[str]]:
+    packages: list[MA2BCasePackage] = []
+    issues: list[str] = []
     for case_id in MA2B_PILOT_CASE_IDS:
         try:
             package = case_loader(
@@ -183,68 +237,45 @@ def check_ma2b_pilot_readiness(
             continue
         _validate_loaded_case(case_id, package, issues)
         packages.append(package)
+    return packages, issues
 
-    loaded_case_ids = [package.manifest.case_id for package in packages]
-    case_set_sha256 = (
-        compute_ma2b_case_set_sha256(packages)
-        if len(packages) == len(MA2B_PILOT_CASE_IDS)
-        else None
-    )
 
-    binding: MA2BExecutionBinding | None = None
-    execution_binding_sha256: str | None = None
+def _load_binding_state(
+    repo: Path,
+    *,
+    execution_binding_path: Path,
+    execution_binding_loader: _ExecutionBindingLoader,
+) -> tuple[MA2BExecutionBinding | None, str | None, list[str]]:
     try:
         binding = execution_binding_loader(
             repo_root=repo,
             binding_path=execution_binding_path,
         )
-        execution_binding_sha256 = _sha256_repo_file(repo, execution_binding_path)
     except MA2BExecutionBindingError as exc:
-        issues.append(exc.issue_code)
+        return None, None, [exc.issue_code]
     except (OSError, ValueError) as exc:
-        issues.append(f"execution_binding:{type(exc).__name__}")
+        return None, None, [f"execution_binding:{type(exc).__name__}"]
+    try:
+        binding_sha256 = _sha256_repo_file(repo, execution_binding_path)
+    except (OSError, ValueError) as exc:
+        # loader 已完成合同校验时保留 binding，避免哈希读取失败掩盖后续 pricing 与时间诊断。
+        return binding, None, [f"execution_binding:{type(exc).__name__}"]
+    return binding, binding_sha256, []
 
-    authorization: MA2BExecutionAuthorization | None = None
+
+def _load_authorization_state(
+    repo: Path,
+    *,
+    authorization_path: Path,
+) -> tuple[MA2BExecutionAuthorization | None, list[str]]:
     try:
         authorization = load_ma2b_execution_authorization(
             repo_root=repo,
             authorization_path=authorization_path,
         )
+        return authorization, []
     except MA2BReadinessError as exc:
-        issues.append(exc.issue_code)
-
-    if authorization is not None:
-        if execution_binding_sha256 is None:
-            issues.append("execution_authorization_binding_unverifiable")
-        elif authorization.execution_binding_sha256 != execution_binding_sha256:
-            issues.append("execution_authorization_binding_hash_mismatch")
-        if binding is None:
-            issues.append("execution_authorization_pricing_unverifiable")
-        elif authorization.pricing_manifest_sha256 != binding.pricing_manifest_ref.sha256:
-            issues.append("execution_authorization_pricing_hash_mismatch")
-        elif _parse_utc_timestamp(authorization.authorized_at_utc) < _parse_utc_timestamp(
-            binding.availability_observed_at_utc
-        ):
-            issues.append("execution_authorization_before_binding_observation")
-        elif _parse_utc_timestamp(authorization.authorized_at_utc) > _parse_utc_timestamp(
-            binding.execution_window_start_utc
-        ):
-            issues.append("execution_authorization_after_execution_window_start")
-        if case_set_sha256 is None:
-            issues.append("execution_authorization_case_set_unverifiable")
-        elif authorization.case_set_sha256 != case_set_sha256:
-            issues.append("execution_authorization_case_set_hash_mismatch")
-
-    unique_issues = list(dict.fromkeys(issues))
-    return MA2BReadinessResult(
-        schema_version=MA2B_READINESS_SCHEMA_VERSION,
-        status="blocked" if unique_issues else "ready",
-        issue_codes=unique_issues,
-        loaded_case_ids=loaded_case_ids,
-        case_set_sha256=case_set_sha256,
-        execution_binding_loaded=binding is not None,
-        authorization_loaded=authorization is not None,
-    )
+        return None, [exc.issue_code]
 
 
 def load_ma2b_execution_authorization(
@@ -415,29 +446,13 @@ def _validate_public_text(value: str) -> str:
     return value
 
 
-def _parse_utc_timestamp(value: str) -> datetime:
-    if not value.endswith("Z"):
-        raise ValueError("时间戳必须使用 UTC Z 格式")
-    try:
-        timestamp = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
-    except ValueError as exc:
-        raise ValueError("时间戳必须是 ISO-8601 UTC") from exc
-    if timestamp.tzinfo is None or timestamp.utcoffset() != UTC.utcoffset(None):
-        raise ValueError("时间戳必须是 UTC")
-    return timestamp
-
-
 __all__ = [
     "MA2B_EXECUTION_AUTHORIZATION_PATH",
     "MA2B_EXECUTION_BINDING_PATH",
-    "MA2B_GROUND_TRUTH_ROOT",
-    "MA2B_PILOT_CASE_IDS",
-    "MA2B_READINESS_SCHEMA_VERSION",
+    "MA2B_GROUND_TRUTH_ROOT", "MA2B_PILOT_CASE_IDS", "MA2B_READINESS_SCHEMA_VERSION",
     "MA2B_TASK_PACK_ROOT",
     "MA2BExecutionAuthorization",
-    "MA2BReadinessError",
-    "MA2BReadinessResult",
-    "check_ma2b_pilot_readiness",
+    "MA2BReadinessError", "MA2BReadinessResult", "check_ma2b_pilot_readiness",
     "compute_ma2b_case_set_sha256",
     "load_ma2b_execution_authorization",
 ]

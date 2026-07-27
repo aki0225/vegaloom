@@ -19,8 +19,8 @@ from pydantic import (
 )
 
 from .delegation import ArtifactReference, Sha256
-from .ma2b_pricing_manifest import MA2BPricingManifestError, parse_ma2b_pricing_manifest
-from .redaction import redact_text
+from .pricing import MA2BPricingManifestError, parse_ma2b_pricing_manifest
+from ...redaction import redact_text
 
 
 MA2B_EXECUTION_BINDING_SCHEMA_VERSION = 1
