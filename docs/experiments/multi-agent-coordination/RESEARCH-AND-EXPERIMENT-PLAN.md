@@ -734,11 +734,242 @@ baseline 上，写出最小、严格、fail-closed 的 `PlanContract` 与 `Deleg
 readiness 门禁阻断：
 
 ```text
-formal_inputs_complete / readiness_blocked / provider_not_authorized
+formal_inputs_complete / readiness_blocked / pre_pilot_probe_complete
 ```
 
-该状态不表示真实 Worker 或 Pilot 已获批准；在 execution binding、owner authorization 和
-Provider 授权齐备前，不得调用真实 Provider，也不得提前进入 Reviewer、MA-3 或 multi-worker。
+Owner 后续只授权了一个有调用上限的 pre-pilot Worker 能力探针。该授权不改变正式 task-pack
+的 `max_slices: 1`，也不解除 12-case readiness 门禁；因此以下结果不能称为正式 MA-2B Pilot，
+不得据此提前进入 Reviewer、MA-3 或默认 multi-worker。
+
+### 12.1 2026-07-27 最小 Provider 能力探针
+
+本轮固定同一 Codex Worker 模型、`medium` reasoning、冻结计划、初始 workspace 和 verifier，
+只比较：
+
+```text
+S：单 Worker、单调用完成两个 slice
+M：两个隔离 Worker 各完成一个互斥 slice，确定性集成后统一验证
+```
+
+Worker 子进程禁用 agents、Memory、插件、Apps 和额外 MCP server；不调用 Planner 或 Reviewer。
+`worker_token_limit` 只作为观测预算，不是运行时硬门禁。
+
+`MA2B-C07` 得到一组可计入的正向结果：
+
+| 指标 | S | M |
+|---|---:|---:|
+| verifier | passed | passed |
+| Worker 调用数 | 1 | 2 |
+| wall-clock | 180.252 秒 | 129.876 秒 |
+| input tokens | 369,487 | 459,967 |
+| cached input tokens | 332,672 | 369,664 |
+| output tokens | 5,097 | 5,683 |
+| input + output | 374,584 | 465,650 |
+| scope violation | 0 | 0 |
+| 集成冲突 | 0 | 0 |
+| 人工代码介入 | 0 | 0 |
+
+两种模式最终 workspace 内容一致，且都只修改 `src/vega/cli.py` 与
+`src/vega/cli_support.py`。与 S 相比，M：
+
+- wall-clock 减少 50.375 秒，即 27.95%；
+- input tokens 增加 90,480，即 24.49%；
+- input + output 增加 91,066，即 24.31%。
+
+因此当前只证明：在一个低耦合双文件 case 上，两个隔离 Worker 可以产生与单 Worker 相同的
+可验证结果，并用更高 Token 消耗换取更低墙钟。Provider 未返回可计价金额，不能补算或宣称
+美元成本优势。C07 的观测 Token 也远高于 task-pack 中 14,000 的单 Worker 观测预算，这不使
+运行失效，但构成明确的经济性负面信号。
+
+`MA2B-C06` 不进入 S/M 比较。其冻结 workspace 缺少 `src/vega/redaction.py`；完成进度回调
+任务后，固定 verifier 会因基线输出变成 `[REDACTION_UNAVAILABLE]` 而失败。让 Worker 额外
+实现脱敏 fallback 才能通过，会把无关修复混入进度能力比较。因此该 case 当前分类为
+workspace/verifier 输入组合无效，不能记为 Worker 质量失败，也不能通过放宽 verifier 修复。
+
+适配阶段发现的父线程 agents 继承、只读审批和缓存分类问题均已 fail-closed，相关尝试不计入
+S/M 指标。实际 Worker Provider 调用已使用 7/9；剩余 2 次不足以完成另一个
+`S 1 次 + M 2 次` 的完整对照，因此本轮停止 Provider 调用，不启动任何下一 case。
+
+当前产品结论仍是 `inconclusive`：已有局部机械能力与延迟信号，但样本只有一个有效 case，
+且 Token 经济性退化。下一次 Provider 调用前，应先修复或替换 C06 这类无效输入，再冻结至少
+一个工作量更均衡的独立 case 和新的调用上限；不得扩大 readiness、增加证据层或转入
+Reviewer / MA-3。
+
+### 12.2 下一正向候选与继续条件
+
+对现有 12-case 的只读复核得到以下边界：
+
+- `C01-C04` 各只有一个允许写路径，不能在不改写冻结输入的情况下形成两个互斥 Worker slice；
+- `C06` 是前述无效 workspace/verifier 组合，不能继续使用；
+- `C09-C10` 只能验证人工决策下的 `safe_deferral`，不得产生代码 diff；
+- `C11-C12` 必须在 Planner/Worker 调用前 `safe_block`，不能证明 Worker 编码能力；
+- `C05` 与 `C08` 都有两个允许写路径，但正式 task-pack 仍保持 `max_slices: 1`。
+
+`C05` 可以作为 pricing parser 与 execution binding 的接口协调压力样本，但参考修复中新增
+pricing 模块为 300 余行，binding 接入约 20 行，负载明显不均衡。即使 M 更快，也不能据此
+归因于通用并行收益，因此它只保留为后备样本。
+
+下一次完整 S/M 对照优先使用 `MA2B-C08`。冻结 verifier 的红基线为一个预期断言失败，不存在
+C06 式缺件；它允许修改一个现有文件和新增一个独立模块，参考实现规模也明显小于 C05。预注册
+拆分为：
+
+```text
+Slice 1:
+  src/vega/repository_identity.py
+  实现 resolve_git_revision(...) 与 repository_scope(...)
+
+Slice 2:
+  src/vega/project_profile.py
+  接入固定 revision，并让 tracked 读取与 Memory scope 复用冻结接口
+
+Verifier:
+  python -m pytest -q tests/test_tracked_profile_identity.py
+```
+
+该 case 仍不是完全均衡负载，只能补充“存在接口依赖的双文件协调”样本，不能单独证明经济性
+优势。pre-pilot Probe 的双 slice 只存在于冻结实验计划中，不修改正式 task-pack、ground truth、
+哈希或 12-case readiness 条件。
+
+继续执行需要 Owner 单独授权最多 3 次新增 Worker Provider 调用，且必须一次性覆盖
+`S 1 次 + M 2 次`。模型、reasoning、Worker 隔离、verifier 和停止语义沿用 C07；任一输入
+有效性、scope 或集成检查失败即停止，不追加补跑预算。获得该明确授权前，只允许本地确定性
+验证，不得调用 Provider。
+
+### 12.3 2026-07-27 C08 探针结果与输入纠偏
+
+Owner 随后明确授权了最多 3 次新增 Worker Provider 调用。本轮严格执行 `S 1 次 + M 2 次`，
+没有 Planner、Reviewer、人工代码修补或失败重试，新增调用预算已使用 `3/3`。
+
+| 指标 | S | M |
+|---|---:|---:|
+| 固定 verifier | passed | failed |
+| Worker 调用数 | 1 | 2 |
+| wall-clock | 258.412 秒 | 128.586 秒 |
+| input tokens | 155,105 | 250,393 |
+| cached input tokens | 127,232 | 187,392 |
+| output tokens | 6,800 | 6,723 |
+| input + output | 161,905 | 257,116 |
+| scope violation | 0 | 0 |
+| 集成冲突 | 0 | 0 |
+| 人工代码介入 | 0 | 0 |
+
+S 修改了两个允许文件并通过固定 verifier，但人工只读检查发现它新增了无实际作用的
+`revision_binding` 字典与恒真自检，只为补足 verifier 的 AST 文本计数。其核心 revision 与
+repository scope 语义成立，但该通过包含明确的测试导向冗余，不能作为干净的代码质量正例。
+
+M 的两个隔离 Worker 各自只修改一个允许文件，集成后的实现能够解析固定 revision、区分同名
+checkout，并且公开 scope 不包含绝对路径。固定 verifier 唯一失败点是同时要求：
+
+```text
+_tracked_files(repo, resolved_revision)
+rendered.count("tracked_revision=resolved_revision") >= 3
+```
+
+冻结 workspace 中除 `_tracked_files` 外只有 `load_project_config` 与
+`load_agents_instructions` 两个合法的 `tracked_revision` keyword 消费者。因此，最小任务实现
+无法同时满足以上两个文本条件；参考绿提交通过增加不属于本 task 验收事实的额外 tracked 读取
+满足计数，S 则通过无效字典绕过。M 按预注册分工使用
+`_tracked_files(repo, tracked_revision=resolved_revision)`，语义正确但被第一个文本断言拒绝。
+
+因此 C08 本轮分类为：
+
+```text
+verifier_task_contract_mismatch / no_valid_s_m_pair
+```
+
+该结果不能记为 Multi-Worker 失败，也不能记为第二个正向 case。M 相比 S 的墙钟减少
+`50.24%`、总 Token 增加 `58.81%`，但由于不存在两路都通过固定 verifier 的有效对照，这两个
+差值只保留为诊断信息，不进入经济性结论。
+
+C08 的冻结 task-pack、ground truth 和哈希不改写；其原始红绿记录继续保留，但“可作为
+pre-pilot 双 Worker 正向样本”的资格被本节 supersede。正式 12-case readiness 仍不放宽。
+下一次 Provider 调用前必须先冻结一个 task/verifier 一致的 case，并重新获得覆盖完整
+`S 1 次 + M 2 次` 的明确调用授权。C05 仍可作为后备接口压力样本，但其负载明显不均衡，
+不得被包装成通用经济性样本。
+
+### 12.4 C05 接口协调压力样本预注册
+
+Owner 随后同意使用 C05 继续一次完整 S/M 对照，并授权新的最多 3 次 Worker Provider 调用。
+本轮继续固定 `gpt-5.6-sol`、`medium` reasoning、相同隔离策略、初始 workspace 和 verifier，
+不调用 Planner 或 Reviewer，不进行人工代码修补或失败重试。
+
+冻结分工为：
+
+```text
+Slice 1:
+  src/vega/ma2b_pricing_manifest.py
+  实现 parse_ma2b_pricing_manifest(
+      raw,
+      expected_model_ids=...,
+      maximum_observed_at_utc=...,
+  )
+
+Slice 2:
+  src/vega/ma2b_execution_binding.py
+  接入模型 ID、观测时间和稳定 issue code 校验
+
+Verifier:
+  python -m pytest -q tests/test_pricing_binding_contract.py
+```
+
+正式 task-pack 的 `max_slices: 1` 不修改；双 slice 只属于 pre-pilot Probe。S 使用单 Worker
+单次完成两个 slice，M 使用两个隔离 Worker 各完成一个互斥 slice，再进行确定性集成和统一
+验证。除非在剩余调用前发现输入、scope 或集成结构无效，否则 Worker 或 verifier 失败本身
+作为实验结果保留，仍完成预注册的三个 treatment 调用；任何失败都不获得补跑预算。
+
+C05 的 pricing parser 工作量显著大于 execution binding 接入，因此本轮主要观察接口定义、
+隔离实现和集成后的固定 verifier。只有 S 与 M 都通过时才比较墙钟与 Token，且差值仍不能
+解释为通用负载均衡或经济性优势。
+
+### 12.5 2026-07-27 C05 探针结果与阶段结论
+
+本轮严格使用新增调用预算 `3/3`，S 与 M 都只修改两个允许文件，固定 verifier 均为
+`3 passed`。没有 scope violation、集成冲突、人工代码修补或失败重试。
+
+| 指标 | S | M |
+|---|---:|---:|
+| 固定 verifier | passed | passed |
+| Worker 调用数 | 1 | 2 |
+| wall-clock | 207.262 秒 | 206.997 秒 |
+| input tokens | 189,104 | 351,957 |
+| cached input tokens | 158,720 | 285,952 |
+| output tokens | 6,999 | 8,340 |
+| input + output | 196,103 | 360,297 |
+| scope violation | 0 | 0 |
+| 集成冲突 | 0 | 0 |
+| 人工代码介入 | 0 | 0 |
+
+S 与 M 的最终文件字节不相同，但都满足冻结的 schema、模型绑定和兼容加载事实。人工只读检查
+未发现测试绕过；两路实现均通过编译与 Ruff，M 的 pricing parser 还额外校验了模型 ID 格式、
+角色模型唯一性、总成本矩阵和输入大小。因此本 case 证明的是独立 Worker 可以按照冻结接口
+分别实现 parser 与 binding，并在没有共享会话或人工修补的情况下成功集成，不要求生成同一
+份参考补丁。
+
+M 相比 S：
+
+- wall-clock 仅减少 0.265 秒，即 `0.13%`，不构成有意义的延迟改善；
+- input tokens 增加 162,853，即 `86.12%`；
+- input + output 增加 164,194，即 `83.73%`。
+
+M 中 pricing Worker 用时 206.002 秒，execution binding Worker 用时 74.706 秒。较短 slice
+完全被较长 slice 覆盖，整体墙钟仍由 pricing parser 支配；这与预注册的负载不均衡风险一致。
+
+结合 C07 与 C05，先前“一例有效 case 下仍为 `inconclusive`”的阶段结论被本节 supersede：
+
+```text
+pre_pilot_worker_capability_signal_positive
+multi_worker_economic_signal_not_observed
+formal_ma2b_pilot_readiness_blocked
+```
+
+当前已证明的能力边界是：两个隔离 Worker 能在一个低耦合双文件 case 和一个存在冻结接口依赖
+的双文件 case 中，各自守住写范围并产生可统一验证的集成结果。当前没有证明默认并行更经济：
+C07 用更多 Token 换取延迟下降，C05 则几乎没有延迟收益且 Token 明显增加。
+
+这已经满足本轮“先验证实际 Worker/Multi-Worker 机械能力”的目的。当前分支停止继续增加
+Provider case，不增加新的证据层，也不进入 Reviewer、MA-3 或 multi-worker 产品化。正式
+Pilot 仍必须通过原 12-case readiness、execution binding、pricing 与 owner authorization，
+不能由本节的两个 pre-pilot case 替代。
 
 ---
 

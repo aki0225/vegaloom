@@ -22,6 +22,9 @@ ProbeStatus = Literal[
 ]
 
 _SLICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+_IGNORED_ARTIFACT_DIRECTORIES = frozenset(
+    {"__pycache__", ".pytest_cache", ".ruff_cache"}
+)
 
 
 @dataclass(frozen=True)
@@ -68,7 +71,7 @@ class WorkerAdapter(Protocol):
     def __call__(
         self,
         *,
-        task_slice: ProbeSlice,
+        task_slices: tuple[ProbeSlice, ...],
         workspace: Path,
     ) -> WorkerObservation: ...
 
@@ -79,7 +82,7 @@ class ProbeVerifier(Protocol):
 
 @dataclass(frozen=True)
 class ProbeWorkerResult:
-    slice_id: str
+    slice_ids: tuple[str, ...]
     workspace: Path
     changed_paths: tuple[str, ...]
     wall_seconds: float
@@ -186,14 +189,11 @@ def _run_sequential(
     workspace: Path,
     worker: WorkerAdapter,
 ) -> tuple[tuple[ProbeWorkerResult, ...], _WorkerFailure | None]:
-    results: list[ProbeWorkerResult] = []
-    for task_slice in plan.slices:
-        result, failure = _run_worker(task_slice, workspace, worker)
-        if failure is not None:
-            return tuple(results), failure
-        assert result is not None
-        results.append(result)
-    return tuple(results), None
+    result, failure = _run_worker(plan.slices, workspace, worker)
+    if failure is not None:
+        return (), failure
+    assert result is not None
+    return (result,), None
 
 
 def _run_parallel(
@@ -218,7 +218,7 @@ def _run_parallel(
         futures = {
             task_slice.slice_id: executor.submit(
                 _run_worker,
-                task_slice,
+                (task_slice,),
                 workspaces[task_slice.slice_id],
                 worker,
             )
@@ -253,25 +253,32 @@ def _run_parallel(
 
 
 def _run_worker(
-    task_slice: ProbeSlice,
+    task_slices: tuple[ProbeSlice, ...],
     workspace: Path,
     worker: WorkerAdapter,
 ) -> tuple[ProbeWorkerResult | None, _WorkerFailure | None]:
+    if not task_slices:
+        return None, _WorkerFailure("worker_assignment_invalid")
     before = _snapshot_workspace(workspace)
     started = perf_counter()
     try:
-        observation = worker(task_slice=task_slice, workspace=workspace)
+        observation = worker(task_slices=task_slices, workspace=workspace)
     except Exception:
         return None, _WorkerFailure("worker_error")
     if not isinstance(observation, WorkerObservation):
         return None, _WorkerFailure("worker_result_invalid")
 
     changed_paths = tuple(sorted(_changed_paths(before, _snapshot_workspace(workspace))))
-    if not set(changed_paths).issubset(task_slice.allowed_write_paths):
+    allowed_write_paths = {
+        path
+        for task_slice in task_slices
+        for path in task_slice.allowed_write_paths
+    }
+    if not set(changed_paths).issubset(allowed_write_paths):
         return None, _WorkerFailure("worker_write_scope_violation")
     return (
         ProbeWorkerResult(
-            slice_id=task_slice.slice_id,
+            slice_ids=tuple(task_slice.slice_id for task_slice in task_slices),
             workspace=workspace,
             changed_paths=changed_paths,
             wall_seconds=perf_counter() - started,
@@ -313,10 +320,13 @@ def _snapshot_workspace(workspace: Path) -> dict[str, bytes]:
         raise ValueError("source_workspace 必须是普通目录")
     snapshot: dict[str, bytes] = {}
     for path in sorted(workspace.rglob("*")):
+        relative = path.relative_to(workspace)
         if path.is_symlink():
             raise ValueError("workspace 不能包含链接")
+        if any(part in _IGNORED_ARTIFACT_DIRECTORIES for part in relative.parts):
+            continue
         if path.is_file():
-            relative_path = path.relative_to(workspace).as_posix()
+            relative_path = relative.as_posix()
             snapshot[relative_path] = path.read_bytes()
         elif not path.is_dir():
             raise ValueError("workspace 不能包含特殊文件")

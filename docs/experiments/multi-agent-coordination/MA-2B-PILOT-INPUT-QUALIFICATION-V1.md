@@ -7,6 +7,12 @@
 > 正式输入迁移提交：`399e7460f5662cca9fb354481ca76bccba0a6fed`
 > 状态：`formal_inputs_complete / readiness_blocked / provider_not_authorized`
 
+> 2026-07-27 supersession 注记：后续 C08 pre-pilot S/M 探针发现固定 verifier 的两个 AST
+> 文本条件不能由最小任务实现同时满足；S 通过包含测试导向冗余，M 的语义实现则被文本断言
+> 拒绝。因此本协议中 C08 的历史红绿记录继续保留，但其“适合作为双 Worker 正向样本”的
+> 资格已被 `RESEARCH-AND-EXPERIMENT-PLAN.md` 第 12.3 节 supersede。正式输入字节、哈希与
+> readiness 条件均不改写。
+
 ## 一、当前结论
 
 Canary 的能力结论保持为：

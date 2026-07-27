@@ -16,10 +16,20 @@ def test_sequential_and_parallel_produce_same_verified_workspace(tmp_path: Path)
     source = _source_workspace(tmp_path)
     plan = _two_slice_plan()
     verified: list[tuple[str, str]] = []
+    calls: list[tuple[str, ...]] = []
 
-    def worker(*, task_slice: ProbeSlice, workspace: Path) -> WorkerObservation:
-        target = workspace / task_slice.allowed_write_paths[0]
-        target.write_text(f"{task_slice.slice_id}\n", encoding="utf-8")
+    def worker(
+        *,
+        task_slices: tuple[ProbeSlice, ...],
+        workspace: Path,
+    ) -> WorkerObservation:
+        calls.append(tuple(task_slice.slice_id for task_slice in task_slices))
+        cache = workspace / "__pycache__"
+        cache.mkdir(exist_ok=True)
+        (cache / "generated.cpython-312.pyc").write_bytes(b"generated")
+        for task_slice in task_slices:
+            target = workspace / task_slice.allowed_write_paths[0]
+            target.write_text(f"{task_slice.slice_id}\n", encoding="utf-8")
         return WorkerObservation(
             input_tokens=100,
             output_tokens=20,
@@ -56,10 +66,14 @@ def test_sequential_and_parallel_produce_same_verified_workspace(tmp_path: Path)
         "backend.txt",
         "frontend.txt",
     )
+    assert len(sequential.worker_results) == 1
+    assert sequential.worker_results[0].slice_ids == ("backend", "frontend")
+    assert calls[0] == ("backend", "frontend")
+    assert sorted(calls[1:]) == [("backend",), ("frontend",)]
     assert verified == [("backend\n", "frontend\n")] * 2
-    assert [item.slice_id for item in parallel.worker_results] == [
-        "backend",
-        "frontend",
+    assert [item.slice_ids for item in parallel.worker_results] == [
+        ("backend",),
+        ("frontend",),
     ]
     assert all(item.observation.input_tokens == 100 for item in parallel.worker_results)
 
@@ -71,7 +85,12 @@ def test_parallel_workers_use_isolated_workspaces_and_run_concurrently(
     lock = Lock()
     workspaces: list[Path] = []
 
-    def worker(*, task_slice: ProbeSlice, workspace: Path) -> WorkerObservation:
+    def worker(
+        *,
+        task_slices: tuple[ProbeSlice, ...],
+        workspace: Path,
+    ) -> WorkerObservation:
+        (task_slice,) = task_slices
         with lock:
             workspaces.append(workspace)
         barrier.wait(timeout=2)
@@ -98,8 +117,15 @@ def test_parallel_workers_use_isolated_workspaces_and_run_concurrently(
 def test_scope_violation_blocks_before_verifier(tmp_path: Path) -> None:
     verifier_calls = 0
 
-    def worker(*, task_slice: ProbeSlice, workspace: Path) -> WorkerObservation:
-        (workspace / "outside.txt").write_text(task_slice.slice_id, encoding="utf-8")
+    def worker(
+        *,
+        task_slices: tuple[ProbeSlice, ...],
+        workspace: Path,
+    ) -> WorkerObservation:
+        (workspace / "outside.txt").write_text(
+            task_slices[0].slice_id,
+            encoding="utf-8",
+        )
         return WorkerObservation()
 
     def verifier(_: Path) -> bool:
@@ -127,7 +153,11 @@ def test_parallel_plan_rejects_overlapping_write_scope_before_workers(
 ) -> None:
     worker_calls = 0
 
-    def worker(*, task_slice: ProbeSlice, workspace: Path) -> WorkerObservation:
+    def worker(
+        *,
+        task_slices: tuple[ProbeSlice, ...],
+        workspace: Path,
+    ) -> WorkerObservation:
         nonlocal worker_calls
         worker_calls += 1
         return WorkerObservation()
@@ -154,8 +184,13 @@ def test_parallel_plan_rejects_overlapping_write_scope_before_workers(
 
 
 def test_worker_failure_blocks_run(tmp_path: Path) -> None:
-    def worker(*, task_slice: ProbeSlice, workspace: Path) -> WorkerObservation:
-        raise RuntimeError(f"{task_slice.slice_id}:{workspace}")
+    def worker(
+        *,
+        task_slices: tuple[ProbeSlice, ...],
+        workspace: Path,
+    ) -> WorkerObservation:
+        slice_ids = ",".join(task_slice.slice_id for task_slice in task_slices)
+        raise RuntimeError(f"{slice_ids}:{workspace}")
 
     result = run_probe(
         mode="sequential",
@@ -172,7 +207,12 @@ def test_worker_failure_blocks_run(tmp_path: Path) -> None:
 
 
 def test_verifier_failure_is_reported(tmp_path: Path) -> None:
-    def worker(*, task_slice: ProbeSlice, workspace: Path) -> WorkerObservation:
+    def worker(
+        *,
+        task_slices: tuple[ProbeSlice, ...],
+        workspace: Path,
+    ) -> WorkerObservation:
+        (task_slice,) = task_slices
         (workspace / task_slice.allowed_write_paths[0]).write_text(
             "changed",
             encoding="utf-8",
