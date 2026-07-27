@@ -451,7 +451,7 @@ def test_verification_propagates_bounded_progress_reporter(
                 "version: 1",
                 "verification:",
                 "  commands:",
-                '    - python -c "import time; time.sleep(0.12)"',
+                '    - python -c "import time; time.sleep(0.3)"',
                 "  max_commands: 1",
             ]
         )

@@ -81,6 +81,17 @@ remaining 和 runtime security 均通过，但 smoke 与 p0 分片暴露两个�
 对应 CI 失败节点在本机修复后重跑为 smoke `5 passed`、p0/review `4 passed`。这仍不能
 替代后续最新 head 的完整跨平台 CI。
 
+## 第二轮新 head CI 反馈
+
+workflow `30283527572` 在 head `769547d` 上有 9/10 个 job 通过；Python 3.11 全量测试
+汇总为 `1 failed, 826 passed, 5 skipped`。唯一失败节点是
+`test_verification_propagates_bounded_progress_reporter`：测试命令只休眠 `0.12s`，在
+Linux 全量负载下可能在第二次进度回调前结束。
+
+本轮只把该测试夹具的休眠时间延长为 `0.3s`，进度回调间隔仍固定为 `0.03s`，不改产品
+运行时语义。该失败 run 保留为时序不稳定证据；修复后的新 head 仍须重新完成全部 CI，
+不能把前一 run 的 9 个成功 job 拼接成通过结论。
+
 ## 最新增量与裁剪
 
 - README 恢复精确产品边界：独立只读 reviewer 只读取明确编译的任务、规则、tracked diff
