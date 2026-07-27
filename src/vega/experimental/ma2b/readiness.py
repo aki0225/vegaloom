@@ -17,7 +17,6 @@ from pydantic import (
     model_validator,
 )
 
-from .delegation import Sha256
 from .execution_binding import MA2BExecutionBinding, MA2BExecutionBindingError
 from .execution_binding import load_ma2b_execution_binding as _load_execution_binding
 from .readiness_validation import (
@@ -26,6 +25,7 @@ from .readiness_validation import (
 )
 from .task_pack import MA2BCasePackage, MA2BTaskPackError
 from .task_pack import load_ma2b_case_package as _load_case_package
+from .task_pack_models import Sha256
 from ...redaction import redact_text
 
 

@@ -18,8 +18,8 @@ from pydantic import (
     model_validator,
 )
 
-from .delegation import ArtifactReference, Sha256
 from .pricing import MA2BPricingManifestError, parse_ma2b_pricing_manifest
+from .task_pack_models import ArtifactReference, Sha256
 from ...redaction import redact_text
 
 

@@ -9,24 +9,11 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    StringConstraints,
-    ValidationError,
-    field_validator,
-    model_validator,
+    BaseModel, ConfigDict, Field, StringConstraints,
+    field_validator, model_validator,
 )
 
-from ...redaction import redact_text
-from .delegation import (
-    AcceptanceId,
-    ArtifactReference,
-    BudgetEligibilityLimits,
-    GitObjectId,
-    Sha256,
-    SliceVerification,
-)
+from ...redaction import redact_text, sensitive_path_reason
 
 
 MA2B_TASK_PACK_SCHEMA_VERSION = 1
@@ -35,17 +22,22 @@ MAX_MA2B_WORKSPACE_FILE_BYTES = 512 * 1024
 MAX_MA2B_WORKSPACE_TOTAL_BYTES = 4 * 1024 * 1024
 
 MA2BCaseClass = Literal[
-    "code_change",
-    "human_required",
-    "stale_evidence",
-    "invalid_verifier",
+    "code_change", "human_required", "stale_evidence", "invalid_verifier"
 ]
 MA2BPackageRole = Literal["fake_driver_fixture", "pilot_case"]
 MA2BExpectedOutcome = Literal["accepted_change", "safe_deferral", "safe_block"]
 MA2BWorkspaceSourceKind = Literal["synthetic_fixture", "git_snapshot"]
 
 _STRICT_MODEL = ConfigDict(extra="forbid", strict=True)
-_ZERO_HASH = "0" * 64
+_PATH_GLOB_CHARACTERS = frozenset("*?[]{}")
+_LOCAL_PATH_PATTERNS = (
+    re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]"),
+    re.compile(
+        r"(?<![A-Za-z0-9._\\-])(?:\\\\){1,2}[A-Za-z0-9._$-]+"
+        r"\\+[A-Za-z0-9._$-]+"
+    ),
+    re.compile(r"(?<![A-Za-z0-9:/])/(?![A-Za-z?](?:[\s\"'`<>]|$))"),
+)
 _CASE_ID_PATTERN = re.compile(r"^MA2B-(?:C|F)(?:0[1-9]|1[0-2])$")
 _TASK_ID_PATTERN = r"^TASK-MA2B-(?:C|F)(?:0[1-9]|1[0-2])$"
 _DECISION_ID_PATTERN = r"^D-MA2B-(?:C|F)(?:0[1-9]|1[0-2])-[A-Z0-9][A-Z0-9._-]{0,49}$"
@@ -58,9 +50,15 @@ CaseId = Annotated[str, StringConstraints(pattern=_CASE_ID_PATTERN.pattern)]
 MA2BTaskId = Annotated[str, StringConstraints(pattern=_TASK_ID_PATTERN)]
 DecisionId = Annotated[str, StringConstraints(pattern=_DECISION_ID_PATTERN)]
 RepositoryId = Annotated[str, StringConstraints(pattern=_REPOSITORY_ID_PATTERN)]
+Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+GitObjectId = Annotated[
+    str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+]
+AcceptanceId = Annotated[
+    str, StringConstraints(pattern=r"^A-[A-Z0-9][A-Z0-9._-]{0,99}$")
+]
 NonEmptyText = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=4000),
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)
 ]
 
 
@@ -70,6 +68,32 @@ class MA2BTaskPackError(ValueError):
     def __init__(self, issue_code: str) -> None:
         self.issue_code = issue_code
         super().__init__(issue_code)
+
+
+class ArtifactReference(BaseModel):
+    model_config = _STRICT_MODEL
+
+    relative_path: str
+    sha256: Sha256
+
+    @field_validator("relative_path")
+    @classmethod
+    def validate_relative_path(cls, value: str) -> str:
+        return _validate_repo_relative_path(value, "relative_path")
+
+
+class MA2BCaseBudget(BaseModel):
+    model_config = _STRICT_MODEL
+
+    max_slices: int = Field(ge=1, le=64)
+    max_dependency_edges: int = Field(ge=0, le=4096)
+    max_write_paths: int = Field(ge=1, le=4096)
+    max_changed_files: int = Field(ge=1, le=1000)
+    max_diff_lines: int = Field(ge=1, le=1_000_000)
+    max_new_files: int = Field(ge=0, le=1000)
+    max_context_tokens: int = Field(ge=1, le=10_000_000)
+    max_worker_time_seconds: int = Field(ge=1, le=86_400)
+    max_worker_tokens: int = Field(ge=1, le=10_000_000)
 
 
 class MA2BAcceptanceFact(BaseModel):
@@ -189,7 +213,7 @@ class MA2BProjectPolicyArtifact(BaseModel):
     case_id: CaseId
     allowed_read_paths: list[str] = Field(min_length=1, max_length=256)
     allowed_write_paths: list[str] = Field(min_length=1, max_length=128)
-    budget_limits: BudgetEligibilityLimits
+    budget_limits: MA2BCaseBudget
 
     @field_validator("allowed_read_paths", "allowed_write_paths")
     @classmethod
@@ -221,13 +245,7 @@ class MA2BVerificationManifest(BaseModel):
     @field_validator("commands")
     @classmethod
     def validate_commands(cls, values: list[str]) -> list[str]:
-        validated = SliceVerification.model_validate(
-            {
-                "commands": values,
-                "oracle": {"kind": "all_commands_exit_zero"},
-            }
-        )
-        return list(validated.commands)
+        return _validate_verification_commands(values)
 
 
 class MA2BCaseManifest(BaseModel):
@@ -282,13 +300,7 @@ class MA2BGroundTruthArtifact(BaseModel):
     @field_validator("required_verification_commands")
     @classmethod
     def validate_verification_commands(cls, values: list[str]) -> list[str]:
-        validated = SliceVerification.model_validate(
-            {
-                "commands": values,
-                "oracle": {"kind": "all_commands_exit_zero"},
-            }
-        )
-        return list(validated.commands)
+        return _validate_verification_commands(values)
 
     @field_validator("manual_adjudication_rule")
     @classmethod
@@ -302,7 +314,12 @@ class MA2BGroundTruthArtifact(BaseModel):
             package_role=self.package_role,
             case_class=self.case_class,
         )
-        expected_outcome = expected_outcome_for_class(self.case_class)
+        expected_outcome = {
+            "code_change": "accepted_change",
+            "human_required": "safe_deferral",
+            "stale_evidence": "safe_block",
+            "invalid_verifier": "safe_block",
+        }[self.case_class]
         if self.expected_outcome != expected_outcome:
             raise ValueError("expected_outcome 与 case_class 不一致")
         if set(self.forbidden_outcomes) != _ALL_OUTCOMES.difference({expected_outcome}):
@@ -390,32 +407,12 @@ def expected_case_class(case_id: str) -> MA2BCaseClass:
     return "invalid_verifier"
 
 
-def expected_outcome_for_class(case_class: MA2BCaseClass) -> MA2BExpectedOutcome:
-    if case_class == "code_change":
-        return "accepted_change"
-    if case_class == "human_required":
-        return "safe_deferral"
-    return "safe_block"
-
-
 def validate_contract_path(value: str) -> str:
-    try:
-        reference = ArtifactReference.model_validate(
-            {
-                "relative_path": value,
-                "sha256": _ZERO_HASH,
-            }
-        )
-    except ValidationError as exc:
-        raise ValueError("必须使用安全的仓库相对路径") from exc
-    return reference.relative_path
+    return _validate_repo_relative_path(value, "contract path")
 
 
 def validate_public_text(value: str, field_name: str) -> str:
-    if any(character in value for character in ("\r", "\n", "\0")):
-        raise ValueError(f"{field_name} 不能包含换行或 NUL")
-    if any(unicodedata.category(character) in {"Cc", "Cf"} for character in value):
-        raise ValueError(f"{field_name} 不能包含控制字符或双向格式字符")
+    _reject_unsafe_text(value, field_name)
     if redact_text(value) != value:
         raise ValueError(f"{field_name} 会触发脱敏，不能进入公开 task-pack")
     return value
@@ -435,31 +432,69 @@ def require_unique(values: list[Any], message: str) -> None:
         raise ValueError(message)
 
 
+def _validate_repo_relative_path(value: str, field_name: str) -> str:
+    if value != value.strip():
+        raise ValueError(f"{field_name} 不能包含首尾空白")
+    if not value or len(value) > 512:
+        raise ValueError(f"{field_name} 必须是长度不超过 512 的非空路径")
+    _reject_unsafe_text(value, field_name)
+    if value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", value):
+        raise ValueError(f"{field_name} 只能使用仓库相对路径")
+    if "\\" in value or ":" in value:
+        raise ValueError(f"{field_name} 必须使用无盘符的 POSIX 相对路径")
+    if any(character in value for character in _PATH_GLOB_CHARACTERS):
+        raise ValueError(f"{field_name} 必须是精确路径，不能使用 glob")
+    segments = value.split("/")
+    if any(segment in {"", ".", ".."} for segment in segments):
+        raise ValueError(f"{field_name} 不能包含空路径段、'.' 或 '..'")
+    if segments[0] == ".git":
+        raise ValueError(f"{field_name} 不能指向 Git 控制目录")
+    sensitive_reason = sensitive_path_reason(value)
+    if sensitive_reason:
+        raise ValueError(f"{field_name} 不能指向敏感路径（{sensitive_reason}）")
+    if redact_text(value) != value:
+        raise ValueError(f"{field_name} 会触发脱敏，不能作为稳定 artifact 身份")
+    return value
+
+
+def _validate_verification_commands(values: list[str]) -> list[str]:
+    normalized = [_validate_verification_command(value) for value in values]
+    require_unique(normalized, "verification commands 不能重复")
+    return normalized
+
+
+def _validate_verification_command(value: str) -> str:
+    if value != value.strip():
+        raise ValueError("verification command 不能包含首尾空白")
+    if not value or len(value) > 2000:
+        raise ValueError("verification command 必须是长度不超过 2000 的非空命令")
+    _reject_unsafe_text(value, "verification command")
+    if any(pattern.search(value) for pattern in _LOCAL_PATH_PATTERNS):
+        raise ValueError("verification command 不能包含本机绝对路径")
+    if redact_text(value) != value:
+        raise ValueError("verification command 会触发脱敏，不能进入公开合同")
+    return value
+
+
+def _reject_unsafe_text(value: str, field_name: str) -> None:
+    if any(character in value for character in ("\r", "\n", "\0")):
+        raise ValueError(f"{field_name} 不能包含换行或 NUL")
+    if any(unicodedata.category(character) in {"Cc", "Cf"} for character in value):
+        raise ValueError(f"{field_name} 不能包含控制字符或双向格式字符")
+
+
 def sha256_json(payload: object) -> str:
     serialized = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 __all__ = [
-    "MA2B_TASK_PACK_SCHEMA_VERSION",
-    "MA2BAcceptanceFact",
-    "MA2BCaseManifest",
-    "MA2BCasePackage",
-    "MA2BExpectedOutcome",
-    "MA2BGroundTruthArtifact",
-    "MA2BInitialWorkspaceArtifact",
-    "MA2BPackageRole",
-    "MA2BProjectPolicyArtifact",
-    "MA2BTaskArtifact",
-    "MA2BTaskPackError",
-    "MA2BUnresolvedDecision",
-    "MA2BVerificationManifest",
-    "MA2BWorkspaceFile",
-    "compute_ma2b_task_pack_sha256",
-    "compute_ma2b_workspace_tree_sha256",
+    "ArtifactReference", "MA2B_TASK_PACK_SCHEMA_VERSION", "MA2BAcceptanceFact",
+    "MA2BCaseManifest", "MA2BCasePackage", "MA2BExpectedOutcome",
+    "MA2BGroundTruthArtifact", "MA2BInitialWorkspaceArtifact", "MA2BPackageRole",
+    "MA2BProjectPolicyArtifact", "MA2BTaskArtifact", "MA2BTaskPackError",
+    "MA2BUnresolvedDecision", "MA2BVerificationManifest", "MA2BWorkspaceFile",
+    "Sha256", "compute_ma2b_task_pack_sha256", "compute_ma2b_workspace_tree_sha256",
 ]

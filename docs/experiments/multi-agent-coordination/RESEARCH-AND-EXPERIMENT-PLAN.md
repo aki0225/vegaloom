@@ -7,6 +7,11 @@
 > 默认产品行为：**不变**<br>
 > 初始裁决：已批准进入 `MA-1`；尚未批准真实 Worker、多 Worker、A2A 或主线合并<br>
 > 2026-07-27 状态：`MA-2B / formal_inputs_complete / readiness_blocked / provider_not_authorized`
+>
+> 2026-07-27 实现纠偏：实验包中的 `PlanContract`、`DelegationReadiness` 路由与证据写入
+> 实现已删除。它们验证的是治理合同，不执行 Worker，也不能回答 Multi-Worker 是否有效，
+> 因此不再作为当前能力路径。下文相关内容保留为历史研究设计；Canary 结果仍是历史事实，
+> 但不能据此恢复该实现或继续增加路由证据层。
 
 ---
 
@@ -715,9 +720,10 @@ Owner 已于 2026-07-23 确认以下五项，而不是直接开始 A2A 或多 wo
 4. 接受 provider-native 子 Agent 先作为 treatment，而不是 Vega 要复制的功能。
 5. 接受 A2A 仅在跨运行时需求被证明后才进入设计 Gate。
 
-因此在 **2026-07-23 的初始裁决时点**，唯一实验实现范围是 `MA-1`：在冻结的公开主线
+因此在 **2026-07-23 的初始裁决时点**，唯一实验实现范围曾是 `MA-1`：在冻结的公开主线
 baseline 上，写出最小、严格、fail-closed 的 `PlanContract` 与 `DelegationReadiness`，
-产出确定性 route evidence artifact。完成验证后先形成 Gate 结论，不自动进入 `MA-2`。
+产出确定性 route evidence artifact。该实现后来被确认无法直接证明 Worker 或 Multi-Worker
+能力，已在 2026-07-27 从当前实验包删除；本段只解释历史决策。
 
 截至 **2026-07-27**，后续实验已推进到 MA-2B 正式输入准备完成，但正式执行资格仍被
 readiness 门禁阻断：

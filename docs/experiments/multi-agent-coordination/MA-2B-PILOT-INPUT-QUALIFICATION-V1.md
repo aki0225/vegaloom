@@ -49,6 +49,9 @@ Pilot、Reviewer、MA-3 或 multi-worker。
 5. 本协议 supersede Canary 对“下一步输入材料”和 `worker_token_limit` 的解释；本次完整
    12-case 冻结同时 supersede 本协议旧版“四个候选、八个缺失”的 readiness 描述。
 6. Canary 的历史运行目录、失败事实和结果文档继续保留，不重写、不合并计分。
+7. 2026-07-27 删除实验包中的 `PlanContract`、`DelegationReadiness` 路由与证据写入实现。
+   Canary 仍作为历史能力信号保留，但该治理栈不再是当前执行路径，也不得成为继续增加
+   evidence artifact 的理由。
 
 ## 三、Worker Token 语义
 
@@ -195,7 +198,8 @@ issue_codes = execution_binding_path_invalid, execution_authorization_path_inval
 
 文件范围分三组：
 
-- 能力与合同：`src/vega/experimental/ma2b/*.py`、对应合同文档和 MA 专用测试。
+- 输入与正式门禁：`src/vega/experimental/ma2b/task_pack*.py`、`pricing.py`、
+  `execution_binding.py`、`readiness*.py`，以及对应合同文档和 MA 专用测试。
 - 正式输入：`eval/experiments/multi-agent-coordination/task-pack/**` 与
   `eval/experiments/multi-agent-coordination/ground-truth/**`。
 - 历史冻结与源树：`eval/experiments/multi-agent-coordination/fixtures/ma2b/**` 与

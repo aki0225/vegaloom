@@ -11,8 +11,8 @@ from typing import TypeVar
 from pydantic import BaseModel, ValidationError
 
 from . import task_pack_models as _models
-from .delegation import ArtifactReference
 from .task_pack_models import (
+    ArtifactReference,
     MAX_MA2B_TASK_PACK_ARTIFACT_BYTES,
     MAX_MA2B_WORKSPACE_FILE_BYTES,
     MAX_MA2B_WORKSPACE_TOTAL_BYTES,
