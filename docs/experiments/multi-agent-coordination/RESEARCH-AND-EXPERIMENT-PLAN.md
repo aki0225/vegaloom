@@ -12,6 +12,11 @@
 > 实现已删除。它们验证的是治理合同，不执行 Worker，也不能回答 Multi-Worker 是否有效，
 > 因此不再作为当前能力路径。下文相关内容保留为历史研究设计；Canary 结果仍是历史事实，
 > 但不能据此恢复该实现或继续增加路由证据层。
+>
+> 当前能力路径只保留最小 `probe.py`：接收外部冻结的一到两个 slice，用同一初始 workspace
+> 比较单 workspace 顺序执行与两个隔离 workspace 并行执行。Worker Adapter 可注入，当前
+> 只用 fake Worker 验证隔离、写入范围、确定性集成和统一 verifier，不调用真实 Provider，
+> 不接入 Reviewer，也不生成新的证据 artifact。
 
 ---
 
