@@ -28,6 +28,7 @@ def review_evidence_schema_issues(
 
     issues: list[str] = []
     issues.extend(_tracked_diff_hash_issues(evidence, current_snapshot))
+    issues.extend(_changed_files_snapshot_issues(evidence, current_snapshot))
 
     source_content_complete = evidence.get("ignored_content_complete")
     if evidence.get("ignored_manifest_complete") is not True:
@@ -276,18 +277,37 @@ def _changed_files_issues(
     source_evidence: dict[str, Any],
 ) -> list[str]:
     issues: list[str] = []
-    state_changed_files = _string_list(reflect_state.get("changed_files"))
-    evidence_changed_files = _string_list(source_evidence.get("changed_files"))
-    if not isinstance(reflect_state.get("changed_files"), list):
+    raw_state_changed_files = reflect_state.get("changed_files")
+    raw_evidence_changed_files = source_evidence.get("changed_files")
+    state_changed_files = _string_list(raw_state_changed_files)
+    evidence_changed_files = _string_list(raw_evidence_changed_files)
+    if not _is_string_list(raw_state_changed_files):
         issues.append("source_changed_files_invalid")
-    if not isinstance(source_evidence.get("changed_files"), list):
+    if not _is_string_list(raw_evidence_changed_files):
         issues.append("evidence_changed_files_invalid")
     if state_changed_files != evidence_changed_files:
         issues.append("changed_files_mismatch")
+    return issues
+
+
+def _changed_files_snapshot_issues(
+    source_evidence: dict[str, Any],
+    current_snapshot: ReviewWorkspaceSnapshot | None,
+) -> list[str]:
+    raw_changed_files = source_evidence.get("changed_files")
+    if not _is_string_list(raw_changed_files):
+        return ["evidence_changed_files_invalid"]
+    changed_files = list(raw_changed_files)
+    issues: list[str] = []
     if str(source_evidence.get("changed_files_sha256") or "") != _sha256_json_value(
-        evidence_changed_files
+        changed_files
     ):
         issues.append("changed_files_hash_mismatch")
+    if (
+        current_snapshot is not None
+        and tuple(changed_files) != current_snapshot.changed_files
+    ):
+        issues.append("changed_files_workspace_mismatch")
     return issues
 
 
@@ -377,9 +397,13 @@ def _sha256_text(text: str) -> str:
 
 
 def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
+    if not _is_string_list(value):
         return []
-    return [str(item) for item in value]
+    return list(value)
+
+
+def _is_string_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
 def _unique(items: list[str]) -> list[str]:

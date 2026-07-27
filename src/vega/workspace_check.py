@@ -101,6 +101,20 @@ class TrackedScopeSnapshot:
     untracked_files: tuple[str, ...] = ()
     unsafe_index_paths: tuple[str, ...] = ()
 
+    @property
+    def changed_paths_sha256(self) -> str:
+        payload = json.dumps(
+            {
+                "staged": self.staged_files,
+                "unstaged": self.unstaged_files,
+                "untracked": self.untracked_files,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return _sha256(payload)
+
 
 class WorkspaceCheckResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -478,7 +492,7 @@ def _assess_baseline_integrity(
             assessment.reasons.append(
                 "worker 启动前已存在 tracked diff；auto 无法将其安全归因于本轮 worker。"
             )
-    elif (
+    if (
         baseline
         and baseline.untracked_manifest_sha256 != current_baseline_manifest_sha256
     ):

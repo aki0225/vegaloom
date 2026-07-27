@@ -173,27 +173,18 @@ def test_filesystem_case_probe_matches_existing_directory_semantics(
 
 
 @pytest.mark.parametrize(
-    ("configured", "filesystem_insensitive", "expected"),
+    ("filesystem_insensitive", "expected"),
     [
-        (True, False, True),
-        (False, True, True),
-        (False, False, False),
-        (None, True, True),
-        (None, False, False),
+        (True, True),
+        (False, False),
     ],
 )
-def test_scope_case_mode_combines_git_and_filesystem_semantics(
+def test_scope_case_mode_uses_filesystem_semantics_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    configured: bool | None,
     filesystem_insensitive: bool,
     expected: bool,
 ) -> None:
-    monkeypatch.setattr(
-        scope_path_matching,
-        "read_core_ignorecase",
-        lambda repo_path: configured,
-    )
     monkeypatch.setattr(
         scope_path_matching,
         "filesystem_is_case_insensitive",

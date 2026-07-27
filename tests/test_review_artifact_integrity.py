@@ -234,6 +234,40 @@ def test_changed_files_and_source_run_tampering_block_reviewer(
     assert _read_json(review_run / "review-verdict.json")["verdict"] == "needs_human"
 
 
+def test_changed_files_must_match_current_workspace_snapshot(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_repo(repo)
+    reflect_run = ReflectRuntime(tmp_path).run(repo)
+    state_path = reflect_run / "state.json"
+    evidence_path = reflect_run / "review-evidence.json"
+    state = _read_json(state_path)
+    evidence = _read_json(evidence_path)
+    forged_changed_files = ["forged.py"]
+    evidence["changed_files"] = forged_changed_files
+    evidence["changed_files_sha256"] = _sha256_json(forged_changed_files)
+    evidence["snapshot_id"] = _sha256_json(
+        {key: item for key, item in evidence.items() if key != "snapshot_id"}
+    )
+    state["changed_files"] = forged_changed_files
+    state["review_snapshot_id"] = evidence["snapshot_id"]
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    evidence_path.write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    runner = RecordingRunner()
+
+    review_run = ReviewRuntime(tmp_path, runner=runner).run(repo, reflect_run.name)
+
+    context = _read_json(review_run / "review-context.json")
+    assert runner.prompts == []
+    assert "changed_files_workspace_mismatch" in context["evidence_issues"]
+    assert _read_json(review_run / "state.json")["status"] == "needs_human"
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected_issue"),
     [

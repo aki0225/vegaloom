@@ -322,7 +322,14 @@ def run_owned_process(
             )
             controller.child_started(process.pid)
             progress.started()
-            while _owned_process_tree_is_active(process, windows_job):
+            process_group_alive = (
+                None if _is_windows_platform() else _is_posix_process_group_alive
+            )
+            while _owned_process_tree_is_active(
+                process,
+                windows_job,
+                process_group_alive=process_group_alive,
+            ):
                 request = controller.read_stop_request()
                 if request is not None:
                     controller.mark_stop_requested(request)
@@ -376,6 +383,9 @@ def run_owned_process(
             if process is not None and _owned_process_tree_may_be_active(
                 process,
                 windows_job,
+                process_group_alive=(
+                    None if _is_windows_platform() else _is_posix_process_group_alive
+                ),
             ):
                 termination = _terminate_owned_process(
                     process,
@@ -399,6 +409,9 @@ def run_owned_process(
             if process is not None and _owned_process_tree_may_be_active(
                 process,
                 windows_job,
+                process_group_alive=(
+                    None if _is_windows_platform() else _is_posix_process_group_alive
+                ),
             ):
                 termination = _terminate_owned_process(
                     process,
@@ -624,7 +637,9 @@ def inspect_execution_for_recovery(run_dir: Path) -> ExecutionRecoveryInspection
     if not records:
         return ExecutionRecoveryInspection(True, "未找到 execution.json，running 状态已无可确认执行主体。")
     unconfirmed_records = [
-        record for record in records if record.lease.termination_unconfirmed
+        record
+        for record in records
+        if _termination_unconfirmed_blocks_recovery(record.lease)
     ]
     if unconfirmed_records:
         record = max(
@@ -645,8 +660,7 @@ def inspect_execution_for_recovery(run_dir: Path) -> ExecutionRecoveryInspection
     live_active_records = [record for record, stale_reason in active_records if stale_reason is None]
     if live_active_records:
         record = max(live_active_records, key=lambda item: _parse_datetime(item.lease.last_heartbeat))
-        job_probe = _execution_windows_job_probe(record.lease)
-        job_summary = windows_job_recovery_summary(job_probe)
+        job_summary = _active_windows_job_recovery_summary(record.lease)
         if job_summary is not None:
             return ExecutionRecoveryInspection(
                 False,
@@ -702,16 +716,14 @@ def inspect_execution_for_recovery(run_dir: Path) -> ExecutionRecoveryInspection
 
 def _active_execution_stale_reason(lease: ExecutionLease) -> str | None:
     if lease.termination_unconfirmed:
+        if _termination_unconfirmed_reconfirmed(lease):
+            return "owned process tree 已重新确认退出"
         return "owned process tree 终止未确认"
     job_probe = _execution_windows_job_probe(lease)
     if windows_job_blocks_recovery(job_probe):
         return None
     owner_probe = _probe_process(lease.owner_pid, lease.owner_creation_token)
-    child_probe = (
-        _probe_process(lease.child_pid, lease.child_creation_token)
-        if lease.child_pid is not None
-        else ProcessProbe("gone")
-    )
+    child_probe = _execution_child_probe(lease)
     if owner_probe.status != "gone" or child_probe.status != "gone":
         # heartbeat/deadline 过期不足以证明执行主体已经退出。只要任一 owned PID
         # 仍存活或身份无法确认，recover 就可能与原进程并发写状态，必须保守阻止。
@@ -734,20 +746,53 @@ def _execution_has_live_owned_pid(lease: ExecutionLease) -> bool:
     if windows_job_blocks_recovery(job_probe):
         return True
     owner_probe = _probe_process(lease.owner_pid, lease.owner_creation_token)
-    child_probe = (
-        _probe_process(lease.child_pid, lease.child_creation_token)
-        if lease.child_pid is not None
-        else ProcessProbe("gone")
-    )
+    child_probe = _execution_child_probe(lease)
     return owner_probe.status != "gone" or child_probe.status != "gone"
 
 
-def _execution_windows_job_probe(
-    lease: ExecutionLease,
-) -> WindowsJobProbe | None:
+def _execution_windows_job_probe(lease: ExecutionLease) -> WindowsJobProbe | None:
     if lease.windows_job_name is None:
         return None
     return _probe_windows_job(lease.windows_job_name)
+
+
+def _active_windows_job_recovery_summary(lease: ExecutionLease) -> str | None:
+    summary = windows_job_recovery_summary(_execution_windows_job_probe(lease))
+    if summary is None or _probe_process(
+        lease.owner_pid,
+        lease.owner_creation_token,
+    ).status != "gone":
+        return summary
+    return (
+        "active execution 的 Windows Job Object 仍有成员或状态无法确认，"
+        "但原 execution owner 已退出，新的 stop request 无执行者可消费；请人工核对并终止"
+        "该 Job 对应进程树，确认现场稳定后再执行 recover。"
+    )
+
+
+def _termination_unconfirmed_reconfirmed(lease: ExecutionLease) -> bool:
+    if (
+        not lease.termination_unconfirmed
+        or not _is_windows_platform()
+        or lease.windows_job_name is None
+    ):
+        return False
+    job_probe = _execution_windows_job_probe(lease)
+    if job_probe is None or job_probe.status not in {"empty", "gone"}:
+        return False
+    owner_probe = _probe_process(lease.owner_pid, lease.owner_creation_token)
+    child_probe = _execution_child_probe(lease)
+    return owner_probe.status == "gone" and child_probe.status == "gone"
+
+
+def _termination_unconfirmed_blocks_recovery(lease: ExecutionLease) -> bool:
+    return lease.termination_unconfirmed and not _termination_unconfirmed_reconfirmed(lease)
+
+
+def _execution_child_probe(lease: ExecutionLease) -> ProcessProbe:
+    if lease.child_pid is None:
+        return ProcessProbe("gone")
+    return _probe_process(lease.child_pid, lease.child_creation_token)
 
 
 def _probe_windows_job(job_name: str) -> WindowsJobProbe:

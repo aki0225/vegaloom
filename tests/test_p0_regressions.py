@@ -1404,7 +1404,9 @@ def test_auto_scope_glob_allows_nested_markdown_file(tmp_path: Path) -> None:
     assert result["changed_files"] == ["docs/guides/guide.md"]
 
 
-def test_auto_scope_glob_honors_git_core_ignorecase(tmp_path: Path) -> None:
+def test_auto_scope_glob_uses_host_semantics_not_git_core_ignorecase(
+    tmp_path: Path,
+) -> None:
     config = "\n".join(
         [
             "version: 1",
@@ -1429,17 +1431,23 @@ def test_auto_scope_glob_honors_git_core_ignorecase(tmp_path: Path) -> None:
 
     state = _read_json(run_dir / "state.json")
     result = _read_json(run_dir / "iterations" / "01" / "scope-gate-result.json")
-    assert state["status"] == "needs_human"
-    assert state["current_step"] == "scope_gate_failed"
-    assert reviewer.calls == 0
-    assert result["status"] == "failed"
-    assert result["violations"] == [
-        {
-            "code": "forbidden_path",
-            "path": "Docs/leak.md",
-            "matched_patterns": ["docs/**"],
-        }
-    ]
+    if os.path.normcase("A") == os.path.normcase("a"):
+        assert state["status"] == "needs_human"
+        assert state["current_step"] == "scope_gate_failed"
+        assert reviewer.calls == 0
+        assert result["status"] == "failed"
+        assert result["violations"] == [
+            {
+                "code": "forbidden_path",
+                "path": "Docs/leak.md",
+                "matched_patterns": ["docs/**"],
+            }
+        ]
+    else:
+        assert state["status"] == "success"
+        assert reviewer.calls == 1
+        assert result["status"] == "success"
+        assert result["violations"] == []
 
 
 @pytest.mark.parametrize(
@@ -1478,6 +1486,34 @@ def test_scope_gate_checks_staged_unstaged_and_mm_diff_streams(
     assert result.unstaged_changed_files == expected_unstaged
     assert result.changed_files == ["README.md"]
     assert result.violations[0].code == "forbidden_path"
+
+
+def test_scope_gate_applies_path_rules_to_untracked_files(tmp_path: Path) -> None:
+    _, repo = _init_repo(tmp_path)
+    target = repo / "tests" / "conftest.py"
+    target.parent.mkdir()
+    target.write_text("VALUE = 1\n", encoding="utf-8", newline="\n")
+
+    result = evaluate_scope_gate(
+        repo,
+        ScopeConfig(
+            allowed_paths=["src/**"],
+            forbidden_paths=["tests/**"],
+        ),
+        iteration=1,
+        phase="pre_verification",
+    )
+
+    assert result.status == "failed"
+    assert result.untracked_changed_files == ["tests/conftest.py"]
+    assert result.changed_files == ["tests/conftest.py"]
+    assert [violation.model_dump() for violation in result.violations] == [
+        {
+            "code": "forbidden_path",
+            "path": "tests/conftest.py",
+            "matched_patterns": ["tests/**"],
+        }
+    ]
 
 
 def test_scope_gate_checks_both_paths_of_staged_rename(tmp_path: Path) -> None:

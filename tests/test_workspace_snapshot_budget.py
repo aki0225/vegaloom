@@ -266,6 +266,35 @@ def test_small_untracked_file_content_change_updates_manifest(
     assert before.fingerprint != after.fingerprint
 
 
+def test_existing_tracked_diff_does_not_skip_untracked_baseline_check(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath("README.md").write_text(
+        "# Demo\nexisting diff\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    local_file = repo / "local.txt"
+    local_file.write_text("before\n", encoding="utf-8", newline="\n")
+    baseline = snapshot_workspace(repo)
+
+    local_file.write_text("after\n", encoding="utf-8", newline="\n")
+    result = evaluate_workspace(
+        repo,
+        baseline=baseline,
+        allow_existing_tracked_diff=True,
+    )
+
+    assert result.status == "failed"
+    assert result.baseline_tracked_changes_present is True
+    assert result.baseline_untracked_changed is True
+    assert any(
+        "worker 修改或删除了启动前已存在的未跟踪文件" in reason
+        for reason in result.reasons
+    )
+
+
 def test_sensitive_untracked_file_is_not_opened_and_is_not_content_complete(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

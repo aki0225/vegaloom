@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import os
 from fnmatch import fnmatchcase
 from functools import lru_cache
 from pathlib import Path
-
-from .workspace_check import read_core_ignorecase
 
 
 def matching_patterns(
@@ -55,29 +54,10 @@ def path_matches_pattern(
 
 
 def scope_paths_are_case_insensitive(repo_path: Path) -> bool:
-    configured = read_core_ignorecase(repo_path)
-    return configured is True or filesystem_is_case_insensitive(repo_path)
+    return filesystem_is_case_insensitive(repo_path)
 
 
 def filesystem_is_case_insensitive(repo_path: Path) -> bool:
-    """用现有目录的大小写别名探测实际文件系统语义，不创建探针文件。"""
-    resolved = repo_path.resolve()
-    for candidate in (resolved, *resolved.parents):
-        alternate_name = _swap_first_ascii_letter_case(candidate.name)
-        if alternate_name is None:
-            continue
-        alternate = candidate.with_name(alternate_name)
-        try:
-            return alternate.exists() and candidate.samefile(alternate)
-        except OSError:
-            continue
-    return False
-
-
-def _swap_first_ascii_letter_case(value: str) -> str | None:
-    for index, character in enumerate(value):
-        if "a" <= character <= "z":
-            return value[:index] + character.upper() + value[index + 1 :]
-        if "A" <= character <= "Z":
-            return value[:index] + character.lower() + value[index + 1 :]
-    return None
+    """使用宿主平台路径规则，避免仓库配置或路径别名放宽 scope。"""
+    repo_path.resolve(strict=True)
+    return os.path.normcase("A") == os.path.normcase("a")

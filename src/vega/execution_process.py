@@ -97,20 +97,29 @@ def close_windows_job(windows_job: NamedWindowsJob | None) -> None:
 def owned_process_tree_is_active(
     process: subprocess.Popen[bytes],
     windows_job: NamedWindowsJob | None,
+    *,
+    process_group_alive: Callable[[int], bool] | None = None,
 ) -> bool:
-    if windows_job is None:
-        return process.poll() is None
-    if windows_job.active_process_count() > 0:
+    process_alive = process.poll() is None
+    if windows_job is not None and windows_job.active_process_count() > 0:
         return True
-    return process.poll() is None
+    if process_group_alive is not None and process_group_alive(process.pid):
+        return True
+    return process_alive
 
 
 def owned_process_tree_may_be_active(
     process: subprocess.Popen[bytes],
     windows_job: NamedWindowsJob | None,
+    *,
+    process_group_alive: Callable[[int], bool] | None = None,
 ) -> bool:
     try:
-        return owned_process_tree_is_active(process, windows_job)
+        return owned_process_tree_is_active(
+            process,
+            windows_job,
+            process_group_alive=process_group_alive,
+        )
     except (OSError, ValueError):
         return True
 

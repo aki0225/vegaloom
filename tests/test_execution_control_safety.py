@@ -193,6 +193,55 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
     assert broken_lease.status == "completed"
 
 
+def test_owned_process_tree_stays_active_for_posix_descendants() -> None:
+    process = _FakeOwnedProcess(pid=5151, wait_times_out=False)
+    process.returncode = 0
+
+    def process_group_alive(process_group_id: int) -> bool:
+        assert process.poll_calls == 1
+        return process_group_id == process.pid
+
+    assert execution_process.owned_process_tree_is_active(
+        process,
+        None,
+        process_group_alive=process_group_alive,
+    )
+    assert process.poll_calls == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process group 专项回归")
+def test_posix_background_descendant_prevents_early_success(
+    tmp_path: Path,
+) -> None:
+    child_code = "import time; time.sleep(30)"
+    root_code = (
+        "import subprocess, sys; "
+        f"subprocess.Popen([sys.executable, '-c', {child_code!r}])"
+    )
+    context = RunnerExecutionContext(
+        execution_dir=tmp_path / "runs" / "posix-descendant" / "executions" / "worker",
+        run_id="posix-descendant",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        terminate_grace_seconds=0.2,
+    )
+
+    result = run_owned_process(
+        [sys.executable, "-c", root_code],
+        "",
+        tmp_path,
+        1,
+        context,
+    )
+    lease = ExecutionLease.model_validate_json(
+        context.execution_dir.joinpath("execution.json").read_text(encoding="utf-8")
+    )
+
+    assert result.status == "timed_out"
+    assert lease.status == "timed_out"
+
+
 def test_owned_process_persists_partial_output_after_keyboard_interrupt(tmp_path: Path) -> None:
     context = RunnerExecutionContext(
         execution_dir=tmp_path / "runs" / "interrupted-output" / "executions" / "worker",
@@ -416,6 +465,7 @@ def test_windows_recovery_blocks_when_named_job_still_has_descendants(
             status="running",
         ),
     )
+    monkeypatch.setattr(execution_control, "_is_windows_platform", lambda: True)
     monkeypatch.setattr(
         execution_control,
         "_probe_process",
@@ -434,6 +484,54 @@ def test_windows_recovery_blocks_when_named_job_still_has_descendants(
     assert inspection.record is not None
     assert inspection.record.path == execution_path
     assert "Job Object" in inspection.summary
+    assert "原 execution owner 已退出" in inspection.summary
+    assert "人工核对并终止" in inspection.summary
+
+
+def test_recovery_rechecks_unconfirmed_named_job_before_blocking(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = tmp_path / "runs" / "unconfirmed-job-now-empty"
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    now = datetime.now(UTC)
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            step="worker",
+            owner_pid=1111,
+            owner_creation_token=100,
+            child_pid=2222,
+            child_creation_token=200,
+            windows_job_name="Local\\Vega-unconfirmed-job-now-empty",
+            termination_unconfirmed=True,
+            command=["worker"],
+            started_at=(now - timedelta(minutes=2)).isoformat(),
+            last_heartbeat=(now - timedelta(minutes=1)).isoformat(),
+            lease_expires_at=(now - timedelta(seconds=30)).isoformat(),
+            deadline=(now - timedelta(seconds=10)).isoformat(),
+            status="running",
+        ),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_process",
+        lambda *_: execution_control.ProcessProbe("gone"),
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_probe_windows_job",
+        lambda _: execution_control.WindowsJobProbe("empty", active_processes=0),
+        raising=False,
+    )
+
+    inspection = inspect_execution_for_recovery(run_dir)
+
+    assert inspection.can_recover
+    assert inspection.record is not None
+    assert inspection.record.path == execution_path
+    assert "已重新确认退出" in inspection.summary
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows Job Object 专项回归")
@@ -962,8 +1060,10 @@ class _FakeOwnedProcess:
         self.returncode: int | None = None
         self.stdin = io.BytesIO()
         self.kill_called = False
+        self.poll_calls = 0
 
     def poll(self) -> int | None:
+        self.poll_calls += 1
         return self.returncode
 
     def wait(self, timeout: float | None = None) -> int:

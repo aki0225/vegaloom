@@ -3,10 +3,9 @@
 > 日期：2026-07-27
 > 分支：`codex/mainline-trust-hardening`
 > 基线：`origin/main@7805bba`
-> 已验证远端 head：`7a35474`
 > Draft PR：`#20`
-> 状态：`7a35474` 的 CI run `30256075361` 已 10/10 success；当前增量推送后必须等待
-> 新 head CI，不直接合并
+> 状态：本文不固定易过期的分支 head；每次推送后必须以 PR `#20` 最新 head 的 CI 为准，
+> 不能复用旧提交的成功结果
 
 ## 本轮结果
 
@@ -28,6 +27,22 @@
 6. CI 的 29 个测试文件全部进入 Linux 分片且无重复；Windows 专项保留完整 containment
    文件。CI 要求 pytest 成功收集并打印实际节点数，不再把会随正常增删测试变化的
    `812` 写成固定授权条件。
+
+## 最后一轮行为合同修复
+
+1. Scope gate 同时检查 staged、unstaged 和 untracked 文件；未跟踪文件不能绕过
+   `allowed_paths` 或 `forbidden_paths`。
+2. worker 启动前已有 tracked diff 时，仍会独立核对启动前未跟踪文件的完整性；允许
+   继续上一轮 tracked diff 不等于允许改写本地未跟踪文件。
+3. scope 路径大小写由宿主路径语义决定，仓库本地 `core.ignorecase` 不能扩大或缩小
+   allowlist/denylist。
+4. Review evidence 的 `changed_files` 必须是严格字符串列表，哈希、Reflect state 和
+   当前工作区快照必须一致；重新计算自洽哈希不能伪造文件集合。
+5. POSIX 根进程退出后仍监控同一进程组中的后台后代，后代未退出时不能提前宣布 runner
+   成功；根进程会先被 `poll()` 回收，避免非 Linux POSIX 因 zombie 根进程误等到超时。
+6. 带命名 Windows Job 的 `termination_unconfirmed` 会在 recovery 时重新探测；只有
+   Job、owner PID 和 child PID 都确认消失后才允许恢复。owner 已退出但 Job 仍活跃时，
+   不再建议写入无人消费的 stop request，而是明确交还人工核对进程树。
 
 ## 最新增量与裁剪
 
@@ -58,8 +73,7 @@
 ### 已通过
 
 ```text
-远端 head 7a35474: CI 10/10 success
-本机 .venv Python 3.12.10 collect-only: 812 tests collected
+本机 .venv Python 3.12.10 collect-only: 815 tests collected
 compileall -f: passed
 Ruff: passed
 git diff --check: passed
@@ -75,10 +89,14 @@ architecture against current branch HEAD: passed
 当前增量的定向验证：
 
 ```text
-新增 safe.directory 回归: 1 passed
-Git 历史与 staged candidate 邻接回归: 2 passed
-finish 决策表: 11 passed
-FinishRuntime 与 Goal consumer 行为回归: 2 passed
+新增 6 类行为合同回归: 7 passed
+scope path matching: 52 passed
+workspace snapshot budget: 17 passed
+review artifact integrity: 16 passed + 15 passed，覆盖全部 31 nodes
+execution control safety: 9 passed + 1 skipped、10 passed、8 passed，覆盖全部 28 nodes
+POSIX 后台后代真实回归: Windows 本机 skipped，必须由 Linux CI 真正执行
+scope gate P0 邻接回归: 8 + 4 + 4 + 5 = 21 passed
+跨模块 consumers: 7 passed
 ```
 
 ### 本机未形成全量通过结论
