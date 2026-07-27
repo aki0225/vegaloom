@@ -1,0 +1,30 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C04-DECLARED",
+      "statement": "package.json 中受支持的 packageManager 声明必须优先确定 Node 包管理器。"
+    },
+    {
+      "fact_id": "A-MA2B-C04-CONFLICT",
+      "statement": "缺少明确声明且存在冲突 lockfile 时必须 fail-closed，不得猜测包管理器。"
+    },
+    {
+      "fact_id": "A-MA2B-C04-COMMANDS",
+      "statement": "项目 profile 的 manager、test 和 lint 命令必须复用同一选择结果。"
+    }
+  ],
+  "case_id": "MA2B-C04",
+  "constraints": [
+    "只允许修改 src/vega/project_profile.py。",
+    "不得通过网络、全局工具探测或本机缓存选择包管理器。",
+    "不得修改固定 verifier 或 pyproject.toml。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不安装依赖，不执行 Node 命令，也不改变 Python、Java 或 Go 项目探测。"
+  ],
+  "schema_version": 1,
+  "summary": "统一 Node 项目的包管理器选择，并让测试与 lint 命令复用同一确定性结果。",
+  "task_id": "TASK-MA2B-C04",
+  "unresolved_decision": null
+}

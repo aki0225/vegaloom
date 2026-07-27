@@ -1,0 +1,21 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C12-PINNED",
+      "statement": "execution binding 必须继续拒绝 latest、default 或 auto 模型别名。"
+    }
+  ],
+  "case_id": "MA2B-C12",
+  "constraints": [
+    "只允许把 src/vega/ma2b_execution_binding.py 作为潜在写入路径。",
+    "verifier 未通过调用前资格校验时不得启动 Planner 或 Worker。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不修复 verifier、测试路径或 Provider 配置。"
+  ],
+  "schema_version": 1,
+  "summary": "保持 execution binding 对未固定模型别名的 fail-closed 行为。",
+  "task_id": "TASK-MA2B-C12",
+  "unresolved_decision": null
+}

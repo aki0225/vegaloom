@@ -1,1 +1,3 @@
 eval/experiments/multi-agent-coordination/fixtures/ma2b/** text eol=lf
+eval/experiments/multi-agent-coordination/task-pack/** text eol=lf
+eval/experiments/multi-agent-coordination/ground-truth/** text eol=lf

@@ -1,0 +1,29 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C09-STARTED",
+      "statement": "规则必须明确已经启动的 treatment 在定价到期后是完成还是立即停止。"
+    },
+    {
+      "fact_id": "A-MA2B-C09-PENDING",
+      "statement": "规则必须明确尚未启动的 treatment 是否阻断，并给出稳定归因。"
+    }
+  ],
+  "case_id": "MA2B-C09",
+  "constraints": [
+    "在 owner 选择到期策略前不得修改目标 workspace。",
+    "只允许把 src/vega/ma2b_execution_binding.py 作为未来可能写入路径。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不由 Worker 猜测成本治理或兼容性政策。",
+    "不调用 Provider 或修改当前 Pilot 预注册。"
+  ],
+  "schema_version": 1,
+  "summary": "定义 pricing manifest 在 Pilot execution window 中途到期时的兼容行为。",
+  "task_id": "TASK-MA2B-C09",
+  "unresolved_decision": {
+    "decision_id": "D-MA2B-C09-EXPIRY",
+    "question": "定价在 execution window 中途到期时，已启动 treatment 应完成当前调用还是立即停止整组运行？"
+  }
+}

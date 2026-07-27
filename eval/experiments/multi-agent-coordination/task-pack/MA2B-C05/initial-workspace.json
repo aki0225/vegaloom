@@ -1,0 +1,46 @@
+{
+  "case_id": "MA2B-C05",
+  "files": [
+    {
+      "relative_path": ".vega.yaml",
+      "sha256": "b8f8017d39049bfce678400ab8f8b070e62548551088495f41773471a27fb5a4",
+      "size_bytes": 420
+    },
+    {
+      "relative_path": "pyproject.toml",
+      "sha256": "9d3496552445b8b368b1c53016630c5609ae320aabe48f94194ddbaee89e7fc9",
+      "size_bytes": 934
+    },
+    {
+      "relative_path": "src/vega/__init__.py",
+      "sha256": "78d7ec1c39d03ae5e5a010afc261dff9003707ebc2efc5ee13e3502b9643fcdf",
+      "size_bytes": 43
+    },
+    {
+      "relative_path": "src/vega/delegation.py",
+      "sha256": "71408029f8b4d924ba4548ac08eaa957b305cd57d4bb90f098ceb937ce0a6968",
+      "size_bytes": 27272
+    },
+    {
+      "relative_path": "src/vega/ma2b_execution_binding.py",
+      "sha256": "b24652acd0be640be1d997e5164a76eaaac380bfc35949b015d2a3021ff49836",
+      "size_bytes": 10065
+    },
+    {
+      "relative_path": "src/vega/redaction.py",
+      "sha256": "b99256a7b4e704338f8f077c227327505ceebaa21caeeb1e2c697969792e1bd8",
+      "size_bytes": 14821
+    },
+    {
+      "relative_path": "tests/test_pricing_binding_contract.py",
+      "sha256": "c741ce4f00d5765d1927d0a0b223757373933032b5186d3e0adcc36d8c8d7fbd",
+      "size_bytes": 5675
+    }
+  ],
+  "origin_head_sha": "3ff369c416340f3acf8c5bc1641e412f2816e738",
+  "origin_repository_id": "aki0225/vegaloom",
+  "schema_version": 1,
+  "source_kind": "git_snapshot",
+  "source_tree": "eval/experiments/multi-agent-coordination/fixtures/ma2b/pilot-candidates/v1/workspaces/MA2B-C05",
+  "workspace_tree_sha256": "146314dceda98cfadcf14573baee7a0527e485a06e2d62787e95790bc64e10f3"
+}

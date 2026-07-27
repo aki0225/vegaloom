@@ -1,0 +1,30 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C07-SHARED",
+      "statement": "仓库目录校验必须由 cli_support.py 提供唯一共享 helper。"
+    },
+    {
+      "fact_id": "A-MA2B-C07-CALLERS",
+      "statement": "非 Reviewer CLI 入口必须统一调用共享 helper，不能保留 cli.py 内的重复实现。"
+    },
+    {
+      "fact_id": "A-MA2B-C07-BOUND",
+      "statement": "抽离后 cli.py 必须保持架构行数上限且继续拒绝普通文件路径。"
+    }
+  ],
+  "case_id": "MA2B-C07",
+  "constraints": [
+    "只允许修改 src/vega/cli.py 和 src/vega/cli_support.py。",
+    "共享 helper 必须继续使用现有脱敏策略和 typer.BadParameter。",
+    "不得修改固定 verifier 或 pyproject.toml。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不改变命令参数、Reviewer CLI 行为或项目配置语义。"
+  ],
+  "schema_version": 1,
+  "summary": "把仓库目录校验抽离到共享 CLI 支持模块，并保持所有现有入口的拒绝语义。",
+  "task_id": "TASK-MA2B-C07",
+  "unresolved_decision": null
+}

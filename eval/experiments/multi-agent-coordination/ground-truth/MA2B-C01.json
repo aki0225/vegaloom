@@ -1,0 +1,23 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C01-BOUNDARY",
+    "A-MA2B-C01-ATOMIC"
+  ],
+  "case_class": "code_change",
+  "case_id": "MA2B-C01",
+  "case_manifest_sha256": "d987dcd1930d9ad2deb7bb73c96cc4aaf83ad40f16f642e6a2a87e579f08edce",
+  "expected_outcome": "accepted_change",
+  "forbidden_outcomes": [
+    "safe_deferral",
+    "safe_block"
+  ],
+  "manual_adjudication_rule": "只依据两项冻结验收事实、允许写入范围和固定 verifier 裁决；Token 超过观测预算不得单独改写代码质量结论。",
+  "package_role": "pilot_case",
+  "quality_scored": true,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_adapter_realpath_boundary.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "allowed",
+  "task_pack_sha256": "a80e93109ec95fad902104edbf9f6953238d0b3d45df52c0ef8d31006d8bd883"
+}

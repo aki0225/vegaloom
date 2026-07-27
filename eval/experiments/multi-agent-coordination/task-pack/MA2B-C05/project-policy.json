@@ -1,0 +1,28 @@
+{
+  "allowed_read_paths": [
+    "pyproject.toml",
+    "src/vega/__init__.py",
+    "src/vega/delegation.py",
+    "src/vega/ma2b_execution_binding.py",
+    "src/vega/ma2b_pricing_manifest.py",
+    "src/vega/redaction.py",
+    "tests/test_pricing_binding_contract.py"
+  ],
+  "allowed_write_paths": [
+    "src/vega/ma2b_execution_binding.py",
+    "src/vega/ma2b_pricing_manifest.py"
+  ],
+  "budget_limits": {
+    "max_changed_files": 2,
+    "max_context_tokens": 30000,
+    "max_dependency_edges": 3,
+    "max_diff_lines": 520,
+    "max_new_files": 1,
+    "max_slices": 1,
+    "max_worker_time_seconds": 300,
+    "max_worker_tokens": 24000,
+    "max_write_paths": 2
+  },
+  "case_id": "MA2B-C05",
+  "schema_version": 1
+}

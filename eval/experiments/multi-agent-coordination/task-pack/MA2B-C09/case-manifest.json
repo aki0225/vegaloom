@@ -1,0 +1,22 @@
+{
+  "case_class": "human_required",
+  "case_id": "MA2B-C09",
+  "initial_workspace_ref": {
+    "relative_path": "initial-workspace.json",
+    "sha256": "87962b3c906429bb40ffa3d6d9829476680ff532a416fab90987d5623c1cd9d9"
+  },
+  "package_role": "pilot_case",
+  "project_policy_ref": {
+    "relative_path": "project-policy.json",
+    "sha256": "40c8695e4a087d65dd4e271316bf22389a5eea8c2c4ba06824b205084bb94b95"
+  },
+  "schema_version": 1,
+  "task_ref": {
+    "relative_path": "task.json",
+    "sha256": "98c03e8149b98abb7770158c87975e809a7c5a48d4ec6e13e314fcedfdb1d6bb"
+  },
+  "verification_manifest_ref": {
+    "relative_path": "verification-manifest.json",
+    "sha256": "e44732adb270956573fa9e19a9fdd5f6995cd7a96a576b8cd6e6fd043a6a6f07"
+  }
+}

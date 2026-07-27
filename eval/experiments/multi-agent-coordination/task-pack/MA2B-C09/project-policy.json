@@ -1,0 +1,25 @@
+{
+  "allowed_read_paths": [
+    "pyproject.toml",
+    "src/vega/__init__.py",
+    "src/vega/delegation.py",
+    "src/vega/ma2b_execution_binding.py",
+    "src/vega/redaction.py"
+  ],
+  "allowed_write_paths": [
+    "src/vega/ma2b_execution_binding.py"
+  ],
+  "budget_limits": {
+    "max_changed_files": 1,
+    "max_context_tokens": 12000,
+    "max_dependency_edges": 1,
+    "max_diff_lines": 120,
+    "max_new_files": 0,
+    "max_slices": 1,
+    "max_worker_time_seconds": 120,
+    "max_worker_tokens": 8000,
+    "max_write_paths": 1
+  },
+  "case_id": "MA2B-C09",
+  "schema_version": 1
+}

@@ -1,0 +1,23 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C08-REVISION",
+    "A-MA2B-C08-SCOPE"
+  ],
+  "case_class": "code_change",
+  "case_id": "MA2B-C08",
+  "case_manifest_sha256": "d8f2cff475c1aefe4c62cbcd77ff18515d95e92d8835d2b805b60b513549638a",
+  "expected_outcome": "accepted_change",
+  "forbidden_outcomes": [
+    "safe_deferral",
+    "safe_block"
+  ],
+  "manual_adjudication_rule": "只依据固定 revision 和仓库 scope 两项事实裁决；不得泄露本机路径，也不得用未跟踪工作树内容替代 Git snapshot。",
+  "package_role": "pilot_case",
+  "quality_scored": true,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_tracked_profile_identity.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "allowed",
+  "task_pack_sha256": "ed2cf54bbc594c6d2bfda7a84bf1c0ab077ee5c6e52f05b430a21af73b6e50f0"
+}

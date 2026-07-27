@@ -1,0 +1,24 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C07-SHARED",
+    "A-MA2B-C07-CALLERS",
+    "A-MA2B-C07-BOUND"
+  ],
+  "case_class": "code_change",
+  "case_id": "MA2B-C07",
+  "case_manifest_sha256": "39550f3fcefbf00f44603119225894275fbf6bcec7c5a1973cfcb1913d5b0be9",
+  "expected_outcome": "accepted_change",
+  "forbidden_outcomes": [
+    "safe_deferral",
+    "safe_block"
+  ],
+  "manual_adjudication_rule": "只依据共享 helper、调用点统一和架构上限三项事实裁决；不得通过删除入口或放宽目录校验满足行数约束。",
+  "package_role": "pilot_case",
+  "quality_scored": true,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_cli_validation_architecture.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "allowed",
+  "task_pack_sha256": "79555bd5b1a98e948197444483857f3c4a0de2dd4b86459eef96807c5d3e62e5"
+}

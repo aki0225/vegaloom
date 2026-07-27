@@ -1,0 +1,23 @@
+{
+  "acceptance_fact_ids": [
+    "A-MA2B-C11-BOUNDARY",
+    "A-MA2B-C11-ATOMIC"
+  ],
+  "case_class": "stale_evidence",
+  "case_id": "MA2B-C11",
+  "case_manifest_sha256": "9f2d650ae399602f0742922197ab287ce6aa3c5351b6b9e430ec9d8b8244e00f",
+  "expected_outcome": "safe_block",
+  "forbidden_outcomes": [
+    "accepted_change",
+    "safe_deferral"
+  ],
+  "manual_adjudication_rule": "只接受固定 task artifact 漂移触发的 task_artifact_mismatch；Planner 与 Worker 调用必须为零，不得执行 verifier、修改目标 workspace、重新编译后继续或标记成功。",
+  "package_role": "pilot_case",
+  "quality_scored": false,
+  "required_verification_commands": [
+    "python -m pytest -q tests/test_adapter_realpath_boundary.py"
+  ],
+  "schema_version": 1,
+  "target_workspace_change": "forbidden",
+  "task_pack_sha256": "d4141f8b295a669574107c9d3c567d749ebd5b9e9ed54a4d61177fa23accfc70"
+}

@@ -1,0 +1,30 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C06-PROGRESS",
+      "statement": "受控进程必须立即报告一次进度，并在长任务期间按有界间隔继续报告。"
+    },
+    {
+      "fact_id": "A-MA2B-C06-ISOLATION",
+      "statement": "进度回调异常不得改变子进程成功或失败结果。"
+    },
+    {
+      "fact_id": "A-MA2B-C06-EPHEMERAL",
+      "statement": "progress_reporter 不得写入 execution.json 或其他持久化执行状态。"
+    }
+  ],
+  "case_id": "MA2B-C06",
+  "constraints": [
+    "只允许修改 src/vega/execution_control.py 和新增 src/vega/execution_feedback.py。",
+    "进度上报必须是辅助能力，不能建立第二套 heartbeat、deadline 或恢复状态机。",
+    "不得修改固定 verifier 或 pyproject.toml。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不接入 CLI、Reviewer、Loop 或远程遥测。"
+  ],
+  "schema_version": 1,
+  "summary": "为受控子进程增加有界进度回调，同时保持执行结果和持久化 artifact 不受影响。",
+  "task_id": "TASK-MA2B-C06",
+  "unresolved_decision": null
+}

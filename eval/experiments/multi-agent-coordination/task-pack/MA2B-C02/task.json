@@ -1,0 +1,26 @@
+{
+  "acceptance_facts": [
+    {
+      "fact_id": "A-MA2B-C02-GUARD",
+      "statement": "config check 必须在调用 check_project_config 前拒绝非目录仓库路径。"
+    },
+    {
+      "fact_id": "A-MA2B-C02-DIRECTORY",
+      "statement": "合法目录仍必须解析为稳定目录路径并继续进入原有配置检查流程。"
+    }
+  ],
+  "case_id": "MA2B-C02",
+  "constraints": [
+    "只允许修改 src/vega/cli.py。",
+    "错误必须保持稳定且不得绕过现有路径脱敏。",
+    "不得修改 cli_support.py、固定 verifier 或 pyproject.toml。",
+    "worker_token_limit 仅表示观测预算；超额记录为经济性事实，不声明运行时硬终止。"
+  ],
+  "non_goals": [
+    "不在本 case 抽离共享 CLI 校验 helper，也不改变 Reviewer CLI 行为。"
+  ],
+  "schema_version": 1,
+  "summary": "在非 Reviewer CLI 入口读取项目配置前拒绝把普通文件当作仓库目录。",
+  "task_id": "TASK-MA2B-C02",
+  "unresolved_decision": null
+}
