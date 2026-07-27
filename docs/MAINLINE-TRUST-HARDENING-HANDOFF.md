@@ -4,6 +4,7 @@
 > 分支：`codex/mainline-trust-hardening`
 > 基线：`origin/main@7805bba`
 > 远端起点：`2ba6ab8`
+> Draft PR：`#20`
 > 状态：本轮实现与裁剪完成；当前分支是唯一接力入口，等待 Draft PR CI，不合并
 
 ## 本轮结果
@@ -92,7 +93,7 @@ git pull --ff-only origin codex/mainline-trust-hardening
 git status -sb
 ```
 
-1. 先核对 Draft PR 的全部 CI job，不要新建分支，也不要合并。
+1. 先核对 Draft PR `#20` 的全部 CI job，不要新建分支，也不要合并。
 2. CI 失败时保留日志，在同一 `codex/mainline-trust-hardening` 分支修复并推送。
 3. CI 全绿后再做一次 PR diff 与公开仓库卫生复核，再判断是否具备合并条件。
 4. MA 与 Assurance 实验继续留在独立实验分支，不带入本 PR。
