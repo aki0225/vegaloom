@@ -188,7 +188,7 @@ issue_codes = execution_binding_path_invalid, execution_authorization_path_inval
 
 文件范围分三组：
 
-- 能力与合同：`src/vega/ma2b_*.py`、`src/vega/delegation.py`、对应合同文档和 MA 专用测试。
+- 能力与合同：`src/vega/experimental/ma2b/*.py`、对应合同文档和 MA 专用测试。
 - 固定输入：`eval/experiments/multi-agent-coordination/fixtures/ma2b/**` 与
   `eval/experiments/multi-agent-coordination/MA-2B-pre-registration.md`。
 - 解释文档：`docs/experiments/multi-agent-coordination/**` 中的 MA-2B 协议与 Canary 结果。

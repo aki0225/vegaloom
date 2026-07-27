@@ -1,8 +1,8 @@
 # MA-2B Worker 输入 v2 Canary Planner 适配修订
 
-> 冻结日期：2026-07-26  
-> 分支：`experiment/ma2b-planner-worker-pilot`  
-> 前置协议：`MA-2B-WORKER-INPUT-V2-CANARY.md`  
+> 冻结日期：2026-07-26<br>
+> 分支：`experiment/ma2b-planner-worker-pilot`<br>
+> 前置协议：`MA-2B-WORKER-INPUT-V2-CANARY.md`<br>
 > 前置协议提交：`137ef84`
 > 状态：`adapter_repair_frozen / owner_authorized`
 > 后续 supersession：本修订只保留为历史 Canary Planner 适配记录；正式 Pilot 输入资格由

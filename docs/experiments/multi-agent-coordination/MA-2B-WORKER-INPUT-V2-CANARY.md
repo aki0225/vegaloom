@@ -1,8 +1,8 @@
 # MA-2B Worker 输入 v2 能力 Canary 协议
 
-> 冻结日期：2026-07-26  
-> 分支：`experiment/ma2b-planner-worker-pilot`  
-> 代码基线：`49ecc19fe4cf7acd7fb9e0c4a736b3b8fb6312d3`  
+> 冻结日期：2026-07-26<br>
+> 分支：`experiment/ma2b-planner-worker-pilot`<br>
+> 代码基线：`49ecc19fe4cf7acd7fb9e0c4a736b3b8fb6312d3`<br>
 > 状态：`protocol_frozen / owner_authorized`
 > 后续 supersession：正式 Pilot 输入资格与 Worker Token 语义由
 > `MA-2B-PILOT-INPUT-QUALIFICATION-V1.md` 控制；本文件继续作为历史 Canary 协议保留。

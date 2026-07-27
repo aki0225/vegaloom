@@ -1,7 +1,7 @@
 # MA-2B Worker 输入 v2 能力 Canary 结果
 
-> 运行日期：2026-07-26  
-> 分支：`experiment/ma2b-planner-worker-pilot`  
+> 运行日期：2026-07-26<br>
+> 分支：`experiment/ma2b-planner-worker-pilot`<br>
 > 协议提交：`137ef84`
 > Planner 适配修订提交：`48e1518`
 > 状态：`canary_completed / capability_signal_positive / economic_signal_not_observed`

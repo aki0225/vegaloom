@@ -22,7 +22,7 @@ Provider，也不授权 Pilot 执行。
 
 ## 二、已冻结的校验
 
-`src/vega/ma2b_execution_binding.py` 只接受脱敏、可公开复核的绑定字段：
+`src/vega/experimental/ma2b/execution_binding.py` 只接受脱敏、可公开复核的绑定字段：
 
 1. Provider family、interface、client version；
 2. premium、budget、balanced reviewer 的固定模型标识；

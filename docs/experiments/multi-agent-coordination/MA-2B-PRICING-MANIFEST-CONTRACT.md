@@ -21,7 +21,7 @@ pricing artifact，不读取 Provider 凭据，不访问 Provider endpoint，也
 
 ## 二、已冻结的校验
 
-`src/vega/ma2b_pricing_manifest.py` 只接受公开可复核的定价快照字段：
+`src/vega/experimental/ma2b/pricing.py` 只接受公开可复核的定价快照字段：
 
 1. schema version、币种、公开来源类别和脱敏来源标签；
 2. 定价观测时间与有效窗口，全部必须是 UTC `Z` 格式；

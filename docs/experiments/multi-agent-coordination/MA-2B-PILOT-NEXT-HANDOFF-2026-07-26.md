@@ -120,3 +120,55 @@ git log -7 --oneline --decorate
 
 如果任一步需要修改通用 Runtime、CI、增加证据层、放宽 readiness，或提前进入 Reviewer、
 MA-3、multi-worker，应停止并重新确认范围。
+
+## 六、2026-07-27 P0 复核记录
+
+本节是对 2026-07-27 候选差异的追加记录，不替换第三节的 2026-07-26 历史验证结果。
+
+本次 P0 只处理实验代码边界和架构增长问题：
+
+1. 将根命名空间中的 MA-2B 专用模块迁入
+   `src/vega/experimental/ma2b/`，不保留旧根模块兼容层。
+2. 将 delegation schema、路径与命令校验、task-pack schema、readiness authorization
+   校验分离到同一实验包内的小模块；将 delegation、task-pack 和 readiness 的超长流程拆成
+   有界函数。
+3. 更新 MA-2B 测试 import 和 live-code 文档路径；冻结 workspace 中的历史 verifier 命令保持
+   不变。
+4. 没有修改 `eval/`、通用 Runtime、Reviewer、CI、readiness 成功条件或 Provider 边界；
+   没有生成 pricing、execution binding、owner authorization，也没有调用真实 Provider。
+
+当前候选差异的验证结果：
+
+- MA-2B 五个定向测试文件：`109 passed`。
+- MA-2B 实验包定向覆盖率：总计 `89%`，各模块均不低于 `80%`。
+- `python -m compileall src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py`：
+  通过。
+- `ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py`：
+  通过。
+- 架构增长门禁：通过，结果为 `C901 46->46，Python 模块 55->65`；新增 MA-2B 模块均不超过
+  500 行。
+- 仓库路径与私密文件卫生检查：通过。
+- 当前工作区差异与 `origin/main` 候选差异的 `git diff --check`：通过。
+- 当前候选差异测试收集：`821` 个节点，CI 固定 `712` 节点的合同漂移未在本阶段处理。
+- wheel 边界：`vega.experimental.ma2b.*` 已打包且可从 wheel 导入；旧
+  `vega.delegation` 与 `vega.ma2b_*` 根模块未进入 wheel。
+
+独立只读 reviewer 发现并修复了一处拆分漂移：execution binding 已成功加载、但随后文件哈希
+读取失败时，拆分后的 helper 曾错误丢弃已加载 binding，造成 `execution_binding_loaded` 和
+后续 pricing 诊断偏离基线。当前实现会保留已加载 binding、仅将哈希标记为不可验证，并已有
+回归测试固定该 fail-closed 语义。
+
+本次没有把全量测试记为通过。拆分初稿按测试文件设置单进程 60 秒上限后，22 个完整文件
+覆盖 479 个节点并全部通过；另外 10 个文件在 60 秒内未完成，未产生断言失败。独立 reviewer
+修复拆分漂移后，受影响的 MA-2B 定向集已按当前候选差异重跑为 `109 passed`，但没有把其余
+不受影响的分片结果拼接成一次新的全量通过。
+
+代表性 faulthandler 诊断显示长节点正在重复执行 workspace、risk gate 和 evidence 快照所需
+的 Git 只读采集，而不是进入 MA-2B 模块调用链。对同一测试临时仓库逐条复放 `rev-parse`、
+`status`、`diff` 和 `ls-files` 时，单条命令均能在一秒内返回；再次运行相同节点时，60 秒
+超时位置已推进到测试函数后半段，因此没有证据证明某条 Git 命令稳定卡死，也没有依据通过
+修改全局 pytest Git 配置解决问题。
+
+该结果只能记为“定向验证通过、全量验证在当前 60 秒预算下未完成”。后续应把这些长节点
+作为独立测试性能问题处理，或在资源稳定时按精确节点重跑；不能沿用 2026-07-26 的全量结果
+冒充当前候选差异已完整通过。

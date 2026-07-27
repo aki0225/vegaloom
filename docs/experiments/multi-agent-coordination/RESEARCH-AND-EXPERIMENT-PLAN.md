@@ -1,11 +1,12 @@
 # 多智能体协调 Harness：调研结论与实验计划
 
-> 状态：`MA-0-frozen / candidate-execution-contract`<br>
+> 初始状态（2026-07-23）：`MA-0-frozen / candidate-execution-contract`<br>
 > 建立日期：2026-07-23<br>
 > 调研基线：公开 `main@521f9b9`（Assurance Stage 1 数据合同）<br>
 > 分支：`experiment/multi-agent-coordination`<br>
 > 默认产品行为：**不变**<br>
-> 结论等级：已批准进入 `MA-1`；尚未批准真实 Worker、多 Worker、A2A 或主线合并
+> 初始裁决：已批准进入 `MA-1`；尚未批准真实 Worker、多 Worker、A2A 或主线合并<br>
+> 2026-07-27 状态：`MA-2B / candidate_inputs_complete / readiness_blocked / provider_not_authorized`
 
 ---
 
@@ -709,9 +710,19 @@ Owner 已于 2026-07-23 确认以下五项，而不是直接开始 A2A 或多 wo
 4. 接受 provider-native 子 Agent 先作为 treatment，而不是 Vega 要复制的功能。
 5. 接受 A2A 仅在跨运行时需求被证明后才进入设计 Gate。
 
-因此当前唯一实验实现范围是 `MA-1`：在冻结的公开主线 baseline 上，写出最小、严格、
-fail-closed 的 `PlanContract` 与 `DelegationReadiness`，产出确定性 route evidence artifact。
-完成验证后先形成 Gate 结论，不自动进入 `MA-2`。
+因此在 **2026-07-23 的初始裁决时点**，唯一实验实现范围是 `MA-1`：在冻结的公开主线
+baseline 上，写出最小、严格、fail-closed 的 `PlanContract` 与 `DelegationReadiness`，
+产出确定性 route evidence artifact。完成验证后先形成 Gate 结论，不自动进入 `MA-2`。
+
+截至 **2026-07-27**，后续实验已推进到 MA-2B 候选输入准备完成，但正式执行资格仍被
+readiness 门禁阻断：
+
+```text
+candidate_inputs_complete / readiness_blocked / provider_not_authorized
+```
+
+该状态不表示真实 Worker 或 Pilot 已获批准；在 execution binding、owner authorization 和
+Provider 授权齐备前，不得调用真实 Provider，也不得提前进入 Reviewer、MA-3 或 multi-worker。
 
 ---
 

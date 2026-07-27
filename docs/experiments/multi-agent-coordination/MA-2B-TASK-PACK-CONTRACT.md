@@ -19,7 +19,7 @@ fixture。它不代表 12 个真实 Pilot case 已经选定，也不授权模型
 实现位置：
 
 ```text
-src/vega/ma2b_task_pack.py
+src/vega/experimental/ma2b/task_pack.py
 tests/test_ma2b_task_pack.py
 eval/experiments/multi-agent-coordination/fixtures/ma2b/
 ```
