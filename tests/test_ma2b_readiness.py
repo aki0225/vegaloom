@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from vega.experimental.ma2b.execution_binding import load_ma2b_execution_binding
 from vega.experimental.ma2b.readiness import (
     MA2B_EXECUTION_AUTHORIZATION_PATH,
     MA2B_EXECUTION_BINDING_PATH,
@@ -138,6 +139,41 @@ def test_readiness_blocks_authorization_case_set_hash_mismatch(tmp_path: Path) -
 
     assert result.status == "blocked"
     assert "execution_authorization_case_set_hash_mismatch" in result.issue_codes
+
+
+def test_readiness_keeps_loaded_binding_when_binding_hash_becomes_unreadable(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    packages = _fake_packages()
+    pricing_sha256 = _write_pricing_manifest(repo)
+    binding_path = _write_binding(repo, pricing_sha256=pricing_sha256)
+    execution_binding_sha256 = _sha256_file(binding_path)
+    binding = load_ma2b_execution_binding(
+        repo_root=repo,
+        binding_path=MA2B_EXECUTION_BINDING_PATH,
+    )
+    _write_authorization(
+        repo,
+        execution_binding_sha256=execution_binding_sha256,
+        pricing_manifest_sha256=pricing_sha256,
+        case_set_sha256=compute_ma2b_case_set_sha256(packages),
+    )
+    binding_path.unlink()
+
+    result = check_ma2b_pilot_readiness(
+        repo_root=repo,
+        case_loader=_fake_case_loader(packages),
+        execution_binding_loader=lambda **_: binding,
+    )
+
+    assert result.status == "blocked"
+    assert result.execution_binding_loaded is True
+    assert result.authorization_loaded is True
+    assert result.issue_codes == [
+        "execution_binding:MA2BReadinessError",
+        "execution_authorization_binding_unverifiable",
+    ]
 
 
 @pytest.mark.parametrize(
