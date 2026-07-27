@@ -22,9 +22,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = Path("eval/experiments/multi-agent-coordination/fixtures/ma2b")
 TASK_PACK_ROOT = FIXTURE_ROOT / "task-pack"
 GROUND_TRUTH_ROOT = FIXTURE_ROOT / "ground-truth"
-PILOT_CANDIDATE_ROOT = FIXTURE_ROOT / "pilot-candidates/v1"
-PILOT_TASK_PACK_ROOT = PILOT_CANDIDATE_ROOT / "task-pack"
-PILOT_GROUND_TRUTH_ROOT = PILOT_CANDIDATE_ROOT / "ground-truth"
 FORMAL_TASK_PACK_ROOT = Path(
     "eval/experiments/multi-agent-coordination/task-pack"
 )
@@ -155,7 +152,7 @@ PILOT_EXPECTED = {
 }
 
 
-def test_task_pack_fixtures_and_pilot_candidates_load_with_bound_hashes() -> None:
+def test_task_pack_fixtures_and_formal_pilot_inputs_load_with_bound_hashes() -> None:
     package = _load_fixture(PROJECT_ROOT, "MA2B-F01")
 
     assert package.manifest.package_role == "fake_driver_fixture"
@@ -165,8 +162,7 @@ def test_task_pack_fixtures_and_pilot_candidates_load_with_bound_hashes() -> Non
     assert package.ground_truth.target_workspace_change == "allowed"
     assert package.task_pack_sha256 == package.ground_truth.task_pack_sha256
     assert package.project_policy.allowed_write_paths == ["src/textops.py"]
-    _assert_frozen_pilot_candidates()
-    _assert_formal_pilot_inputs_match_candidates()
+    _assert_frozen_formal_pilot_inputs()
 
 
 def test_stale_evidence_fixture_is_safe_block_and_never_quality_scored() -> None:
@@ -344,15 +340,6 @@ def _load_fixture(repo_root: Path, case_id: str):
     )
 
 
-def _load_pilot_candidate(case_id: str):
-    return load_ma2b_case_package(
-        repo_root=PROJECT_ROOT,
-        case_id=case_id,
-        task_pack_root=PILOT_TASK_PACK_ROOT,
-        ground_truth_root=PILOT_GROUND_TRUTH_ROOT,
-    )
-
-
 def _load_formal_pilot_case(case_id: str):
     return load_ma2b_case_package(
         repo_root=PROJECT_ROOT,
@@ -362,24 +349,9 @@ def _load_formal_pilot_case(case_id: str):
     )
 
 
-def _assert_formal_pilot_inputs_match_candidates() -> None:
-    for case_id, expected in PILOT_EXPECTED.items():
-        candidate = _load_pilot_candidate(case_id)
-        formal = _load_formal_pilot_case(case_id)
-
-        assert formal.task_pack_sha256 == candidate.task_pack_sha256
-        assert formal.task_pack_sha256 == expected["task_pack_sha256"]
-        assert formal.manifest == candidate.manifest
-        assert formal.task == candidate.task
-        assert formal.initial_workspace == candidate.initial_workspace
-        assert formal.project_policy == candidate.project_policy
-        assert formal.verification == candidate.verification
-        assert formal.ground_truth == candidate.ground_truth
-
-
-def _assert_frozen_pilot_candidates() -> None:
+def _assert_frozen_formal_pilot_inputs() -> None:
     packages = {
-        case_id: _load_pilot_candidate(case_id)
+        case_id: _load_formal_pilot_case(case_id)
         for case_id in PILOT_EXPECTED
     }
     for case_id, expected in PILOT_EXPECTED.items():
@@ -397,7 +369,7 @@ def _assert_frozen_pilot_candidates() -> None:
         )
 
         ground_truth_path = (
-            PROJECT_ROOT / PILOT_GROUND_TRUTH_ROOT / f"{case_id}.json"
+            PROJECT_ROOT / FORMAL_GROUND_TRUTH_ROOT / f"{case_id}.json"
         )
         assert _sha256_file(ground_truth_path) == expected["ground_truth_sha256"]
 

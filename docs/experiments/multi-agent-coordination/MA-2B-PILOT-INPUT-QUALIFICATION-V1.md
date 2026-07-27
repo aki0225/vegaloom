@@ -3,8 +3,9 @@
 > 冻结日期：2026-07-26
 > 主线基线：`origin/main@7805bba18f7d91594cba0c6cb95251493503362c`
 > 分支：`experiment/ma2b-pilot-next`
-> 完整输入提交：`6bc443ef3faf68adc5e2574cad6415de06f52e30`
-> 状态：`candidate_inputs_complete / readiness_blocked / provider_not_authorized`
+> 候选冻结提交：`6bc443ef3faf68adc5e2574cad6415de06f52e30`
+> 正式输入迁移提交：`399e7460f5662cca9fb354481ca76bccba0a6fed`
+> 状态：`formal_inputs_complete / readiness_blocked / provider_not_authorized`
 
 ## 一、当前结论
 
@@ -28,7 +29,7 @@ economic_signal_not_observed
 但 treatment 总 Token 增加 `56.5%`、总墙钟增加 `17.5%`。premium Planner 的固定开销
 超过了 budget Worker 的子阶段节省，不能宣称 C 已比 A 更经济。
 
-本轮新增的 12 个正式候选只证明输入、scope、固定 verifier、ground truth 和哈希可复核。
+本分支冻结并迁移的 12 个正式输入只证明输入、scope、固定 verifier、ground truth 和哈希可复核。
 它们没有调用 Provider，也不能证明 Worker 已经解决 8 个代码 case。能力结论不能外推到正式
 Pilot、Reviewer、MA-3 或 multi-worker。
 
@@ -67,16 +68,22 @@ worker_token_observation_budget
 - 若未来需要硬门禁，必须单独修改 Runtime，并增加终止、usage 缺失和结果失效测试；该动作
   不属于本轮输入资格工作。
 
-## 四、正式候选集合
+## 四、正式输入集合
 
-候选根目录为：
+readiness 与后续执行只读取以下正式根目录：
 
 ```text
-eval/experiments/multi-agent-coordination/fixtures/ma2b/pilot-candidates/v1/
+eval/experiments/multi-agent-coordination/task-pack/
+eval/experiments/multi-agent-coordination/ground-truth/
 ```
 
-该目录仍是隔离候选区，不是 readiness 默认读取的正式 task-pack 根目录。全部 12 个候选都
-使用 `package_role=pilot_case`、`source_kind=git_snapshot`，且不包含 reference patch、
+`eval/experiments/multi-agent-coordination/fixtures/ma2b/pilot-candidates/v1/`
+中的同名 task-pack 与 ground truth 是迁移前的历史冻结副本。它们按 `eval/` 只追加规则保留，
+但不再作为 readiness、哈希或后续执行的第二权威源，也不再与正式输入逐文件互证。
+
+该候选目录下的 `workspaces/` 仍是正式 `initial-workspace.json` 引用的冻结源树，因此继续
+保留并参与 workspace tree 校验。全部 12 个正式输入都使用
+`package_role=pilot_case`、`source_kind=git_snapshot`，且不包含 reference patch、
 Provider prompt、凭据或运行结果。
 
 | Case | 类别 | 历史红基线 | 参考修复或预期行为 | 固定 verifier |
@@ -151,14 +158,14 @@ Workspace 是历史 Git 源文件的 LF-normalized 最小投影，并附带 eval
 
 ## 七、Readiness 不放宽
 
-本轮没有修改：
+正式输入迁移没有修改：
 
 - `MA2B_PILOT_CASE_IDS`；
 - `check_ma2b_pilot_readiness()`；
 - execution binding、pricing、authorization 或 CI；
-- 正式 task-pack 默认根目录。
+- readiness 的成功条件或 12-case 数量。
 
-使用候选根目录运行真实 readiness 的结果为：
+使用默认正式根目录运行 readiness 的结果为：
 
 ```text
 loaded_case_ids = MA2B-C01 ... MA2B-C12
@@ -167,14 +174,13 @@ status = blocked
 issue_codes = execution_binding_path_invalid, execution_authorization_path_invalid
 ```
 
-因此 12 个输入已经齐全，但仍未获得真实执行资格。定向测试为 `24 passed, 1 skipped`，项目
-测试收集数仍为 `820`，没有通过增加测试节点或缩减 case 集合放宽 readiness。
+因此 12 个输入已经齐全，但仍未获得真实执行资格。迁移只填充默认输入根，没有通过增加
+测试节点、缩减 case 集合或改变成功条件放宽 readiness。
 
-## 八、从更新后 main 重建的迁移清单
+## 八、历史迁移清单
 
 当前分支已经从 `origin/main@7805bba18f7d91594cba0c6cb95251493503362c`
-建立。若后续需要从更新后的 `main` 再建 `ma2b-pilot-next`，按以下顺序迁移；目标主线若已包含
-等价能力，应按文件比较而不是覆盖新 Runtime。
+建立并完成以下迁移。该清单只用于解释当前文件来源，不再是创建新分支或重复迁移的下一步：
 
 1. `13b62c2`：MA-2B 最小合同、task-pack/readiness/pricing/execution-binding 模块、fake
    fixture、预注册和定向测试。
@@ -185,13 +191,18 @@ issue_codes = execution_binding_path_invalid, execution_authorization_path_inval
 6. 迁移本文件以及
    `docs/experiments/multi-agent-coordination/RESEARCH-AND-EXPERIMENT-PLAN.md` 中对应的
    supersession 说明。
+7. `399e746`：将完整 12-case task-pack 与 ground truth 迁入 readiness 默认正式根。
 
 文件范围分三组：
 
 - 能力与合同：`src/vega/experimental/ma2b/*.py`、对应合同文档和 MA 专用测试。
-- 固定输入：`eval/experiments/multi-agent-coordination/fixtures/ma2b/**` 与
-  `eval/experiments/multi-agent-coordination/MA-2B-pre-registration.md`。
+- 正式输入：`eval/experiments/multi-agent-coordination/task-pack/**` 与
+  `eval/experiments/multi-agent-coordination/ground-truth/**`。
+- 历史冻结与源树：`eval/experiments/multi-agent-coordination/fixtures/ma2b/**` 与
+  `eval/experiments/multi-agent-coordination/MA-2B-pre-registration.md`；只保留，不作为第二
+  权威输入。
 - 解释文档：`docs/experiments/multi-agent-coordination/**` 中的 MA-2B 协议与 Canary 结果。
 
-如果迁移需要覆盖更新后 main 的通用 Runtime、修改 CI、调用真实 Provider、增加证据层、
-放宽 readiness，或开始 Reviewer、MA-3、multi-worker，应立即停止并重新评审范围。
+当前工作继续在 `experiment/ma2b-pilot-next` 上进行，不再为同一实验创建新分支。如果后续
+工作需要覆盖通用 Runtime、修改 CI、调用真实 Provider、增加证据层、放宽 readiness，或开始
+Reviewer、MA-3、multi-worker，应立即停止并重新评审范围。

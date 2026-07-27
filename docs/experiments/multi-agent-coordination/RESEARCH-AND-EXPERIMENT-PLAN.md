@@ -6,7 +6,7 @@
 > 分支：`experiment/multi-agent-coordination`<br>
 > 默认产品行为：**不变**<br>
 > 初始裁决：已批准进入 `MA-1`；尚未批准真实 Worker、多 Worker、A2A 或主线合并<br>
-> 2026-07-27 状态：`MA-2B / candidate_inputs_complete / readiness_blocked / provider_not_authorized`
+> 2026-07-27 状态：`MA-2B / formal_inputs_complete / readiness_blocked / provider_not_authorized`
 
 ---
 
@@ -294,9 +294,14 @@ budget:
 `worker_token_observation_budget`。现有字段名为了 schema v1 兼容暂时保留，但不能宣称
 Provider 会在达到该值时被 Runtime 硬终止；实际超额只进入成本与容量观测。
 
-同日的输入资格更新已在候选隔离根冻结 `MA2B-C01`～`MA2B-C12`，固定
+同日的输入资格更新先在隔离根冻结 `MA2B-C01`～`MA2B-C12`，随后由提交 `399e746`
+迁入正式默认根，固定
 `case_set_sha256=33b2caa335b417b47ee45bb5de7051aef20682bbf938eddf5d2e4ad5d3d4f137`。
-这只解除 case 缺失问题，不代表 execution binding、authorization 或 Provider 执行已获批准。
+正式 `task-pack/` 与 `ground-truth/` 是后续 readiness 和执行的唯一权威输入；候选目录中的
+同名 task-pack 与 ground truth 仅作为历史冻结副本保留，不再读取、比较或继续维护。候选
+`workspaces/` 仍由正式 `initial-workspace.json` 引用，不能停用。
+
+该迁移只解除 case 缺失问题，不代表 execution binding、authorization 或 Provider 执行已获批准。
 
 `schema_version` 表达数据格式版本，`plan_revision` 表达同一业务计划的修订次数，二者不能
 混用。首版计划必须是 `plan_revision = 1` 且没有 parent；后续 revision 必须绑定父计划
@@ -714,11 +719,11 @@ Owner 已于 2026-07-23 确认以下五项，而不是直接开始 A2A 或多 wo
 baseline 上，写出最小、严格、fail-closed 的 `PlanContract` 与 `DelegationReadiness`，
 产出确定性 route evidence artifact。完成验证后先形成 Gate 结论，不自动进入 `MA-2`。
 
-截至 **2026-07-27**，后续实验已推进到 MA-2B 候选输入准备完成，但正式执行资格仍被
+截至 **2026-07-27**，后续实验已推进到 MA-2B 正式输入准备完成，但正式执行资格仍被
 readiness 门禁阻断：
 
 ```text
-candidate_inputs_complete / readiness_blocked / provider_not_authorized
+formal_inputs_complete / readiness_blocked / provider_not_authorized
 ```
 
 该状态不表示真实 Worker 或 Pilot 已获批准；在 execution binding、owner authorization 和

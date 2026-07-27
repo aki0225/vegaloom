@@ -4,9 +4,9 @@
 > 分支：`experiment/ma2b-planner-worker-pilot`<br>
 > 当前状态：`readiness_gate_fake_verified / real_execution_blocked`
 >
-> 2026-07-26 状态更新：候选隔离根已冻结完整 12-case，并可生成固定
-> `case_set_sha256`。readiness 合同与 12-case gate 未放宽；当前仍因正式 execution
-> binding 和 authorization 缺失而 `blocked`。详见
+> 2026-07-27 状态更新：正式默认根已具备完整 12-case，并可生成固定
+> `case_set_sha256`。readiness 合同与 12-case gate 未放宽；当前阻断与 case 缺失无关，
+> 仍因正式 execution binding 和 authorization 缺失而 `blocked`。详见
 > `MA-2B-PILOT-INPUT-QUALIFICATION-V1.md`。
 
 ## 一、边界

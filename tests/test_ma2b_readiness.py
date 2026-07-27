@@ -22,18 +22,6 @@ from vega.experimental.ma2b.task_pack import MA2BTaskPackError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-FORMAL_TASK_PACK_ROOT = Path(
-    "eval/experiments/multi-agent-coordination/task-pack"
-)
-FORMAL_GROUND_TRUTH_ROOT = Path(
-    "eval/experiments/multi-agent-coordination/ground-truth"
-)
-PILOT_CANDIDATE_ROOT = Path(
-    "eval/experiments/multi-agent-coordination/fixtures/ma2b/"
-    "pilot-candidates/v1"
-)
-PILOT_TASK_PACK_ROOT = PILOT_CANDIDATE_ROOT / "task-pack"
-PILOT_GROUND_TRUTH_ROOT = PILOT_CANDIDATE_ROOT / "ground-truth"
 PRICING_PATH = Path("eval/experiments/multi-agent-coordination/pricing/MA-2B-pricing.json")
 
 
@@ -51,7 +39,7 @@ def test_readiness_blocks_when_pilot_artifacts_are_missing_or_partial(
     assert "pilot_case:MA2B-C01:task_pack_root_invalid" in result.issue_codes
     assert "execution_binding_path_invalid" in result.issue_codes
     assert "execution_authorization_path_invalid" in result.issue_codes
-    _assert_formal_inputs_preserve_candidate_identity()
+    _assert_formal_inputs_load_with_default_readiness()
 
 
 def test_readiness_is_ready_only_when_cases_binding_pricing_and_authorization_match(
@@ -276,50 +264,25 @@ def _repo(root: Path) -> Path:
     return repo
 
 
-def _assert_formal_inputs_preserve_candidate_identity() -> None:
+def _assert_formal_inputs_load_with_default_readiness() -> None:
     assert MA2B_PILOT_CASE_IDS == tuple(
         f"MA2B-C{index:02d}" for index in range(1, 13)
     )
 
-    candidate_result = check_ma2b_pilot_readiness(
-        repo_root=PROJECT_ROOT,
-        task_pack_root=PILOT_TASK_PACK_ROOT,
-        ground_truth_root=PILOT_GROUND_TRUTH_ROOT,
+    result = check_ma2b_pilot_readiness(repo_root=PROJECT_ROOT)
+
+    assert result.status == "blocked"
+    assert result.loaded_case_ids == list(MA2B_PILOT_CASE_IDS)
+    assert (
+        result.case_set_sha256
+        == "33b2caa335b417b47ee45bb5de7051aef20682bbf938eddf5d2e4ad5d3d4f137"
     )
-    formal_result = check_ma2b_pilot_readiness(repo_root=PROJECT_ROOT)
-
-    for result in (candidate_result, formal_result):
-        assert result.status == "blocked"
-        assert result.loaded_case_ids == list(MA2B_PILOT_CASE_IDS)
-        assert (
-            result.case_set_sha256
-            == "33b2caa335b417b47ee45bb5de7051aef20682bbf938eddf5d2e4ad5d3d4f137"
-        )
-        assert result.issue_codes == [
-            "execution_binding_path_invalid",
-            "execution_authorization_path_invalid",
-        ]
-        assert result.execution_binding_loaded is False
-        assert result.authorization_loaded is False
-
-    for case_id in MA2B_PILOT_CASE_IDS:
-        candidate_case_dir = PROJECT_ROOT / PILOT_TASK_PACK_ROOT / case_id
-        formal_case_dir = PROJECT_ROOT / FORMAL_TASK_PACK_ROOT / case_id
-        for artifact_name in (
-            "case-manifest.json",
-            "initial-workspace.json",
-            "project-policy.json",
-            "task.json",
-            "verification-manifest.json",
-        ):
-            assert formal_case_dir.joinpath(artifact_name).read_bytes() == (
-                candidate_case_dir / artifact_name
-            ).read_bytes()
-        assert (
-            PROJECT_ROOT / FORMAL_GROUND_TRUTH_ROOT / f"{case_id}.json"
-        ).read_bytes() == (
-            PROJECT_ROOT / PILOT_GROUND_TRUTH_ROOT / f"{case_id}.json"
-        ).read_bytes()
+    assert result.issue_codes == [
+        "execution_binding_path_invalid",
+        "execution_authorization_path_invalid",
+    ]
+    assert result.execution_binding_loaded is False
+    assert result.authorization_loaded is False
 
 
 def _fake_case_loader(

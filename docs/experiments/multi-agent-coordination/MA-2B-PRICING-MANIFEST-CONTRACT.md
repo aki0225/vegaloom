@@ -4,8 +4,8 @@
 > 分支：`experiment/ma2b-planner-worker-pilot`<br>
 > 当前状态：`pricing_manifest_schema_fake_verified / real_execution_blocked`
 >
-> 2026-07-26 状态更新：12 个候选 task-pack 与 ground truth 已在隔离根冻结，但真实 pricing、
-> execution binding、authorization 和 Provider 可用性仍未建立。
+> 2026-07-27 状态更新：12 个正式 task-pack 与 ground truth 已迁入 readiness 默认根，但真实
+> pricing、execution binding、authorization 和 Provider 可用性仍未建立。
 
 ## 一、边界
 
@@ -16,7 +16,6 @@ pricing artifact，不读取 Provider 凭据，不访问 Provider endpoint，也
 
 - 真实 `eval/experiments/multi-agent-coordination/pricing/MA-2B-pricing.json`；
 - `eval/experiments/multi-agent-coordination/MA-2B-execution-binding.md`；
-- 将已冻结的 12 个候选 task-pack 与 ground truth 迁入正式默认根；
 - owner 或独立复审后的明确执行授权。
 
 ## 二、已冻结的校验
@@ -56,5 +55,5 @@ execution binding 现在不再只检查 pricing manifest 是否为有效 JSON。
 
 本 Slice 不能被解释为 `execution_authorized`。pricing manifest schema 通过只说明“未来真实
 定价快照有可校验格式”，不说明当前已有真实价格、真实 Provider 可用性或真实 Pilot 样本。
-只要候选 task-pack 尚未迁入正式默认根，或仍缺真实 pricing artifact、execution binding
-artifact、复审授权，状态必须保持 `real_execution_blocked`。
+当前正式输入虽已齐全，但只要仍缺真实 pricing artifact、execution binding artifact 或
+复审授权，状态必须保持 `real_execution_blocked`。
