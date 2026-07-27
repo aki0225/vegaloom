@@ -122,7 +122,7 @@ repository hygiene against origin/main: passed
 architecture growth: passed
   C901 46 -> 39
   Python modules 55 -> 69
-architecture against current branch HEAD: 提交后复核
+architecture against current branch HEAD: 42 passed
 ```
 
 当前增量的定向验证：
@@ -136,8 +136,10 @@ verification 后工作区变化回归: 1 passed
 recovery continue 回归: 1 passed
 受控 Git replace/text 读取回归: 2 passed
 verification 工作区指纹采集失败（auto/continue）: 2 passed
-architecture growth 单元合同: 41 passed；self-HEAD 节点待提交后复核
+architecture growth 单元合同与 self-HEAD: 42 passed
 ```
+
+代码提交：`d5091e0`（`fix: complete mainline trust hardening`）。
 
 ### 本机未形成全量通过结论
 
