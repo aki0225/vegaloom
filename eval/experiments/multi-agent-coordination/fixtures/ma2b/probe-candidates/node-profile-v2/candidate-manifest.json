@@ -1,0 +1,104 @@
+{
+  "authorization": {
+    "future_execution_requires_owner_authorization": true,
+    "maximum_future_worker_provider_calls": 3,
+    "provider_calls_authorized_by_this_candidate": 0,
+    "scope": "offline_qualification_only"
+  },
+  "candidate_id": "MA2B-NODE-PROFILE-V2",
+  "execution_control": {
+    "execution_dir_template": ".tmp/m2n/<run_id>/x/<label>",
+    "run_id_rule": "execution.run_id == run_root.name",
+    "run_root_template": ".tmp/m2n/<run_id>",
+    "worker_workspace_aliases": [
+      "w1",
+      "w2"
+    ]
+  },
+  "formal_ma2b_pilot": false,
+  "frozen_files": [
+    {
+      "relative_path": "pre-registration.md",
+      "sha256": "546078cad6a43cd041d1b2f4a0e17f5dfa0a560b6e9a4705a594012f9cb50d10"
+    },
+    {
+      "relative_path": "task.md",
+      "sha256": "f47948280c48d5923699f7cf14ebbea9ba7a2e8e00c402cbbca1331a11dffddb"
+    },
+    {
+      "relative_path": "plan.json",
+      "sha256": "09a3d95b3fa4bc9e993a3fbf2b79f1f18d43ac2ba407f6c9c93ab35a75e20e8c"
+    },
+    {
+      "relative_path": "ground-truth.json",
+      "sha256": "d421b7192f4f1b0532ca93a5780171af6cecd2f6aea3f2ddc1393740323c36b1"
+    },
+    {
+      "relative_path": "context/node-profile-detection.md",
+      "sha256": "9a8becce2f512f8f3cd1e56d5ee32f639f3e383f91604f194c5ad658e04f183a"
+    },
+    {
+      "relative_path": "context/profile-issue-context.md",
+      "sha256": "eb983cd2035ea24199a376d0532b8d4d2a7e8cf9838171febf7441d8ebad9f16"
+    }
+  ],
+  "harness_files": [
+    {
+      "relative_path": "src/vega/experimental/ma2b/probe.py",
+      "sha256": "be04f692a061f23691ade3f494a7c9e90f9f20c4b756ed771de0c4c0de345e6d"
+    },
+    {
+      "relative_path": "src/vega/experimental/ma2b/probe_harness.py",
+      "sha256": "969345a1b127672bf99d06d275a11bf0e1a58d8beee240f7bdda1fb517becea0"
+    }
+  ],
+  "preflight": {
+    "initial_workspace": {
+      "log_sha256": "b073bed551f5af9774597bfd4bedf8fc95806d0d1ffa83c629c172256ca37466",
+      "qualified_red_baseline": true,
+      "verifier_failed": 11,
+      "verifier_passed": 0
+    },
+    "reference_implementation": {
+      "diff_committed": false,
+      "diff_sha256": "c607e73d5d5554ea1009262b4b3d348ef3403503eafaa58c65b4bf083fa39521",
+      "log_sha256": "cd0b0a802b637824f8f2de51a6fb45afd898f5deccf5252ebccd6c4493a0f9ce",
+      "qualified_green_reference": true,
+      "slice_added_lines": {
+        "node-profile-detection": 43,
+        "profile-issue-context": 21
+      },
+      "slice_addition_ratio": 2.05,
+      "verifier_failed": 0,
+      "verifier_passed": 11
+    }
+  },
+  "prompt_boundary": {
+    "broad_repository_search": "prohibited",
+    "ground_truth_included": false,
+    "historical_results_included": false,
+    "reference_patch_included": false,
+    "unassigned_context_packet_included": false,
+    "verifier_content_included": false
+  },
+  "schema_version": 1,
+  "source_workspace": {
+    "excluded_paths": [
+      "AGENTS.md",
+      "CLAUDE.md",
+      "eval/"
+    ],
+    "origin_commit": "e4bacfc7c24020489db7bb2675aee4bab14c10d4",
+    "origin_tree": "225ea52befd8b700f1bc32d48ad9ad1fc2403e93",
+    "prepared_archive_sha256": "55acdb8cd08803863b8b03878282d8d4dfcc12aa59529dc0012a8aa6265c1462",
+    "prepared_tree": "61efd1dc116be8101000f464739b817b0eb33f16",
+    "recipe": "对 origin_commit 执行 git archive，并在归档 pathspec 中排除 AGENTS.md、CLAUDE.md 与 eval/；解包后初始化独立本地 Git 索引。"
+  },
+  "verifier": {
+    "deterministic": true,
+    "network_access": "prohibited",
+    "relative_path": "eval/experiments/multi-agent-coordination/fixtures/ma2b/probe-candidates/node-profile-v1/verifier/test_node_profile_probe.py",
+    "sha256": "bb44e88e2be824095144c4c60643850ad850bb0402e4f8164d8af402984b2469",
+    "worker_write_access": "prohibited"
+  }
+}
