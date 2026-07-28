@@ -172,3 +172,33 @@ Issue 或已冻结公开 PR 的资格变化、基线不能复现、验证或证�
 最终第一条验证命令改为 `set "NX_DAEMON=false" && corepack yarn build`。命令数、超时和
 构建范围不变，原命令结果只作为控制端诊断，不计入最终基线。更新后必须重新执行并确认没有
 遗留目标相关进程。
+
+## 2026-07-28 执行登记：CRWP-V1 前置检查阻断
+
+三个目标副本、最终 `.vega.yaml`、控制 oracle 和依赖环境已经准备完成。三次
+`config check` 均通过，最终配置中的非 oracle 命令全部通过；三个 oracle 都在独立进程中
+连续两次稳定以 `1` 退出，决定性输出字节一致。登记审查随后发现三个 oracle 仍有合同覆盖
+缺口：Dormice 默认 timeout 未校验完整请求字段，Sequelize 未建立真实 SQL 注释负对照，
+OpenStates 未证明首次幂等运行真实生成预期 YAML。因此这些结果只能作为待修订控制基线，
+不能作为已经冻结的最终 oracle 证据。
+
+正式 worker 没有启动。当前 Vega Runtime 无法为已安装依赖的目标仓库建立完整 ignored
+工作区基线：
+
+- Dormice 的 ignored 枚举超过固定 30 秒 Git 读取上限；
+- Sequelize 与 OpenStates 的 ignored 文件数超过 4096 个元数据条目预算，
+  `snapshot_workspace().capture_complete=false`。
+
+因此本次只登记配置解析、非 oracle 命令、待修订控制基线和两个独立阻断，状态为
+`registration-review-blocked / preflight-blocked / worker-not-started`。可信 workspace
+baseline 尚未建立，也没有 worker 输出、reviewer verdict、Finish 结论或模型成败结果。
+后续必须先补齐三个 oracle 合同并重新执行双次基线，同时修复并验证 Vega 的大型依赖目录
+工作区清单策略；不能靠 `config check` 通过、删除依赖目录或放宽 fail-closed 语义绕过。
+
+控制端在创建正式 run 前停止。Dormice 的 `snapshot_workspace()` 当前还会让
+`subprocess.TimeoutExpired` 直接向上传播；若直接进入 auto loop，worker 不会被调用，但
+run 可能停在 `running / current_step=worker`，不能把它表述为已经形成干净
+`needs_human` 终态。
+
+完整执行参数、哈希、基线命令、oracle 结果和停止依据见
+[`docs/CORE-REAL-WORLD-PILOT-V1-RUN-REGISTRATION.md`](../docs/CORE-REAL-WORLD-PILOT-V1-RUN-REGISTRATION.md)。
