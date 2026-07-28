@@ -971,6 +971,43 @@ Provider case，不增加新的证据层，也不进入 Reviewer、MA-3 或 mult
 Pilot 仍必须通过原 12-case readiness、execution binding、pricing 与 owner authorization，
 不能由本节的两个 pre-pilot case 替代。
 
+### 12.6 2026-07-28 Node 自举候选结果
+
+Owner 后续单独授权了一个新的 Vega 自举 Node 任务，调用上限为 `S 1 次 + M 2 次`。本轮固定
+`gpt-5.6-sol`、`medium` reasoning、相同初始 workspace、行为 verifier 和 480 秒单 Worker
+上限，不调用 Planner 或 Reviewer，不重试。
+
+调用前初始 verifier 为 `11 failed`，临时 reference 实现为 `11 passed`，两个 slice 的参考
+新增行约为 `45:22`。正式运行结果为：
+
+| Treatment | 结果 | Provider 调用耗时 | 完成改动 | Token |
+|---|---|---:|---|---:|
+| S | timeout | 489.532 秒 | 无 | 不可用 |
+| M / Node 检测 | timeout，终止未确认 | 497.636 秒 | 无 | 不可用 |
+| M / 合同与上下文 | timeout | 492.086 秒 | `models.py` 一行 | 不可用 |
+
+三次调用都没有产生 `turn.completed`，最终 integrated verifier 未运行，因此不能比较 S/M
+质量、Token 或经济性。M 缩小了写范围，但两个 Worker 仍分别重复读取完整生产文件和既有测试，
+直到接近 timeout 才进入文件修改；当前只得到“写路径拆分不足以替代窄读上下文编译”的负面
+完成信号。
+
+M 调用前还发现一次不消耗 Provider 的 Windows 深路径复制失败；改用短临时根后才执行原冻结
+M。Node 检测 Worker 超时后的 owned process tree 终止未被当场确认，且一次性 driver 的
+`run_id` 与 run root 身份不一致，标准 recovery 检查拒绝接管。这些控制面问题必须在新调用前
+先离线修复。
+
+本 candidate 结果固定为：
+
+```text
+node_profile_probe_inconclusive
+current_provider_harness_completion_signal_negative
+multi_worker_economic_comparison_unavailable
+formal_ma2b_pilot_readiness_blocked
+```
+
+不在原 candidate 上补跑或追加预算。详细证据见
+`MA-2B-NODE-PROFILE-PROBE-RESULT-2026-07-28.md` 与对应结构化 JSON。
+
 ---
 
 ## 13. 参考资料

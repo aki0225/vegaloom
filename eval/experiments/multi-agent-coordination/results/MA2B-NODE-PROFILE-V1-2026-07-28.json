@@ -1,0 +1,136 @@
+{
+  "artifact_hashes": {
+    "candidate_manifest_sha256": "02d10b0bc18d608e8cdcf4c17f6478db39881e65a0553d92f1d6b0123ec14dc7",
+    "ground_truth_sha256": "9829a965ba58521c573d4130e48320165dd0539e194ce3ac207a04faadcc0a0f",
+    "local_post_run_audit_sha256": "8a74c26c744b5cc13622c7b60288f2d0f219e51ceee65edc4d41acd9d8daba9f",
+    "local_run_manifest_sha256": "4a24960b83fd10633ea764e5e170ab2a666bffb626de25f8090c4b96aaae133e",
+    "local_summary_sha256": "bf580b30bc9feeb8f9464e0162d7314ce7603d5028bd3556a74b37b2e180ab54",
+    "plan_sha256": "2b7f4ebacab417a6e4d2e76d7c0596a0ae20f7610b2337fba902397ca5cf02eb",
+    "task_sha256": "c1e95ed2eb9797a2bb3106636fcf29f9dac7585088e1a1396bc238565a4c26fc",
+    "verifier_sha256": "bb44e88e2be824095144c4c60643850ad850bb0402e4f8164d8af402984b2469"
+  },
+  "candidate_commit": "30cf4e89a8fb20f71054763fd3367f85f3036365",
+  "candidate_id": "MA2B-NODE-PROFILE-V1",
+  "control_preflight": {
+    "issue_code": "windows_workspace_path_too_deep",
+    "provider_calls_started": 0,
+    "resolution": "保持输入不变，改用仓库内短临时根执行原预注册 M。"
+  },
+  "execution": {
+    "codex_cli_version": "codex-cli 0.144.6",
+    "maximum_provider_calls": 3,
+    "model": "gpt-5.6-sol",
+    "planner_calls": 0,
+    "reasoning_effort": "medium",
+    "retry_calls": 0,
+    "reviewer_calls": 0,
+    "worker_timeout_seconds": 480
+  },
+  "finished_at_utc": "2026-07-28T02:27:20.793518+00:00",
+  "formal_ma2b_pilot": false,
+  "input_preflight": {
+    "initial_verifier": {
+      "failed": 11,
+      "passed": 0
+    },
+    "reference_verifier": {
+      "failed": 0,
+      "passed": 11
+    },
+    "slice_addition_ratio": 2.05
+  },
+  "interpretation": {
+    "current_harness_completion_signal": "negative",
+    "economic_comparison_valid": false,
+    "formal_readiness": "blocked",
+    "multi_worker_capability_conclusion": "inconclusive",
+    "reason": "S 与 M 都没有在冻结时限内形成可统一验证的完成结果，且所有调用都缺少 turn.completed usage。"
+  },
+  "local_raw_artifacts": {
+    "committed": false,
+    "location": "$repoRoot/.tmp/node-profile-probe-20260728",
+    "reason": "原始事件含本机运行路径与会话标识；公开结果只保留脱敏摘要和内容哈希。"
+  },
+  "partial_diagnostics": {
+    "M-node-profile-detection": {
+      "changed_paths": [],
+      "event_counts": {
+        "item_completed": 9,
+        "item_started": 5,
+        "turn_completed": 0
+      }
+    },
+    "M-profile-issue-context": {
+      "changed_paths": [
+        "src/vega/models.py"
+      ],
+      "diagnostic_verifier": {
+        "failed": 10,
+        "log_sha256": "0cc2acdde895f41b9eaa0af9c8576aba9f6fbdf88cb652a4bad6f1b8b1eec620",
+        "passed": 1
+      },
+      "diff_sha256": "b40a0849a0c3791ee718a7f81dc248c065d3ad0e3948a8ab421a491e5d35ce05",
+      "event_counts": {
+        "item_completed": 7,
+        "item_started": 4,
+        "turn_completed": 0
+      }
+    },
+    "S": {
+      "changed_paths": [],
+      "event_counts": {
+        "item_completed": 11,
+        "item_started": 7,
+        "turn_completed": 0
+      }
+    }
+  },
+  "provider_calls_used": 3,
+  "runs": [
+    {
+      "changed_paths": [],
+      "duration_seconds": 489.532,
+      "label": "S",
+      "output_sha256": "9f84b6978dc3b338a37bf8d250cbcf31737dd08c4a1e536ba7bc1df01c5ed556",
+      "prompt_sha256": "ef193987c201ebb6bca5755bc708db5388ed24520e12ebfd1279740512cb5907",
+      "status": "timed_out",
+      "token_usage": null
+    },
+    {
+      "changed_paths": [],
+      "duration_seconds": 497.636,
+      "label": "M-node-profile-detection",
+      "output_sha256": "2dc62d730fe40f488c2a860ca1e40f556a333d084b772cce90199be217887855",
+      "prompt_sha256": "823b8806b5e9ed45adb71eaef0c065f95b7af854844f11420bfd88b6368eb889",
+      "status": "timeout_termination_unconfirmed",
+      "token_usage": null
+    },
+    {
+      "changed_paths": [
+        "src/vega/models.py"
+      ],
+      "duration_seconds": 492.086,
+      "label": "M-profile-issue-context",
+      "output_sha256": "e0d84f7ba4b64a1e4fef778c58165a3e1f988a7a68f310afeefcbf0d2cab47b7",
+      "prompt_sha256": "da49ff4c3757455f534784d6dbb4d96ba442f99dd11e52540adf5b27cbf62b86",
+      "status": "timed_out",
+      "token_usage": null
+    }
+  ],
+  "schema_version": 1,
+  "source_workspace": {
+    "origin_commit": "e4bacfc7c24020489db7bb2675aee4bab14c10d4",
+    "prepared_tree": "ec8915a32417f49dd43097f4975986b0a2bdab99"
+  },
+  "termination_audit": {
+    "recorded_pid_count": 26,
+    "recorded_pids_live_at_audit": 0,
+    "recovery_inspection_issue": "execution_run_id_mismatch",
+    "termination_unconfirmed_remains": true
+  },
+  "verifier": {
+    "final_integrated_verifier_run": false,
+    "reason": "Worker failure发生在 scope 检查与确定性集成前，probe 按 fail-closed 语义未运行最终 verifier。"
+  },
+  "verdict": "inconclusive"
+}
