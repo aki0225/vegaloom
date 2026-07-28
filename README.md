@@ -4,7 +4,7 @@
 
 # Vega
 
-<h3>One writes. One reviews. Separate sessions, shared evidence.</h3>
+<h3>本地优先的 AI 编码与验证编排框架</h3>
 
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
@@ -13,6 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
+**[核心设计](#核心设计)** ·
 **[核心能力](#核心能力)** ·
 **[安装](#安装)** ·
 **[快速开始](#快速开始)** ·
@@ -22,18 +23,34 @@
 
 </div>
 
-写代码的 AI 不该只靠自己审查自己。Vega 是一个本地优先的 AI 编码工作流 harness：
-worker 负责修改代码；reviewer 使用独立只读会话，不继承 worker 的完整对话和中间推理，
-只读取明确编译的任务、项目规则、tracked diff 和验证证据。终态由确定性验证、风险门禁
-和 reviewer 结论共同形成；确定性失败或证据不足不能被 reviewer 的 `approve` 覆盖。
-执行失败、中断，或者证据缺失、过期、相互不一致时，Vega 保留现场并交还人工。它不是
-通用 Multi-Agent 框架，也不把会话隔离包装成操作系统级安全沙箱。
+Vega 不追求堆叠复杂的 Multi-Agent 架构。它专注于将代码修改、确定性验证与独立评审分流，
+让 AI 编码的每一步都有明确的输入边界、验证证据和退出条件。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，worker 与 reviewer 使用独立会话，失败 fail-closed 交还人工">
 </p>
 
 <p align="center"><sub>写与审使用独立会话；验证失败或证据不足时，Vega 停止自动执行并交还人工。</sub></p>
+
+## 核心设计
+
+### 双角色会话隔离（Role Segregation）
+
+Worker（编写）与 Reviewer（评审）使用彼此独立的新会话。Reviewer 仅读取任务目标、项目规则、
+代码 Diff 及运行证据，不继承 Worker 的历史对话与中间推理上下文。
+
+从输入机制上切断 AI “自编自审”的上下文继承。*（注：本框架基于会话级上下文隔离，
+非系统或容器级安全沙箱。）*
+
+### 确定性指标拦截（Deterministic Gating）
+
+不盲信模型的口头结论。代码变更必须通过项目本机的验证命令，例如 pytest、eslint 和静态检查。
+即使 Reviewer 给出 `approve`，验证未通过的任务也不能标记为成功，不允许模型结论静默覆盖工程错误。
+
+### Fail-Closed 现场保留（State Preservation）
+
+遇到验证失败、执行超时、Provider 异常或证据冲突时，Vega 立即停止后续自动执行，保留当前运行状态、
+执行 Trace、验证报告和未提交的 Diff，不进行自动回滚、commit 或 push，交由人工接管。
 
 ## 核心能力
 
