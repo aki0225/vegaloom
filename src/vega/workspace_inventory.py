@@ -147,6 +147,12 @@ def _fingerprint_entry(
             False,
             False,
         )
+    if stat.S_ISDIR(stat_result.st_mode):
+        return _EntryFingerprint(
+            metadata + b"<directory-content-not-read>",
+            True,
+            False,
+        )
     if is_sensitive_path(relative_path):
         return _EntryFingerprint(
             metadata + b"<sensitive-content-not-read>",

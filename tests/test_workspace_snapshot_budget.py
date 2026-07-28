@@ -145,6 +145,41 @@ def test_ignored_content_hashing_exposes_incomplete_budget(
     assert len(snapshot.ignored_manifest_sha256) == 64
 
 
+def test_ignored_directory_is_folded_without_exhausting_metadata_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath(".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    _git(repo, "add", "--", ".gitignore")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "ignore dependency directory",
+    )
+    package_dir = repo / "node_modules" / "pkg"
+    package_dir.mkdir(parents=True)
+    package_dir.joinpath("index.js").write_text("module.exports = 1;\n", encoding="utf-8")
+    package_dir.joinpath("types.d.ts").write_text("export {};\n", encoding="utf-8")
+
+    monkeypatch.setattr(workspace_check_module, "MAX_IGNORED_METADATA_FILES", 1)
+
+    baseline = snapshot_workspace(repo)
+    review_snapshot = capture_review_workspace(repo)
+
+    assert baseline.ignored_manifest_complete is True
+    assert baseline.ignored_content_complete is False
+    assert baseline.capture_complete is True
+    assert review_snapshot.ignored_manifest_complete is True
+    assert review_snapshot.ignored_content_complete is False
+    assert review_snapshot.ignored_coverage_level == "metadata_bounded"
+
+
 def test_workspace_check_fails_when_ignored_manifest_is_incomplete(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
