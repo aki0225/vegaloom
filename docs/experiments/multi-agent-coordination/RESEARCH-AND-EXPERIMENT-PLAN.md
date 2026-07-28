@@ -17,6 +17,9 @@
 > 比较单 workspace 顺序执行与两个隔离 workspace 并行执行。Worker Adapter 可注入，当前
 > 只用 fake Worker 验证隔离、写入范围、确定性集成和统一 verifier，不调用真实 Provider，
 > 不接入 Reviewer，也不生成新的证据 artifact。
+>
+> 2026-07-28 A2A 纠偏：当前只冻结最小互操作探针设计，不进入 MA-5 实现，不新增 SDK、
+> Runtime、fixture、测试或 Provider 调用。设计见 `A2A-MINIMAL-INTEROP-PROBE-V1.md`。
 
 ---
 
@@ -525,7 +528,7 @@ classification
 
 一个任务只有同时满足以下条件，才有资格使用多个外部 worker：
 
-1. `PlanContract.task_dag` 中至少两个 slice 的写入集合和语义边界可证明独立。
+1. 冻结的 task-pack 或 probe plan 中至少两个 slice 的写入集合和语义边界可证明独立。
 2. 不共享 schema、公共接口、全局配置、锁、生成产物或易冲突测试夹具。
 3. 每个 slice 能在独立 worktree 中运行自己的验证。
 4. 合并阶段有独立的集成验证，而不是「两个 worker 都说完成」。
@@ -539,29 +542,22 @@ classification
 A2A 的价值是跨运行时、跨厂商或跨机器时的互操作；它不自动提供正确的计划、隔离、验证、
 成本收益或代码合并语义。
 
-只有以下条件同时成立时，才创建 A2A 设计 Gate：
+设计预注册可以提前冻结问题和停止线；只有以下条件同时成立时，才允许执行可计入结论的
+A2A 探针：
 
-1. 需要调用独立部署、不同 provider 或不同权限域的 Agent；
-2. 本地 provider-native subagent / artifact packet 不能表达所需交接；
-3. 对方必须发现能力、接收任务、返回 artifact，且这些交互需要可重放审计；
+1. 已确定一个不能安全地作为进程内 `WorkerAdapter` 调用的独立部署、不同运行时、不同
+   provider 或不同权限域 Agent；
+2. 对方确实需要跨网络边界接收任务和返回 artifact，本地 provider-native subagent 不足以
+   表达所需交接；
+3. 对方必须发现能力、接收任务、返回 artifact，并能用现有 task/run 标识关联状态，不新增
+   审计 ledger；
 4. 安全边界、身份、数据最小化和取消语义已经定义；
-5. 前述 PlanContract 与 evidence binding 已在单运行时实验中证明有价值。
+5. 现有 task-pack、写范围、workspace revision 与固定 verifier 已足以约束输入输出；映射
+   不要求恢复 `PlanContract`、新增 `HandoffPacket` 数据模型或增加证据层。
 
-未满足时，使用本地 `HandoffPacket` 即可：
-
-```yaml
-task_ref: "..."
-plan_ref: "..."
-policy_ref: "..."
-snapshot_ref: "..."
-allowed_actions: []
-budget: {}
-artifact_refs: []
-resume_conditions: []
-```
-
-它只传递内容哈希绑定的事实和最小必要摘要，不传递 API key、完整会话、隐藏推理或不受控环境
-信息。日后如需接入 A2A，应把这个 packet 映射到协议，而不是先造聊天协议再寻找用途。
+未满足时继续使用本地 `WorkerAdapter` 与现有 task-pack。日后接入 A2A 时，只把现有任务事实
+映射到 `Message` / `Task` / `Artifact`，不先造持久化聊天协议再寻找用途。最小映射、P0/P1
+边界和停止线见 `A2A-MINIMAL-INTEROP-PROBE-V1.md`。
 
 ---
 
@@ -575,7 +571,7 @@ resume_conditions: []
 | `MA-2.5` | 失败归因与计划修订 | 分类、显式 revision 与升级是否比盲目重试更可解释 | 有真实失败样本和人工复核 | 删除不可靠分类 |
 | `MA-3` | 原生子 Agent 边际评测 | native subagent 是否优于同 provider 单 worker | `MA-2` 存在可测瓶颈 | 不实现外部协调 |
 | `MA-4` | 隔离 multi-worker | 仅在可并行 DAG 上是否有净收益 | 独立 scope 与集成 oracle 均成立 | 保持单 worker |
-| `MA-5` | A2A 设计 Gate | 跨运行时互操作是否真实需要 | 本节 8.2 五项全满足 | 不实现 A2A |
+| `MA-5` | A2A 互操作 Gate | 跨运行时任务与 artifact 交接是否真实需要且可安全实现 | 本节 8.2 五项全满足 | 不实现 A2A |
 
 ### 9.1 主线与实验分支同步规则
 
@@ -587,8 +583,9 @@ resume_conditions: []
 4. 主线修复如果改变冻结变量，实验必须重新预注册，不能直接同步后继续累计原 Gate 结果。
 5. 实验能力进入产品时，从最新 `main` 新建小分支重新提取独立能力，不整分支合并。
 
-`PlanVersion`、`HandoffPacket`、`failure_signature`、通用 snapshot 绑定等都只是候选基础设施；
-只有证明脱离多 Agent 场景仍有独立价值后，才有资格进入主线。
+`PlanVersion`、`HandoffPacket`、`failure_signature`、通用 snapshot 绑定等是历史候选
+基础设施，不属于当前能力路径。A2A 探针只复用现有 task-pack、`WorkerAdapter`、scope 与
+verifier，不为协议映射恢复这些对象或增加新的持久化证据层。
 
 ### 9.2 `MA-1` 的最小实现范围
 
@@ -1018,6 +1015,20 @@ Owner 选择方案 A。Node V1-V3 继续作为历史控制面阻断记录保留�
 当前有效结论保持为 C07/C05：Multi-Worker 机械能力成立，经济收益未观察到，正式 MA-2B
 Pilot readiness 仍由原 12-case gate 阻断。后续仅允许离线整理既有 task-pack、ground truth、
 固定 verifier 与文档，不调用 Provider，不进入 Reviewer、MA-3 或 multi-worker 产品化。
+
+### 12.8 2026-07-28 A2A 最小互操作探针设计授权
+
+Owner 同意继续在 `experiment/ma2b-pilot-next` 上准备 A2A 后续验证，但当前授权仅限设计
+预注册和过时条件修正，不创建新分支，不实现 A2A Runtime，也不调用 Provider。
+
+本轮冻结的唯一问题是：现有 task-pack、写范围和固定 verifier 能否通过 A2A 交给独立 Agent，
+并在不传递完整会话、不增加证据模型的情况下安全返回代码 artifact。P0 只允许使用
+`MA2B-F01` 与确定性 fake Agent 检查本地协议资格，不计入能力结论；未来 P1 才可在另行授权后
+使用 `MA2B-C07` 检查真实跨运行时互操作。
+
+完整变量、协议映射、资格条件和停止线见 `A2A-MINIMAL-INTEROP-PROBE-V1.md`。该设计不修改
+正式 task-pack、ground truth、hash 或 12-case readiness；也不改变 C07/C05 的既有能力与
+经济性结论。
 
 ---
 
