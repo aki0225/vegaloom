@@ -1,0 +1,117 @@
+{
+  "artifact_hashes": {
+    "candidate_manifest_sha256": "38a87828d0cd3da4d14f944b84eb2f2d181e356f39f5402c48158078d04cf966",
+    "context_node_profile_detection_sha256": "9a8becce2f512f8f3cd1e56d5ee32f639f3e383f91604f194c5ad658e04f183a",
+    "context_profile_issue_sha256": "eb983cd2035ea24199a376d0532b8d4d2a7e8cf9838171febf7441d8ebad9f16",
+    "driver_sha256": "9f915345a1affa694a4fee5d7aea51e9c36e8b085b820d24c65cf336b4174900",
+    "ground_truth_sha256": "d421b7192f4f1b0532ca93a5780171af6cecd2f6aea3f2ddc1393740323c36b1",
+    "local_driver_status_sha256": "16f32fd08c1b8c4fb369bd067764f20c1039b60bfadeefac127736b9135d5c8a",
+    "local_run_manifest_sha256": "359650f722ff7b11c2f717009c5db19cf430160ae5b55eece1145ae050c5ffda",
+    "local_sequential_execution_sha256": "3c3e3954e5d33a24c7bbd1f8a64f8c72afde7c00c01cccf8ef438497cdc7d6da",
+    "local_sequential_invocation_sha256": "8d5b82d3438fad28c3f6bcd75db3f958b1ca396fa68727167c3ed8250d8a08ef",
+    "local_summary_sha256": "6434afbc7684cb83f5860211be4ebfbd26a861e876d33eed4dc23b1a2bdb1c16",
+    "plan_sha256": "09a3d95b3fa4bc9e993a3fbf2b79f1f18d43ac2ba407f6c9c93ab35a75e20e8c",
+    "pre_registration_sha256": "546078cad6a43cd041d1b2f4a0e17f5dfa0a560b6e9a4705a594012f9cb50d10",
+    "red_baseline_log_sha256": "60ea06b430dd22838b7a9f6d3bc2c1f64393e0189667a38b16d9a351e5e78ef1",
+    "task_sha256": "f47948280c48d5923699f7cf14ebbea9ba7a2e8e00c402cbbca1331a11dffddb",
+    "verifier_sha256": "bb44e88e2be824095144c4c60643850ad850bb0402e4f8164d8af402984b2469"
+  },
+  "authorization": {
+    "authorized_worker_provider_calls": 3,
+    "owner_authorization_recorded_in_repository": false,
+    "planner_calls": 0,
+    "retry_calls": 0,
+    "reviewer_calls": 0,
+    "unused_worker_calls_not_consumed": 2
+  },
+  "candidate_commit": "d55eeda3def863be50ab8654191c956be9b1764a",
+  "candidate_id": "MA2B-NODE-PROFILE-V2",
+  "execution": {
+    "codex_cli_version": "codex-cli 0.144.6",
+    "maximum_provider_calls": 3,
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "medium",
+    "worker_timeout_seconds": 480
+  },
+  "finished_at_utc": "2026-07-28T04:30:43.667898+00:00",
+  "formal_ma2b_pilot": false,
+  "input_preflight": {
+    "driver_preflight_passed": true,
+    "fresh_initial_verifier": {
+      "failed": 11,
+      "passed": 0
+    },
+    "parallel_prompt_context_isolation_passed": true,
+    "tracked_workspace_clean": true
+  },
+  "interpretation": {
+    "control_plane_fail_closed": true,
+    "economic_comparison_valid": false,
+    "formal_readiness": "blocked",
+    "multi_worker_capability_conclusion": "not_tested",
+    "parallel_treatment_executed": false,
+    "process_termination_reliability": "termination_unconfirmed",
+    "reason": "S Worker 超时后 owned process tree 终止未被当场确认，Driver 按冻结停止规则未启动 M。",
+    "sequential_completion_signal": "negative"
+  },
+  "local_raw_artifacts": {
+    "committed": false,
+    "location": "$repoRoot/.tmp/m2n",
+    "reason": "原始事件含本机路径、PID 与 Provider 会话标识；公开结果只保留脱敏摘要和内容哈希。"
+  },
+  "prompt_sha256": {
+    "M-node-profile-detection": "d402ea11ca1ce951a689226088cd494434f84611ecfc3a5078cb5eb72e16bbf4",
+    "M-profile-issue-context": "09591808822ed8c04a21f706892a3276872e423df17ff578b209fd8540c1a16f",
+    "S": "2f1ad7152ba5c988ecc89cbc29582e9f0bbacdf0e14a99f9bd8d34f3d339dd17"
+  },
+  "provider_calls_used": 1,
+  "runs": [
+    {
+      "changed_paths": [],
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "duration_seconds": 499.442,
+      "event_counts": {
+        "item_completed": 6,
+        "item_started": 2,
+        "turn_completed": 0
+      },
+      "execution_finished_at": null,
+      "execution_status": "running",
+      "label": "S",
+      "output_sha256": "9722a4a6e33c5d170e38dd1a6a18352aef954ccb35bf6e4905e1e0c83633dd31",
+      "prompt_sha256": "2f1ad7152ba5c988ecc89cbc29582e9f0bbacdf0e14a99f9bd8d34f3d339dd17",
+      "status": "termination_unconfirmed",
+      "termination_unconfirmed": true,
+      "token_usage": null,
+      "wall_seconds": 500.632
+    },
+    {
+      "label": "M-node-profile-detection",
+      "provider_calls": 0,
+      "status": "not_run"
+    },
+    {
+      "label": "M-profile-issue-context",
+      "provider_calls": 0,
+      "status": "not_run"
+    }
+  ],
+  "schema_version": 1,
+  "source_workspace": {
+    "origin_commit": "e4bacfc7c24020489db7bb2675aee4bab14c10d4",
+    "prepared_archive_sha256": "55acdb8cd08803863b8b03878282d8d4dfcc12aa59529dc0012a8aa6265c1462",
+    "prepared_tree": "61efd1dc116be8101000f464739b817b0eb33f16"
+  },
+  "termination_audit": {
+    "output_stable_observation_seconds": 5,
+    "recorded_target_pid_count": 26,
+    "recorded_target_pids_live_at_audit": 0,
+    "termination_unconfirmed_remains": true,
+    "workspace_clean_at_audit": true
+  },
+  "verifier": {
+    "final_integrated_verifier_run": false,
+    "reason": "S Worker 失败发生在 scope 检查与统一验证前，Driver 按 fail-closed 语义未运行 verifier。"
+  },
+  "verdict": "inconclusive_control_plane_blocked"
+}
