@@ -1,0 +1,158 @@
+{
+  "artifact_hashes": {
+    "candidate_manifest_sha256": "00a7888726f7c3da9d4a4f4182dacfbcfcc70215f889085f4fb5472e95f1ba0c",
+    "codex_exec_help_sha256": "c040cab52849ae9a1a9c65b53c64a613badda3cd3dfa1bc5501b1e5f5c14edc4",
+    "context_node_profile_detection_sha256": "9a8becce2f512f8f3cd1e56d5ee32f639f3e383f91604f194c5ad658e04f183a",
+    "context_profile_issue_sha256": "eb983cd2035ea24199a376d0532b8d4d2a7e8cf9838171febf7441d8ebad9f16",
+    "driver_sha256": "710df026dfe9d897de18e1964d1d3931124a2ce77cbffb4ca41a4a2b7d32e5ea",
+    "ground_truth_sha256": "6cac1fbbdda6c9454d80ca7a49a76ad2740c59f270a9ef4d1ead9416e6efb34d",
+    "local_driver_status_sha256": "46868b0996f96f5473b7e702e62fa1679c69baa957a82ed2f8f1a1bb6caf9ea3",
+    "local_parallel_node_execution_sha256": "fa30b2bf93d246ee0fc944cfbe160cca17ea6bbd68cd93f26f1e52d18fed2249",
+    "local_parallel_node_invocation_sha256": "9f1ff0406fa258d02210388f9114bb71e7ddb18390af7babefd753c24237bd8d",
+    "local_parallel_node_output_sha256": "9035a2d98b6794275169637c2c6237d441acfb63951094d476316da9179a0bdc",
+    "local_parallel_profile_execution_sha256": "23489a4edb4e53285acfb9006d1c67fd8bd76e5c8faa5f8471375925cf1d17de",
+    "local_parallel_profile_invocation_sha256": "5d5e6c8595820ee76f56b2511e1a6c6a19dd23e98599f6d33e264ebe93b12565",
+    "local_parallel_profile_output_sha256": "978b7ea628301ba212d027f27909db911d64be1265c32a090d2d825e7f980dc7",
+    "local_run_manifest_sha256": "a06b69fd5745195fccff52e5e894e551a230523dc8f09a13869967b8d6307030",
+    "local_sequential_execution_sha256": "4f42219b3d72b8953daefb13ccb686dd2bb0a87292fcd4a6a21cb6049db021f1",
+    "local_sequential_invocation_sha256": "cac424f0b3988680201022f87483e89b0507c996868e22fa90c3b207d9114297",
+    "local_sequential_output_sha256": "688c5c9c27aedab7f108b8f5a816865241fb50fb82a546bb8475f67e027bbc91",
+    "local_summary_sha256": "1d503b8ba539eb9dad375af70bab0a4e063cc8ad17f3d217700a9ddc5525b3ce",
+    "plan_sha256": "7fd94d0f5f56e49f02a5b41e07f1bf73647c98942b79a3fa36f2c4d141578c61",
+    "pre_registration_sha256": "faa665039f3ac6acb14557887560581b60a6edfc79407bbf13d094af22b628e1",
+    "red_baseline_log_sha256": "7c9f980ab5e9e932ca2a20f236b81040ccee4d73124418227420077ea2805a5e",
+    "task_sha256": "f47948280c48d5923699f7cf14ebbea9ba7a2e8e00c402cbbca1331a11dffddb",
+    "verifier_sha256": "bb44e88e2be824095144c4c60643850ad850bb0402e4f8164d8af402984b2469"
+  },
+  "authorization": {
+    "authorized_worker_provider_calls": 3,
+    "planner_calls": 0,
+    "provider_calls_consumed": 3,
+    "retry_calls": 0,
+    "reviewer_calls": 0,
+    "unused_worker_calls_not_consumed": 0
+  },
+  "candidate_commit": "47c68f8534e15f77e0512ff7d2d393ac67b58e92",
+  "candidate_id": "MA2B-NODE-PROFILE-V3",
+  "execution": {
+    "codex_cli_version": "codex-cli 0.144.6",
+    "ignore_user_config": true,
+    "maximum_provider_calls": 3,
+    "model": "gpt-5.6-sol",
+    "native_windows_executable": true,
+    "reasoning_effort": "medium",
+    "worker_timeout_seconds": 480
+  },
+  "finished_at_utc": "2026-07-28T09:27:03.479047+00:00",
+  "formal_ma2b_pilot": false,
+  "input_preflight": {
+    "driver_preflight_passed": true,
+    "fresh_initial_verifier": {
+      "failed": 11,
+      "passed": 0
+    },
+    "parallel_prompt_context_isolation_passed": true,
+    "source_commit": "a4ab2dbaf6e8ed6676bdc207bf42a384bf42a2ef",
+    "source_tree": "61efd1dc116be8101000f464739b817b0eb33f16",
+    "tracked_workspace_clean": true
+  },
+  "interpretation": {
+    "economic_comparison_valid": false,
+    "formal_readiness": "blocked",
+    "multi_worker_capability_conclusion": "not_tested",
+    "parallel_treatment_executed": true,
+    "provider_authentication_preflight": "missing",
+    "reason": "三次 Codex 调用均未进入模型执行；WebSocket 超时回退 HTTPS 后，Provider 以无效 API key 的 401 拒绝请求。",
+    "termination_unconfirmed_observed": false,
+    "verdict": "inconclusive_provider_auth_blocked"
+  },
+  "local_raw_artifacts": {
+    "committed": false,
+    "location": "$repoRoot/.tmp/m2n",
+    "reason": "原始事件包含本机路径、Provider 会话标识和脱敏认证错误；公开结果只保留错误类别、摘要和内容哈希。"
+  },
+  "prompt_sha256": {
+    "M-node-profile-detection": "4c12144f0f6425671a9317f2bb61edac2ee14543cdce6b6d9f622d9cd4b8bc86",
+    "M-profile-issue-context": "977c56cfe7c59127d630b85b10d754990f418edb5942132a82c0b26dbbf37197",
+    "S": "0319139e8780bf71ed68ba43b65bae7af66df57f9b02509141344ba9a3a9e1e8"
+  },
+  "provider_auth_audit": {
+    "ambient_api_key_variables_observed_after_run": {
+      "CODEX_API_KEY": false,
+      "OPENAI_API_KEY": false,
+      "OPENAI_BASE_URL": false
+    },
+    "cli_contract": "--ignore-user-config 不加载 CODEX_HOME/config.toml，但认证仍使用 CODEX_HOME。",
+    "codex_home_present": true,
+    "error_class": "invalid_api_key",
+    "most_likely_boundary": "V3 隔离了用户配置，却没有隔离或验证 CODEX_HOME 中的认证状态。",
+    "raw_credential_committed": false
+  },
+  "runs": [
+    {
+      "changed_paths": [],
+      "diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "duration_seconds": 130.402,
+      "event_counts": {
+        "item_completed": 1,
+        "item_started": 0,
+        "turn_completed": 0
+      },
+      "label": "S",
+      "output_sha256": "688c5c9c27aedab7f108b8f5a816865241fb50fb82a546bb8475f67e027bbc91",
+      "provider_error_class": "invalid_api_key",
+      "returncode": 1,
+      "runner_status": "error",
+      "status": "provider_auth_error",
+      "termination_unconfirmed": false,
+      "token_usage": null,
+      "wall_seconds": 131.594
+    },
+    {
+      "changed_paths": [],
+      "duration_seconds": 133.162,
+      "event_counts": {
+        "item_completed": 1,
+        "item_started": 0,
+        "turn_completed": 0
+      },
+      "label": "M-node-profile-detection",
+      "output_sha256": "9035a2d98b6794275169637c2c6237d441acfb63951094d476316da9179a0bdc",
+      "provider_error_class": "invalid_api_key",
+      "returncode": 1,
+      "runner_status": "error",
+      "status": "provider_auth_error",
+      "termination_unconfirmed": false,
+      "token_usage": null
+    },
+    {
+      "changed_paths": [],
+      "duration_seconds": 135.1,
+      "event_counts": {
+        "item_completed": 1,
+        "item_started": 0,
+        "turn_completed": 0
+      },
+      "label": "M-profile-issue-context",
+      "output_sha256": "978b7ea628301ba212d027f27909db911d64be1265c32a090d2d825e7f980dc7",
+      "provider_error_class": "invalid_api_key",
+      "returncode": 1,
+      "runner_status": "error",
+      "status": "provider_auth_error",
+      "termination_unconfirmed": false,
+      "token_usage": null
+    }
+  ],
+  "schema_version": 1,
+  "source_workspace": {
+    "origin_commit": "e4bacfc7c24020489db7bb2675aee4bab14c10d4",
+    "prepared_archive_sha256": "55acdb8cd08803863b8b03878282d8d4dfcc12aa59529dc0012a8aa6265c1462",
+    "prepared_commit": "a4ab2dbaf6e8ed6676bdc207bf42a384bf42a2ef",
+    "prepared_tree": "61efd1dc116be8101000f464739b817b0eb33f16"
+  },
+  "verifier": {
+    "final_integrated_verifier_run": false,
+    "reason": "三次调用都在模型执行前被 Provider 认证拒绝，没有形成可做 scope 检查或统一验证的代码改动。"
+  },
+  "verdict": "inconclusive_provider_auth_blocked"
+}
