@@ -1,0 +1,25 @@
+{
+  "candidate_id": "MA2B-NODE-PROFILE-V1",
+  "schema_version": 1,
+  "slices": [
+    {
+      "allowed_write_paths": [
+        "src/vega/project_profile.py"
+      ],
+      "slice_id": "node-profile-detection",
+      "summary": "读取 Node scripts，区分 package manager 问题，并填充冻结 profile issue code。"
+    },
+    {
+      "allowed_write_paths": [
+        "src/vega/models.py",
+        "src/vega/project_context.py"
+      ],
+      "slice_id": "profile-issue-context",
+      "summary": "定义 ProjectProfile.profile_issues，并在项目上下文中呈现问题码。"
+    }
+  ],
+  "treatments": {
+    "M": "两个隔离 Worker 并行，各自只处理一个 slice。",
+    "S": "一个隔离 Worker 单次处理两个 slice。"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "authorization": {
+    "failure_retries": 0,
+    "maximum_worker_provider_calls": 3,
+    "parallel_worker_calls": 2,
+    "sequential_worker_calls": 1
+  },
+  "candidate_id": "MA2B-NODE-PROFILE-V1",
+  "execution": {
+    "disabled_features": [
+      "hooks",
+      "memories",
+      "goals",
+      "multi_agent",
+      "multi_agent_v2",
+      "enable_fanout",
+      "apps",
+      "plugins",
+      "fast_mode"
+    ],
+    "ephemeral": true,
+    "extra_mcp_servers": "disabled",
+    "model": "gpt-5.6-sol",
+    "planner": "disabled",
+    "reasoning_effort": "medium",
+    "reviewer": "disabled"
+  },
+  "formal_ma2b_pilot": false,
+  "frozen_files": [
+    {
+      "relative_path": "pre-registration.md",
+      "sha256": "b4a163229d9696d9d17eb5da339fc8de35e39491f2eab77db4907d5c57d6eb6c"
+    },
+    {
+      "relative_path": "task.md",
+      "sha256": "c1e95ed2eb9797a2bb3106636fcf29f9dac7585088e1a1396bc238565a4c26fc"
+    },
+    {
+      "relative_path": "plan.json",
+      "sha256": "2b7f4ebacab417a6e4d2e76d7c0596a0ae20f7610b2337fba902397ca5cf02eb"
+    },
+    {
+      "relative_path": "ground-truth.json",
+      "sha256": "9829a965ba58521c573d4130e48320165dd0539e194ce3ac207a04faadcc0a0f"
+    },
+    {
+      "relative_path": "verifier/test_node_profile_probe.py",
+      "sha256": "bb44e88e2be824095144c4c60643850ad850bb0402e4f8164d8af402984b2469"
+    }
+  ],
+  "preflight": {
+    "initial_verifier": {
+      "failed": 11,
+      "passed": 0,
+      "qualified_red_baseline": true
+    },
+    "reference_implementation": {
+      "qualified_green_reference": true,
+      "slice_added_lines": {
+        "node-profile-detection": 45,
+        "profile-issue-context": 22
+      },
+      "slice_addition_ratio": 2.05,
+      "verifier_failed": 0,
+      "verifier_passed": 11
+    }
+  },
+  "schema_version": 1,
+  "source_workspace": {
+    "archive_sha256": "97f377b1267df10b13cd894634a91e52a7464e9ef9b7e056387cf829513f5702",
+    "excluded_instruction_files": [
+      "AGENTS.md",
+      "CLAUDE.md"
+    ],
+    "origin_commit": "e4bacfc7c24020489db7bb2675aee4bab14c10d4",
+    "origin_tree": "225ea52befd8b700f1bc32d48ad9ad1fc2403e93",
+    "prepared_tree": "ec8915a32417f49dd43097f4975986b0a2bdab99",
+    "recipe": "从 origin_commit 执行 git archive，排除 instruction files 后初始化独立本地 Git 仓库。"
+  },
+  "verifier": {
+    "command_template": "python -m pytest -q -c $workspace/pyproject.toml --rootdir $workspace $candidateRoot/verifier/test_node_profile_probe.py",
+    "deterministic": true,
+    "network_access": "prohibited",
+    "worker_write_access": "prohibited"
+  }
+}

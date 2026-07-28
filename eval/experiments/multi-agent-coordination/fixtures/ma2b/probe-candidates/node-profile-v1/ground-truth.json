@@ -1,0 +1,23 @@
+{
+  "acceptance_facts": [
+    "只有非空 test script 时才推荐 Node test 命令。",
+    "只有非空 lint script 时才推荐 Node lint 命令。",
+    "lockfile 冲突产生 node_lockfile_conflict。",
+    "非法 packageManager 产生 node_package_manager_invalid。",
+    "有效显式 packageManager 可以消歧多个 lockfile。",
+    "显式 Vega verification 继续覆盖自动命令。",
+    "tracked manager 与 scripts 来自同一固定 revision。",
+    "项目上下文呈现 profile_issues。"
+  ],
+  "candidate_id": "MA2B-NODE-PROFILE-V1",
+  "expected_outcome": "accepted_change",
+  "forbidden_techniques": [
+    "修改 verifier",
+    "AST 或源码文本计数",
+    "参考补丁匹配",
+    "硬编码测试临时路径",
+    "新增通用诊断框架"
+  ],
+  "manual_adjudication_rule": "只依据冻结公开行为、写范围和固定 verifier 裁决；不得以 Worker 自述替代验证。",
+  "schema_version": 1
+}
