@@ -1,5 +1,17 @@
 # MA-2B Pilot Next 认证阻断后交接
 
+> **Supersession（Owner 方案 A，2026-07-28）**
+>
+> 本文以下关于继续修复认证控制面、建立认证健康门、追加 Provider 预算或准备 Node V4 的
+> 建议均已失效，不再作为后续执行指令。Node V1-V3 及其结果继续保留为历史控制面阻断记录，
+> 不删除、不改写，也不据此扩建新的证据层。
+>
+> MA 分支撤销 `e0f93a7` 引入的通用 Runtime 改动，并删除无法由远端完整重放的临时
+> harness 及其源码哈希绑定测试。当前有效结论恢复为 C07/C05：
+> `Multi-Worker 机械能力成立 / 经济收益未观察到 / 正式 MA-2B Pilot readiness 仍阻断`。
+> 下一步不调用 Provider，不创建 V4，不增加认证门或新预算，也不进入 Reviewer、MA-3 或
+> multi-worker 产品化。本文其余内容仅用于还原当时发生了什么。
+
 > 交接日期：2026-07-28
 > 工作分支：`experiment/ma2b-pilot-next`
 > 代码与实验结果基线：`de0265589fdde20a5c5c70f693fe6d91e208cacd`

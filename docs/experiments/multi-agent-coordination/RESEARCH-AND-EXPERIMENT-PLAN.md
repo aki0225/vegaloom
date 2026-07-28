@@ -1008,6 +1008,17 @@ formal_ma2b_pilot_readiness_blocked
 不在原 candidate 上补跑或追加预算。详细证据见
 `MA-2B-NODE-PROFILE-PROBE-RESULT-2026-07-28.md` 与对应结构化 JSON。
 
+### 12.7 2026-07-28 Owner 裁决：停止 Node candidate
+
+Owner 选择方案 A。Node V1-V3 继续作为历史控制面阻断记录保留，但不创建 V4，不建立新的
+认证健康门或 Provider 预算，不再用新的证据结构证明既有证据。`e0f93a7` 引入的通用 Runtime
+改动不属于本 MA 分支目标，后续以普通反向提交撤销；不可由远端完整重放的临时 harness 与
+源码哈希绑定测试一并删除。
+
+当前有效结论保持为 C07/C05：Multi-Worker 机械能力成立，经济收益未观察到，正式 MA-2B
+Pilot readiness 仍由原 12-case gate 阻断。后续仅允许离线整理既有 task-pack、ground truth、
+固定 verifier 与文档，不调用 Provider，不进入 Reviewer、MA-3 或 multi-worker 产品化。
+
 ---
 
 ## 13. 参考资料

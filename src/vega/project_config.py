@@ -290,9 +290,8 @@ class PromptBudgetConfig(BaseModel):
 class CodexExecOptions(BaseModel):
     """允许项目按角色覆盖的 Codex exec 参数。
 
-    这里只开放模型、推理强度、profile、临时会话和是否继承用户配置，不接受任意 CLI
-    参数。自动化默认隔离基础用户配置，避免个人 MCP、Hook 或 Memory 隐式进入
-    Worker；显式 profile 则作为项目主动声明的外部配置依赖。
+    这里只开放模型、推理强度、profile 和临时会话，不接受任意 CLI 参数。这样既能让
+    worker/reviewer 使用不同成本策略，也不会把 sandbox bypass 等危险开关暴露给 YAML。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -301,7 +300,6 @@ class CodexExecOptions(BaseModel):
     model: str | None = None
     reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
     ephemeral: bool = False
-    inherit_user_config: bool = False
 
     @field_validator("profile")
     @classmethod
@@ -755,16 +753,9 @@ def render_project_config_summary(config: ProjectConfig) -> str:
 
 
 def _render_codex_exec_options(role: str, options: CodexExecOptions) -> list[str]:
-    if options.inherit_user_config:
-        fallback = "继承用户配置"
-    elif options.profile:
-        fallback = f"由 profile {options.profile} 或 Codex 默认决定"
-    else:
-        fallback = "由隔离 Codex 默认决定"
     return [
-        f"- `{role}.profile`：`{options.profile or '未指定'}`",
-        f"- `{role}.model`：`{options.model or fallback}`",
-        f"- `{role}.reasoning_effort`：`{options.reasoning_effort or fallback}`",
+        f"- `{role}.profile`：`{options.profile or '继承用户配置'}`",
+        f"- `{role}.model`：`{options.model or '继承用户配置'}`",
+        f"- `{role}.reasoning_effort`：`{options.reasoning_effort or '继承用户配置'}`",
         f"- `{role}.ephemeral`：`{options.ephemeral}`",
-        f"- `{role}.inherit_user_config`：`{options.inherit_user_config}`",
     ]

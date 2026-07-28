@@ -46,14 +46,8 @@ runner:
       ephemeral: true
 ```
 
-这里没有固定 model，表示模型由隔离后的 Codex 默认配置决定；只按角色覆盖推理强度。Vega
-自动化默认传入 `--ignore-user-config`，因此个人 Codex 配置中的 MCP、Hook 和 Memory 不会进入
-worker/reviewer。确需沿用个人配置时可以在对应角色下显式设置
-`inherit_user_config: true`，但这会把个人运行环境重新引入本次证据边界。
-如果配置了 `profile`，对应的 `$CODEX_HOME/<name>.config.toml` 仍会被显式加载，也应视为
-本次 run 的外部依赖。
-
-worker 使用 `medium` 控制日常小任务成本；reviewer 保留 `high`。两者都使用临时 session，
+这里没有固定 model，表示沿用使用者自己的 Codex 模型；只按角色覆盖推理强度。worker 负责实现，
+使用 `medium` 控制日常小任务成本；reviewer 负责找问题，保留 `high`。两者都使用临时 session，
 但 Vega 的 run 证据仍会保存在当前项目的 `runs/`。
 
 ## 1. 启动日常入口
