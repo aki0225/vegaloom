@@ -572,3 +572,20 @@ packages/cli/src/commands.test.ts
 Issue、冻结源码、行为合同、独立 oracle、六条验证命令、模型配置和结果判定均不变。本修订
 只消除“合同要求新增测试文件、Runtime 又拒绝未跟踪文件”的执行矛盾，不根据任何 worker
 结果调整题目。
+
+## 十二、2026-07-28 Amendment 2：禁用 Sequelize Nx daemon
+
+本修订发生在任何正式 worker 启动之前。使用原冻结命令 `corepack yarn build` 完成一次控制端
+基线执行后，命令虽以 `0` 退出，目标仓库下仍残留一个 Nx daemon 进程。控制端随后显式执行
+`corepack yarn nx reset` 完成清理。
+
+该后台进程不在验证命令退出后自然结束，可能继续持有目标目录或修改 ignored 缓存，不能把
+前台命令退出等同于运行现场已经稳定。目标依赖中的 Nx 实现明确支持
+`NX_DAEMON=false`，因此 `CRWP-V1-02` 的第一条验证命令改为：
+
+```text
+set "NX_DAEMON=false" && corepack yarn build
+```
+
+命令数量、300 秒单命令上限、构建范围和其他四条验证命令不变。原命令的首次结果只登记为
+控制端诊断，不计入最终基线；更新后的命令必须重新执行并确认没有遗留目标相关进程。

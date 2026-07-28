@@ -163,3 +163,12 @@ Issue 或已冻结公开 PR 的资格变化、基线不能复现、验证或证�
 因此允许测试路径改为已有的 `packages/cli/src/commands.test.ts`，`max_new_files` 改为 `0`。
 测试仍必须直接覆盖 `main.ts` 的 Commander 解析边界，并证明无效 timeout 不会调用
 `clientFromEnv` 或 `sandboxExec`。其他 Issue、oracle、验证命令和结果判定不变。
+
+## 2026-07-28 Amendment：CRWP-V1-02 禁用 Nx daemon（未执行）
+
+本修订发生在任何正式 worker 启动之前。原第一条命令 `corepack yarn build` 虽返回 `0`，
+仍在目标仓库下留下 Nx daemon；控制端已用 `corepack yarn nx reset` 显式清理。
+
+最终第一条验证命令改为 `set "NX_DAEMON=false" && corepack yarn build`。命令数、超时和
+构建范围不变，原命令结果只作为控制端诊断，不计入最终基线。更新后必须重新执行并确认没有
+遗留目标相关进程。
