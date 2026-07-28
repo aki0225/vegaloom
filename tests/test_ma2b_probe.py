@@ -112,6 +112,47 @@ def test_parallel_workers_use_isolated_workspaces_and_run_concurrently(
     assert result.status == "passed"
     assert len(set(workspaces)) == 2
     assert all(path.parent.name == "workers" for path in workspaces)
+    assert {path.name for path in workspaces} == {"w1", "w2"}
+
+
+def test_parallel_worker_paths_do_not_include_max_length_slice_ids(
+    tmp_path: Path,
+) -> None:
+    workspaces: list[Path] = []
+    first_id = "a" * 100
+    second_id = "b" * 100
+    plan = ProbePlan(
+        (
+            ProbeSlice(first_id, ("backend.txt",)),
+            ProbeSlice(second_id, ("frontend.txt",)),
+        )
+    )
+
+    def worker(
+        *,
+        task_slices: tuple[ProbeSlice, ...],
+        workspace: Path,
+    ) -> WorkerObservation:
+        (task_slice,) = task_slices
+        workspaces.append(workspace)
+        (workspace / task_slice.allowed_write_paths[0]).write_text(
+            task_slice.slice_id,
+            encoding="utf-8",
+        )
+        return WorkerObservation()
+
+    result = run_probe(
+        mode="parallel",
+        plan=plan,
+        source_workspace=_source_workspace(tmp_path),
+        run_root=tmp_path / "run",
+        worker=worker,
+        verifier=lambda _: True,
+    )
+
+    assert result.status == "passed"
+    assert {path.name for path in workspaces} == {"w1", "w2"}
+    assert all(first_id not in str(path) and second_id not in str(path) for path in workspaces)
 
 
 def test_scope_violation_blocks_before_verifier(tmp_path: Path) -> None:

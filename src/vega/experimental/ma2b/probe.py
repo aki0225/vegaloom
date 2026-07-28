@@ -207,8 +207,10 @@ def _run_parallel(
     worker_root = run_root / "workers"
     worker_root.mkdir()
     workspaces: dict[str, Path] = {}
-    for task_slice in plan.slices:
-        workspace = worker_root / task_slice.slice_id
+    for index, task_slice in enumerate(plan.slices, start=1):
+        # slice_id 仍用于证据绑定，但不再进入物理路径，避免真实仓库深层文件在 Windows
+        # 上叠加长实验名后超过传统路径预算。
+        workspace = worker_root / f"w{index}"
         shutil.copytree(source_workspace, workspace)
         workspaces[task_slice.slice_id] = workspace
 
