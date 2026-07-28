@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -172,7 +173,7 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
             repo,
             include_untracked=True,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         return WorkspaceSnapshot(
             raw_status=f"<git status failed before worker: {exc}>",
             tracked_files=frozenset(),
@@ -194,11 +195,9 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
             repo,
             ignored_files,
         )
-        ignored_manifest_complete = (
-            ignored_capture_complete and ignored_metadata_complete
-        )
+        ignored_manifest_complete = ignored_capture_complete and ignored_metadata_complete
         git_control_sha256, git_control_complete = _git_control_manifest(repo)
-    except RuntimeError as exc:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         return WorkspaceSnapshot(
             raw_status=f"<workspace control snapshot failed before worker: {exc}>",
             tracked_files=frozenset(dict.fromkeys(tracked_files)),
@@ -354,7 +353,7 @@ def evaluate_workspace(
     repo = repo_path.resolve()
     try:
         current = _capture_current_workspace_inventory(repo)
-    except RuntimeError as exc:
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         return WorkspaceCheckResult(
             status="failed",
             repo_path=str(repo),
@@ -539,7 +538,7 @@ def _assess_workspace_controls(
         )
     ):
         assessment.reasons.append(
-            "ignored 路径与元数据清单完整，但部分内容因敏感路径或预算限制未读取；"
+            "ignored 路径根与元数据清单完整，但敏感路径、预算外文件或折叠目录内部内容未读取；"
             "自动决策依赖稳定元数据比较，不将其表述为恶意本地写者的完整文件系统证明。"
         )
 
@@ -765,7 +764,7 @@ def _ignored_manifest(
     result = build_content_manifest(
         repo_path,
         paths,
-        version="ignored-v4",
+        version="ignored-v5",
         budget=ContentManifestBudget(
             max_content_files=MAX_IGNORED_CONTENT_FILES,
             max_file_bytes=MAX_IGNORED_FILE_BYTES,

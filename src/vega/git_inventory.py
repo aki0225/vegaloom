@@ -26,7 +26,15 @@ class GitBytesReader(Protocol):
 def read_ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
     result = run_git_capture(
         repo_path,
-        ["git", "ls-files", "--others", "--ignored", "--exclude-standard", "-z"],
+        [
+            "git",
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "-z",
+        ],
     )
     stdout = coerce_git_output_bytes(result.stdout)
     stderr = coerce_git_output_bytes(result.stderr)

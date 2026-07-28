@@ -286,6 +286,53 @@ def test_auto_stops_before_worker_when_tracked_baseline_is_dirty(tmp_path: Path)
     assert workspace_check["baseline_tracked_files"] == ["README.md"]
 
 
+def test_auto_records_terminal_artifacts_when_ignored_inventory_times_out(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, repo = _init_repo(tmp_path)
+    worker = CountingWorker("worker change")
+    reviewer = CountingReviewer()
+
+    def timeout_ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
+        del repo_path
+        raise subprocess.TimeoutExpired(
+            cmd=["git", "ls-files"],
+            timeout=30,
+        )
+
+    monkeypatch.setattr(
+        workspace_check_module,
+        "_ignored_paths",
+        timeout_ignored_paths,
+    )
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=worker,
+        reviewer_runner=reviewer,
+    ).start(_brief(repo), "auto", max_iterations=1, verify=False)
+
+    state = _read_json(run_dir / "state.json")
+    iteration_dir = run_dir / "iterations" / "01"
+    trace = [
+        json.loads(line)
+        for line in run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "workspace_baseline_unavailable"
+    assert worker.calls == 0
+    assert reviewer.calls == 0
+    assert iteration_dir.joinpath("workspace-check.json").is_file()
+    assert iteration_dir.joinpath("workspace-check.md").is_file()
+    assert run_dir.joinpath("final-report.md").is_file()
+    assert run_dir.joinpath("eval.md").is_file()
+    assert any(item["event"] == "workspace_baseline_blocked" for item in trace)
+    assert trace[-1]["event"] == "run_paused"
+    assert trace[-1]["status"] == "needs_human"
+
+
 def test_auto_blocks_mm_baseline_when_net_diff_is_empty(tmp_path: Path) -> None:
     workspace, repo = _init_repo(tmp_path)
     repo.joinpath("README.md").write_text(
