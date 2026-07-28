@@ -1,28 +1,31 @@
-# MA-2B Pilot Next 认证阻断后交接
+# MA-2B Pilot Next 当前交接与认证阻断历史快照
 
-> **Supersession（Owner 方案 A，2026-07-28）**
+> **当前有效交接（Owner 方案 A，2026-07-28）**
 >
 > 本文以下关于继续修复认证控制面、建立认证健康门、追加 Provider 预算或准备 Node V4 的
 > 建议均已失效，不再作为后续执行指令。Node V1-V3 及其结果继续保留为历史控制面阻断记录，
 > 不删除、不改写，也不据此扩建新的证据层。
 >
-> MA 分支撤销 `e0f93a7` 引入的通用 Runtime 改动，并删除无法由远端完整重放的临时
-> harness 及其源码哈希绑定测试。当前有效结论恢复为 C07/C05：
+> MA 分支已通过 `d398299` 撤销 `e0f93a7` 引入的通用 Runtime 改动，并删除不再作为活跃
+> 实现的、受 Git 跟踪的 probe harness 及其源码哈希绑定测试。V2/V3 绑定的受 Git 跟踪实现
+> 仍可从各自 `candidate_commit` 恢复；原始运行无法完整重放，是因为 `.tmp` Driver 与原始
+> 运行产物从未提交。当前有效结论恢复为 C07/C05：
 > `Multi-Worker 机械能力成立 / 经济收益未观察到 / 正式 MA-2B Pilot readiness 仍阻断`。
 > 下一步不调用 Provider，不创建 V4，不增加认证门或新预算，也不进入 Reviewer、MA-3 或
-> multi-worker 产品化。本文其余内容仅用于还原当时发生了什么。
+> multi-worker 产品化。当前执行边界同时以
+> `RESEARCH-AND-EXPERIMENT-PLAN.md` 第 12.7 节为准。
 
-> 交接日期：2026-07-28
+> 历史交接日期：2026-07-28
 > 工作分支：`experiment/ma2b-pilot-next`
-> 代码与实验结果基线：`de0265589fdde20a5c5c70f693fe6d91e208cacd`
-> 当前阶段：
+> 历史代码与实验结果基线：`de0265589fdde20a5c5c70f693fe6d91e208cacd`
+> 历史阶段（已由 Owner 方案 A supersede）：
 > `provider_auth_preflight_missing / multi_worker_capability_not_tested / formal_ma2b_pilot_readiness_blocked`
 
-本文是当前跨电脑继续工作的权威交接，取代
-`MA-2B-PILOT-NEXT-HANDOFF-2026-07-27.md` 对“下一步”的描述。旧交接继续作为历史记录，
-不得改写或删除。
+本文当前有效内容仅为顶部“当前有效交接”、第八节停止线，以及
+`RESEARCH-AND-EXPERIMENT-PLAN.md` 第 12.7 节。以下其余章节保留 2026-07-28 Owner 裁决前的
+执行快照，只用于审计当时发生了什么，不得作为新的操作清单。
 
-## 一、这次完成了什么
+## 历史快照一：当时完成了什么
 
 本轮在同一实验分支上完成并推送了三个阶段：
 
@@ -43,7 +46,7 @@
 
 本轮没有新增 SDK、Planner、Reviewer、产品化 Multi-Worker、长期 Memory 或新的通用证据层。
 
-## 二、V3 的真实结果
+## 历史快照二：V3 的真实结果
 
 实际执行：
 
@@ -86,7 +89,7 @@ eval/experiments/multi-agent-coordination/results/
   MA2B-NODE-PROFILE-V3-2026-07-28.json
 ```
 
-## 三、根因边界
+## 历史快照三：当时判断的根因边界
 
 本机 `codex exec --help` 明确说明：
 
@@ -109,13 +112,14 @@ CODEX_HOME：存在
 
 另一个已暴露问题是错误分类：
 
-- 当前 Driver 把 Provider 认证失败归入普通 `worker_error`；
+- 当时的 Driver 把 Provider 认证失败归入普通 `worker_error`；
 - 冻结规则允许普通失败后继续 M；
 - 因而 S 已证明认证不可用后，M 仍消耗了剩余两次调用。
 
-后续必须把认证错误视为 Provider 控制面错误，在 S 后直接阻断 M。
+当时的改进建议是把认证错误视为 Provider 控制面错误，在 S 后直接阻断 M；Owner 方案 A
+已经终止这条实现路径。
 
-## 四、远端没有包含什么
+## 历史快照四：远端当时没有包含什么
 
 以下内容只存在于本次电脑的忽略目录，不会从 Git 远端恢复：
 
@@ -129,9 +133,9 @@ $repoRoot/.tmp/m2n/npv3m/
 这是有意设计，不是遗漏。原始文件包含本机路径、PID、Provider thread id 和脱敏认证错误，
 不应进入公开仓库。远端已保留足够的脱敏摘要、哈希、冻结输入和结论。
 
-晚上从远端继续时，不需要恢复这些 `.tmp` 文件，也不要尝试在 V3 上补跑。
+当时计划从远端继续时不恢复这些 `.tmp` 文件，也不在 V3 上补跑。
 
-## 五、当前验证状态
+## 历史快照五：当时的验证状态
 
 本轮已通过：
 
@@ -147,7 +151,7 @@ $repoRoot/.tmp/m2n/npv3m/
 `git rev-parse --verify` 子进程，随后只停止了本轮自己的 pytest 进程。该结果不能记为全量
 通过，也没有证据表明它与 V3 新增文档或测试存在断言失败。
 
-## 六、晚上拉取后的启动命令
+## 历史快照六：当时拟使用的跨电脑启动命令
 
 已有本地分支：
 
@@ -185,9 +189,9 @@ $remote = (git ls-remote --heads origin experiment/ma2b-pilot-next).Split()[0]
 4. `fixtures/ma2b/probe-candidates/node-profile-v3/pre-registration.md`；
 5. `RESEARCH-AND-EXPERIMENT-PLAN.md` 第 12 节。
 
-## 七、晚上首先要做的事
+## 历史快照七：当时拟议的下一步（已失效）
 
-先不要修改 MA-2B 实现，也不要立即创建 V4。第一步只确认认证边界：
+当时拟先不修改 MA-2B 实现，也不立即创建 V4，而是只确认认证边界：
 
 ```powershell
 codex --version
@@ -195,16 +199,16 @@ codex login status
 codex exec --help
 ```
 
-要求：
+当时约束如下：
 
 - 不打印、复制或提交任何 token、API key 或认证文件；
 - 不把真实 `CODEX_HOME` 路径写进仓库；
 - 不把“login status 有输出”直接当作 Provider 请求一定可用；
 - 若要执行最小真实认证 canary，必须先明确它是否计入新的 Provider 预算。
 
-需要先做出一个取舍：
+当时需要做出以下取舍；Owner 后续已选择方案 A，方案 B 不再有效：
 
-### 方案 A：到此结束 Node candidate
+### 历史方案 A：到此结束 Node candidate（Owner 已选择）
 
 接受 C07/C05 已得到的结论：
 
@@ -217,9 +221,9 @@ Multi-Worker 机械能力成立；
 Node V1-V3 作为“真实实验会被路径、终止和认证控制面阻断”的负面案例保留。该方案最符合
 KISS，也足够用于面试讲清楚 harness、fail-closed 和实验边界。
 
-### 方案 B：只允许最后一次 Node V4
+### 历史方案 B：只允许最后一次 Node V4（已否决）
 
-如果仍需要一个中等真实任务作为最终证据，则 V4 必须先冻结：
+当时方案 B 规定：如果仍需要一个中等真实任务作为最终证据，V4 必须先冻结：
 
 1. Codex auth source 的使用边界；
 2. 一个独立、明确计数的认证健康门；
@@ -227,10 +231,10 @@ KISS，也足够用于面试讲清楚 harness、fail-closed 和实验边界。
 4. S 出现认证控制面错误后阻断 M；
 5. 仍然只使用 S 一次、M 两次，不加 Planner、Reviewer 或 Retry。
 
-建议把 V4 定义为 Node candidate 的最后一次尝试。若认证门不通过，则不消耗 S/M；若认证门
-通过但 Worker 仍不能形成 verifier 结果，则停止该候选，不再继续 V5。
+该历史方案将 V4 定义为 Node candidate 的最后一次尝试：认证门不通过时不消耗 S/M；
+认证门通过但 Worker 仍不能形成 verifier 结果时停止该候选，不再继续 V5。
 
-## 八、不可做的事情
+## 八、持续有效的停止线
 
 - 不修改或润色 V1、V2、V3 已提交的实验结果；
 - 不复用 V3 已耗尽的三次调用预算；
@@ -242,9 +246,9 @@ KISS，也足够用于面试讲清楚 harness、fail-closed 和实验边界。
 - 不把本机绝对路径写入公开文档；
 - 不把全量 pytest timeout 描述为全量通过。
 
-## 九、原始实验目标
+## 历史快照九：原始实验目标
 
-当前分支唯一需要回答的问题仍然是：
+当时分支唯一需要回答的问题是：
 
 ```text
 S：一个 Worker 完成两个 slice
@@ -261,5 +265,5 @@ M：两个隔离 Worker 各完成一个互斥 slice
 - 集成冲突；
 - 人工负担。
 
-V3 没有回答这个问题，因为模型没有执行。晚上继续时应先决定是否值得用最后一次 V4 获得
-答案，而不是继续扩建与原问题无关的 harness。
+V3 没有回答这个问题，因为模型没有执行。Owner 后续选择方案 A，当前分支不再通过 V4
+继续取证，也不继续扩建与原问题无关的 harness。
