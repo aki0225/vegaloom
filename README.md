@@ -4,7 +4,7 @@
 
 # Vega
 
-<h3>One writes. One reviews. Separate sessions, shared evidence.</h3>
+<h3>One writes, one reviews — worker 与 reviewer 上下文隔离的 AI 编码工作流 Harness</h3>
 
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
@@ -22,12 +22,13 @@
 
 </div>
 
-写代码的 AI 不该只靠自己审查自己。Vega 是一个本地优先的 AI 编码工作流 harness：
-worker 负责修改代码；reviewer 使用独立只读会话，不继承 worker 的完整对话和中间推理，
-只读取明确编译的任务、项目规则、tracked diff 和验证证据。终态由确定性验证、风险门禁
-和 reviewer 结论共同形成；确定性失败或证据不足不能被 reviewer 的 `approve` 覆盖。
-执行失败、中断，或者证据缺失、过期、相互不一致时，Vega 保留现场并交还人工。它不是
-通用 Multi-Agent 框架，也不把会话隔离包装成操作系统级安全沙箱。
+Vega 是一个本地优先的 AI 编码工作流 Harness，用独立的 worker 与 reviewer 会话分开实现和审查。
+
+Worker 负责修改代码；Reviewer 不继承 worker 的完整对话和中间推理，只读取明确编译的任务、代码 diff、
+项目规则和验证证据。任务是否满足完成条件，由项目自己的测试、静态检查和风险规则决定。
+
+当执行失败、中断，或者证据缺失、过期、相互不一致时，Vega 停止自动执行，保存 state、trace、验证结果
+和报告，交还人工处理。Vega 不是通用 Multi-Agent 框架，也不把会话隔离包装成操作系统级安全沙箱。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，worker 与 reviewer 使用独立会话，失败 fail-closed 交还人工">
