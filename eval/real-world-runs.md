@@ -128,3 +128,27 @@ pycodestyle #1187 follow-up 的“执行前冻结合同”来自本地运行记�
 该样例证明当前主线能够在 Windows 慢测试环境中完成有进度、可追溯、fail-closed 的
 assist 验证与隔离审查闭环。它不能证明新 worker 每次都能生成正确补丁，也不能证明所有
 Windows 子进程解码问题已经解决。
+
+## 2026-07-28 预注册：Core Real-World Pilot v1（未执行）
+
+本条在任何正式 worker 运行前冻结三项真实 Issue 和固定顺序，不代表已经产生结果：
+
+1. `CRWP-V1-01`：`BitMiracle-AI/Dormice#33`，基线
+   `f26ba3748e79c7225f4aafb757c6f9f1f6b2d733`，验证 CLI timeout 的正整数输入边界；
+2. `CRWP-V1-02`：`sequelize/sequelize#18265`，基线
+   `f0cea95e38b4f2c9096267371ab305d08f7b8497`，验证 SQLite `sync({ alter: true })`
+   重建表后仍保留 `AUTOINCREMENT`；
+3. `CRWP-V1-03`：`openstates/jurisdictions#122`，基线
+   `6fbe7d6aed32c3b781490c8e4c5a737bdd6e4705`，验证 ancestor stub 文件名与模型 UUID
+   一致。
+
+详细任务合同、允许路径、独立 oracle、验证命令、成本口径、迭代预算和停止条件见
+[`docs/CORE-REAL-WORLD-PILOT-V1-PREREGISTRATION.md`](../docs/CORE-REAL-WORLD-PILOT-V1-PREREGISTRATION.md)。
+
+其中 Sequelize 项在冻结前已有公开 PR `#18274`，因此明确记录为 controlled public replay；
+PR 与 diff 不进入 worker/reviewer 输入，只能在终态后由控制端比较，不能表述为独立发现。
+Dormice 与 OpenStates 虽未发现公开修复 PR，Issue 正文也已给出实现线索，同样不是盲测。
+
+首轮明确不覆盖并发、重试或分布式副作用；三个筛选样本只记录原始结果，不计算成功率。
+Issue 或已冻结公开 PR 的资格变化、基线不能复现、验证或证据失败、路径越界、Provider 错误
+和 timeout 都必须保留并 fail-closed，不换题、不挑成绩重跑，也不自动 commit、push 或发布。
