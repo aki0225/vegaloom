@@ -152,3 +152,14 @@ Dormice 与 OpenStates 虽未发现公开修复 PR，Issue 正文也已给出实
 首轮明确不覆盖并发、重试或分布式副作用；三个筛选样本只记录原始结果，不计算成功率。
 Issue 或已冻结公开 PR 的资格变化、基线不能复现、验证或证据失败、路径越界、Provider 错误
 和 timeout 都必须保留并 fail-closed，不换题、不挑成绩重跑，也不自动 commit、push 或发布。
+
+## 2026-07-28 Amendment：CRWP-V1-01 测试文件路径（未执行）
+
+本修订发生在任何正式 worker 启动之前。Dormice 冻结修订没有
+`packages/cli/src/main.test.ts`，而当前 Runtime 会在 worker 新建未跟踪文件后于 verification
+和 reviewer 之前 fail-closed；预先加入空测试文件又违反“准备提交只加入 `.vega.yaml`”的
+合同。
+
+因此允许测试路径改为已有的 `packages/cli/src/commands.test.ts`，`max_new_files` 改为 `0`。
+测试仍必须直接覆盖 `main.ts` 的 Commander 解析边界，并证明无效 timeout 不会调用
+`clientFromEnv` 或 `sandboxExec`。其他 Issue、oracle、验证命令和结果判定不变。

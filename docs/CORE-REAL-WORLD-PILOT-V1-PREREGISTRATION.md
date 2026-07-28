@@ -546,3 +546,29 @@ examples/evidence/core-real-world-pilot-v1/<case-id>/
 6. 执行结果、失败、中断和 correction 只能追加，不回写本文或历史运行记录。
 7. 三项完成或停止后结束 Pilot，不顺带启动 Stage 4、并发 detector、新 CLI、多 Reviewer、
    MA-2B 或其他基础设施工作。
+
+## 十一、2026-07-28 Amendment 1：Dormice 测试文件路径
+
+本修订发生在任何正式 worker 启动之前。控制端复核当前 Runtime 后确认：
+
+- Dormice 冻结修订中不存在 `packages/cli/src/main.test.ts`；
+- worker 新建未跟踪文件后，当前 Runtime 会在 verification 与 reviewer 之前 fail-closed；
+- 预先加入空测试文件又会违反“准备提交只加入 `.vega.yaml`”的共同合同。
+
+因此 `CRWP-V1-01` 的允许测试路径改为冻结修订中已经受 Git 跟踪的：
+
+```text
+packages/cli/src/commands.test.ts
+```
+
+对应预算改为 `max_new_files: 0`。生产代码允许路径仍为
+`packages/cli/src/main.ts`，其他修改边界不变。
+
+测试职责不变：项目测试必须直接覆盖 `main.ts` 的 Commander 参数解析边界，并用 mock/spy
+证明无效 timeout 不会调用 `clientFromEnv` 或 `sandboxExec`。不得为了迁就现有测试文件名，
+把仅属于 CLI 入口的解析规则下沉到 `commands.ts`，也不得用只测独立 helper 的方式替代入口
+行为验证。
+
+Issue、冻结源码、行为合同、独立 oracle、六条验证命令、模型配置和结果判定均不变。本修订
+只消除“合同要求新增测试文件、Runtime 又拒绝未跟踪文件”的执行矛盾，不根据任何 worker
+结果调整题目。
