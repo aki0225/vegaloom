@@ -210,10 +210,18 @@ loop 创建前会前后复核 HEAD 与策略文件 bytes 摘要，并把解析�
 
 Codex runner 采用“角色策略 + 固定安全边界”：
 
-- worker/reviewer 可以分别选择 `profile`、`model`、`reasoning_effort` 和 `ephemeral`。
-- 空的 `profile/model/reasoning_effort` 继承用户 Codex 配置，避免 Vega 复制一套全局模型配置。
+- worker/reviewer 可以分别选择 `profile`、`model`、`reasoning_effort`、`ephemeral` 和
+  `inherit_user_config`。
+- 自动化默认使用 `--ignore-user-config`，不继承个人 `$CODEX_HOME/config.toml` 中的 MCP、
+  Hook、Memory 或其他运行设置；认证仍由 Codex 自己读取。
+- 空的 `model/reasoning_effort` 由隔离后的 Codex 配置决定。确需兼容个人配置时可以显式设置
+  `inherit_user_config: true`，但此时个人 MCP 与 Hook 会成为当前 run 的外部变量。
+- 显式 `profile` 仍会加载对应的 `$CODEX_HOME/<name>.config.toml`；它属于项目主动声明的
+  外部配置依赖，不受基础用户配置隔离保护。
 - runtime 只把白名单字段编译成 `codex exec` 参数，不接受 YAML 传入任意 args。
 - worker 的 sandbox 固定为 `workspace-write`，reviewer 固定为 `read-only`，不开放 bypass 参数。
+- Windows 标准 npm 安装优先直接执行随包附带的原生 `codex.exe`，避免额外的
+  `cmd.exe -> codex.cmd` 包装层；无法定位原生二进制时才回退 PATH 结果。
 - `execution.json` 记录最终命令；`project-context.md` 记录有效角色策略。
 
 这样可以让高频 worker 使用中等推理成本，让 reviewer 保持更高审查强度，同时不把 Vega

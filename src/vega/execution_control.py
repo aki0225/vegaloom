@@ -30,6 +30,7 @@ ExecutionStatus = Literal[
 ACTIVE_EXECUTION_STATUSES = {"starting", "running", "stop_requested"}
 TERMINAL_EXECUTION_STATUSES = {"stopped", "timed_out", "completed", "failed"}
 _REDACTION_UNAVAILABLE_OUTPUT = "[REDACTION_UNAVAILABLE]"
+_WINDOWS_FORCE_TASKKILL_TIMEOUT_SECONDS = 30.0
 
 
 class ExecutionLease(BaseModel):
@@ -795,7 +796,13 @@ def _terminate_owned_process(
 
     if _is_windows_platform():
         # PID 必须来自当前 execution lease；/T 只处理该 owned process tree，不枚举其他进程。
-        taskkill_failure = _run_windows_taskkill(process.pid, force=True, timeout=10)
+        # Windows 在清理包含多个工具子进程的树时可能超过 10 秒；这里给强制终止一个
+        # 固定且有界的确认窗口，避免 taskkill 已在清理却被 Vega 过早判成未确认。
+        taskkill_failure = _run_windows_taskkill(
+            process.pid,
+            force=True,
+            timeout=_WINDOWS_FORCE_TASKKILL_TIMEOUT_SECONDS,
+        )
         tree_termination_failed = taskkill_failure is not None
         if taskkill_failure is not None:
             failures.append(taskkill_failure)

@@ -639,6 +639,62 @@ def test_windows_final_wait_timeout_keeps_timeout_execution_active(
     assert not inspection.can_recover
 
 
+@pytest.mark.skipif(os.name != "nt", reason="只验证 Windows taskkill 真实进程树语义")
+def test_windows_timeout_confirms_real_owned_python_process_tree(
+    tmp_path: Path,
+) -> None:
+    child_pid_path = tmp_path / "child.pid"
+    context = RunnerExecutionContext(
+        execution_dir=tmp_path / "runs" / "real-tree-timeout" / "executions" / "worker",
+        run_id="real-tree-timeout",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        terminate_grace_seconds=0.2,
+    )
+    script = (
+        "import subprocess, sys, time; "
+        "from pathlib import Path; "
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        f"Path({str(child_pid_path)!r}).write_text(str(child.pid), encoding='utf-8'); "
+        "print(child.pid, flush=True); "
+        "time.sleep(60)"
+    )
+    root_pid: int | None = None
+    child_pid: int | None = None
+    try:
+        result = run_owned_process(
+            [sys.executable, "-u", "-c", script],
+            "",
+            tmp_path,
+            1,
+            context,
+        )
+        lease = ExecutionLease.model_validate_json(
+            context.execution_dir.joinpath("execution.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        root_pid = lease.child_pid
+        child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+
+        assert result.status == "timed_out"
+        assert result.termination_unconfirmed is False
+        assert lease.status == "timed_out"
+        assert root_pid is not None
+        assert not execution_control.is_process_alive(root_pid)
+        assert not execution_control.is_process_alive(child_pid)
+    finally:
+        for pid in (root_pid, child_pid):
+            if pid is not None and execution_control.is_process_alive(pid):
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
+
+
 class _FakeOwnedProcess:
     def __init__(self, *, pid: int, wait_times_out: bool) -> None:
         self.pid = pid

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 import vega
+import vega.runner as runner_module
 from typer.testing import CliRunner
 
 from vega.experimental.inspection import eval as eval_runner
@@ -36,7 +37,12 @@ from vega.experimental.inspection.loop_spec import (
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.experimental.memory import MemoryLedgerStore
 from vega.models import BriefInput, MemoryProposal, RunState, ToolResult
-from vega.project_config import CodexExecOptions, check_project_config, load_project_config
+from vega.project_config import (
+    CodexExecOptions,
+    check_project_config,
+    load_project_config,
+    render_project_config_summary,
+)
 from vega.project_profile import build_project_profile
 from vega.reflect_runtime import ReflectRuntime
 from vega.recovery_runtime import RecoveryRuntime
@@ -1364,6 +1370,7 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
     assert captured["command"] == [
         "D:/tools/codex.cmd",  # repo-path-policy: allow-test-fixture
         "exec",
+        "--ignore-user-config",
         "--cd",
         str(repo_dir.resolve()),
         "--sandbox",
@@ -1378,6 +1385,64 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
         "-",
     ]
     assert captured["input_text"] == "完成最小修改"
+
+
+def test_codex_exec_runner_can_explicitly_inherit_user_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    captured: dict[str, object] = {}
+
+    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+        del input_text, cwd, timeout_seconds, context
+        captured["command"] = command
+        return SimpleNamespace(status="success", output="ok", error=None)
+
+    monkeypatch.setattr(
+        "vega.runner.shutil.which",
+        lambda _: "D:/tools/codex.cmd",  # repo-path-policy: allow-test-fixture
+    )
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+    runner = CodexExecRunner(options=CodexExecOptions(inherit_user_config=True))
+
+    result = runner.run("检查项目", repo_dir, sandbox="read-only", timeout_seconds=60)
+
+    assert result.status == "success"
+    assert "--ignore-user-config" not in captured["command"]
+
+
+def test_codex_exec_runner_prefers_windows_native_binary(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    bin_dir = tmp_path / "node-global"
+    wrapper = bin_dir / "codex.cmd"
+    native = (
+        bin_dir
+        / "node_modules"
+        / "@openai"
+        / "codex"
+        / "node_modules"
+        / "@openai"
+        / "codex-win32-x64"
+        / "vendor"
+        / "x86_64-pc-windows-msvc"
+        / "bin"
+        / "codex.exe"
+    )
+    wrapper.parent.mkdir(parents=True)
+    wrapper.write_text("@echo off\n", encoding="utf-8")
+    native.parent.mkdir(parents=True)
+    native.write_bytes(b"fake")
+    monkeypatch.setattr(runner_module.shutil, "which", lambda _: str(wrapper))
+    monkeypatch.setattr(runner_module, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(runner_module.platform, "machine", lambda: "AMD64")
+
+    resolved = runner_module._resolve_codex_executable("codex")
+
+    assert resolved == str(native.resolve())
 
 
 def test_codex_exec_runner_executes_raw_command_but_redacts_result_command(
@@ -1887,6 +1952,7 @@ def test_project_config_parses_codex_exec_role_options(tmp_path) -> None:
                 "      model: gpt-reviewer",
                 "      reasoning_effort: high",
                 "      ephemeral: true",
+                "      inherit_user_config: true",
                 "prompt_budget:",
                 "  worker_max_chars: 12000",
                 "  reviewer_max_chars: 24000",
@@ -1902,12 +1968,17 @@ def test_project_config_parses_codex_exec_role_options(tmp_path) -> None:
     assert config.runner.codex_exec.worker.model == "gpt-worker"
     assert config.runner.codex_exec.worker.reasoning_effort == "medium"
     assert not config.runner.codex_exec.worker.ephemeral
+    assert not config.runner.codex_exec.worker.inherit_user_config
     assert config.runner.codex_exec.reviewer.model == "gpt-reviewer"
     assert config.runner.codex_exec.reviewer.reasoning_effort == "high"
     assert config.runner.codex_exec.reviewer.ephemeral
+    assert config.runner.codex_exec.reviewer.inherit_user_config
     assert config.prompt_budget.worker_max_chars == 12000
     assert config.prompt_budget.reviewer_max_chars == 24000
     assert config.prompt_budget.reviewer_diff_max_chars == 8000
+    summary = render_project_config_summary(config)
+    assert "- `worker.inherit_user_config`：`False`" in summary
+    assert "- `reviewer.inherit_user_config`：`True`" in summary
 
 
 def test_loop_stops_before_worker_when_prompt_budget_is_exceeded(tmp_path) -> None:

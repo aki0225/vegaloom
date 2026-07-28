@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import platform
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,7 +65,9 @@ class CodexExecRunner:
     """通过 codex exec 启动短生命周期隔离会话。
 
     reviewer 默认使用 read-only sandbox；worker 只在 auto 模式中使用 workspace-write。
-    这里不传 bypass sandbox / bypass approval，避免把自动 loop 变成无边界执行器。
+    自动化默认不继承用户级 Codex 配置，避免个人 MCP、Hook 或 Memory 扩大 Worker
+    进程树与上下文；这里只开放经过验证的角色参数，也不传 bypass sandbox /
+    bypass approval。
     """
 
     def __init__(
@@ -83,7 +87,7 @@ class CodexExecRunner:
         timeout_seconds: int,
         execution_context: RunnerExecutionContext | None = None,
     ) -> RunnerResult:
-        resolved = shutil.which(self.executable)
+        resolved = _resolve_codex_executable(self.executable)
         if not resolved:
             return RunnerResult(
                 status="error",
@@ -95,11 +99,17 @@ class CodexExecRunner:
         command = [
             resolved,
             "exec",
-            "--cd",
-            str(repo_path.resolve()),
-            "--sandbox",
-            sandbox,
         ]
+        if not self.options.inherit_user_config:
+            command.append("--ignore-user-config")
+        command.extend(
+            [
+                "--cd",
+                str(repo_path.resolve()),
+                "--sandbox",
+                sandbox,
+            ]
+        )
         if self.options.profile:
             command.extend(["--profile", self.options.profile])
         if self.options.model:
@@ -145,3 +155,52 @@ def make_runner(name: str, options: CodexExecOptions | None = None) -> Runner:
     if normalized in {"codex-exec", "codex"}:
         return CodexExecRunner(options=options)
     raise ValueError(f"不支持的 runner：{name}")
+
+
+def _resolve_codex_executable(executable: str) -> str | None:
+    """解析 Codex CLI；Windows npm 安装优先绕过 cmd 包装层。
+
+    `codex.cmd` 仍作为兼容兜底，但标准 npm 安装会附带原生 `codex.exe`。直接运行
+    原生二进制可以减少一层 `cmd.exe -> codex.cmd` 进程包装，让 owned process tree
+    更容易被 Vega 精确终止和确认。
+    """
+
+    resolved = shutil.which(executable)
+    if resolved is None or not _is_windows_platform():
+        return resolved
+    resolved_path = Path(resolved)
+    if resolved_path.suffix.casefold() == ".exe":
+        return str(resolved_path)
+    native = _find_windows_native_codex(resolved_path)
+    return str(native) if native is not None else resolved
+
+
+def _find_windows_native_codex(wrapper: Path) -> Path | None:
+    package_scope = (
+        wrapper.parent
+        / "node_modules"
+        / "@openai"
+        / "codex"
+        / "node_modules"
+        / "@openai"
+    )
+    if not package_scope.is_dir():
+        return None
+    machine = platform.machine().casefold()
+    preferred_suffix = "arm64" if machine in {"arm64", "aarch64"} else "x64"
+    package_dirs = sorted(
+        package_scope.glob("codex-win32-*"),
+        key=lambda path: (
+            not path.name.casefold().endswith(preferred_suffix),
+            path.name.casefold(),
+        ),
+    )
+    for package_dir in package_dirs:
+        for candidate in sorted(package_dir.glob("vendor/*/bin/codex.exe")):
+            if candidate.is_file():
+                return candidate.resolve()
+    return None
+
+
+def _is_windows_platform() -> bool:
+    return os.name == "nt"
