@@ -1174,6 +1174,25 @@ Vega 的编码、审查或验证能力。
 环境检查使用现有命令人工确认，不新增 runner、账本 schema、事件采集器或证据层。
 任何真实 Worker 或 Reviewer 调用仍需单独授权。
 
+### 12.17 2026-07-29 DV-B05 输入资格冻结
+
+按 12.16 的最小继续边界，下一候选选择 `pallets/click #3572`：禁用颜色时，
+`confirm` 和 `prompt` 的交互提示仍保留 ANSI 样式代码。该任务包含颜色开关、两个交互 API
+和 stdout/stderr 路由组合，预计比单行 setter 修复更接近 10 至 20 分钟的真实编码任务。
+原候选 DV-B03 因 Issue 评论直接给出单行修法而退休，未调用 Provider，也未继续构造证据。
+
+DV-B05 固定 baseline 为 `6ec99f89261b32f8a50848786eca055e1967659f`，oracle 为
+`fe3ad76e5807e7a401ed7520f051071c6ae1fa6e`，且 baseline 是 oracle 第一父提交。
+Windows/Python 3.12.10 下，同一 verifier 连续三次稳定得到 baseline 退出码 `1`、oracle
+退出码 `0`；两个 ref 均从源码安装、通过 `pip check` 和目标 `tests/test_termui.py`。
+
+未来直接配对固定 `gpt-5.6-sol`、`medium` reasoning、1200 秒 timeout、Native → Vega
+顺序，只允许修改 `src/click/termui.py` 与 `tests/test_termui.py`。`worker_token_limit`
+仅作为观测预算，不宣称为硬门禁。固定验证同时运行八场景 verifier 与 Click 现有
+`tests/test_termui.py`，不新增测试驱动器。本轮只提交 task、资格记录、固定 verifier 与
+ledger revision，没有恢复 Harness，没有修改 Vega Runtime，也没有调用 Provider、Worker
+或 Reviewer。
+
 ---
 
 ## 13. 参考资料

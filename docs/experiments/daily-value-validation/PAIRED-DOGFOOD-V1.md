@@ -3,10 +3,14 @@
 > 2026-07-29 实现 supersession：V1 资格记录与运行结果继续作为历史事实保留，
 > 但配套的 `daily_value_eval.py` 与 Codex 离线预检脚本已因过度设计删除。
 > 本文中的脚本命令只用于解释当时流程，不再是可执行入口，也不得据此重跑或改写 V1。
+>
+> 2026-07-29 最小继续：DV-B05 仅复用本 append-only ledger、固定 task 和 verifier，
+> 用于未来一次直接 Native/Vega 配对。它不是 V1 隐藏重跑，也不恢复 V2 Harness。
 
-状态：实验合同已冻结；DV-B01 已因缺少上游绿态 oracle 退休，DV-B02 与替代案例 DV-B04
-已达到 `runnable`。DV-B04 的 Native treatment 已发生一次基础设施失败；DV-B02 的 Vega
-与 Native treatment 已按冻结顺序各正式运行一次，均超时且未启动 Reviewer。
+状态：历史 V1 结果保持封存。DV-B03 因任务过短且 Issue 评论直接给出修法而退休；替代案例
+DV-B05 已达到 `runnable`，但未调用 Provider、Worker 或 Reviewer。DV-B04 的 Native
+treatment 已发生一次基础设施失败；DV-B02 的 Vega 与 Native treatment 已按冻结顺序各
+正式运行一次，均超时且未启动 Reviewer。
 
 ## 1. 要回答的问题
 
@@ -77,16 +81,18 @@ status=candidate_not_frozen
 |---|---|---|---|---|
 | DV-B01 | Bug | PyCQA/pycodestyle #1311，f-string 集合/字典推导式误报 E201/E202 | Native → Vega | retired |
 | DV-B02 | Bug | python-attrs/attrs #1348，`optional(pipe(...))` 组合回归 | Vega → Native | runnable；两个 treatment 均已运行且超时 |
-| DV-B03 | Bug | pallets/werkzeug #2364，`s_maxage` 整数 setter 异常 | Native → Vega | candidate_not_frozen |
+| DV-B03 | Bug | pallets/werkzeug #2364，`s_maxage` 整数 setter 异常 | Native → Vega | retired |
 | DV-B04 | Bug | pallets/click #2836，prompt 忽略字符串 `show_default` | Native → Vega | runnable；Native 基础设施失败 |
+| DV-B05 | Bug | pallets/click #3572，禁用颜色时交互提示仍保留 ANSI | Native → Vega | runnable；尚未启动 treatment |
 | DV-F01 | Feature | python-attrs/attrs #814，生成 `__match_args__` | Vega → Native | candidate_not_frozen |
 | DV-F02 | Feature | pallets/werkzeug #2948，支持 RFC5861 Cache-Control 扩展 | Native → Vega | candidate_not_frozen |
 | DV-F03 | Feature | pallets/click #805，`style` 支持删除线 | Vega → Native | candidate_not_frozen |
 
 选择标准是任务行为可测试、修改面预计较窄、已有上游 oracle。这里的“预计”不代替资格门。
 DV-B01 的真实资格确认推翻了“已有 oracle”的初始假设；DV-B04 已完成独立红绿验证并替代其
-活跃 Bug 名额。历史退休记录仍保留，因此 ledger 当前有七个 case identity，但同时只有三个
-活跃 Bug 和三个活跃 Feature。
+活跃 Bug 名额。DV-B03 在资格构造前因任务尺度和答案泄露退休，DV-B05 替代其活跃 Bug
+名额。历史退休记录仍保留，因此 ledger 当前有八个 case identity，但同时只有三个活跃 Bug
+和三个活跃 Feature。
 
 ## 5. 结果记录
 
@@ -204,6 +210,12 @@ python scripts/daily_value_eval.py `
   oracle 绿；两个 ref 均从源码安装并通过 `pip check`。正式执行采用
   `CODEX-EXECUTION-PROFILE.md`，保留 Provider 路由并显式关闭实验外 feature。完整记录见
   `eval/experiments/daily-value-validation/qualifications/DV-B02.md`。
+- `DV-B03`：2026-07-29 在调用 Provider 前退休。该任务预计只需单行修复，且 Issue 评论
+  直接给出最终修法，不满足 10 至 20 分钟任务尺度和盲测边界；未继续构造 verifier。
+- `DV-B05`：2026-07-29 达到 `runnable`。Windows/Python 3.12.10 下独立 verifier
+  连续三次稳定得到 baseline 红、oracle 绿；两个 ref 均从源码安装、通过 `pip check`
+  和 `tests/test_termui.py`。资格阶段未调用 Provider、Worker 或 Reviewer。完整记录见
+  `eval/experiments/daily-value-validation/qualifications/DV-B05.md`。
 
 ## 11. 正式运行记录
 
