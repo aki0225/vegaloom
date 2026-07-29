@@ -54,6 +54,8 @@ from .risk_gate_evidence import (
     sha256_text,
     validate_iteration_risk_gate_artifacts,
 )
+from .risk_review_evidence import gate_blocks_reviewer_before_execution, required_review_iteration_eval_results
+from .risk_review_reporting import render_final_review_details
 from .run_lock import RunMutationLock
 from .run_utils import create_run_dir, resolve_run_dir, run_name
 from .runner import Runner, RunnerResult, RunnerStatus, make_runner
@@ -713,7 +715,7 @@ class LoopAutomationRuntime:
         if (
             gate_evidence.error
             or gate_result is None
-            or gate_result.recommendation == "human-review"
+            or gate_blocks_reviewer_before_execution(gate_result)
         ):
             state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
@@ -1421,7 +1423,7 @@ class LoopAutomationRuntime:
                     current_step="risk_gate_failed",
                 )
                 return run_dir
-            if gate_result.recommendation == "human-review":
+            if gate_blocks_reviewer_before_execution(gate_result):
                 state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
@@ -2278,6 +2280,7 @@ def _loop_iteration_evidence_checks(
         results.append("FAIL: review-verdict.json 与 iteration.verdict 不一致")
     else:
         results.append("PASS: reviewer verdict artifact 与 iteration 一致")
+    results.extend(required_review_iteration_eval_results(gate_integrity.result, verdict))
 
     context_path = iteration_dir / "review-context.json"
     if not context_path.exists():
@@ -3034,13 +3037,7 @@ def _write_final_report(
     ]
     if verdict:
         lines.extend([f"- verdict：`{verdict.verdict}`", f"- summary：{verdict.summary}", ""])
-        if verdict.findings:
-            lines.append("## 剩余 Findings")
-            lines.append("")
-            for finding in verdict.findings:
-                lines.append(f"- [{finding.severity}] {finding.title}：{finding.recommendation}")
-        else:
-            lines.append("- 未发现阻塞问题。")
+        lines.extend(render_final_review_details(verdict))
     else:
         lines.append("- 未产生有效 reviewer verdict。")
     if (

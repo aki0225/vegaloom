@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import subprocess
-import unicodedata
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +15,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from .git_read import coerce_git_output_bytes, run_git_capture
 from .redaction import redact_text
 from .repository_identity import resolve_git_revision
+from .risk_review_config import (
+    RequiredReviewRule,
+    ensure_unique_required_review_ids,
+    render_required_review_config_lines,
+)
+from .scope_path_matching import validate_scope_pattern
 
 
 CONFIG_FILENAMES = [".vega.yaml", ".vega.yml"]
@@ -212,6 +217,18 @@ class RiskConfig(BaseModel):
     high_paths: list[str] = Field(default_factory=list)
     medium_paths: list[str] = Field(default_factory=list)
     require_human_review: list[str] = Field(default_factory=list)
+    required_reviews: list[RequiredReviewRule] = Field(
+        default_factory=list,
+        max_length=64,
+    )
+
+    @field_validator("required_reviews")
+    @classmethod
+    def validate_required_review_ids(
+        cls,
+        rules: list[RequiredReviewRule],
+    ) -> list[RequiredReviewRule]:
+        return ensure_unique_required_review_ids(rules)
 
 
 class BudgetConfig(BaseModel):
@@ -245,39 +262,7 @@ class ScopeConfig(BaseModel):
         values: list[str],
         info: ValidationInfo,
     ) -> list[str]:
-        return [_validate_scope_pattern(value, info.field_name) for value in values]
-
-
-def _validate_scope_pattern(value: str, field_name: str) -> str:
-    """拒绝会把仓库相对 glob 解释成外部路径或含糊路径的配置值。"""
-    if value != value.strip():
-        raise ValueError(f"{field_name} 中的路径规则不能包含首尾空白")
-    if not value:
-        raise ValueError(f"{field_name} 中的路径规则不能为空")
-    if len(value) > 512:
-        raise ValueError(f"{field_name} 中的路径规则长度不能超过 512")
-    if any(character in value for character in ("\r", "\n", "\0")):
-        raise ValueError(f"{field_name} 中的路径规则不能包含换行或 NUL")
-    if any(unicodedata.category(character) in {"Cc", "Cf"} for character in value):
-        raise ValueError(f"{field_name} 中的路径规则不能包含控制字符或双向格式字符")
-    if value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", value):
-        raise ValueError(f"{field_name} 只能使用仓库相对路径，不能使用绝对路径或盘符")
-    if "\\" in value:
-        raise ValueError(f"{field_name} 必须使用 POSIX 分隔符 '/'，不能使用反斜杠")
-    if ":" in value:
-        raise ValueError(f"{field_name} 不能包含 ':'，避免 Windows 路径歧义")
-    segments = value.split("/")
-    if any(segment in {"", ".", ".."} for segment in segments):
-        raise ValueError(
-            f"{field_name} 不能包含空路径段、'.' 或 '..'，请使用明确的仓库相对 glob"
-        )
-    if segments.count("**") > 16:
-        raise ValueError(f"{field_name} 中的 '**' 不能超过 16 个，避免规则匹配失控")
-    if redact_text(value) != value:
-        raise ValueError(
-            f"{field_name} 中的路径规则会触发脱敏，无法作为稳定的机器判定身份"
-        )
-    return value
+        return [validate_scope_pattern(value, info.field_name) for value in values]
 
 
 class PromptBudgetConfig(BaseModel):
@@ -745,7 +730,13 @@ def render_project_config_summary(config: ProjectConfig) -> str:
         lines.append("- 中风险路径：" + "、".join(f"`{item}`" for item in config.risk.medium_paths))
     if config.risk.require_human_review:
         lines.append("- 必须人工确认：" + "、".join(f"`{item}`" for item in config.risk.require_human_review))
-    if not (config.risk.high_paths or config.risk.medium_paths or config.risk.require_human_review):
+    lines.extend(render_required_review_config_lines(config.risk.required_reviews))
+    if not (
+        config.risk.high_paths
+        or config.risk.medium_paths
+        or config.risk.require_human_review
+        or config.risk.required_reviews
+    ):
         lines.append("- 未配置项目级风险策略。")
     return redact_text("\n".join(lines).rstrip() + "\n")
 

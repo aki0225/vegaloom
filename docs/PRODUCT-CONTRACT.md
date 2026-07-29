@@ -68,8 +68,8 @@ Vega 发布 Python distribution 是为了安装 CLI 和本地资源，不把内�
   `assume-unchanged`、`skip-worktree`、运行中策略变化或 reviewer 授权快照变化都会 fail-closed。
   `project-policy-snapshot.json` 与根状态哈希绑定，Finish 会复查当前策略；缺少三阶段 scope
   证据的旧 run 仍可查看，但不能自动进入 `ready_to_commit`。
-- iteration-local risk gate 的结果与报告绑定 source reflect、iteration、结果哈希、风险和建议；Finish 会结合 trace、连续 iteration 与 Reflect 重算复核。缺失、篡改、语义不一致或绕过 `human-review` 时，不得给出 `ready_to_commit`。
-- 独立 reviewer 也必须带上同一份风险门禁；`human-review` 下的 AI 审查只能提供辅助发现，不能成为 Goal checkpoint 的自动完成证据。
+- iteration-local risk gate 的结果与报告绑定 source reflect、iteration、结果哈希、风险、建议和命名高风险命中项；Finish 会结合 trace、连续 iteration 与 Reflect 重算复核。缺失、篡改、语义不一致或绕过 `human-review` 时，不得给出 `ready_to_commit`。
+- `risk.required_reviews` 命中时，独立 reviewer 必须逐类覆盖全部命中文件，说明修改、判断、证据和剩余风险；持久化 verdict 固定为 `needs_human`。这类 AI 审查只能作为人工检查材料，不能成为 Goal checkpoint 的自动完成证据。
 - reviewer 不能覆盖确定性验证失败。
 - state、trace、execution、status、finish、stop 和 recover。
 

@@ -8,6 +8,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .models import GateResult, LoopIterationState
+from .risk_review_evidence import (
+    gate_blocks_reviewer_before_execution,
+    gate_result_semantics,
+)
 
 
 REPORT_BINDING_START = "<!-- vega-risk-gate-binding\n"
@@ -148,7 +152,10 @@ def validate_iteration_risk_gate_artifacts(
         if iteration.risk_gate_recommendation is None:
             issues.append("risk_gate_recommendation_missing")
         if result and _reviewer_evidence_present(iteration):
-            if result.recommendation == "human-review":
+            if gate_blocks_reviewer_before_execution(result) or (
+                result.required_reviews
+                and iteration.verdict != "needs_human"
+            ):
                 issues.append("risk_gate_human_review_bypassed")
         if result:
             _validate_result_policy(result, issues)
@@ -328,18 +335,8 @@ def _validate_recomputed_result(
     except Exception:  # noqa: BLE001 - 重算失败不能把旧结果视为可信
         issues.append("risk_gate_recomputation_failed")
         return
-    if _result_semantics(expected) != _result_semantics(result):
+    if gate_result_semantics(expected) != gate_result_semantics(result):
         issues.append("risk_gate_recomputed_result_mismatch")
-
-
-def _result_semantics(result: GateResult) -> tuple[object, ...]:
-    return (
-        result.risk,
-        result.recommendation,
-        tuple((reason.code, reason.severity) for reason in result.reasons),
-        tuple(result.changed_files),
-        result.scope_profile,
-    )
 
 
 def _validate_trace_binding(

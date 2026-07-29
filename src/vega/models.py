@@ -11,8 +11,12 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from .redaction import redact_value
-from .review_contract import ReviewFinding as ReviewFinding
-from .review_contract import ReviewVerdict as ReviewVerdict
+from .review_contract import (
+    GateReason,
+    RequiredReviewHit,
+    ReviewFinding as ReviewFinding,
+    ReviewVerdict as ReviewVerdict,
+)
 
 
 def _save_model(path: Path, model: BaseModel) -> None:
@@ -498,18 +502,12 @@ class GoalState(BaseModel):
         _save_model(path, self)
 
 
-class GateReason(BaseModel):
-    code: str
-    severity: Literal["low", "medium", "high"]
-    message: str
-    evidence: str = ""
-
-
 class GateResult(BaseModel):
     risk: Literal["low", "medium", "high"]
     recommendation: Literal["self-check", "isolated-review", "human-review"]
     reasons: list[GateReason] = Field(default_factory=list)
     changed_files: list[str] = Field(default_factory=list)
+    required_reviews: list[RequiredReviewHit] = Field(default_factory=list)
     scope_profile: str | None = None
 
 
@@ -524,6 +522,7 @@ class GateState(BaseModel):
     recommendation: Literal["self-check", "isolated-review", "human-review"] | None = None
     scope_profile: str | None = None
     changed_files: list[str] = Field(default_factory=list)
+    required_reviews: list[RequiredReviewHit] = Field(default_factory=list)
     artifacts: list[str] = Field(default_factory=list)
     eval_results: list[str] = Field(default_factory=list)
 

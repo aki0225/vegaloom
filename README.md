@@ -123,6 +123,7 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 - auto 首轮不会接管已有 tracked diff，避免把历史改动错误归因给本轮 worker。
 - staged 与 unstaged 变更都会进入审查证据，不使用可能相互抵消的净差异代替。
 - 高风险路径、超预算变更或明确的 `human-review` 不会被 AI reviewer 自动放行。
+- 可配置的支付、数据库、并发等命名高风险会由 Reviewer 逐类披露，但最终仍由人工确认。
 - 证据缺失、过期或相互不一致时 fail-closed，并交还人工判断。
 - Vega 不会自动提交、推送、发布、删除文件或写入长期 Memory。
 

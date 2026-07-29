@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -10,8 +9,13 @@ from typing import Any, Callable
 from pydantic import ValidationError
 
 from .execution_control import RunnerExecutionContext
-from .gate_runtime import evaluate_risk
-from .models import BriefState, GateResult, ReviewFinding, ReviewState, ReviewVerdict
+from .models import (
+    BriefState,
+    GateResult,
+    ReviewFinding,
+    ReviewState,
+    ReviewVerdict,
+)
 from .project_config import (
     ProjectConfig,
     load_project_config,
@@ -29,6 +33,33 @@ from .prompt_metrics import (
 )
 from .redaction import redact_text, redact_value
 from .review_evidence import review_evidence_issues as _review_evidence_issues
+from .review_runner_contract import (
+    review_result_diagnostic,
+    review_result_is_trusted,
+    untrusted_review_current_step,
+)
+from .review_risk_gate import (
+    PrecomputedReviewRiskGate,
+    evaluate_review_risk_gate as _default_evaluate_review_risk_gate,
+    review_risk_gate_result as _review_risk_gate_result,
+)
+from .risk_review_reporting import (
+    render_review_checklist,
+    render_review_findings,
+    render_runner_output,
+    verdict_schema_example as _verdict_schema_example,
+)
+from .risk_review_runtime import (
+    build_required_review_failure_reasons,
+    enforce_required_risk_review,
+    redact_review_verdict as _redact_review_verdict,
+    render_required_review_pack_lines,
+    render_required_review_prompt_rules,
+    required_review_outcome_line,
+    required_reviews_from_inputs,
+    run_required_review_pack_eval,
+    run_required_review_prompt_eval,
+)
 from .run_utils import create_run_dir, resolve_run_dir
 from .runner import Runner, RunnerResult, make_runner
 from .trace import TraceWriter
@@ -55,34 +86,12 @@ REVIEW_ARTIFACTS = [
 MAX_TEXT_CHARS = 20000
 
 
-@dataclass(frozen=True)
-class PrecomputedReviewRiskGate:
-    """Loop 传给内嵌 reviewer 的已绑定确定性风险门禁。"""
-
-    source_run: str
-    result: GateResult
-    project_policy_snapshot: dict[str, str | None]
-
-
 def _evaluate_review_risk_gate(
     workspace: Path,
     repo_path: Path,
     source_run: str,
 ) -> dict[str, Any]:
-    """为独立 reviewer 固化同一份确定性风险结论。"""
-    try:
-        result = evaluate_risk(workspace, repo_path, source_run)
-    except Exception as exc:  # noqa: BLE001 - 风险评估失败必须阻止自动审查结论
-        return {
-            "status": "failed",
-            "source_run": source_run,
-            "diagnostic": redact_text(f"{type(exc).__name__}: {exc}")[:1000],
-        }
-    return {
-        "status": "success",
-        "source_run": source_run,
-        "result": result.model_dump(mode="json"),
-    }
+    return _default_evaluate_review_risk_gate(workspace, repo_path, source_run)
 
 
 def _review_risk_gate_payload(
@@ -112,16 +121,6 @@ def _review_risk_gate_payload(
     }
 
 
-def _review_risk_gate_result(inputs: dict[str, Any]) -> GateResult | None:
-    gate = inputs.get("risk_gate")
-    if not isinstance(gate, dict) or gate.get("status") != "success":
-        return None
-    try:
-        return GateResult.model_validate(gate.get("result"))
-    except ValidationError:
-        return None
-
-
 class ReviewPackRuntime:
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace
@@ -141,6 +140,12 @@ class ReviewPackRuntime:
         trace.write("review_pack_started", repo_path=str(repo_path.resolve()), source_run=source_run)
 
         inputs = collect_review_inputs(self.workspace, repo_path, source_run)
+        inputs["risk_gate"] = _review_risk_gate_payload(
+            self.workspace,
+            repo_path,
+            source_run,
+            None,
+        )
         state.changed_files = inputs["changed_files"]
         metrics = _write_review_pack_artifacts(run_dir, inputs)
         trace.write("review_pack_written", changed_files=state.changed_files)
@@ -151,6 +156,16 @@ class ReviewPackRuntime:
             diagnostics=inputs["evidence_diagnostics"],
         )
         trace.write("review_prompt_measured", metrics=metrics.model_dump())
+        risk_gate_result = _review_risk_gate_result(inputs)
+        trace.write(
+            "review_risk_gate_evaluated",
+            status=str(inputs["risk_gate"].get("status") or "failed"),
+            source_run=source_run,
+            risk=risk_gate_result.risk if risk_gate_result else None,
+            recommendation=(
+                risk_gate_result.recommendation if risk_gate_result else None
+            ),
+        )
 
         state.current_step = "eval"
         run_dir.joinpath("eval.md").write_text("# Eval\n\n(pending)\n", encoding="utf-8")
@@ -166,6 +181,9 @@ class ReviewPackRuntime:
             state.artifacts = [*REVIEW_PACK_ARTIFACTS, report]
             state.status = "needs_human"
             state.current_step = "context_budget"
+        elif risk_gate_result is None:
+            state.status = "needs_human"
+            state.current_step = "risk_gate_failed"
         else:
             state.status = "failed" if _has_failures(eval_results) else "success"
             state.current_step = "done"
@@ -358,11 +376,31 @@ class ReviewRuntime:
             inputs,
             review_execution_issues,
         )
+        required_review_failures = build_required_review_failure_reasons(
+            evidence_issues=pre_review_evidence_issues,
+            truncated_sections=inputs["truncated_sections"],
+            workspace_issues=review_execution_issues,
+            prompt_budget_exceeded=metrics.exceeded,
+            runner_status=result.status,
+            runner_error=result.error,
+            termination_unconfirmed=result.termination_unconfirmed,
+        )
+        verdict, risk_disclosure_issues = enforce_required_risk_review(
+            verdict,
+            risk_gate_result,
+            evidence_failures=required_review_failures,
+        )
         run_dir.joinpath("review-verdict.json").write_text(
             _redacted_model_json(verdict),
             encoding="utf-8",
         )
-        run_dir.joinpath("review-findings.md").write_text(render_review_findings(verdict), encoding="utf-8")
+        run_dir.joinpath("review-findings.md").write_text(
+            render_review_findings(
+                verdict,
+                risk_gate_result.required_reviews if risk_gate_result else [],
+            ),
+            encoding="utf-8",
+        )
         trace.write(
             "review_runner_finished",
             runner=runner_name,
@@ -370,6 +408,8 @@ class ReviewRuntime:
             termination_unconfirmed=result.termination_unconfirmed,
             verdict=verdict.verdict,
             findings=len(verdict.findings),
+            risk_disclosures=len(verdict.risk_disclosures),
+            risk_disclosure_issues=risk_disclosure_issues,
         )
         trace.write(
             "review_workspace_checked",
@@ -390,6 +430,7 @@ class ReviewRuntime:
             metrics=metrics,
             risk_gate_result=risk_gate_result,
             verdict=verdict,
+            risk_disclosure_issues=risk_disclosure_issues,
         )
         run_dir.joinpath("eval.md").write_text(render_eval(eval_results), encoding="utf-8")
         state.eval_results = eval_results
@@ -414,21 +455,21 @@ class ReviewRuntime:
         elif risk_gate_result is None:
             state.status = "needs_human"
             state.current_step = "risk_gate_failed"
+        elif not review_result_is_trusted(result):
+            state.status = "needs_human"
+            state.current_step = untrusted_review_current_step(result)
+        elif inputs["truncated_sections"]:
+            state.status = "needs_human"
+            state.current_step = "evidence_truncated"
         elif risk_gate_result.recommendation == "human-review":
             state.status = "needs_human"
             state.current_step = "risk_gate_needs_human"
-        elif result.status in {"error", "timed_out", "stopped"}:
-            state.status = "needs_human"
-            state.current_step = "runner_error" if result.status == "error" else result.status
         elif verdict.verdict == "approve" and not _has_failures(eval_results):
             state.status = "success"
             state.current_step = "done"
         elif verdict.verdict == "request_changes":
             state.status = "needs_human"
             state.current_step = "done"
-        elif verdict.verdict == "needs_human" and inputs["truncated_sections"]:
-            state.status = "needs_human"
-            state.current_step = "evidence_truncated"
         else:
             state.status = "failed" if _has_failures(eval_results) else "needs_human"
             state.current_step = "done"
@@ -618,23 +659,9 @@ def collect_review_inputs(
     }
 
 
-def render_review_checklist() -> str:
-    return "\n".join(
-        [
-            "# Review Checklist",
-            "",
-            "- 需求是否被真实满足，是否存在遗漏路径。",
-            "- diff 是否引入明显行为回归、边界错误或兼容性风险。",
-            "- 测试日志是否覆盖核心路径；缺测试时必须指出风险。",
-            "- 是否违反 AGENTS.md、accepted memory 或本次 brief 的约束。",
-            "- 是否存在输入校验、权限、安全、敏感信息或破坏性操作风险。",
-            "- reviewer 只读且仅使用现有证据；禁止运行测试、构建、安装依赖、格式化、代码生成或其他会写文件/缓存的命令，也不修改、提交或发布。",
-        ]
-    ).rstrip() + "\n"
-
-
 def render_review_pack(inputs: dict[str, Any]) -> str:
     risk_gate = inputs.get("risk_gate")
+    required_review_lines: list[str] = []
     risk_gate_note = [
         f"- ignored 证据覆盖：Reflect `{inputs['source_ignored_coverage_level']}`，当前 "
         f"`{inputs['current_ignored_coverage_level']}`；`metadata_bounded` 仅表示稳定元数据检测。"
@@ -652,6 +679,9 @@ def render_review_pack(inputs: dict[str, Any]) -> str:
                 risk_gate_note.append(
                     "- 风险门禁要求人工审查；本次 reviewer 只提供辅助发现，不能替代人工确认。"
                 )
+            required_review_lines.extend(
+                render_required_review_pack_lines(result.required_reviews)
+            )
     elif risk_gate is not None:
         risk_gate_note.append("- 风险门禁评估失败；本次审查不能作为自动通过结论。")
     text = "\n".join(
@@ -689,6 +719,7 @@ def render_review_pack(inputs: dict[str, Any]) -> str:
             ),
             *risk_gate_note,
             "",
+            *required_review_lines,
             "## 原始需求 / Agent Brief",
             "",
             inputs["source_brief"] or "- 未找到上游 agent-brief.md。",
@@ -720,6 +751,7 @@ def render_review_pack(inputs: dict[str, Any]) -> str:
 
 
 def render_review_prompt(inputs: dict[str, Any]) -> str:
+    required_reviews = required_reviews_from_inputs(inputs)
     text = "\n".join(
         [
             "# 任务：隔离代码审查",
@@ -731,11 +763,16 @@ def render_review_prompt(inputs: dict[str, Any]) -> str:
             "- 不要运行测试、构建、安装依赖、格式化、代码生成或其他可能写入文件/缓存的命令，也不要修改、提交、推送、发布、删除或执行破坏性操作。",
             "- 重点找真实 bug、遗漏测试、需求不满足、项目规则违反和安全风险。",
             "- 如果证据不足，不要强行 approve，返回 needs_human。",
+            *render_required_review_prompt_rules(required_reviews),
             "- 最终只能输出一个 JSON 对象，不要包 Markdown 代码块。",
             "",
             "JSON schema：",
             "```json",
-            json.dumps(_verdict_schema_example(), ensure_ascii=False, indent=2),
+            json.dumps(
+                _verdict_schema_example(required_reviews),
+                ensure_ascii=False,
+                indent=2,
+            ),
             "```",
             "",
             render_review_pack(inputs),
@@ -779,7 +816,7 @@ def render_review_context(inputs: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_review_verdict(output: str, error: str | None = None) -> ReviewVerdict:
-    if error and not output.strip():
+    if error is not None:
         return _needs_human_verdict(f"reviewer runner 执行失败：{error}")
     try:
         return _extract_review_verdict(output)
@@ -787,8 +824,6 @@ def parse_review_verdict(output: str, error: str | None = None) -> ReviewVerdict
         message = f"reviewer 输出无法解析为 verdict JSON：{type(exc).__name__}"
         if str(exc) == "multiple review verdict json candidates found":
             message = f"{message}；检测到多个合法 verdict 候选"
-        if error:
-            message = f"{message}；runner 错误：{error}"
         return _needs_human_verdict(message)
 
 
@@ -797,7 +832,12 @@ def _review_verdict_from_result(result: RunnerResult) -> ReviewVerdict:
         return _needs_human_verdict(
             "reviewer owned process tree 终止未确认，未读取或采用 runner 输出。"
         )
-    return parse_review_verdict(result.output, result.error)
+    if not review_result_is_trusted(result):
+        return _needs_human_verdict(
+            "reviewer Runner 未形成可采信结论"
+            f"（{review_result_diagnostic(result)}），未读取或采用 runner 输出。"
+        )
+    return parse_review_verdict(result.output)
 
 
 def _append_review_eval_outcome(
@@ -809,7 +849,12 @@ def _append_review_eval_outcome(
     metrics: PromptMetrics,
     risk_gate_result: GateResult | None,
     verdict: ReviewVerdict,
+    risk_disclosure_issues: list[str],
 ) -> None:
+    eval_results.extend(
+        f"FAIL: required risk disclosure：{issue}"
+        for issue in risk_disclosure_issues
+    )
     if result.termination_unconfirmed:
         eval_results.append(
             "FAIL: reviewer owned process tree 终止未确认，未读取或采用 runner 输出"
@@ -822,36 +867,24 @@ def _append_review_eval_outcome(
         eval_results.append("FAIL: reviewer prompt 超过上下文预算，未启动外部 runner")
     elif risk_gate_result is None:
         eval_results.append("FAIL: review 风险门禁评估失败，未启动外部 runner")
+    elif not review_result_is_trusted(result):
+        eval_results.append(
+            "FAIL: reviewer Runner 未形成可采信结论"
+            f"（{review_result_diagnostic(result)}），"
+            "未读取或采用 runner 输出"
+        )
     elif risk_gate_result.recommendation == "human-review":
-        eval_results.append("FAIL: review 风险门禁要求人工审查，不能作为自动通过结论")
-    elif result.status == "skipped":
-        eval_results.append("PASS: runner=none 已跳过外部审查")
+        eval_results.append(
+            required_review_outcome_line(
+                risk_gate_result,
+                verdict,
+                risk_disclosure_issues,
+            )
+        )
     elif verdict.verdict == "needs_human":
         eval_results.append("FAIL: reviewer 输出需要人工处理")
     else:
         eval_results.append("PASS: reviewer 输出 verdict 可解析")
-
-
-def render_runner_output(result: RunnerResult) -> str:
-    lines = ["# Runner Output", "", f"- status: `{result.status}`"]
-    if result.termination_unconfirmed:
-        lines.append("- termination_unconfirmed: `true`")
-    if result.command:
-        lines.extend(["", "## Command", "", "```text", " ".join(result.command), "```"])
-    if result.error:
-        lines.extend(["", "## Error", "", result.error])
-    if result.termination_unconfirmed:
-        lines.extend(
-            [
-                "",
-                "## Output",
-                "",
-                "owned process tree 终止未确认，未读取或复制 runner 输出。",
-            ]
-        )
-    else:
-        lines.extend(["", "## Output", "", "```text", result.output.strip(), "```"])
-    return redact_text("\n".join(lines).rstrip() + "\n")
 
 
 def _write_runner_status_report(
@@ -901,39 +934,13 @@ def _write_runner_status_report(
     return filename
 
 
-def render_review_findings(verdict: ReviewVerdict) -> str:
-    lines = ["# Review Findings", "", f"- 结论：`{verdict.verdict}`", f"- 摘要：{verdict.summary}", ""]
-    lines.extend(["## Findings", ""])
-    if verdict.findings:
-        for index, finding in enumerate(verdict.findings, start=1):
-            location = f"{finding.file}:{finding.line}" if finding.file else "未指定位置"
-            lines.extend(
-                [
-                    f"### {index}. {finding.title}",
-                    "",
-                    f"- 严重级别：`{finding.severity}`",
-                    f"- 位置：`{location}`",
-                    f"- 证据：{finding.evidence or '未提供'}",
-                    f"- 建议：{finding.recommendation or '未提供'}",
-                    "",
-                ]
-            )
-    else:
-        lines.append("- 未发现阻塞问题。")
-    lines.extend(["", "## Checked Items", ""])
-    if verdict.checked_items:
-        lines.extend(f"- {item}" for item in verdict.checked_items)
-    else:
-        lines.append("- reviewer 未列出检查项。")
-    return redact_text("\n".join(lines).rstrip() + "\n")
-
-
 def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
     results = [f"{'PASS' if (run_dir / item).exists() else 'FAIL'}: artifact 存在：{item}" for item in artifacts]
     prompt = run_dir / "review-prompt.md"
+    prompt_text = ""
     if prompt.exists():
-        text = prompt.read_text(encoding="utf-8", errors="replace")
-        results.append("PASS: review prompt 标记不包含 worker 聊天" if "worker 的完整聊天记录" in text else "FAIL: review prompt 缺少隔离说明")
+        prompt_text = prompt.read_text(encoding="utf-8", errors="replace")
+        results.append("PASS: review prompt 标记不包含 worker 聊天" if "worker 的完整聊天记录" in prompt_text else "FAIL: review prompt 缺少隔离说明")
     metrics_path = run_dir / "review-prompt-metrics.json"
     if metrics_path.exists():
         metrics = PromptMetrics.model_validate_json(metrics_path.read_text(encoding="utf-8"))
@@ -973,10 +980,20 @@ def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
             except ValidationError:
                 results.append("FAIL: review 风险门禁结果格式不合法")
             else:
-                if result.recommendation == "human-review":
-                    results.append("FAIL: review 风险门禁要求人工审查")
+                if "review-verdict.json" in artifacts:
+                    results.extend(
+                        run_required_review_pack_eval(
+                            result,
+                            run_dir / "review-verdict.json",
+                        )
+                    )
                 else:
-                    results.append("PASS: review 风险门禁允许隔离审查")
+                    results.extend(
+                        run_required_review_prompt_eval(
+                            result,
+                            prompt_text,
+                        )
+                    )
     return results
 
 
@@ -1104,14 +1121,14 @@ def _redact_runner_result(result: RunnerResult) -> RunnerResult:
             if result.termination_unconfirmed
             else redact_text(result.output)
         ),
-        error=redact_text(result.error) if result.error else None,
+        error=(
+            redact_text(result.error)
+            if result.error is not None
+            else None
+        ),
         command=[redact_text(item) for item in (result.command or [])],
         termination_unconfirmed=result.termination_unconfirmed,
     )
-
-
-def _redact_review_verdict(verdict: ReviewVerdict) -> ReviewVerdict:
-    return ReviewVerdict.model_validate(redact_value(verdict.model_dump(mode="json")))
 
 
 def _redacted_model_json(verdict: ReviewVerdict) -> str:
@@ -1312,24 +1329,6 @@ def _enforce_complete_review_evidence(
         ],
         checked_items=[*verdict.checked_items, "上下文完整性"],
     )
-
-
-def _verdict_schema_example() -> dict[str, Any]:
-    return {
-        "verdict": "approve | request_changes | needs_human",
-        "summary": "简短中文结论",
-        "findings": [
-            {
-                "severity": "blocker | major | minor | suggestion",
-                "file": "相对路径或空字符串",
-                "line": 0,
-                "title": "问题标题",
-                "evidence": "基于 diff/test/规则的证据",
-                "recommendation": "建议修复方式",
-            }
-        ],
-        "checked_items": ["需求覆盖", "测试覆盖", "项目规则", "安全风险"],
-    }
 
 
 def _new_run_id(suffix: str) -> str:

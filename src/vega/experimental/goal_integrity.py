@@ -153,6 +153,10 @@ def _gate_model_consistency_issues(
         ("gate_result_risk_mismatch", result.risk != state.risk),
         ("gate_result_recommendation_mismatch", result.recommendation != state.recommendation),
         ("gate_result_changed_files_mismatch", result.changed_files != state.changed_files),
+        (
+            "gate_result_required_reviews_mismatch",
+            result.required_reviews != state.required_reviews,
+        ),
         ("gate_result_scope_profile_mismatch", result.scope_profile != state.scope_profile),
     )
     return [issue for issue, invalid in checks if invalid]

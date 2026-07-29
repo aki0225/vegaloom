@@ -18,6 +18,12 @@ from .project_config import (
 from .project_knowledge import load_project_knowledge
 from .redaction import redact_text, redact_value, write_redacted_json, write_redacted_text
 from .reflect_runtime import collect_git_reflection
+from .risk_review import (
+    build_required_review_reasons,
+    match_required_reviews,
+)
+from .risk_review_evidence import required_review_policy_consistent
+from .risk_review_reporting import render_gate_report
 from .run_utils import create_run_dir, resolve_run_dir
 from .trace import TraceWriter
 from .workspace_check import collect_tracked_diff_parts, render_tracked_diff_sections
@@ -175,6 +181,7 @@ class GateRuntime:
         state.changed_files = safe_result.changed_files
         state.risk = safe_result.risk
         state.recommendation = safe_result.recommendation
+        state.required_reviews = safe_result.required_reviews
         gate_result_payload = {
             **safe_result.model_dump(mode="json"),
             "run_id": run_id,
@@ -191,6 +198,7 @@ class GateRuntime:
             risk=safe_result.risk,
             recommendation=safe_result.recommendation,
             reasons=[reason.code for reason in safe_result.reasons],
+            required_reviews=[item.id for item in safe_result.required_reviews],
         )
 
         state.current_step = "eval"
@@ -351,9 +359,24 @@ def evaluate_risk(
                     evidence=", ".join(large_files[:8]),
                 )
             )
+    required_reviews = match_required_reviews(
+        repo,
+        changed_files,
+        config.risk.required_reviews,
+    )
+    reasons.extend(build_required_review_reasons(required_reviews))
+    required_review_files = {
+        path
+        for review in required_reviews
+        for path in review.matched_files
+    }
     high_paths = _matched_paths(changed_files, HIGH_RISK_PATH_KEYWORDS)
     configured_high_paths = _matched_config_paths(changed_files, config.risk.high_paths)
-    high_paths = _dedupe([*high_paths, *configured_high_paths])
+    high_paths = [
+        path
+        for path in _dedupe([*high_paths, *configured_high_paths])
+        if path not in required_review_files
+    ]
     if high_paths:
         reasons.append(
             GateReason(
@@ -431,45 +454,9 @@ def evaluate_risk(
             )
         ],
         changed_files=changed_files,
+        required_reviews=required_reviews,
         scope_profile=scope_profile,
     )
-
-
-def render_gate_report(result: GateResult) -> str:
-    lines = [
-        "# Risk Gate Report",
-        "",
-        f"- 风险等级：`{result.risk}`",
-        f"- 建议：`{result.recommendation}`",
-        f"- scope：`{result.scope_profile or 'default'}`",
-        "",
-        "## 变更文件",
-        "",
-    ]
-    if result.changed_files:
-        lines.extend(f"- `{item}`" for item in result.changed_files)
-    else:
-        lines.append("- 未发现变更文件。")
-    lines.extend(["", "## 门禁原因", ""])
-    for reason in result.reasons:
-        lines.extend(
-            [
-                f"### {reason.code}",
-                "",
-                f"- 严重级别：`{reason.severity}`",
-                f"- 说明：{reason.message}",
-                f"- 证据：{reason.evidence or '无'}",
-                "",
-            ]
-        )
-    lines.extend(["## 建议解释", ""])
-    if result.recommendation == "self-check":
-        lines.append("- 可以由主会话做自检；仍建议保留 reflect/report 证据。")
-    elif result.recommendation == "isolated-review":
-        lines.append("- 建议运行隔离 reviewer，但不需要直接升级到人工阻塞。")
-    else:
-        lines.append("- 建议人工判断后再继续 auto loop 或合并变更。")
-    return redact_text("\n".join(lines).rstrip() + "\n")
 
 
 def _finish_gate_config_failure(
@@ -781,12 +768,18 @@ def _run_gate_eval(run_dir: Path) -> list[str]:
             and result.risk == state.risk
             and result.recommendation == state.recommendation
             and result.changed_files == state.changed_files
+            and result.required_reviews == state.required_reviews
             and result.scope_profile == state.scope_profile
         )
         results.append(
             "PASS: gate-result.json 与 GateState 身份和关键字段一致"
             if identity_matches
             else "FAIL: gate-result.json 与 GateState 身份或关键字段不一致"
+        )
+        results.append(
+            "PASS: 必须披露风险命中保持 fail-closed 语义"
+            if required_review_policy_consistent(result)
+            else "FAIL: 必须披露风险命中未绑定 high/human-review 语义"
         )
     else:
         results.append("FAIL: gate-result.json 不存在")

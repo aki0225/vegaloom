@@ -1,8 +1,56 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from fnmatch import fnmatchcase
 from functools import lru_cache
 from pathlib import Path
+
+from .redaction import redact_text
+
+
+def validate_scope_pattern(value: str, field_name: str) -> str:
+    """拒绝会把仓库相对 glob 解释成外部路径或含糊路径的配置值。"""
+    if value != value.strip():
+        raise ValueError(f"{field_name} 中的路径规则不能包含首尾空白")
+    if not value:
+        raise ValueError(f"{field_name} 中的路径规则不能为空")
+    if len(value) > 512:
+        raise ValueError(f"{field_name} 中的路径规则长度不能超过 512")
+    _validate_pattern_characters(value, field_name)
+    _validate_relative_posix_pattern(value, field_name)
+    _validate_pattern_segments(value, field_name)
+    if redact_text(value) != value:
+        raise ValueError(
+            f"{field_name} 中的路径规则会触发脱敏，无法作为稳定的机器判定身份"
+        )
+    return value
+
+
+def _validate_pattern_characters(value: str, field_name: str) -> None:
+    if any(character in value for character in ("\r", "\n", "\0")):
+        raise ValueError(f"{field_name} 中的路径规则不能包含换行或 NUL")
+    if any(unicodedata.category(character) in {"Cc", "Cf"} for character in value):
+        raise ValueError(f"{field_name} 中的路径规则不能包含控制字符或双向格式字符")
+
+
+def _validate_relative_posix_pattern(value: str, field_name: str) -> None:
+    if value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", value):
+        raise ValueError(f"{field_name} 只能使用仓库相对路径，不能使用绝对路径或盘符")
+    if "\\" in value:
+        raise ValueError(f"{field_name} 必须使用 POSIX 分隔符 '/'，不能使用反斜杠")
+    if ":" in value:
+        raise ValueError(f"{field_name} 不能包含 ':'，避免 Windows 路径歧义")
+
+
+def _validate_pattern_segments(value: str, field_name: str) -> None:
+    segments = value.split("/")
+    if any(segment in {"", ".", ".."} for segment in segments):
+        raise ValueError(
+            f"{field_name} 不能包含空路径段、'.' 或 '..'，请使用明确的仓库相对 glob"
+        )
+    if segments.count("**") > 16:
+        raise ValueError(f"{field_name} 中的 '**' 不能超过 16 个，避免规则匹配失控")
 
 
 def matching_patterns(

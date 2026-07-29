@@ -36,6 +36,7 @@ from .project_config import (
 )
 from .risk_gate_evidence import validate_iteration_risk_gate_artifacts
 from .review_evidence import review_evidence_schema_issues
+from .risk_review_evidence import disclosure_issues, gate_result_semantics
 from .run_utils import resolve_run_dir
 from .scope_gate import validate_iteration_scope_gate_artifacts
 from .workspace_check import (
@@ -251,6 +252,7 @@ def validate_review_evidence_freshness(
             repo,
             source_run,
             context,
+            verdict,
             issues,
         )
     else:
@@ -284,6 +286,7 @@ def _validate_review_risk_gate(
     repo_path: Path,
     source_run: str,
     context: dict[str, Any],
+    verdict: ReviewVerdict | None,
     issues: list[str],
 ) -> None:
     """重算 review 所依赖 Reflect 的风险门禁，禁止本地伪造 approve 覆盖人工审查。"""
@@ -310,19 +313,11 @@ def _validate_review_risk_gate(
     except Exception:  # noqa: BLE001 - 无法重算时不得信任 review 的自动通过
         issues.append("review_risk_gate_recomputation_failed")
         return
-    if _gate_result_semantics(recorded_result) != _gate_result_semantics(expected_result):
+    if gate_result_semantics(recorded_result) != gate_result_semantics(expected_result):
         issues.append("review_risk_gate_result_mismatch")
+    issues.extend(disclosure_issues("review", expected_result, verdict))
     if expected_result.recommendation == "human-review":
         issues.append("review_risk_gate_requires_human")
-
-
-def _gate_result_semantics(result: GateResult) -> tuple[object, ...]:
-    return (
-        result.risk,
-        result.recommendation,
-        tuple((reason.code, reason.severity) for reason in result.reasons),
-        result.scope_profile,
-    )
 
 
 def validate_loop_artifact_integrity(
@@ -450,6 +445,7 @@ def validate_loop_artifact_integrity(
             repo_path,
             iteration_dir,
             iteration,
+            gate_integrity.result,
             issues,
             verdicts,
         )
@@ -680,6 +676,7 @@ def _validate_iteration_review(
     repo_path: Path,
     iteration_dir: Path,
     iteration: LoopIterationState,
+    risk_gate_result: GateResult | None,
     issues: list[str],
     verdicts: list[ReviewVerdict],
 ) -> str:
@@ -698,6 +695,7 @@ def _validate_iteration_review(
             issues.append(f"{prefix}_local_review_verdict_mismatch")
         if len(local_verdict.findings) != iteration.findings_count:
             issues.append(f"{prefix}_local_review_findings_count_mismatch")
+        issues.extend(disclosure_issues(prefix, risk_gate_result, local_verdict))
     if not iteration.review_run:
         issues.append(f"{prefix}_review_run_missing")
         return ""
@@ -743,6 +741,7 @@ def _validate_iteration_review(
             issues.append(f"{prefix}_child_review_context_repo_mismatch")
     if child_verdict and child_verdict.verdict != iteration.verdict:
         issues.append(f"{prefix}_child_review_verdict_mismatch")
+    issues.extend(disclosure_issues(f"{prefix}_child", risk_gate_result, child_verdict))
 
     reviewed_workspace_fingerprint = validated_review_workspace_fingerprint(
         child_context,

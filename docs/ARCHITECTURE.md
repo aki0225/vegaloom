@@ -168,6 +168,19 @@ risk:
     - src/auth/
   require_human_review:
     - 删除文件
+  required_reviews:
+    - id: payment
+      label: 支付与资金
+      paths:
+        - src/payments/**
+    - id: database
+      label: 数据库与迁移
+      paths:
+        - db/migrations/**
+    - id: concurrency
+      label: 并发与异步
+      paths:
+        - src/jobs/**
 budget:
   max_changed_files: 5
   max_diff_lines: 300
@@ -202,6 +215,11 @@ runner:
 ```
 
 如果配置不存在，Vega 使用 project profile 自动识别。配置存在时，verification、精确路径范围、change budget、workspace check 和 risk gate 优先使用显式策略。`scope.allowed_paths` 非空时，所有 staged 与 unstaged tracked diff 都必须命中 allowlist；`forbidden_paths` 优先于 allowlist。`vega config check --repo <repo>` 是只读预检：它会拒绝路径逃逸、绝对路径和歧义 Windows 路径，不执行命令，用来在 auto loop 前提前发现不安全配置。
+
+`risk.required_reviews` 使用仓库相对 POSIX glob。它不是禁止修改列表，而是高风险披露义务：
+Gate 命中后仍会启动只读 Reviewer，要求每个风险 ID 覆盖全部命中文件并说明判断、证据与剩余
+风险；持久化 verdict 固定为 `needs_human`。普通预算超限、删除文件或未命名的
+`human-review` 仍保持原有早停行为。
 
 loop 创建前会前后复核 HEAD 与策略文件 bytes 摘要，并把解析后的 scope 摘要写入根状态。
 每次 scope gate 使用 `git status --porcelain=v2 --branch -z` 的稳定快照区分 index 与工作区
@@ -287,18 +305,21 @@ vega review --repo <repo> --run <reflect_run_id> --runner codex-exec
 
 Risk Gate 会读取 reflect run、当前 diff、测试摘要、变更路径、`.vega.yaml` 风险策略和已接受 memory，
 输出 `gate-result.json` 与 `gate-report.md`。独立 `vega gate` 只给出 `self-check`、
-`isolated-review` 或 `human-review` 建议；auto loop 会在当前 iteration 写入同等证据，并把
-`human-review` 或门禁异常作为停止条件，避免在超预算或高风险 diff 上继续启动 reviewer。
+`isolated-review` 或 `human-review` 建议；auto loop 会在当前 iteration 写入同等证据。门禁异常
+或没有命名披露义务的 `human-review` 会在 Reviewer 前停止；命中
+`risk.required_reviews` 时只读 Reviewer 继续生成逐类披露，但终态固定交由人工。
 loop state 会记录该 iteration 的 source reflect、风险结论、建议和两份门禁产物哈希。
 `risk-gate-report.md` 还会携带机器可校验的结构化绑定：status、iteration、source reflect、
 result hash、risk 和 recommendation。loop eval 与 Finish 会同时复核结果、报告和 state；
-风险门禁产物缺失、损坏、语义绑定不一致，或 `human-review` 已与 reviewer evidence 共存时，
-都不能进入 `success/ready_to_commit`。复核时还会从绑定的 Reflect 和当前可信工作区快照重算
+风险门禁产物缺失、损坏、语义绑定不一致，或未命名的 `human-review` 被 Reviewer 绕过时，
+都不能进入 `success/ready_to_commit`。命名高风险只有在逐类披露完整且 verdict 为
+`needs_human` 时才能形成有效的人工接管证据。复核时还会从绑定的 Reflect 和当前可信工作区快照重算
 风险语义，并核对 loop trace、连续 iteration 编号和 state.current_iteration，避免只同步改写
 state、报告和哈希就把高风险结论降级。
 
 独立 `vega review` 同样会在启动 reviewer 前固化对应风险门禁。若结果为
-`human-review`，仍可保留 reviewer 的辅助发现，但 review run 必须停在 `needs_human`；
+`human-review`，仍可保留 reviewer 的辅助发现；命中 `required_reviews` 时还会校验每个风险
+ID、全部命中文件、代码证据与剩余风险。review run 必须停在 `needs_human`；
 Goal 不会把它当成可完成 checkpoint 的自动证据。
 
 风险门禁完成后，ReviewRuntime 会再次捕获授权快照并复查项目策略、工作区指纹和 index
