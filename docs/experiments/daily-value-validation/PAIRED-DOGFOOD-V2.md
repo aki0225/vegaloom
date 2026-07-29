@@ -1,6 +1,10 @@
 # Vega 日用价值配对实验 V2
 
-状态：实验基础设施已实现，尚未登记或启动任何 V2 正式 treatment。
+> 2026-07-29 supersession：V2 可执行 Harness 与配套测试已因过度设计删除。
+> 本文只保留为未执行的历史预注册，正文中的脚本命令不再可用。后续若继续日用价值验证，
+> 只能重新冻结一个最小 case，并直接复用 task、允许路径和固定 verifier，不恢复本 Harness。
+
+状态：`historical_design / harness_retired / no_treatment_started`。
 
 V2 不是给 Vega 增加功能，而是修复 V1 暴露出的实验误差。DV-B02 与 DV-B04 的 V1 结果
 保持封存，不重跑、不改写，也不用于证明 Vega 已有日用收益。

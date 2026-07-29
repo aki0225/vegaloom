@@ -1,5 +1,9 @@
 # Vega 日用价值配对实验 V1
 
+> 2026-07-29 实现 supersession：V1 资格记录与运行结果继续作为历史事实保留，
+> 但配套的 `daily_value_eval.py` 与 Codex 离线预检脚本已因过度设计删除。
+> 本文中的脚本命令只用于解释当时流程，不再是可执行入口，也不得据此重跑或改写 V1。
+
 状态：实验合同已冻结；DV-B01 已因缺少上游绿态 oracle 退休，DV-B02 与替代案例 DV-B04
 已达到 `runnable`。DV-B04 的 Native treatment 已发生一次基础设施失败；DV-B02 的 Vega
 与 Native treatment 已按冻结顺序各正式运行一次，均超时且未启动 Reviewer。

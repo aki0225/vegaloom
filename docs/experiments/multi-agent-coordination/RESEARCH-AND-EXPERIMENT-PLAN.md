@@ -20,6 +20,10 @@
 >
 > 2026-07-28 A2A 纠偏：当前只冻结最小互操作探针设计，不进入 MA-5 实现，不新增 SDK、
 > Runtime、fixture、测试或 Provider 调用。设计见 `A2A-MINIMAL-INTEROP-PROBE-V1.md`。
+>
+> 2026-07-29 过度设计清理：A2A P0 不实施；日用价值 V2 的可执行 Harness 与配套测试
+> 已退役。历史 task、资格记录、运行结果和固定 verifier 保留，后续不再为实验账本、
+> preflight 或事件时间戳扩建代码与全局 CI。
 
 ---
 
@@ -1147,6 +1151,28 @@ V2 结果显式区分 Runtime verification 与 post-seal verifier，并把
 `owner_manual_actions` 与 `automation_actions` 分开。V1 ledger 与运行记录不改写，也没有
 新增 V2 正式 treatment。完整合同见
 `docs/experiments/daily-value-validation/PAIRED-DOGFOOD-V2.md`。
+
+### 12.16 2026-07-29 Owner 裁决：删除日用实验过度设计 Harness
+
+Owner 复核 `9adba80` 后确认，日用价值验证已经从“测试 Vega 是否值得日用”偏移为
+“用代码和测试证明实验 Harness 自身正确”。四个实验脚本共 1511 行，两个测试文件共
+921 行，并把一次性实验入口、固定测试节点数和专属分片耦合进全局 CI；这不直接增加
+Vega 的编码、审查或验证能力。
+
+因此当前分支执行以下减法：
+
+1. 删除 `daily_value_codex_preflight.py`、`daily_value_eval.py`、
+   `daily_value_v2.py`、`daily_value_v2_worker.py` 及其两个测试文件；
+2. 从 CI 的编译、Ruff 和测试分片中移除上述实验入口，MA-2B 原有定向测试继续保留；
+3. V1 task、资格记录、正式运行结果和固定 verifier 继续作为历史事实保留，不删除、不改写；
+4. V2 从“基础设施已实现”改为“历史设计、Harness 已退役、未执行 treatment”；
+5. A2A 文档只保留历史设计价值，不实施 P0，也不安装 SDK。
+
+本次清理没有修改 Vega Runtime，没有调用 Provider，也没有形成新的能力或经济性结论。
+后续若继续验证日用价值，只允许选择一个预计 10 至 20 分钟的新 case，冻结最小 task、
+允许路径、同一模型与 timeout、固定 verifier，然后直接执行一次 Native/Vega 配对。
+环境检查使用现有命令人工确认，不新增 runner、账本 schema、事件采集器或证据层。
+任何真实 Worker 或 Reviewer 调用仍需单独授权。
 
 ---
 

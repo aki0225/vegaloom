@@ -1,5 +1,8 @@
 # A2A 最小互操作探针预注册 V1
 
+> 2026-07-29 supersession：Owner 已决定不实施 A2A P0。本文只保留为历史预注册，
+> 不再是当前执行计划，也不授权安装 SDK、增加 Runtime、创建 fixture 或启动 Provider。
+
 > 日期：2026-07-28
 > 分支：`experiment/ma2b-pilot-next`
 > 状态：`design_only / runtime_not_implemented / provider_not_authorized`

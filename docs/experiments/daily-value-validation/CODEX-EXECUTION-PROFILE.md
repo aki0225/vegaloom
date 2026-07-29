@@ -1,5 +1,9 @@
 # Codex 正式 Treatment 执行配置
 
+> 2026-07-29 supersession：`daily_value_codex_preflight.py` 已随过度设计清理删除。
+> 本文继续保留 Provider 路由不能被 `--ignore-user-config` 意外移除的历史教训，
+> 但正文中的预检脚本命令不再是当前执行入口。
+
 状态：2026-07-29 起对后续 treatment 生效；不追溯修改
 `DV-B04/native` 的基础设施失败，也不允许重跑该 treatment。
 
