@@ -12,6 +12,8 @@
 
 - 本轮 oracle 修订基于主线可信执行提交：
   `8f91844`。
+- `52a8b3d test: finalize CRWP-V1 oracle contracts` 已在本地提交三份 oracle、Control
+  Amendment 与证据口径修正。本次接力提交推送后，远端 `main` 将包含该提交和本文件的更新。
 - PR `#22` 已于 2026-07-28 合并，标题为
   `fix: bound ignored inventory and fail closed on timeout`。
 - 主线随后新增可配置的 `risk.required_reviews` 必审高风险披露，并完成 Goal/Gate 防篡改、
@@ -28,6 +30,12 @@
   ignored，不进入 Git。
 - 三份 oracle 已取得双次稳定 `exit=1` 证据；OpenStates 因 PR `#125` 固定停止为
   `eligibility-changed-before-run`。
+- 本轮重新收集到 `896` 个 pytest node，但完整 pytest 在 60 秒外层上限内没有正常退出，
+  因此不能记为新的全量通过。临时安全目录配置后，焦点集 JUnit 记录 `67 passed / 0 failed`，
+  但 runner 同样未退出；该结果只说明测试主体已执行，不构成通过证据。
+- 继续 CRWP 前必须先定位 pytest runner 未正常终止的原因，并取得带明确
+  `passed / failed / skipped` 计数的正常退出终态。该问题不通过放宽超时、强制成功退出或忽略
+  残留进程解决。
 
 ### Runtime 阻断已经解除
 
@@ -150,14 +158,17 @@ Git 暂存区中的 LF 字节 SHA-256（提交后的权威控制哈希）：
 
 ### 下一会话固定顺序
 
-1. 审阅并在确认后推送冻结三份 oracle 与 Control Amendment 的本地提交。
-2. OpenStates 固定记录为 `eligibility-changed-before-run`，不运行 Case 03。
-3. 从冻结 SHA 重新准备 Case 01/02 目标副本，只提交 `.vega.yaml`，重新登记 prepared HEAD、tree 和
+1. 先定位 pytest runner 在测试主体完成后未正常终止的原因；保持当前 60 秒上限，不把
+   JUnit 单独生成当作测试通过。
+2. 取得一次完整 pytest 的正常退出和明确计数后，复核本文件中的 `896 collected / 888 passed /
+   8 skipped` 历史基线是否仍适用。
+3. OpenStates 固定记录为 `eligibility-changed-before-run`，不运行 Case 03。
+4. 从冻结 SHA 重新准备 Case 01/02 目标副本，只提交 `.vega.yaml`，重新登记 prepared HEAD、tree 和
    config hash。
-4. 重跑 config check、非 oracle 基线、双次 oracle、Issue/PR 资格和 Provider 探测。
-5. 只有控制哈希、资格、workspace baseline 和 Provider 全部满足合同，才按固定顺序启动
+5. 重跑 config check、非 oracle 基线、双次 oracle、Issue/PR 资格和 Provider 探测。
+6. 只有控制哈希、资格、workspace baseline、Provider 和可信 pytest 终态全部满足合同，才按固定顺序启动
    Dormice 和 Sequelize。每项最多两轮、总墙钟 30 分钟，不挑结果重跑。
-6. 将真实结果只追加到 `eval/real-world-runs.md`，最后再执行 Vega 主仓库验证。
+7. 将真实结果只追加到 `eval/real-world-runs.md`，最后再执行 Vega 主仓库验证。
 
 ### 续做命令
 
@@ -177,12 +188,13 @@ $repoRoot = "<vegaloom-repository>"
 Set-Location $repoRoot
 $repoRootPosix = (Get-Location).Path.Replace("\", "/")
 git -c "safe.directory=$repoRootPosix" fetch origin --prune
+git -c "safe.directory=$repoRootPosix" pull --ff-only origin main
 git -c "safe.directory=$repoRootPosix" status --short --branch
 Get-Content docs/CORE-REAL-WORLD-PILOT-V1-HANDOFF.md
 ```
 
-本文件所在提交冻结三份 oracle 与 Control Amendment，但尚未 push，也未启动正式 Worker。
-后续只从 Case 01/02 的全量 preflight 继续。
+先检查 pytest runner 是否有遗留进程，再从测试终态诊断继续。正式 Worker、Reviewer 和 Finish
+仍未启动；在可信 pytest 终态与 Case 01/02 全量 preflight 同时满足前，不得启动它们。
 
 ## 上一阶段结论（保留作历史）
 
