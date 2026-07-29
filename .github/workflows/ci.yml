@@ -38,8 +38,8 @@ jobs:
 
       - name: 编译与静态检查
         run: |
-          python -m compileall src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py scripts/run_assurance_stage3_dml_backfill_experiment.py
-          ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py scripts/run_assurance_stage3_dml_backfill_experiment.py
+          python -m compileall src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/daily_value_codex_preflight.py scripts/daily_value_eval.py scripts/daily_value_v2.py scripts/daily_value_v2_worker.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py scripts/run_assurance_stage3_dml_backfill_experiment.py
+          ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/daily_value_codex_preflight.py scripts/daily_value_eval.py scripts/daily_value_v2.py scripts/daily_value_v2_worker.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py scripts/run_assurance_stage3_dml_backfill_experiment.py
 
       - name: 检查仓库路径与私密文件卫生
         shell: bash
@@ -109,9 +109,9 @@ jobs:
             exit "$collect_status"
           fi
           node_count="$(grep -c '::' .tmp/pytest/linux-collected.txt || true)"
-          if [[ "$node_count" != "712" ]]; then
+          if [[ "$node_count" != "815" ]]; then
             cat .tmp/pytest/linux-collected.txt
-            echo "期望收集 712 个节点，实际为 ${node_count}" >&2
+            echo "期望收集 815 个节点，实际为 ${node_count}" >&2
             exit 1
           fi
           echo "已收集并核对 ${node_count} 个测试节点"
@@ -210,6 +210,16 @@ jobs:
               tests/test_assurance_stage2_sqlite_experiment.py
               tests/test_assurance_stage2_expand_contract_experiment.py
               tests/test_assurance_stage3_dml_backfill_experiment.py
+          - name: experimental-evaluation
+            test_timeout: 58
+            files: >-
+              tests/test_ma2b_execution_binding.py
+              tests/test_ma2b_pricing_manifest.py
+              tests/test_ma2b_probe.py
+              tests/test_ma2b_readiness.py
+              tests/test_ma2b_task_pack.py
+              tests/test_daily_value_eval.py
+              tests/test_daily_value_v2.py
           - name: remaining
             test_timeout: 58
             files: >-

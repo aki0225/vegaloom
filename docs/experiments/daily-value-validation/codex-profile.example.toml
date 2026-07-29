@@ -1,0 +1,19 @@
+project_root_markers = []
+approval_policy = "never"
+
+[sandbox_workspace_write]
+network_access = false
+
+[features]
+apps = false
+browser_use = false
+browser_use_external = false
+computer_use = false
+fast_mode = false
+goals = false
+hooks = false
+in_app_browser = false
+memories = false
+multi_agent = false
+plugins = false
+standalone_web_search = false

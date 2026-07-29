@@ -1030,6 +1030,124 @@ Owner 同意继续在 `experiment/ma2b-pilot-next` 上准备 A2A 后续验证，
 正式 task-pack、ground truth、hash 或 12-case readiness；也不改变 C07/C05 的既有能力与
 经济性结论。
 
+### 12.9 2026-07-29 Owner 裁决：转入日用价值对照验证
+
+Owner 确认当前分支不再横向扩建 Multi-Worker、A2A、Memory 或新的 Runtime 能力。MA-2B
+保持既有结论：机械能力成立，经济收益未观察到，不进入产品化；A2A 仅保留设计文档，不实施
+P0。主线 `v0.1.3` 继续冻结。
+
+当前分支转为 Vega 日用价值验证分支，唯一问题是：对同一个真实 Bug 或 Feature，Vega
+`assist/auto + 隔离 reviewer + 证据 artifact` 相比原生 Codex Worker 与独立 Review，
+是否提供足够的质量、人工操作和追溯收益。V1 预注册 3 个 Bug 与 3 个 Feature，严格保持
+baseline、任务、模型、验证和 timeout 一致，不加入 Trellis、Multi-Worker、Memory、Goal
+或 A2A。
+
+实验合同、候选资格门和结果 schema 见
+`docs/experiments/daily-value-validation/PAIRED-DOGFOOD-V1.md`。当前六个任务都只是
+`candidate_not_frozen`；没有证明 baseline verifier 为红、oracle 为绿和 Windows 可运行前，
+不得调用 Provider 或形成能力结论。核心 Runtime 只有在同一真实痛点至少重复出现两次后，
+才允许另行讨论修改。
+
+### 12.10 2026-07-29 DV-B01 资格确认：退休而非强行运行
+
+DV-B01 已完成 Windows 本地资格确认。`pycodestyle 2.14.0` 对 Issue 中 set/dict
+comprehension 复现稳定产生 E201/E202，依赖安装和 parenthesized smoke 均正常；但上游
+Issue 在没有接受修复的情况下关闭，当前上游 `main` 对同一复现仍然为红。因此该候选没有
+可固定的上游绿态 oracle，按预注册停止线追加 `revision=2, status=retired`，不调用
+Provider，也不把 workaround 伪装成任务修复。
+
+该结果同时暴露了 ledger 的真实需求：退休候选不能永久占用 3 Bug + 3 Feature 的活跃名额。
+聚合器现在只限制同时最多三个活跃 Bug 和三个活跃 Feature，允许后续用新 case ID 登记一个
+替代 Bug；历史 DV-B01 记录仍然保留，不改写。
+
+### 12.11 2026-07-29 DV-B04 资格确认：冻结首个可运行案例
+
+替代案例最终选择 `pallets/click #2836`：当 `Option(prompt=True)` 的 `show_default`
+为字符串时，提示行应显示该自定义标签而不泄露真实默认值；空字符串应隐藏默认值，既有
+布尔语义保持不变。上游 Issue 正文只描述行为，不包含最终 patch。
+
+固定 baseline 为 `8c95c73bd5ef89eac638f85f1904a104ba4b1a32`，oracle 为
+`76552ff1e8c85837f911fc34037e702ae4327eda`。Windows/Python 3.14.3 下，独立 verifier
+连续三次稳定得到 baseline 退出码 `1`、oracle 退出码 `0`；两个 ref 均可安装并通过
+`pip check`。因此 ledger 以 append-only 方式追加 DV-B04 的 candidate 与 runnable
+revision，不修改 DV-B01 历史。
+
+正式 treatment 使用 `gpt-5.6-sol`、`medium` reasoning、600 秒 timeout 和
+Native → Vega 顺序。为避免闭环任务泄露答案，Worker 合同不包含 Issue URL、关联 PR、
+oracle ref 或实现细节；workspace 只由 baseline tree 导出，不保留可读取 oracle 的 Git
+历史。该资格确认不修改 Vega Runtime，也未调用 Provider。
+
+### 12.12 2026-07-29 DV-B04 Native 基础设施失败
+
+DV-B04 的 Native treatment 按冻结顺序启动了一次正式 Worker 调用。baseline-only
+workspace 不包含 Git 历史，调用前 verifier 为红，task、模型、reasoning、timeout 和允许
+路径均与合同一致。
+
+为了隔离本机 hooks、Memory、Goal、多 Agent 与浏览能力，启动命令使用了
+`--ignore-user-config` 并显式关闭相关 feature。实际运行证明该隔离方式过宽：它同时移除了
+本机自定义 Provider 路由，而认证状态仍被保留，最终在模型输出前收到 `401`。147.307 秒
+后 Codex CLI 退出，Token 不可用；workspace 无任何文件变化，固定 verifier 仍为红，
+Reviewer 因无可审 diff 而未启动。
+
+该结果属于实验启动边界造成的 `infrastructure_failure`，不计为 Native 模型能力失败，也
+不得静默重跑。V1 的 DV-B04 pair 保持不完整。下一次新的正式 treatment 前，必须先在不调用
+任务模型的本地预检中证明：隔离配置会关闭 hooks/Memory/Goal 等变量，同时保留冻结的
+Provider 路由；该修正只属于实验启动器，不得修改 Vega Runtime 来迁就案例。
+
+### 12.13 2026-07-29 DV-B02 资格确认与执行配置收紧
+
+DV-B04 的失败后没有修改 Vega Runtime，也没有重跑。新增的
+`daily_value_codex_preflight.py` 只离线读取当前 Codex 配置：保留已配置的 Provider 路由，
+拒绝 `--ignore-user-config`，并生成显式关闭 hooks、Memory、Goal、多 Agent、插件和浏览
+能力的标准参数。Provider endpoint 只参与本地 hash，不进入公开证据；预检本身不调用模型。
+
+下一个案例选择 `python-attrs/attrs #1348`。该任务要求修复
+`optional(pipe(...))` 对非 `None` 输入丢失实例与字段上下文的回归。固定 baseline 为
+`ee0f19b696c60064c58cdc08b3265aef56d49ff8`，oracle 为
+`e21793e90a25c7ea47a9c0369150067cc8322de0`。Windows/Python 3.14.3 下同一 verifier
+连续三次稳定得到 baseline 红、oracle 绿，两个 ref 均从源码安装并通过 `pip check`；
+baseline-only archive 不包含 Git 历史或上游修复线索。
+
+DV-B02 以 append-only 方式追加 `revision=2, status=runnable`，正式顺序保持 Vega →
+Native。该资格结论不消耗 Provider 调用，也不允许用 DV-B02 的结果回头重解释或重跑
+DV-B04。
+
+### 12.14 2026-07-29 DV-B02 配对结果与停止线
+
+DV-B02 已按 Vega → Native 顺序各正式运行一次。两个 Worker 都在 600 秒达到 timeout，
+终止均已确认，两个 Reviewer 都未启动。Vega 超时现场的固定 verifier 为红；Native 超时
+现场的固定 verifier 为绿，但未把部分绿态改写为成功。两组都按 append-only 规则封存，
+不得在 V1 合同下重跑。
+
+本轮同时暴露两个实验缺口：资格阶段的 `dependencies=passed` 没有覆盖正式测试 extra，
+Native 运行目标 pytest 时缺少 `hypothesis`；两组本地工具调用都出现数十秒级延迟，当前
+证据无法把 timeout 归因给模型、同机竞争或 Harness。由于 Reviewer 价值仍未被实际测试，
+不得据此宣称 Vega 已有日用收益，也不得继续扩建 Runtime。
+
+后续若继续，只能另行预注册最小 V2：冻结两组共用依赖环境、记录实验并发条件、给 Worker
+事件增加接收时间戳，并区分 Runtime verification 与 post-seal verifier。完整分析见
+`docs/experiments/daily-value-validation/DV-B02-PAIR-ANALYSIS.md`。
+
+### 12.15 2026-07-29 V2 实验误差修复
+
+全量 pytest 的有界诊断确认收集阶段正常：800 个节点约 2.32 秒完成。执行停点位于
+`test_unstructured_external_test_log_cannot_auto_succeed` 的 Finish 风险证据重算，线程栈
+等待 Git 子进程；同机同时存在多个 Codex、Python 和 Node 进程，独立 `git status` 也出现
+秒级延迟。因此不修改 Vega Runtime、不放宽验证语义，而是在正式 Provider 调用前增加环境
+与控制延迟资格门。
+
+V2 基础设施由两个有界脚本组成：
+
+- `scripts/daily_value_v2.py`：冻结 Python 与安装包 fingerprint，执行 `pip check`、目标
+  pytest 收集、控制命令延迟门禁，并校验 V2 结果字段；
+- `scripts/daily_value_v2_worker.py`：运行一次 JSONL Worker，为每个事件记录本地
+  `received_at`，超时只终止自身创建的进程树。
+
+V2 结果显式区分 Runtime verification 与 post-seal verifier，并把
+`owner_manual_actions` 与 `automation_actions` 分开。V1 ledger 与运行记录不改写，也没有
+新增 V2 正式 treatment。完整合同见
+`docs/experiments/daily-value-validation/PAIRED-DOGFOOD-V2.md`。
+
 ---
 
 ## 13. 参考资料
