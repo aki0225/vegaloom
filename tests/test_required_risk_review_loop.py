@@ -73,7 +73,7 @@ class RequiredReviewReviewer:
                             "locations": [
                                 {
                                     "file": self.relative_path,
-                                    "line": 0,
+                                    "line": 1,
                                 }
                             ],
                             "change_summary": "修改了支付处理逻辑。",
@@ -196,6 +196,11 @@ def test_auto_named_required_review_runs_reviewer_once_and_stays_human(
     assert finish["loop_status"] == "needs_human"
     assert finish["latest_verdict"]["verdict"] == "needs_human"
     assert finish["artifact_integrity"]["valid"] is True
+    assert finish["evidence_freshness"]["fresh"] is True
+    assert not any(
+        "工作区发生变化" in note or "快照缺失" in note
+        for note in finish["handoff_notes"]
+    )
 
 
 def test_assist_named_required_review_runs_reviewer_and_stays_human(

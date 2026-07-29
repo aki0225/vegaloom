@@ -182,7 +182,7 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
     )
     owner = subprocess.Popen(
         [
-            sys.executable,
+            getattr(sys, "_base_executable", sys.executable),
             "-c",
             OWNER_SCRIPT,
             str(workspace),

@@ -14,11 +14,16 @@ from ..loop_evidence import (
 )
 from ..loop_integrity import latest_verification_failed, trusted_verification_passed
 from ..models import GateResult, GateState
+from ..project_config import normalize_scope_profile
+from ..risk_review_evidence import gate_result_semantics
 
 
 def validate_gate_artifact_integrity(
+    workspace: Path,
     gate_dir: Path,
     repo_path: Path,
+    *,
+    expected_scope_profile: str | None = None,
 ) -> tuple[GateState | None, GateResult | None, list[str]]:
     """校验 Goal 引用的 Gate artifact，避免只凭状态字段宣布 checkpoint 可完成。"""
 
@@ -28,6 +33,21 @@ def validate_gate_artifact_integrity(
     issues.extend(_gate_state_identity_issues(state, gate_dir, repo_path))
     issues.extend(_gate_result_identity_issues(result_payload, state, gate_dir, repo_path))
     issues.extend(_gate_model_consistency_issues(state, result))
+    normalized_expected_scope = normalize_scope_profile(expected_scope_profile)
+    if (
+        state is not None
+        and normalize_scope_profile(state.scope_profile) != normalized_expected_scope
+    ):
+        issues.append("gate_scope_profile_mismatch")
+    issues.extend(
+        _gate_recomputation_issues(
+            workspace,
+            repo_path,
+            state,
+            result,
+            expected_scope_profile=normalized_expected_scope,
+        )
+    )
     return state, result, list(dict.fromkeys(issues))
 
 
@@ -157,9 +177,40 @@ def _gate_model_consistency_issues(
             "gate_result_required_reviews_mismatch",
             result.required_reviews != state.required_reviews,
         ),
-        ("gate_result_scope_profile_mismatch", result.scope_profile != state.scope_profile),
+        (
+            "gate_result_scope_profile_mismatch",
+            normalize_scope_profile(result.scope_profile)
+            != normalize_scope_profile(state.scope_profile),
+        ),
     )
     return [issue for issue, invalid in checks if invalid]
+
+
+def _gate_recomputation_issues(
+    workspace: Path,
+    repo_path: Path,
+    state: GateState | None,
+    result: GateResult | None,
+    *,
+    expected_scope_profile: str | None,
+) -> list[str]:
+    if state is None or result is None or not state.source_run:
+        return []
+    try:
+        # gate_runtime 依赖 loop_evidence；延迟导入避免模块加载时形成循环。
+        from ..gate_runtime import evaluate_risk
+
+        expected = evaluate_risk(
+            workspace,
+            repo_path,
+            state.source_run,
+            scope_profile=expected_scope_profile,
+        )
+    except Exception:  # noqa: BLE001 - 无法重算时不得采信可编辑的 Gate artifact
+        return ["gate_result_recomputation_failed"]
+    if gate_result_semantics(result) != gate_result_semantics(expected):
+        return ["gate_result_recomputed_result_mismatch"]
+    return []
 
 
 def _finish_identity_issues(

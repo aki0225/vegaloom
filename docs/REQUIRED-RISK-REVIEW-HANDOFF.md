@@ -2,11 +2,10 @@
 
 ## 当前结论
 
-本轮实现已经完成代码与定向回归，但**尚未取得冻结快照下的全量 pytest 通过证据**。
-当前提交适合作为跨机器接力点，不应据此宣称功能已经完成最终验收。
+本轮实现与可信性修复已经完成，并在同一代码快照下取得全量 pytest 通过证据。
 
-继续工作时保持当前分支，不要再拆分模块或增加新的产品能力。下一步只完成全量验证、
-处理真实失败并做最终只读审查。
+功能边界仍然不变：命中 `risk.required_reviews` 后只读 Reviewer 负责生成结构化人工检查
+材料，最终固定为 `needs_human`，不能自动升级为 `ready_to_commit`。
 
 ## 本轮实现
 
@@ -54,6 +53,21 @@ termination_unconfirmed is False
 `skipped`、`error`、`timed_out`、`stopped`，以及畸形的终止确认值，即使携带合法
 `approve` JSON，也不能进入正式 verdict。原始输出只保留为人工接管材料。
 
+### 最终只读审查修复
+
+全量验证前的两轮只读审查发现并修复：
+
+- Goal 不再只比较可同步修改的 Gate state/result，而是使用 Goal 自身绑定的 scope profile
+  对当前仓库重新计算 Gate；
+- `None`、空字符串和 `default` 统一表示默认 scope，命名 scope 去除首尾空白；
+- standalone review 即使被篡改为 `status=success`，只要重算 Gate 仍要求人工，Goal
+  checkpoint 就不能完成；
+- `needs_human` 与证据新鲜度分离，合法人工接管不再被误报成工作区变化；
+- 正常风险披露必须为每个命中文件提供正行号；`insufficient_evidence` 可使用 `line=0`
+  表示只能定位到文件级；
+- Windows venv 测试使用真实基础解释器启动 crash-recovery owner，避免把 venv launcher
+  PID 误当成实际锁持有者 PID。
+
 ### Review Pack
 
 `review-pack` 现在也会绑定确定性 Risk Gate。命中必审风险时，Prompt 包含全部风险 ID、
@@ -61,12 +75,15 @@ termination_unconfirmed is False
 
 ## 已完成验证
 
-当前代码快照已通过：
+2026-07-29 的最终代码快照已通过：
 
 ```text
-python -m compileall src scripts/check_repository_hygiene.py
+896 tests collected
+888 passed, 8 skipped
+
+python -m compileall src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py
 python scripts/check_repository_hygiene.py --base-ref origin/main
-ruff check src tests scripts/check_repository_hygiene.py
+ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py
 python scripts/check_architecture_growth.py --base-ref origin/main
 git diff --check
 ```
@@ -80,52 +97,22 @@ Python 模块 69 -> 76
 
 关键定向验证包括：
 
-- 自动模式命名风险正常路径：`1 passed`；
+- 必审高风险完整分片：`60 passed`；
+- P0/CLI/锁分片：`137 passed, 2 skipped`；
+- Goal Gate scope 同步篡改、standalone review status 篡改和默认 scope 别名：通过；
 - 命名风险与预算超限组合：`2 passed`；
 - Review Pack 命名风险绑定与 Gate 失败路径：分别通过；
 - 非成功 Runner、空错误、畸形终止确认和空壳 finding 回归：分别通过；
 - 风险配置与合同测试：通过。
 
-## 未完成验证
+8 个 skipped 均为当前 Windows 环境缺少符号链接权限或仅适用于 POSIX 的专项。pytest
+唯一 warning 来自本地验证关闭 cache provider 后，配置中的 `cache_dir` 不再由插件识别；
+它不属于产品代码 warning。
 
-当前共收集：
+## 下一步
 
-```text
-893 tests collected
-```
-
-标准全量 `python -m pytest` 尚未完成：
-
-1. 一次后台运行执行到约 17% 后被外层进程机制无摘要终止，该结果无效；
-2. 随后的前台运行因本次跨机器接力被中断，相关 pytest 进程已明确停止；
-3. 两次运行都不能计入全量通过证据。
-
-本机 Git 操作存在明显延迟，部分临时仓库的 `git status` 接近或超过内部 30 秒超时。
-如果晚间运行出现 `subprocess.TimeoutExpired`，先确认是 Git 环境延迟还是代码断言失败，
-不要为了追求全绿现场修改业务语义。
-
-## 晚间继续步骤
-
-```powershell
-git pull --ff-only
-git status -sb
-git rev-parse HEAD
-
-python -m pytest
-
-python -m compileall src scripts/check_repository_hygiene.py
-python scripts/check_repository_hygiene.py --base-ref origin/main
-ruff check src tests scripts/check_repository_hygiene.py
-python scripts/check_architecture_growth.py --base-ref origin/main
-git diff --check
-```
-
-如果全量 pytest 失败：
-
-1. 保留完整输出；
-2. 区分断言失败、Git 30 秒超时和进程终止；
-3. 只修复可稳定复现的真实问题；
-4. 修复后重新从完整冻结快照执行全量测试，不能把不同代码快照的局部结果拼成全绿。
+必审高风险功能不再继续扩张。主线下一项工作回到已预注册的 CRWP-V1：先解决 Sequelize
+oracle 的旧 constraint parser 隔离，再重新冻结三份 oracle、资格和目标仓库快照。
 
 ## 范围约束
 
@@ -134,4 +121,4 @@ git diff --check
 - 不修改或重写 `eval/` 历史证据；
 - 不把 `.local-validation/`、`.tmp/` 或其他本机产物提交；
 - 不将本机绝对路径、环境文件、凭据或私密文件写入公开内容；
-- 全量验证和最终只读审查通过前，不宣称完成最终验收。
+- 后续改动仍必须重新完成同等验证，不能复用本次快照的结论。

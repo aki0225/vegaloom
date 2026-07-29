@@ -10,7 +10,7 @@ import pytest
 
 import vega.loop_evidence as loop_evidence_module
 from vega.finish_runtime import FinishRuntime
-from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
+from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime, evaluate_risk
 from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput
@@ -196,6 +196,8 @@ def test_human_risk_standalone_review_cannot_complete_goal_checkpoint(
     assert review_state["status"] == "needs_human"
     assert review_state["current_step"] == "risk_gate_needs_human"
     assert review_context["risk_gate"]["result"]["recommendation"] == "human-review"
+    review_state["status"] = "success"
+    _write_json(review_run / "state.json", review_state)
 
     goal = GoalRuntime(workspace)
     goal_run = goal.start(repo, _goal_text(), "test", None)
@@ -513,6 +515,134 @@ def test_goal_gate_evidence_rejects_tampered_gate_result(tmp_path: Path) -> None
     assert "gate_result_changed_files_mismatch" in evidence["validation_summary"]
     with pytest.raises(ValueError, match="缺少可完成证据"):
         runtime.checkpoint_done(goal_run.name, "01", note="不应放行")
+
+
+def test_goal_gate_evidence_rejects_synchronized_gate_tampering(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "budget:",
+                "  max_diff_lines: 0",
+                "budget_profiles:",
+                "  refactor:",
+                "    max_diff_lines: 100",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    subprocess.run(
+        ["git", "add", "--", ".vega.yaml"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-m",
+            "add risk policy",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    repo.joinpath("README.md").write_text(
+        "# Demo\nchanged\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    workspace.mkdir(exist_ok=True)
+    test_log = workspace / "tests.log"
+    test_log.write_text("1 passed\n", encoding="utf-8")
+    reflect_run = ReflectRuntime(workspace).run(repo, test_log=test_log)
+    gate_run = GateRuntime(workspace).run(repo, reflect_run.name)
+    gate_state_path = gate_run / "state.json"
+    gate_result_path = gate_run / "gate-result.json"
+    gate_state = _read_json(gate_state_path)
+    gate_result = _read_json(gate_result_path)
+    assert gate_result["recommendation"] == "human-review"
+
+    relaxed_result = evaluate_risk(
+        workspace,
+        repo,
+        reflect_run.name,
+        scope_profile="refactor",
+    ).model_dump(mode="json")
+    for key in (
+        "risk",
+        "recommendation",
+        "changed_files",
+        "required_reviews",
+        "scope_profile",
+    ):
+        gate_state[key] = relaxed_result[key]
+    gate_result.update(relaxed_result)
+    _write_json(gate_state_path, gate_state)
+    _write_json(gate_result_path, gate_result)
+
+    runtime = GoalRuntime(workspace)
+    goal_run = runtime.start(repo, _goal_text(), "test", None)
+    runtime.step(goal_run.name)
+    runtime.attach(goal_run.name, "01", gate_run.name, "gate", "伪造 gate")
+
+    state = _read_json(goal_run / "goal-state.json")
+    evidence = state["checkpoint_records"][0]["refs"][0]
+    assert evidence["completion_eligible"] is False
+    assert "gate_result_recomputed_result_mismatch" in evidence["validation_summary"]
+    with pytest.raises(ValueError, match="缺少可完成证据"):
+        runtime.checkpoint_done(goal_run.name, "01", note="不应放行")
+
+
+def test_goal_gate_evidence_accepts_default_scope_alias(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    workspace.mkdir(exist_ok=True)
+    test_log = workspace / "tests.log"
+    test_log.write_text("1 passed\n", encoding="utf-8")
+    reflect_run = ReflectRuntime(workspace).run(repo, test_log=test_log)
+    gate_run = GateRuntime(workspace).run(
+        repo,
+        reflect_run.name,
+        scope_profile="default",
+    )
+    gate_state_path = gate_run / "state.json"
+    gate_result_path = gate_run / "gate-result.json"
+    gate_state = _read_json(gate_state_path)
+    gate_result = _read_json(gate_result_path)
+    assert gate_state["scope_profile"] is None
+    assert gate_result["scope_profile"] is None
+
+    gate_state["scope_profile"] = "default"
+    gate_result["scope_profile"] = "default"
+    _write_json(gate_state_path, gate_state)
+    _write_json(gate_result_path, gate_result)
+
+    runtime = GoalRuntime(workspace)
+    goal_run = runtime.start(repo, _goal_text(), "test", None)
+    runtime.step(goal_run.name)
+    runtime.attach(goal_run.name, "01", gate_run.name, "gate", "默认 scope")
+
+    evidence = _read_json(goal_run / "goal-state.json")[
+        "checkpoint_records"
+    ][0]["refs"][0]
+    assert evidence["completion_eligible"] is True
+    assert "gate_scope_profile_mismatch" not in evidence["validation_summary"]
 
 
 @pytest.mark.parametrize(

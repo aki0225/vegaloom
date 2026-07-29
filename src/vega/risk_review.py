@@ -35,6 +35,7 @@ RiskReviewIssueCode = Literal[
     "risk_disclosure_unknown",
     "risk_disclosure_location_missing",
     "risk_disclosure_location_mismatch",
+    "risk_disclosure_location_line_missing",
     "risk_disclosure_issue_without_finding",
 ]
 
@@ -300,6 +301,20 @@ def _validate_one_disclosure(
                     file=location.file,
                 )
             )
+    if disclosure.assessment != "insufficient_evidence":
+        for expected_file in sorted(expected_files):
+            if not any(
+                _normalize_repo_path(location.file) == expected_file
+                and location.line > 0
+                for location in disclosure.locations
+            ):
+                issues.append(
+                    RiskReviewValidationIssue(
+                        "risk_disclosure_location_line_missing",
+                        risk_id=risk_id,
+                        file=expected_file,
+                    )
+                )
     if disclosure.assessment == "issue_found" and not _has_matching_finding(
         disclosure_files,
         findings,

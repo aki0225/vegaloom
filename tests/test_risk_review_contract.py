@@ -28,12 +28,13 @@ def _disclosure(
     *,
     assessment: str = "no_obvious_issue",
     file: str = "src/payments/charge.py",
+    line: int = 1,
 ) -> ReviewRiskDisclosure:
     return ReviewRiskDisclosure.model_validate(
         {
             "risk_id": risk_id,
             "assessment": assessment,
-            "locations": [{"file": file, "line": 0}],
+            "locations": [{"file": file, "line": line}],
             "change_summary": "修改了扣款重试逻辑。",
             "evidence": "已检查当前 diff 和已有测试摘要。",
             "residual_risk": "人工确认网关超时后的并发重试行为。",
@@ -71,8 +72,8 @@ def test_risk_disclosure_rejects_empty_text_fields(field: str, value: str) -> No
         ReviewRiskDisclosure.model_validate(payload)
 
 
-def test_risk_disclosure_requires_location_and_accepts_file_level_line() -> None:
-    assert _disclosure().locations[0].line == 0
+def test_risk_disclosure_requires_location() -> None:
+    assert _disclosure().locations[0].line == 1
     payload = _disclosure().model_dump(mode="json")
     payload["locations"] = []
 
@@ -135,6 +136,24 @@ def test_required_risk_disclosures_accept_exact_mapping() -> None:
     assert result.issues == ()
 
 
+def test_substantive_risk_disclosure_requires_positive_line() -> None:
+    result = validate_required_risk_disclosures(
+        [
+            RequiredReviewHit(
+                id="payment",
+                label="支付与资金",
+                matched_files=["src/payments/charge.py"],
+            )
+        ],
+        [_disclosure(line=0)],
+        [],
+    )
+
+    assert "risk_disclosure_location_line_missing" in {
+        issue.code for issue in result.issues
+    }
+
+
 def test_required_risk_disclosure_must_cover_every_matched_file() -> None:
     required = [
         RequiredReviewHit(
@@ -153,7 +172,7 @@ def test_required_risk_disclosure_must_cover_every_matched_file() -> None:
     )
     complete_payload = _disclosure().model_dump(mode="json")
     complete_payload["locations"].append(
-        {"file": "src/payments/refund.py", "line": 0}
+        {"file": "src/payments/refund.py", "line": 1}
     )
     complete = validate_required_risk_disclosures(
         required,
@@ -192,6 +211,23 @@ def test_build_insufficient_evidence_disclosures_covers_every_required_review() 
     assert [location.file for location in disclosures[0].locations] == [
         "db/migrations/024_add_status.sql"
     ]
+    assert all(
+        location.line == 0
+        for disclosure in disclosures
+        for location in disclosure.locations
+    )
+    assert validate_required_risk_disclosures(
+        [
+            RequiredReviewHit(
+                item.risk_id,
+                item.risk_id,
+                [location.file for location in item.locations],
+            )
+            for item in disclosures
+        ],
+        disclosures,
+        [],
+    ).valid
 
 
 @pytest.mark.parametrize(

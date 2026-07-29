@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import GateResult
+from .project_config import normalize_scope_profile
 from .review_contract import ReviewVerdict
 from .risk_review import validate_required_risk_disclosures
 
@@ -20,7 +21,7 @@ def gate_result_semantics(result: GateResult) -> tuple[object, ...]:
             )
             for item in result.required_reviews
         ),
-        result.scope_profile,
+        normalize_scope_profile(result.scope_profile),
     )
 
 

@@ -623,11 +623,11 @@ def render_project_config_check(result: ProjectConfigCheckResult) -> str:
     return redact_text("\n".join(lines).rstrip() + "\n")
 
 
+def normalize_scope_profile(scope: str | None) -> str | None:
+    return normalized if (normalized := scope.strip() if scope else "") != "default" and normalized else None
+
 def budget_for_scope(config: ProjectConfig, scope: str | None = None) -> BudgetConfig:
-    if not scope:
-        return config.budget
-    normalized = scope.strip()
-    if not normalized or normalized == "default":
+    if (normalized := normalize_scope_profile(scope)) is None:
         return config.budget
     if normalized not in config.budget_profiles:
         available = ", ".join(sorted(config.budget_profiles)) or "无"

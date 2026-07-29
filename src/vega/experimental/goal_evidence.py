@@ -32,6 +32,7 @@ def validate_goal_evidence(
     reference: str,
     evidence_type: GoalCheckpointEvidenceType,
     note: str | None,
+    expected_scope_profile: str | None = None,
 ) -> GoalCheckpointRef:
     """解析并校验 checkpoint 证据，避免把任意字符串当作已完成证明。
 
@@ -40,7 +41,14 @@ def validate_goal_evidence(
     """
     if evidence_type == "manual":
         return _validate_manual_evidence(workspace, goal_repo_path, reference, note)
-    return _validate_run_evidence(workspace, goal_repo_path, reference, evidence_type, note)
+    return _validate_run_evidence(
+        workspace,
+        goal_repo_path,
+        reference,
+        evidence_type,
+        note,
+        expected_scope_profile,
+    )
 
 
 def _validate_run_evidence(
@@ -49,6 +57,7 @@ def _validate_run_evidence(
     reference: str,
     evidence_type: GoalCheckpointEvidenceType,
     note: str | None,
+    expected_scope_profile: str | None,
 ) -> GoalCheckpointRef:
     child_dir = resolve_run_dir(workspace, reference)
     runs_root = (workspace / "runs").resolve()
@@ -79,6 +88,7 @@ def _validate_run_evidence(
         child_dir,
         evidence_type,
         status,
+        expected_scope_profile,
     )
     return GoalCheckpointRef(
         run=child_dir.name,
@@ -134,12 +144,14 @@ def _completion_eligibility(
     child_dir: Path,
     evidence_type: GoalCheckpointEvidenceType,
     status: str,
+    expected_scope_profile: str | None,
 ) -> tuple[bool, str]:
     freshness = _run_evidence_freshness(
         workspace,
         goal_repo_path,
         child_dir,
         evidence_type,
+        expected_scope_profile,
     )
     freshness_summary = (
         "fresh"
@@ -178,7 +190,12 @@ def _completion_eligibility(
             "reflect 只能证明已复盘，不能单独证明 checkpoint 完成",
         )
     if evidence_type == "gate":
-        _, result, gate_issues = validate_gate_artifact_integrity(child_dir, goal_repo_path)
+        _, result, gate_issues = validate_gate_artifact_integrity(
+            workspace,
+            child_dir,
+            goal_repo_path,
+            expected_scope_profile=expected_scope_profile,
+        )
         recommendation = result.recommendation if result else "unknown"
         gate_issue_summary = f"({','.join(gate_issues)})" if gate_issues else ""
         eligible = (
@@ -201,6 +218,12 @@ def _completion_eligibility(
         )
         validated_status = review_state.status if review_state else "invalid"
         verdict = review_verdict.verdict if review_verdict else "invalid"
+        completion_blockers = _review_completion_blockers(
+            workspace,
+            goal_repo_path,
+            review_state,
+            expected_scope_profile,
+        )
         eligible = (
             state_issue is None
             and verdict_issue is None
@@ -209,10 +232,13 @@ def _completion_eligibility(
             and _review_state_allows_verdict(review_state, review_verdict.verdict)
             and review_verdict.verdict == "approve"
             and freshness.fresh
+            and not completion_blockers
         )
         return (
             eligible,
             f"review status={validated_status}, verdict={verdict}, "
+            "completion_blockers="
+            f"{','.join(completion_blockers) if completion_blockers else 'none'}, "
             f"evidence={freshness_summary}",
         )
     if evidence_type == "finish":
@@ -252,6 +278,7 @@ def _run_evidence_freshness(
     goal_repo_path: Path,
     child_dir: Path,
     evidence_type: GoalCheckpointEvidenceType,
+    expected_scope_profile: str | None = None,
 ) -> EvidenceFreshness:
     if evidence_type in {"loop", "finish"}:
         return validate_loop_evidence_freshness(
@@ -273,8 +300,10 @@ def _run_evidence_freshness(
         )
     if evidence_type == "gate":
         gate_state, _, gate_issues = validate_gate_artifact_integrity(
+            workspace,
             child_dir,
             goal_repo_path,
+            expected_scope_profile=expected_scope_profile,
         )
         source_run = gate_state.source_run if gate_state else ""
         if not source_run:
@@ -295,6 +324,31 @@ def _run_evidence_freshness(
             snapshot_id=source_freshness.snapshot_id,
         )
     return _freshness(["unsupported_evidence_type"], "")
+
+
+def _review_completion_blockers(
+    workspace: Path,
+    goal_repo_path: Path,
+    review_state: object,
+    expected_scope_profile: str | None,
+) -> list[str]:
+    source_run = str(getattr(review_state, "source_run", "") or "")
+    if not source_run:
+        return ["review_source_missing"]
+    try:
+        from ..gate_runtime import evaluate_risk
+
+        result = evaluate_risk(
+            workspace,
+            goal_repo_path,
+            source_run,
+            scope_profile=expected_scope_profile,
+        )
+    except Exception:  # noqa: BLE001 - 无法重算时不得让 review 证明 Goal 完成
+        return ["review_risk_gate_recomputation_failed"]
+    if result.recommendation == "human-review":
+        return ["review_risk_gate_requires_human"]
+    return []
 
 
 def _expected_kind(evidence_type: GoalCheckpointEvidenceType) -> str:

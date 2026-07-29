@@ -132,7 +132,7 @@ def render_required_review_prompt_rules(
         return ["- Review Pack 未列出必审风险 ID 时，`risk_disclosures` 必须返回空列表。"]
     return [
         "- Review Pack 列出必须披露的高风险 ID 时，`risk_disclosures` 必须逐个且只出现一次。",
-        "- 每项 disclosure 的 locations 必须覆盖该 ID 下列出的全部文件；整文件判断可使用 line=0。",
+        "- 每项 disclosure 的 locations 必须覆盖全部命中文件并给出大于 0 的关键行号；`assessment=insufficient_evidence` 时可使用 line=0 表示只能定位到文件级。",
         "- `issue_found` 必须同时给出同文件且标题、证据、建议均非空的 finding；未发现明确问题使用 `no_obvious_issue`，证据不足使用 `insufficient_evidence`。",
         "- `no_obvious_issue` 只表示当前证据下未发现明显问题，不代表安全证明；命中必审风险后最终仍由人工确认。",
     ]
@@ -149,7 +149,7 @@ def risk_disclosure_schema_example(
         {
             "risk_id": first.id,
             "assessment": "issue_found | no_obvious_issue | insufficient_evidence",
-            "locations": [{"file": first_file, "line": 0}],
+            "locations": [{"file": first_file, "line": 1}],
             "change_summary": "说明该风险领域具体修改了什么。",
             "evidence": "列出 diff、测试和项目规则中的直接证据。",
             "residual_risk": "说明仍需人工确认的问题；没有也要说明原因。",

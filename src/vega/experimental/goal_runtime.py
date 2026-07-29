@@ -15,6 +15,7 @@ from ..models import (
     GoalContract,
     GoalState,
 )
+from ..project_config import normalize_scope_profile
 from ..redaction import write_redacted_json, write_redacted_text
 from ..run_utils import create_run_dir, resolve_run_dir
 from ..trace import TraceWriter
@@ -33,6 +34,7 @@ class GoalRuntime:
     ) -> Path:
         if not goal_text.strip():
             raise ValueError("goal 内容不能为空。")
+        scope_profile = normalize_scope_profile(scope_profile)
         base_run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-goal"
         run_id, run_dir = create_run_dir(self.workspace, base_run_id)
         trace = TraceWriter(run_dir / "goal-trace.jsonl")
@@ -125,11 +127,8 @@ class GoalRuntime:
             raise ValueError("--ref 不能为空。")
         checked_evidence_type = cast(GoalCheckpointEvidenceType, evidence_type)
         evidence = validate_goal_evidence(
-            self.workspace,
-            Path(state.repo_path),
-            child_run.strip(),
-            checked_evidence_type,
-            note,
+            self.workspace, Path(state.repo_path), child_run.strip(),
+            checked_evidence_type, note, state.scope_profile,
         )
         if any(item.type == evidence.type and item.run == evidence.run for item in record.refs):
             raise ValueError(f"checkpoint {checkpoint_id} 已存在相同证据：{evidence.type}:{evidence.run}")
@@ -175,9 +174,7 @@ class GoalRuntime:
         if not record.refs:
             raise ValueError("checkpoint 没有挂载任何证据，不能标记完成。")
         refreshed_refs, refresh_errors = _revalidate_checkpoint_refs(
-            self.workspace,
-            Path(state.repo_path),
-            record,
+            self.workspace, Path(state.repo_path), record, state.scope_profile,
         )
         if refresh_errors:
             raise ValueError(
@@ -295,9 +292,7 @@ class GoalRuntime:
             item.checkpoint
             for item in state.checkpoint_records
             if not _checkpoint_completion_is_current(
-                self.workspace,
-                Path(state.repo_path),
-                item,
+                self.workspace, Path(state.repo_path), item, state.scope_profile,
             )
         ]
         if invalid:
@@ -378,6 +373,8 @@ class GoalRuntime:
             raise ValueError(f"goal JSON schema 不合法：{exc.errors()[0]['type']}") from exc
         if Path(state.repo_path).resolve() != Path(contract.repo_path).resolve():
             raise ValueError("goal state.repo_path 与 contract.repo_path 不一致。")
+        if normalize_scope_profile(state.scope_profile) != normalize_scope_profile(contract.scope_profile):
+            raise ValueError("goal state.scope_profile 与 contract.scope_profile 不一致。")
         _validate_checkpoint_artifacts(run_dir, state)
         return run_dir, state, contract
 
@@ -850,11 +847,12 @@ def _checkpoint_completion_is_valid(record: GoalCheckpointRecord) -> bool:
 
 
 def _checkpoint_completion_is_current(
-    workspace: Path,
-    repo_path: Path,
-    record: GoalCheckpointRecord,
+    workspace: Path, repo_path: Path, record: GoalCheckpointRecord,
+    expected_scope_profile: str | None,
 ) -> bool:
-    refs, errors = _revalidate_checkpoint_refs(workspace, repo_path, record)
+    refs, errors = _revalidate_checkpoint_refs(
+        workspace, repo_path, record, expected_scope_profile,
+    )
     if errors:
         return False
     refreshed = record.model_copy(update={"refs": refs})
@@ -862,20 +860,16 @@ def _checkpoint_completion_is_current(
 
 
 def _revalidate_checkpoint_refs(
-    workspace: Path,
-    repo_path: Path,
-    record: GoalCheckpointRecord,
+    workspace: Path, repo_path: Path, record: GoalCheckpointRecord,
+    expected_scope_profile: str | None,
 ) -> tuple[list[GoalCheckpointRef], list[str]]:
     refreshed: list[GoalCheckpointRef] = []
     errors: list[str] = []
     for reference in record.refs:
         try:
             current = validate_goal_evidence(
-                workspace,
-                repo_path,
-                reference.run,
-                reference.type,
-                reference.note,
+                workspace, repo_path, reference.run, reference.type,
+                reference.note, expected_scope_profile,
             )
         except (FileNotFoundError, ValueError) as exc:
             errors.append(f"{reference.type}:{reference.run} -> {exc}")

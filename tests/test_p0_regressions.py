@@ -732,7 +732,7 @@ def test_auto_reuses_loop_risk_gate_for_embedded_reviewer(
 
     monkeypatch.setattr(
         review_runtime_module,
-        "evaluate_risk",
+        "_evaluate_review_risk_gate",
         fail_duplicate_review_risk_gate,
     )
 

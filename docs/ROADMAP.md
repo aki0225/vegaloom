@@ -1,11 +1,11 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-07-27
+> 更新时间：2026-07-29
 > 稳定基线：`v0.1.3`
-> 当前状态：`M-001`、`M-002`、`M-003`、Assurance Stage 1、Stage 2 两个 SQLite 个案
+> 当前状态：`M-001`、`M-002`、`M-003`、`M-004`、Assurance Stage 1、Stage 2 两个 SQLite 个案
 > 与 Stage 3 有界 DML/Backfill 个案均已进入 `main`。它们仍不属于 Runtime 或默认能力，
-> 也不能解释为生产数据库安全证明。当前 `Now` 是完成 `M-004` 主线可信执行维护，并在
-> 合并后转入真实代码任务验证；不启动 Stage 4 或新的 Runtime/Memory/LangGraph 集成。
+> 也不能解释为生产数据库安全证明。当前 `Now` 是执行已预注册的 CRWP-V1 真实代码任务
+> 验证；不启动 Stage 4 或新的 Runtime/Memory/LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -74,8 +74,9 @@ Stage 0 的三个已确认维护缺口按以下顺序完成：
 ### M-004：主线可信执行维护
 
 - 优先级：`P0/P1`
-- 状态：`active` / Ready for Review PR `#20`
-- 分支：`codex/mainline-trust-hardening`
+- 状态：`completed`
+- 合并证据：PR `#20` 与 PR `#22` 已进入 `main`；后续必审高风险披露与 Goal/Gate
+  防篡改回归在 2026-07-29 的 896 节点快照下通过。
 - 来源：Stage 3 冻结后，真实 dogfood 与独立审查又复现了主线可信执行缺口；这是一项
   新增维护决策，不属于原 Assurance Stage，也不代表启动 Stage 4。
 - 固定范围：目标仓库与 Git 读取边界、staged/index 候选卫生、workspace/review evidence
@@ -91,7 +92,7 @@ Stage 0 的三个已确认维护缺口按以下顺序完成：
 ```text
 Assurance：Stage 1 -> Stage 2 -> Stage 3 -> 冻结，不启动 Stage 4
 主线维护：M-001 -> M-002 -> M-003 -> M-004
-M-004 合并后：真实代码任务能力与成本验证
+M-004 合并后：CRWP-V1 真实代码任务能力与成本验证
 ```
 
 ## 三、主线阶段

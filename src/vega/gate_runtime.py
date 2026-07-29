@@ -12,7 +12,7 @@ from .project_config import (
     ProjectConfigCheckResult,
     budget_for_scope,
     check_project_config,
-    load_project_config,
+    load_project_config, normalize_scope_profile,
     render_project_config_check,
 )
 from .project_knowledge import load_project_knowledge
@@ -111,12 +111,12 @@ DEPENDENCY_FILES = {
     "Cargo.lock",
 }
 
-
 class GateRuntime:
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace
 
     def run(self, repo_path: Path, source_run: str, scope_profile: str | None = None) -> Path:
+        scope_profile = normalize_scope_profile(scope_profile)
         repo = repo_path.resolve()
         base_run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}-gate"
         run_id, run_dir = create_run_dir(self.workspace, base_run_id)
@@ -455,7 +455,7 @@ def evaluate_risk(
         ],
         changed_files=changed_files,
         required_reviews=required_reviews,
-        scope_profile=scope_profile,
+        scope_profile=normalize_scope_profile(scope_profile),
     )
 
 
