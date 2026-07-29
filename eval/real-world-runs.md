@@ -202,3 +202,26 @@ run 可能停在 `running / current_step=worker`，不能把它表述为已经�
 
 完整执行参数、哈希、基线命令、oracle 结果和停止依据见
 [`docs/CORE-REAL-WORLD-PILOT-V1-RUN-REGISTRATION.md`](../docs/CORE-REAL-WORLD-PILOT-V1-RUN-REGISTRATION.md)。
+
+## 2026-07-29 Control Amendment：CRWP-V1 oracle 合同完成
+
+正式 Worker、Reviewer 和 Finish 仍未启动。本次只补齐三个独立 oracle 的控制合同并执行
+双次基线。三份 oracle 均从 Git index 物化的 LF 字节执行，控制哈希与提交后内容一致：
+
+- Dormice 两次均以 `1` 退出，stdout SHA-256 为
+  `4308870971d831b3f42883a42ea06057da9267782574b278a527f614172095e1`；
+- Sequelize 两次均以 `1` 退出，stdout SHA-256 为
+  `0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b`；
+- OpenStates 两次均以 `1` 退出，stdout SHA-256 为
+  `e3cf488350744510cbe084c452e4dc4ce4a314724ea0d02910837084c6675f21`。
+
+Sequelize oracle 只在真实 SQL 行注释负对照的 `describeTable()` 调用期间临时隔离冻结版本的
+旧 `showConstraints()` 多行解析缺陷，并在 `finally` 恢复；AUTOINCREMENT metadata
+待测路径与目标仓库均未修改。
+
+Dormice 的一次并行控制尝试触发 `cli_timeout`，该无效现场被保留，随后在新目录串行执行两次
+取得一致结果。OpenStates 的首次 index-byte 探测误用缺少目标依赖的系统 Python，该无效
+现场也被保留；使用目标仓库既有 `.venv` Python 后双次结果一致。OpenStates 虽然 oracle
+合同完整，但 PR `#125` 已触发
+`eligibility-changed-before-run`，因此 Case 03 停止。后续只允许在重新完成 preflight 后运行
+Case 01/02，不据此计算成功率。

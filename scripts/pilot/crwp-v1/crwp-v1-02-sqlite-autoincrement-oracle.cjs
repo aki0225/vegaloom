@@ -98,6 +98,41 @@ async function runOracle(repo) {
       'literal_pk',
     );
     await sequelize.query(
+      'CREATE TABLE "line_comment_pk" ('
+        + '"id" INTEGER PRIMARY KEY -- AUTOINCREMENT\n'
+        + ', "note" TEXT'
+        + ')',
+    );
+    const lineCommentSql = await tableSql(
+      sequelize,
+      QueryTypes,
+      'line_comment_pk',
+    );
+    const originalShowConstraints = sequelize.queryInterface.showConstraints;
+    let lineCommentDescription;
+    try {
+      sequelize.queryInterface.showConstraints = () => Promise.resolve([]);
+      lineCommentDescription = await sequelize.queryInterface.describeTable(
+        'line_comment_pk',
+      );
+    } finally {
+      sequelize.queryInterface.showConstraints = originalShowConstraints;
+    }
+    await sequelize.query(
+      'CREATE TABLE "block_comment_pk" ('
+        + '"id" INTEGER PRIMARY KEY /* AUTOINCREMENT */, '
+        + '"note" TEXT'
+        + ')',
+    );
+    const blockCommentSql = await tableSql(
+      sequelize,
+      QueryTypes,
+      'block_comment_pk',
+    );
+    const blockCommentDescription = await sequelize.queryInterface.describeTable(
+      'block_comment_pk',
+    );
+    await sequelize.query(
       'CREATE TABLE "dash_pk" ('
         + '"note" TEXT DEFAULT \'a--b\', '
         + '"id" INTEGER PRIMARY KEY AUTOINCREMENT'
@@ -122,6 +157,16 @@ async function runOracle(repo) {
       literal_text_not_autoincrement:
         literalDescription.id?.autoIncrement !== true
         && literalDescription.note?.autoIncrement !== true,
+      line_comment_preserved_in_sql:
+        lineCommentSql.includes('-- AUTOINCREMENT'),
+      line_comment_not_autoincrement:
+        lineCommentDescription.id?.primaryKey === true
+        && lineCommentDescription.id?.autoIncrement !== true,
+      block_comment_preserved_in_sql:
+        blockCommentSql.includes('/* AUTOINCREMENT */'),
+      block_comment_not_autoincrement:
+        blockCommentDescription.id?.primaryKey === true
+        && blockCommentDescription.id?.autoIncrement !== true,
       dash_literal_preserves_later_autoincrement:
         dashDescription.id?.autoIncrement === true
         && dashDescription.note?.autoIncrement !== true,

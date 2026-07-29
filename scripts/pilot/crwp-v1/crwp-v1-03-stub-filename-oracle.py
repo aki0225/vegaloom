@@ -342,6 +342,28 @@ def main() -> int:
                 idempotency_root,
                 idempotency_root,
             )
+            first_item = first_run[0] if len(first_run) == 1 else {}
+            division_path_value = first_item.get("division_path")
+            jurisdiction_path_value = first_item.get("jurisdiction_path")
+            division_path = (
+                Path(division_path_value) if division_path_value else None
+            )
+            jurisdiction_path = (
+                Path(jurisdiction_path_value)
+                if jurisdiction_path_value
+                else None
+            )
+            division_payload = (
+                load_yaml(division_path)
+                if division_path is not None and division_path.is_file()
+                else {}
+            )
+            jurisdiction_payload = (
+                load_yaml(jurisdiction_path)
+                if jurisdiction_path is not None
+                and jurisdiction_path.is_file()
+                else {}
+            )
             before_manifest = tree_manifest(idempotency_root)
             with (
                 mock.patch.object(
@@ -363,9 +385,32 @@ def main() -> int:
             after_manifest = tree_manifest(idempotency_root)
             idempotency_result = {
                 "first_created": (
-                    bool(first_run)
-                    and all(
-                        item.get("action") == "created" for item in first_run
+                    len(first_run) == 1
+                    and first_item.get("action") == "created"
+                ),
+                "first_files_written": (
+                    division_path is not None
+                    and jurisdiction_path is not None
+                    and division_path.is_file()
+                    and jurisdiction_path.is_file()
+                    and division_path.is_relative_to(idempotency_root)
+                    and jurisdiction_path.is_relative_to(idempotency_root)
+                    and division_path.relative_to(
+                        idempotency_root
+                    ).as_posix()
+                    in before_manifest
+                    and jurisdiction_path.relative_to(
+                        idempotency_root
+                    ).as_posix()
+                    in before_manifest
+                    and len(before_manifest) == 2
+                ),
+                "first_expected_ocdids": (
+                    division_payload.get("ocdid")
+                    == "ocd-division/country:us/state:wa"
+                    and jurisdiction_payload.get("ocdid")
+                    == (
+                        "ocd-jurisdiction/country:us/state:wa/government"
                     )
                 ),
                 "second_skipped": (

@@ -571,3 +571,55 @@ oracle JSON、ignored inventory、snapshot 结果、作废尝试和 setup 证据
    `CRWP-V1-01`、`CRWP-V1-02`、`CRWP-V1-03`。
 
 本登记提交完成后仍不 push、不启动正式 worker，也不创建新的 Vega 工作分支。
+
+## 十三、2026-07-29 Control Amendment：oracle 合同完成
+
+本记录只追加 2026-07-29 的控制端结果，不改写第八、九节的历史阻断。正式 Worker、
+Reviewer 和 Finish 仍未启动。
+
+### 13.1 控制结果
+
+| Case | Oracle SHA-256 | 两次退出码 | stdout SHA-256 | 结论 |
+|---|---|---|---|---|
+| `CRWP-V1-01` | `a1a9152a9d96f0ac935f6c26baccba7ce4632453b388ba570ceb62731ae65b5f` | `1 / 1` | `4308870971d831b3f42883a42ea06057da9267782574b278a527f614172095e1` | 合同完整，稳定复现 |
+| `CRWP-V1-02` | `f784abc3518e12991f3f0b93628773adda1d68c9add4fe2a75d9e93b318e93d0` | `1 / 1` | `0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b` | 合同完整，稳定复现 |
+| `CRWP-V1-03` | `79fd7227f44e1cf1aaff40d9f02b9d19a96834b14aa858de6c507503208ace0f` | `1 / 1` | `e3cf488350744510cbe084c452e4dc4ce4a314724ea0d02910837084c6675f21` | 合同完整，但资格已变化 |
+
+表中 oracle SHA-256 来自 Git index 的 LF 字节，是提交后的权威控制哈希。Windows 工作树
+CRLF checkout 的三个本机哈希分别为
+`5af44f7ec73328d373c791b4b042c5465ceeb754e2d2bf4f1aef45d17328cf76`、
+`61c85e423715ad748b3adabef6b9cd9718b51fb1a4aa31b416b981885479c294` 和
+`596145bfa64a84ae98bf63f6b96401e027d145a50aafc89410f0be68954f7e02`，只用于行尾诊断。
+
+本机原始输出位于：
+
+```text
+.local-validation/crwp-v1/control-evidence/oracle-contract-index-final-20260729/
+```
+
+其中 Dormice 一次并行尝试触发 `cli_timeout`，以 `exit=2` 结束。该尝试未被选入基线，
+随后使用新目录串行重跑两次并得到一致结果。OpenStates 首次 index-byte 探测误用控制端
+系统 Python，因缺少目标依赖 `i18naddress` 以 `exit=2` 结束；改用目标仓库既有 `.venv`
+Python 后双次结果一致。无效尝试均不计入基线，三份有效 oracle 的 stderr 均为空。
+
+### 13.2 阻断变化
+
+- 第 9.1 节的三个 oracle 合同缺口已解除；
+- PR `#22` 已解除旧的 ignored inventory 与 timeout 非终态阻断；
+- 三个现有目标副本仍停在冻结 upstream SHA、工作区干净且没有 `.vega.yaml`；
+- OpenStates PR `#125` 触发 `eligibility-changed-before-run`，Case 03 停止；
+- Case 01/02 仍需从冻结 SHA 重建最小目标副本、加入并只提交 `.vega.yaml`，再重跑全部
+  preflight 后才能启动正式 Worker。
+
+当前状态固定为：
+
+```text
+oracle-contract-ready
+case-01-preflight-pending
+case-02-preflight-pending
+case-03-eligibility-changed-before-run
+worker-not-started
+```
+
+下一步只准备和执行 `CRWP-V1-01`、`CRWP-V1-02`。不得顺带增加 Runtime、测试框架、
+Memory、LangGraph、多 Reviewer 或新的 Pilot Case。

@@ -589,3 +589,84 @@ set "NX_DAEMON=false" && corepack yarn build
 
 命令数量、300 秒单命令上限、构建范围和其他四条验证命令不变。原命令的首次结果只登记为
 控制端诊断，不计入最终基线；更新后的命令必须重新执行并确认没有遗留目标相关进程。
+
+## 十三、2026-07-29 Amendment 3：控制 oracle 合同与资格状态
+
+本修订发生在任何正式 Worker、Reviewer 或 Finish 启动之前，只修正控制端合同，不修改三个
+Issue、冻结源码、允许路径、验证命令、模型配置、迭代预算或结果判定。
+
+### 13.1 最终控制文件
+
+三份修订后 oracle 的 Git index LF 字节 SHA-256 为：
+
+| Case | Oracle SHA-256 |
+|---|---|
+| `CRWP-V1-01` | `a1a9152a9d96f0ac935f6c26baccba7ce4632453b388ba570ceb62731ae65b5f` |
+| `CRWP-V1-02` | `f784abc3518e12991f3f0b93628773adda1d68c9add4fe2a75d9e93b318e93d0` |
+| `CRWP-V1-03` | `79fd7227f44e1cf1aaff40d9f02b9d19a96834b14aa858de6c507503208ace0f` |
+
+这是提交后可复现的权威控制字节。当前 Windows 工作树使用 CRLF checkout，对应 SHA-256
+依次为：
+
+| Case | Windows 工作树 SHA-256 |
+|---|---|
+| `CRWP-V1-01` | `5af44f7ec73328d373c791b4b042c5465ceeb754e2d2bf4f1aef45d17328cf76` |
+| `CRWP-V1-02` | `61c85e423715ad748b3adabef6b9cd9718b51fb1a4aa31b416b981885479c294` |
+| `CRWP-V1-03` | `596145bfa64a84ae98bf63f6b96401e027d145a50aafc89410f0be68954f7e02` |
+
+工作树哈希只用于解释行尾转换，不作为冻结控制哈希。
+
+静态检查通过：
+
+```text
+python -m compileall scripts/pilot/crwp-v1
+ruff check scripts/pilot/crwp-v1
+node --check scripts/pilot/crwp-v1/crwp-v1-02-sqlite-autoincrement-oracle.cjs
+node --check scripts/pilot/crwp-v1/ignore-native-drivers.cjs
+git diff --check
+git diff --cached --check
+```
+
+### 13.2 双次控制基线
+
+三份 oracle 均从 Git index 物化的 LF 字节执行，每个 oracle 在独立临时目录中串行运行
+两次。预期缺陷仍稳定以 `1` 退出，决定性 stdout SHA-256 分别为：
+
+| Case | Run 1 | Run 2 | stdout SHA-256 |
+|---|---:|---:|---|
+| `CRWP-V1-01` | `1` | `1` | `4308870971d831b3f42883a42ea06057da9267782574b278a527f614172095e1` |
+| `CRWP-V1-02` | `1` | `1` | `0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b` |
+| `CRWP-V1-03` | `1` | `1` | `e3cf488350744510cbe084c452e4dc4ce4a314724ea0d02910837084c6675f21` |
+
+Dormice 在一次三项并行控制运行中出现 `exit=2 / cli_timeout`。该现场保留为无效环境尝试，
+不计入双次基线；随后在无并行负载的新目录中串行执行两次，分别耗时 `6.135` 秒和 `4.915`
+秒，均得到上表中的相同预期结果。
+
+OpenStates 的首次 index-byte 探测误用了控制端系统 Python，因缺少目标环境依赖
+`i18naddress` 连续两次以 `exit=2` 结束。该现场同样只保留为无效解释器尝试；改用目标仓库
+既有 `.venv` Python 后串行执行两次，得到上表中的稳定结果。两类无效尝试均不计入基线。
+
+### 13.3 Sequelize 隔离边界
+
+真实 SQL 行注释会让冻结版本的 `showConstraints()` 多行正则先失败，掩盖待测的
+`describeTable()` AUTOINCREMENT metadata 路径。oracle 仅在读取 `line_comment_pk`
+metadata 时临时将 `queryInterface.showConstraints()` 替换为空结果，并在 `finally`
+恢复原方法。
+
+该隔离不修改目标仓库，不替换 `PRAGMA TABLE_INFO`，也不改变正向 AUTOINCREMENT 判断。
+双次结果均确认：
+
+- `before_has_autoincrement=true`；
+- `after_has_autoincrement=false`；
+- `describe_reports_autoincrement=false`；
+- 行注释与块注释都真实保留在 `sqlite_master.sql`；
+- 两类注释中的文本都没有把普通主键误标为 auto-increment。
+
+因此 oracle 现在稳定复现目标缺陷，而不是控制 harness 自身错误。
+
+### 13.4 Case 03 资格变化
+
+OpenStates PR `#125` 晚于冻结资格截止时间，并明确关闭 Issue `#122`。
+`CRWP-V1-03` 因而固定记录为 `eligibility-changed-before-run`，不得按原 Issue 引导样本启动
+Worker。除非未来另建预注册并明确改为 controlled public replay，否则本 Pilot 只继续
+`CRWP-V1-01` 与 `CRWP-V1-02`。

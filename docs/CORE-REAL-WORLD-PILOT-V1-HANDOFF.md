@@ -10,15 +10,15 @@
 
 ### 当前状态
 
-- 必审高风险功能基线提交：
-  `cab48777bd64017b373e5a35ec53fa49ff271288`。
+- 本轮 oracle 修订基于主线可信执行提交：
+  `8f91844`。
 - PR `#22` 已于 2026-07-28 合并，标题为
   `fix: bound ignored inventory and fail closed on timeout`。
 - 主线随后新增可配置的 `risk.required_reviews` 必审高风险披露，并完成 Goal/Gate 防篡改、
   人工接管新鲜度和关键行号修复。当前快照已取得 `896 collected / 888 passed /
   8 skipped` 的全量 pytest 终态证据。
 - 正式 CRWP-V1 Worker、Reviewer 和 Finish 仍然都没有启动。
-- 三份 oracle 仍保留本地未提交修改：
+- 三份 oracle 合同已经补齐，并由本文件所在提交共同冻结：
   - `scripts/pilot/crwp-v1/crwp-v1-01-timeout-oracle.py`
   - `scripts/pilot/crwp-v1/crwp-v1-02-sqlite-autoincrement-oracle.cjs`
   - `scripts/pilot/crwp-v1/crwp-v1-03-stub-filename-oracle.py`
@@ -26,6 +26,8 @@
   工作区干净且当前没有 `.vega.yaml`。
 - `.local-validation/crwp-v1/control-evidence/` 保留本机基线和 oracle 原始输出，继续保持
   ignored，不进入 Git。
+- 三份 oracle 已取得双次稳定 `exit=1` 证据；OpenStates 因 PR `#125` 固定停止为
+  `eligibility-changed-before-run`。
 
 ### Runtime 阻断已经解除
 
@@ -64,53 +66,40 @@ ignored 文件仍受控，但不能把结果描述成“完整扫描了依赖目
 4308870971d831b3f42883a42ea06057da9267782574b278a527f614172095e1
 ```
 
-当前工作树文件 SHA-256：
+Git 暂存区中的 LF 字节 SHA-256（提交后的权威控制哈希）：
 
 ```text
-5af44f7ec73328d373c791b4b042c5465ceeb754e2d2bf4f1aef45d17328cf76
+a1a9152a9d96f0ac935f6c26baccba7ce4632453b388ba570ceb62731ae65b5f
 ```
 
-该结果可以进入后续 Control Amendment，但在提交与登记更新前仍不是冻结控制哈希。
+当前 Windows 工作树因 CRLF checkout 得到
+`5af44f7ec73328d373c791b4b042c5465ceeb754e2d2bf4f1aef45d17328cf76`；该值只用于
+本机行尾诊断，不替代 Git index 控制哈希。
 
 #### `CRWP-V1-02` Sequelize
 
-块注释和行注释负对照已经写入 oracle，但当前版本仍被一个独立的上游解析限制阻断：
+行注释负对照已经只在 `describeTable('line_comment_pk')` 期间临时替换
+`queryInterface.showConstraints()` 为空结果，并在 `finally` 恢复。真实
+`PRAGMA TABLE_INFO`、AUTOINCREMENT metadata 路径和块注释正常路径均未替换。
+
+两次独立基线均以 `1` 退出，输出 SHA-256 均为：
 
 ```text
-Could not parse constraints from SQL: CREATE TABLE ...
+0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b
 ```
 
-原因是冻结版本的 `showConstraints()` 使用不支持换行的正则解析 `CREATE TABLE`。真实 SQL
-行注释必须换行才能结束，因此当前 synthetic table 在 `describeTable()` 的 constraint
-阶段失败，连续两次均以 `2` 退出，输出 SHA-256 均为：
+两次均确认行注释与块注释真实保留，且没有把普通主键误标为 auto-increment。当前失败只剩
+目标 Issue 的正向语义。
+
+Git 暂存区中的 LF 字节 SHA-256（提交后的权威控制哈希）：
 
 ```text
-7cc34a40688d5095d540ccf95e246d7dd7c47c314240a637d2abe762a1c532c1
+f784abc3518e12991f3f0b93628773adda1d68c9add4fe2a75d9e93b318e93d0
 ```
 
-SQLite 还会从 `sqlite_master.sql` 中移除位于右括号后的尾随行注释和块注释，所以把注释放在
-整个 `CREATE TABLE (...)` 之后也不能形成有效负对照。
-
-下一会话应先隔离 `describeTable()` 的 auto-increment metadata 读取与
-`showConstraints()` 的旧解析缺陷。推荐最小方案是在 oracle 内仅对该 synthetic 表临时替换
-`queryInterface.showConstraints()` 为空结果，然后：
-
-1. 确认 `sqlite_master.sql` 真实保留 `-- AUTOINCREMENT`；
-2. 调用 `describeTable()` 获取列 metadata；
-3. 断言普通整数主键没有被注释文本误标为 auto-increment；
-4. 恢复原 `showConstraints()`；
-5. 块注释用例继续走未替换的正常路径。
-
-该替换只隔离与本题无关的旧 constraint parser，不得屏蔽待测 auto-increment metadata
-逻辑。修正后必须重新执行 Node syntax check 和两次独立 oracle。
-
-当前工作树文件 SHA-256：
-
-```text
-da9a6733d1a5c5743be2413191cc5e90a9ccef0e86473175fb596ef8e596a0cf
-```
-
-该哈希对应当前无效的 `exit=2` 版本，不得登记为最终控制哈希。
+当前 Windows 工作树因 CRLF checkout 得到
+`61c85e423715ad748b3adabef6b9cd9718b51fb1a4aa31b416b981885479c294`；该值只用于
+本机行尾诊断。
 
 #### `CRWP-V1-03` OpenStates
 
@@ -128,13 +117,15 @@ da9a6733d1a5c5743be2413191cc5e90a9ccef0e86473175fb596ef8e596a0cf
 e3cf488350744510cbe084c452e4dc4ce4a314724ea0d02910837084c6675f21
 ```
 
-当前工作树文件 SHA-256：
+Git 暂存区中的 LF 字节 SHA-256（提交后的权威控制哈希）：
 
 ```text
-596145bfa64a84ae98bf63f6b96401e027d145a50aafc89410f0be68954f7e02
+79fd7227f44e1cf1aaff40d9f02b9d19a96834b14aa858de6c507503208ace0f
 ```
 
-该结果可以进入 Control Amendment，但 Case 本身出现了新的资格变化。
+当前 Windows 工作树因 CRLF checkout 得到
+`596145bfa64a84ae98bf63f6b96401e027d145a50aafc89410f0be68954f7e02`；该值只用于
+本机行尾诊断。Case 本身另有资格变化。
 
 ### 新发现的资格变化
 
@@ -159,17 +150,14 @@ e3cf488350744510cbe084c452e4dc4ce4a314724ea0d02910837084c6675f21
 
 ### 下一会话固定顺序
 
-1. 修正 Sequelize 行注释负对照，执行 syntax check 和双次 oracle。
-2. 对三份最终 oracle 执行静态检查，计算最终 LF/index 版本 SHA-256。
-3. 在预注册、执行登记和 `eval/real-world-runs.md` 中只追加 Control Amendment，不改写
-   历史基线。
-4. 记录 OpenStates `eligibility-changed-before-run`。未新建预注册前，不运行 Case 03。
-5. 从冻结 SHA 重新准备目标副本，只提交 `.vega.yaml`，重新登记 prepared HEAD、tree 和
+1. 审阅并在确认后推送冻结三份 oracle 与 Control Amendment 的本地提交。
+2. OpenStates 固定记录为 `eligibility-changed-before-run`，不运行 Case 03。
+3. 从冻结 SHA 重新准备 Case 01/02 目标副本，只提交 `.vega.yaml`，重新登记 prepared HEAD、tree 和
    config hash。
-6. 重跑 config check、非 oracle 基线、双次 oracle、Issue/PR 资格和 Provider 探测。
-7. 只有控制哈希、资格、workspace baseline 和 Provider 全部满足合同，才按固定顺序启动
+4. 重跑 config check、非 oracle 基线、双次 oracle、Issue/PR 资格和 Provider 探测。
+5. 只有控制哈希、资格、workspace baseline 和 Provider 全部满足合同，才按固定顺序启动
    Dormice 和 Sequelize。每项最多两轮、总墙钟 30 分钟，不挑结果重跑。
-8. 将真实结果只追加到 `eval/real-world-runs.md`，最后再执行 Vega 主仓库验证。
+6. 将真实结果只追加到 `eval/real-world-runs.md`，最后再执行 Vega 主仓库验证。
 
 ### 续做命令
 
@@ -193,8 +181,8 @@ git -c "safe.directory=$repoRootPosix" status --short --branch
 Get-Content docs/CORE-REAL-WORLD-PILOT-V1-HANDOFF.md
 ```
 
-当前三份 oracle 修改尚未提交，也没有 push。不要丢弃或覆盖工作树；先从 Sequelize
-阻断继续。
+本文件所在提交冻结三份 oracle 与 Control Amendment，但尚未 push，也未启动正式 Worker。
+后续只从 Case 01/02 的全量 preflight 继续。
 
 ## 上一阶段结论（保留作历史）
 

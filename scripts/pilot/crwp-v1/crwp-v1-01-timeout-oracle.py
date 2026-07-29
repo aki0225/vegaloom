@@ -266,10 +266,19 @@ def main() -> int:
             "accepted_connections": after_connections - before_connections,
             "request_count": len(default_new_requests),
             "request_path_ok": default_request.get("path") == "/execCommand",
+            "authorization_ok": (
+                default_request.get("authorization") == "Bearer oracle-token"
+            ),
             "timeout_is_sdk_default": (
                 isinstance(default_body, dict)
                 and default_body.get("timeoutSeconds") == 300
             ),
+            "body_exact": default_body
+            == {
+                "name": "oracle-timeout",
+                "command": "echo oracle",
+                "timeoutSeconds": 300,
+            },
         }
     finally:
         server.shutdown()
@@ -307,7 +316,9 @@ def main() -> int:
             default_result_record["accepted_connections"] == 1,
             default_result_record["request_count"] == 1,
             default_result_record["request_path_ok"],
+            default_result_record["authorization_ok"],
             default_result_record["timeout_is_sdk_default"],
+            default_result_record["body_exact"],
         )
     )
     passed = invalid_passed and valid_passed and default_passed
