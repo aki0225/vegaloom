@@ -17,7 +17,11 @@ import vega.recovery_runtime as recovery_runtime_module
 from vega.cli import app
 from vega.execution_control import ExecutionLease, is_process_alive
 from vega.loop_evidence import validate_loop_artifact_integrity
-from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
+from vega.loop_runtime import (
+    LoopAutomationRuntime,
+    loop_initialization_issues,
+    run_loop_eval,
+)
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.recovery_runtime import RecoveryRuntime
 from vega.run_lock import RunMutationLock
@@ -738,6 +742,131 @@ def test_recovery_after_partial_initialization_rejects_continue_before_iteration
             repo,
             verify=False,
         )
+    assert not list(run_dir.glob("iterations/*"))
+
+
+def test_recovery_after_baseline_state_save_before_trace_is_not_legacy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    workspace = tmp_path / "workspace"
+    original_write = TraceWriter.write
+
+    def crash_before_baseline_trace(
+        writer: TraceWriter,
+        event: str,
+        **payload,
+    ) -> None:
+        if event == "workspace_baseline_captured":
+            raise RuntimeError("simulated crash before baseline trace")
+        original_write(writer, event, **payload)
+
+    monkeypatch.setattr(TraceWriter, "write", crash_before_baseline_trace)
+    with pytest.raises(RuntimeError, match="before baseline trace"):
+        LoopAutomationRuntime(workspace).start(
+            BriefInput(
+                mode="bug",
+                text="验证 baseline state 与 trace 的中断边界",
+                source="baseline-trace-interruption",
+                repo_path=str(repo),
+            ),
+            "assist",
+        )
+
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    interrupted_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert interrupted_state.workspace_baseline_sha256
+    assert run_dir.joinpath("workspace-baseline.json").exists()
+    assert not run_dir.joinpath("worker-prompt.md").exists()
+    trace_items = [
+        json.loads(line)
+        for line in run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert not any(
+        item["event"] in {"workspace_baseline_captured", "loop_initialized"}
+        for item in trace_items
+    )
+    monkeypatch.setattr(TraceWriter, "write", original_write)
+
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "owner exited between baseline state and trace",
+    )
+
+    recovered_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert recovered_state.current_step == "recovered_initialization_incomplete"
+    recovery_report = run_dir.joinpath("recovery-report.md").read_text(encoding="utf-8")
+    assert "workspace_baseline_event_count_invalid" in recovery_report
+    assert "loop_initialization_marker_missing" in recovery_report
+    with pytest.raises(ValueError, match="初始化未完成"):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+
+
+def test_legacy_initialization_is_recognized_but_not_continuable(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    workspace = tmp_path / "workspace"
+    runtime = LoopAutomationRuntime(workspace)
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="验证旧初始化协议的 supersession 边界",
+            source="legacy-initialization",
+            repo_path=str(repo),
+        ),
+        "assist",
+    )
+    state_path = run_dir / "state.json"
+    state = LoopAutomationState.model_validate_json(
+        state_path.read_text(encoding="utf-8")
+    )
+    state.workspace_baseline_sha256 = None
+    state.artifacts = [
+        item for item in state.artifacts if item != "workspace-baseline.json"
+    ]
+    state.save(state_path)
+    run_dir.joinpath("workspace-baseline.json").unlink()
+
+    trace_items = [
+        json.loads(line)
+        for line in run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    legacy_trace: list[dict[str, object]] = []
+    for item in trace_items:
+        if item.get("event") == "workspace_baseline_captured":
+            continue
+        if item.get("event") == "loop_initialized":
+            item["artifacts"] = [
+                name
+                for name in item["artifacts"]
+                if name != "workspace-baseline.json"
+            ]
+        legacy_trace.append(item)
+    run_dir.joinpath("trace.jsonl").write_text(
+        "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in legacy_trace),
+        encoding="utf-8",
+    )
+
+    issues = loop_initialization_issues(workspace, run_dir, state, repo)
+
+    assert issues == ["legacy_workspace_baseline_unavailable"]
+    with pytest.raises(ValueError, match="legacy_workspace_baseline_unavailable"):
+        runtime.continue_assist(run_dir.name, repo, verify=False)
     assert not list(run_dir.glob("iterations/*"))
 
 

@@ -1473,6 +1473,14 @@ def test_loop_assist_continue_generates_fix_prompt_from_review_findings(tmp_path
     assert [item["sha256"] for item in baseline_events] == [
         start_state["workspace_baseline_sha256"]
     ]
+    event_names = [item["event"] for item in trace_items]
+    assert event_names.index("workspace_baseline_captured") < event_names.index(
+        "worker_prompt_measured"
+    )
+    assert event_names.index("worker_prompt_measured") < event_names.index(
+        "loop_initialized"
+    )
+    assert loop_run.joinpath("worker-prompt.md").exists()
     repo_dir.joinpath("README.md").write_text(
         "# Demo\nworker change\n",
         encoding="utf-8",
@@ -1517,6 +1525,13 @@ def test_assist_start_blocks_dirty_tracked_baseline_before_worker_handoff(
     assert state["iterations"] == []
     assert run_dir.joinpath("workspace-baseline.json").exists()
     assert run_dir.joinpath("workspace-check.json").exists()
+    for name in (
+        "worker-prompt.md",
+        "worker-prompt-metrics.json",
+        "worker-prompt-metrics.md",
+    ):
+        assert not run_dir.joinpath(name).exists()
+        assert name not in state["artifacts"]
     assert "无法把后续修改安全归因" in run_dir.joinpath("final-report.md").read_text(
         encoding="utf-8"
     )

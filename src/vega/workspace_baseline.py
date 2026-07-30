@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -80,6 +80,13 @@ def _validate_baseline_paths(paths: list[str], label: str) -> None:
         if not value or "\x00" in value:
             raise ValueError("workspace baseline 包含空路径或 NUL")
         normalized = value.replace("\\", "/")
-        candidate = Path(normalized)
-        if candidate.is_absolute() or ".." in candidate.parts or normalized.startswith("//"):
+        posix_candidate = PurePosixPath(normalized)
+        windows_candidate = PureWindowsPath(value)
+        if (
+            posix_candidate.is_absolute()
+            or windows_candidate.drive
+            or windows_candidate.root
+            or windows_candidate.anchor
+            or ".." in posix_candidate.parts
+        ):
             raise ValueError("workspace baseline 包含越过仓库边界的路径")

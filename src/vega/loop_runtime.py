@@ -63,14 +63,20 @@ from .workspace_check import (
     snapshot_workspace,
 )
 
-LOOP_INITIALIZATION_ARTIFACTS = [
+LOOP_PRE_WORKER_ARTIFACTS = [
     "agent-brief.md",
     "project-context.md",
     "project-policy-snapshot.json",
     "loop-plan.md",
+]
+WORKER_PROMPT_ARTIFACTS = [
     "worker-prompt.md",
     "worker-prompt-metrics.json",
     "worker-prompt-metrics.md",
+]
+LOOP_INITIALIZATION_ARTIFACTS = [
+    *LOOP_PRE_WORKER_ARTIFACTS,
+    *WORKER_PROMPT_ARTIFACTS,
 ]
 LOOP_ARTIFACTS = [
     "state.json",
@@ -215,22 +221,6 @@ class LoopAutomationRuntime:
             run_dir / "loop-plan.md",
             render_loop_plan(brief_input, automation_mode, max_iterations),
         )
-        worker_prompt, worker_sections = build_worker_prompt(
-            brief_input,
-            brief_run,
-            None,
-            1,
-        )
-        _write_text_artifact(run_dir / "worker-prompt.md", worker_prompt)
-        worker_metrics = measure_prompt(
-            worker_prompt,
-            role="worker",
-            max_chars=config.prompt_budget.worker_max_chars,
-            sections=worker_sections,
-        )
-        write_prompt_metrics(run_dir, "worker-prompt", worker_metrics)
-        trace.write("worker_prompt_measured", metrics=worker_metrics.model_dump())
-        initialization_artifacts = list(LOOP_INITIALIZATION_ARTIFACTS)
         # 不论 Worker 由 Vega 还是外部主会话调度，都先封存同一份根基线。
         # auto 的每轮 Worker 仍会捕获更近的运行时基线；根基线用于跨进程 continue 和归因审计。
         workspace_baseline = snapshot_workspace(Path(brief_input.repo_path))
@@ -238,7 +228,6 @@ class LoopAutomationRuntime:
             run_dir / WORKSPACE_BASELINE_ARTIFACT,
             workspace_baseline,
         )
-        initialization_artifacts.append(WORKSPACE_BASELINE_ARTIFACT)
         state.artifacts = [WORKSPACE_BASELINE_ARTIFACT]
         state.save(run_dir / "state.json")
         trace.write(
@@ -248,11 +237,6 @@ class LoopAutomationRuntime:
             tracked_files=len(workspace_baseline.tracked_files),
             untracked_files=len(workspace_baseline.untracked_files),
             capture_complete=workspace_baseline.capture_complete,
-        )
-        trace.write(
-            "loop_initialized",
-            brief_run=state.brief_run,
-            artifacts=initialization_artifacts,
         )
         if automation_mode == "assist":
             baseline_head_changed = bool(
@@ -297,7 +281,9 @@ class LoopAutomationRuntime:
                 )
                 _write_final_report(run_dir, state, None, conclusion)
                 state.artifacts = [
-                    *LOOP_ARTIFACTS,
+                    "state.json",
+                    "trace.jsonl",
+                    *LOOP_PRE_WORKER_ARTIFACTS,
                     WORKSPACE_BASELINE_ARTIFACT,
                     "workspace-check.json",
                     "workspace-check.md",
@@ -310,6 +296,31 @@ class LoopAutomationRuntime:
                     current_step=current_step,
                 )
                 return run_dir
+        worker_prompt, worker_sections = build_worker_prompt(
+            brief_input,
+            brief_run,
+            None,
+            1,
+        )
+        _write_text_artifact(run_dir / "worker-prompt.md", worker_prompt)
+        worker_metrics = measure_prompt(
+            worker_prompt,
+            role="worker",
+            max_chars=config.prompt_budget.worker_max_chars,
+            sections=worker_sections,
+        )
+        write_prompt_metrics(run_dir, "worker-prompt", worker_metrics)
+        trace.write("worker_prompt_measured", metrics=worker_metrics.model_dump())
+        initialization_artifacts = [
+            *LOOP_INITIALIZATION_ARTIFACTS,
+            WORKSPACE_BASELINE_ARTIFACT,
+        ]
+        trace.write(
+            "loop_initialized",
+            brief_run=state.brief_run,
+            artifacts=initialization_artifacts,
+        )
+        if automation_mode == "assist":
             root_budget_artifact: str | None = None
             if worker_metrics.exceeded:
                 root_budget_artifact = write_context_budget_report(
@@ -487,7 +498,17 @@ class LoopAutomationRuntime:
         if workspace_check.has_failures:
             state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
-            if workspace_check.new_untracked_count:
+            if workspace_check.baseline_head_changed:
+                _write_text_artifact(
+                    iteration_dir / "fix-prompt.md",
+                    render_workspace_fix_prompt(iteration_number + 1),
+                )
+                conclusion = (
+                    "Git HEAD 在 loop 启动后发生变化；当前 diff 无法继续归因，"
+                    "已在 scope gate 前停止。"
+                )
+                current_step = "workspace_head_changed"
+            elif workspace_check.new_untracked_count:
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
                     render_untracked_files_fix_prompt(
@@ -1609,9 +1630,19 @@ class LoopAutomationRuntime:
         trace: TraceWriter,
         current_step: str = "done",
     ) -> None:
-        required_artifacts = (
+        required_artifacts = list(
             FINAL_LOOP_ARTIFACTS if (run_dir / "final-report.md").exists() else LOOP_ARTIFACTS
         )
+        if current_step in {
+            "workspace_baseline_dirty",
+            "workspace_baseline_unavailable",
+            "workspace_head_changed",
+        } and not any(
+            run_dir.joinpath(name).exists() for name in WORKER_PROMPT_ARTIFACTS
+        ):
+            required_artifacts = [
+                item for item in required_artifacts if item not in WORKER_PROMPT_ARTIFACTS
+            ]
         artifacts = list(dict.fromkeys([*state.artifacts, *required_artifacts]))
         state.current_step = current_step
         state.status = status
@@ -2377,7 +2408,6 @@ def loop_initialization_issues(
             issues.append(f"{name}_source_mismatch")
 
     expected_initialization_artifacts = _expected_initialization_artifacts(state)
-    issues.extend(_workspace_baseline_initialization_issues(run_dir, state))
 
     for name in expected_initialization_artifacts:
         path = run_dir / name
@@ -2416,6 +2446,16 @@ def loop_initialization_issues(
     except (OSError, ValueError):
         issues.append("initialization_trace_invalid")
     else:
+        baseline_events = [
+            item
+            for item in trace_items
+            if item.get("event") == "workspace_baseline_captured"
+        ]
+        baseline_protocol_signal = bool(
+            state.workspace_baseline_sha256
+            or (run_dir / WORKSPACE_BASELINE_ARTIFACT).is_file()
+            or baseline_events
+        )
         initialized_events = [
             item for item in trace_items if item.get("event") == "loop_initialized"
         ]
@@ -2424,21 +2464,43 @@ def loop_initialization_issues(
                 issues.append("loop_initialized_event_count_invalid")
             else:
                 initialized = initialized_events[0]
+                initialized_artifacts = initialized.get("artifacts")
+                uses_baseline_protocol = bool(
+                    isinstance(initialized_artifacts, list)
+                    and WORKSPACE_BASELINE_ARTIFACT in initialized_artifacts
+                )
                 if initialized.get("brief_run") != state.brief_run:
                     issues.append("loop_initialized_brief_mismatch")
-                if initialized.get("artifacts") != expected_initialization_artifacts:
+                if initialized_artifacts != expected_initialization_artifacts:
                     issues.append("loop_initialized_artifacts_mismatch")
-                issues.extend(_workspace_baseline_trace_issues(trace_items, state))
+                if uses_baseline_protocol:
+                    issues.extend(
+                        _workspace_baseline_initialization_issues(run_dir, state)
+                    )
+                    issues.extend(
+                        _workspace_baseline_trace_issues(trace_items, state)
+                    )
+                elif baseline_protocol_signal:
+                    issues.append("workspace_baseline_protocol_mismatch")
+                else:
+                    issues.append("legacy_workspace_baseline_unavailable")
         else:
-            # 兼容旧 run：根级 worker_prompt_measured 发生在全部初始化文件写完之后。
-            legacy_markers = [
-                item
-                for item in trace_items
-                if item.get("event") == "worker_prompt_measured"
-                and "iteration" not in item
-            ]
-            if len(legacy_markers) != 1:
+            if baseline_protocol_signal:
+                issues.extend(_workspace_baseline_initialization_issues(run_dir, state))
+                issues.extend(_workspace_baseline_trace_issues(trace_items, state))
                 issues.append("loop_initialization_marker_missing")
+            else:
+                # 旧协议只能被识别，不能事后补写 baseline 获得继续执行资格。
+                legacy_markers = [
+                    item
+                    for item in trace_items
+                    if item.get("event") == "worker_prompt_measured"
+                    and "iteration" not in item
+                ]
+                if len(legacy_markers) != 1:
+                    issues.append("loop_initialization_marker_missing")
+                else:
+                    issues.append("legacy_workspace_baseline_unavailable")
     return list(dict.fromkeys(issues))
 
 
@@ -2455,6 +2517,12 @@ def _require_loop_initialization(
         repo_path,
     )
     if issues:
+        if issues == ["legacy_workspace_baseline_unavailable"]:
+            raise ValueError(
+                "loop 使用已被 workspace baseline 替代的旧初始化协议；"
+                "旧 run 可保留查看，但不能继续归因当前 diff，请重新启动 loop。"
+                "（legacy_workspace_baseline_unavailable）"
+            )
         raise ValueError(
             "loop 初始化未完成或证据不完整，已拒绝 continue："
             + ", ".join(issues)

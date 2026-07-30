@@ -887,13 +887,16 @@ def test_assist_continue_rejects_head_change_after_loop_start(tmp_path: Path) ->
     runtime.continue_assist(run_dir.name, repo, verify=False)
 
     state = _read_json(run_dir / "state.json")
-    result = _read_json(run_dir / "iterations" / "01" / "scope-gate-result.json")
+    iteration_dir = run_dir / "iterations" / "01"
+    workspace_check = _read_json(iteration_dir / "workspace-check.json")
     assert state["status"] == "needs_human"
-    assert state["current_step"] == "scope_gate_failed"
+    assert state["current_step"] == "workspace_head_changed"
     assert reviewer.calls == 0
-    assert result["failure_code"] == "scope_head_changed"
-    assert result["expected_head_sha"] == state["initial_head_sha"]
-    assert result["current_head_sha"] != state["initial_head_sha"]
+    assert workspace_check["baseline_head_changed"] is True
+    assert workspace_check["baseline_head_sha"] == state["initial_head_sha"]
+    assert workspace_check["current_head_sha"] != state["initial_head_sha"]
+    assert state["iterations"][0]["scope_gate_status"] == "skipped"
+    assert not iteration_dir.joinpath("scope-gate-result.json").exists()
 
 
 @pytest.mark.parametrize("mode", ["auto", "assist"])
