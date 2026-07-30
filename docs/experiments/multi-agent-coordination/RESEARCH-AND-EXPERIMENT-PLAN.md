@@ -25,6 +25,11 @@
 > 2026-07-29 过度设计清理：A2A P0 不实施；日用价值 V2 的可执行 Harness 与配套测试
 > 已退役。历史 task、资格记录、运行结果和固定 verifier 保留，后续不再为实验账本、
 > preflight 或事件时间戳扩建代码与全局 CI。
+>
+> 2026-07-30 分支冻结：`experiment/ma2b-pilot-next` 进入
+> `branch_frozen / selective_migration_only`。从本次冻结提交起，不再新增实验、调用
+> Provider、修改通用 Runtime 或调整 CI；后续只允许只读审查，并把经重新验证的通用修复
+> 选择性迁移到独立集成分支。当前实验分支本身不作为整体 PR。
 
 ---
 
