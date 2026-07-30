@@ -85,6 +85,31 @@ Runtime、测试框架或证据格式。
 当前可以按预注册顺序进入 Case 01 的正式 Worker。不要再次重跑已经通过的 setup 或
 baseline；Case 01 取得终态后，再决定是否继续 Case 02。
 
+### Case 01 正式运行结果（2026-07-30）
+
+Case 01 已形成终态，正式 run 为 `20260730-223403-019133-bug-loop`。
+
+- `gpt-5.4 / medium` Worker 正常退出，耗时约 `464` 秒，runner 报告
+  `58,637` tokens。
+- Worker 只修改两个允许文件，但新增未跟踪缓存
+  `.pnpm-store/v11/index.db`。Workspace Gate 在 verification 和 reviewer 前停止，
+  最终状态为 `needs_human / workspace_check_failed`。
+- 候选 diff 为 `344` 行新增、`210` 行删除，共 `554` 行，已经超过预注册的
+  `max_diff_lines=350`。其中 `main.ts` 被整体重排为可导入的 `createProgram()`，
+  不属于本题期望的小范围参数解析修复。
+- 因为清理缓存后仍会被 diff 预算拒绝，本轮不删除现场、不继续同一 run，也不为得到更好
+  结果而重跑 Case 01。
+- Worker 最终输入在 `worker_started` 前已写入两份相同 artifact，SHA-256 为
+  `bc045e73d25a921258dc952aec8fa85ca0e68d06ab567575e77cf030cb1586b9`；但控制端在外部
+  runner 启动后才读取并登记该哈希，因此本次存在输入哈希登记时序偏差，不能描述为完全无
+  协议偏差的样本。
+- 没有启动 verification、Reflect、Reviewer 或 Finish，没有自动 commit、push、release
+  或写入长期 Memory，目标相关残留进程为 `0`。
+
+该结果证明 Vega 会在 Worker 产生未登记文件时按设计 fail-closed，但不能证明候选修复正确，
+也不能算完成 Coding Loop。Case 02 尚未启动；下一步只评估如何在不增加 Runtime 机制的前提下，
+在调用前完成其既定负向输入扫描。
+
 ### 已取得终态的静态验证
 
 ```text
