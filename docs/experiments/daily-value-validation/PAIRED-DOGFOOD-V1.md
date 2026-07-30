@@ -6,11 +6,22 @@
 >
 > 2026-07-29 最小继续：DV-B05 仅复用本 append-only ledger、固定 task 和 verifier，
 > 用于未来一次直接 Native/Vega 配对。它不是 V1 隐藏重跑，也不恢复 V2 Harness。
+>
+> 2026-07-30 结果更新：DV-B05 Native 已正式运行一次。Provider 在写入部分 patch 后发生
+> `502/503`，Worker 未正常返回，固定验证为红，Reviewer 未启动；当前 pair 已停止。
+>
+> 2026-07-30 Owner 将该结果判定为不可比较的无效样本，并以独立 V2 合同重跑。V2 Worker
+> 在初始检索后发生 stream transport error，1200 秒超时且没有修改文件，Reviewer 仍未启动。
+>
+> 2026-07-30 重跑 V3：Worker、固定验证和独立只读 Reviewer 均真实完成。实现与验证为绿，
+> Reviewer 没有发现代码缺陷，但因输入证据缺少 verifier 前后哈希而返回 `needs_human`；
+> 补充证据不追溯改写 verdict，Vega treatment 仍待单独授权。
 
 状态：历史 V1 结果保持封存。DV-B03 因任务过短且 Issue 评论直接给出修法而退休；替代案例
-DV-B05 已达到 `runnable`，但未调用 Provider、Worker 或 Reviewer。DV-B04 的 Native
-treatment 已发生一次基础设施失败；DV-B02 的 Vega 与 Native treatment 已按冻结顺序各
-正式运行一次，均超时且未启动 Reviewer。
+DV-B05 已达到 `runnable`，原 Native 与重跑 V2 因 Provider 基础设施问题不可比较；重跑
+V3 已完成 Worker、验证和 Reviewer，但最终为 `needs_human`。DV-B04 的 Native treatment
+已发生一次基础设施失败；DV-B02 的 Vega 与 Native treatment 已按冻结顺序各正式运行一次，
+均超时且未启动 Reviewer。
 
 ## 1. 要回答的问题
 
@@ -28,17 +39,25 @@ treatment 已发生一次基础设施失败；DV-B02 的 Vega 与 Native treatme
 
 ### A. `native`
 
-- 使用原生 Codex Worker 会话实现任务。
-- Worker 完成后，使用原生独立 Review 会话审查同一 diff。
+- 先使用 `vega loop ... --mode assist` 编译任务上下文并封存 workspace baseline。
+- 使用原生 Codex Worker 会话执行 Vega 生成的 `worker-prompt.md`；这是 Native 与 Vega
+  treatment 唯一允许不同的调度步骤。
+- Worker 完成后必须运行同一 run 的 `vega loop continue`，复用 Vega 的确定性验证、
+  Reflect、Risk Gate、独立只读 ReviewRuntime 和 verdict；禁止手工拼 Reviewer Prompt。
 - Reviewer 不接收 Worker 的完整聊天记录或自述，只接收预注册任务、项目规则、diff 和验证证据。
 - 人工负责记录验证、时间、Token、操作数和最终结论。
 
 ### B. `vega`
 
 - 使用 `vega do bug|feature --mode auto`，或同等的 `vega loop ... --mode auto`。
-- Vega 编译项目上下文、启动 Worker、执行固定验证、启动隔离只读 Reviewer，并生成 Finish artifact。
+- Vega 编译项目上下文、封存同样的 workspace baseline、启动 Worker，并执行与 Native
+  treatment 相同的后处理链。
 - Reviewer 同样不接收 Worker 的完整聊天记录。
 - 不启用 Multi-Worker、Trellis、Memory、Goal 或 A2A。
+
+该修正自 2026-07-30 后的新 treatment 生效。DV-B05 V3 的手工 Native 后处理属于已封存
+历史事实，不追溯改写；其漏交 verifier 前后哈希并返回 `needs_human`，正是本修正要消除的
+执行偏差。
 
 除上述编排方式外，两组必须保持一致：
 
@@ -83,7 +102,7 @@ status=candidate_not_frozen
 | DV-B02 | Bug | python-attrs/attrs #1348，`optional(pipe(...))` 组合回归 | Vega → Native | runnable；两个 treatment 均已运行且超时 |
 | DV-B03 | Bug | pallets/werkzeug #2364，`s_maxage` 整数 setter 异常 | Native → Vega | retired |
 | DV-B04 | Bug | pallets/click #2836，prompt 忽略字符串 `show_default` | Native → Vega | runnable；Native 基础设施失败 |
-| DV-B05 | Bug | pallets/click #3572，禁用颜色时交互提示仍保留 ANSI | Native → Vega | runnable；尚未启动 treatment |
+| DV-B05 | Bug | pallets/click #3572，禁用颜色时交互提示仍保留 ANSI | Native → Vega | runnable；V3 Native 为 `needs_human`，Vega 未授权 |
 | DV-F01 | Feature | python-attrs/attrs #814，生成 `__match_args__` | Vega → Native | candidate_not_frozen |
 | DV-F02 | Feature | pallets/werkzeug #2948，支持 RFC5861 Cache-Control 扩展 | Native → Vega | candidate_not_frozen |
 | DV-F03 | Feature | pallets/click #805，`style` 支持删除线 | Vega → Native | candidate_not_frozen |
@@ -235,6 +254,25 @@ python scripts/daily_value_eval.py `
   允许文件并补充回归测试；封存阶段固定 verifier 四项全部通过，但未把部分绿态改写为成功。
   该结果登记为 `timed_out`，不进行隐藏重跑。公开记录见
   `eval/experiments/daily-value-validation/runs/DV-B02-native-20260729.md`。
+- `DV-B05/native`：2026-07-30 使用冻结 profile、模型和 1200 秒 timeout 启动一次原生
+  Codex Worker。Worker 写入两个允许文件后，Provider 经本地代理连续返回 `502/503`，
+  CLI 没有产生 `turn.completed`、最终消息或 Token usage。封存 verifier 的四个
+  `color=False` 场景仍失败，目标 pytest 为 `4 failed, 233 passed, 11 skipped`。Reviewer
+  按 fail-closed 合同未启动；该结果登记为 `infrastructure_failure`，不重跑，也不继续
+  Vega treatment。公开记录见
+  `eval/experiments/daily-value-validation/runs/DV-B05-native-20260730.md`。
+- `DV-B05/native` 重跑 V2：2026-07-30 经 Owner 明确判定上一轮不可比较后，以 revision
+  `4`、全新 workspace 和新 profile fingerprint 预注册执行。Worker 在初始源码检索后出现
+  Provider stream transport error，直到 1200 秒 timeout 均未恢复；workspace 无修改，
+  verifier 仍为红，目标 pytest 保持 `229 passed, 11 skipped`。Reviewer 未启动，本版本
+  不再重跑。公开记录见
+  `eval/experiments/daily-value-validation/runs/DV-B05-native-r2-20260730.md`。
+- `DV-B05/native` 重跑 V3：2026-07-30 使用 revision `5` 和全新 workspace 执行。Worker
+  正常 `turn.completed`，只修改两个允许文件；固定 verifier 8 个场景全部通过，目标 pytest
+  为 `237 passed, 11 skipped`。独立只读 Reviewer 未发现代码缺陷，但因输入证据漏交
+  verifier 验证前后哈希而返回 `needs_human`。随后补充哈希不变和再次全绿的证据，不改写
+  Reviewer verdict，也不重跑 Reviewer。公开记录见
+  `eval/experiments/daily-value-validation/runs/DV-B05-native-r3-20260730.md`。
 
 DV-B02 的配对分析、实验缺口和最小 V2 条件见
 `docs/experiments/daily-value-validation/DV-B02-PAIR-ANALYSIS.md`。

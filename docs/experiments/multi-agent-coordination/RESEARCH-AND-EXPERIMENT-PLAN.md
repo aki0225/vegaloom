@@ -1193,6 +1193,81 @@ Windows/Python 3.12.10 下，同一 verifier 连续三次稳定得到 baseline �
 ledger revision，没有恢复 Harness，没有修改 Vega Runtime，也没有调用 Provider、Worker
 或 Reviewer。
 
+### 12.18 2026-07-30 DV-B05 Native 正式运行
+
+Owner 明确授权后，DV-B05 使用全新的 baseline-only workspace 启动唯一一次 Native
+treatment。调用前重新确认 150 个 tracked 文件与 baseline archive 一致、workspace
+单提交且无 remote、严格线索扫描为零命中、verifier hash 正确、baseline verifier 为红，
+目标 `tests/test_termui.py` 为 `229 passed, 11 skipped`。Provider profile fingerprint
+继续匹配冻结值，未使用 `--ignore-user-config`。
+
+Worker 在 `510.792` 秒内完成源码检查并写入两个允许文件，但随后 Provider 经本地代理连续
+返回 `502/503`。Codex CLI 以 `turn.failed` 和退出码 `1` 结束，没有
+`turn.completed`、最终消息或 Token usage。现场 diff 为 `+32 / -0`，没有越过 allowlist，
+也没有新增非忽略文件。
+
+封存阶段执行两个固定验证：verifier 的四个 `color=False` 场景仍失败，目标 pytest 为
+`4 failed, 233 passed, 11 skipped`。Worker 未正常完成且确定性验证为红，因此按
+fail-closed 合同没有启动 Reviewer。结果登记为
+`infrastructure_failure / not_completed`，同一 Native treatment 不重跑，也不继续 Vega
+treatment。该结果不能形成 Native 能力成功、能力失败或 Vega 日用价值结论。公开记录见
+`eval/experiments/daily-value-validation/runs/DV-B05-native-20260730.md`。
+
+### 12.19 2026-07-30 DV-B05 Native 重跑 V2
+
+Owner 将 12.18 的运行判定为 Provider 中途故障造成的不可比较无效样本。旧结果继续保留，
+随后以 `direct-rerun-v2` 独立预注册一次重跑：使用全新 baseline-only workspace、Codex
+会话、venv、临时目录和证据目录，不向 Worker 暴露上一轮 patch 或结论。
+
+正式调用前发现 Codex `model_provider` 名称发生变化，但脱敏 origin、Responses 协议、模型
+目录、执行 profile 与全部隔离设置保持一致。该变化在任何 Provider 请求前以 case revision
+`4` 和新 profile fingerprint 冻结。baseline verifier 仍为红，目标 pytest 为
+`229 passed, 11 skipped`。
+
+V2 Worker 完成初始源码检索后出现 Provider stream transport decode error，此后直到
+`1200` 秒 timeout 均未恢复。进程树终止已确认，workspace 没有任何修改，没有
+`turn.completed`、最终消息或 Token usage。封存 verifier 仍有四个 `color=False` 场景失败，
+目标 pytest 保持 baseline 绿态。
+
+由于 Worker 超时、没有 patch 且 verifier 为红，Reviewer 未启动。结果登记为
+`timed_out / not_completed / invalid_infrastructure`，本版本不再次重跑，也不继续 Vega
+treatment。两次 Native 调用均没有形成可比较的日用价值证据；live Provider 行为与调用前
+稳定性判断不一致，是当前实验的直接阻断。公开记录见
+`eval/experiments/daily-value-validation/runs/DV-B05-native-r2-20260730.md`。
+
+### 12.20 2026-07-30 DV-B05 Native 重跑 V3
+
+Owner 再次确认 Provider 已恢复后，以 `direct-rerun-v3`、case revision `5` 预注册第三个
+独立版本。V3 使用全新的 baseline-only workspace、Codex 会话、venv 和临时目录，不向
+Worker 暴露前两次运行。首次本地门禁发现 venv 没有通过 `PYTHONPATH` 指向源码布局，目标
+pytest 因无法导入 Click 而退出 `4`；该阻断发生在 Provider 调用前，原始记录被保留，修正
+环境后门禁重新达到 ready。
+
+正式 Worker 在 `706.705` 秒正常产生 `turn.completed`，只修改
+`src/click/termui.py` 与 `tests/test_termui.py`。Worker sandbox 内执行
+`--basetemp ../pytest-temp` 时因父目录不可写得到 `PermissionError`，但封存阶段在同一
+workspace 上独立执行两个冻结命令，verifier 8 个场景全部通过，目标 pytest 为
+`237 passed, 11 skipped`，`git diff --check` 和 allowlist 同样通过。
+
+满足 Reviewer 启动门禁后，新的只读 Codex 会话只接收冻结任务、diff 和独立验证证据，不
+接收 Worker 对话、事件流、自述或最终消息。Reviewer 在 `391.512` 秒正常完成，没有发现
+代码缺陷，但指出输入证据缺少 verifier 验证前后实际 SHA-256 记录，因此按 fail-closed
+合同返回 `needs_human`。
+
+Reviewer 完成后补充执行带前后哈希的固定验证，hash 均匹配冻结值，两项验证再次全绿；该
+补充不追溯改写首次 Reviewer verdict，也没有再次调用 Reviewer。因此 V3 如实登记为
+`completed / needs_human / pending_human_adjudication`，不是 `verified_success`。
+
+这次运行证明 Provider 链路、独立上下文 Reviewer 和确定性封存流程能够真实完成，也暴露
+两个最小 Harness 问题：
+
+1. Worker 的固定 `../pytest-temp` 与 `workspace-write` sandbox 写边界冲突；
+2. Reviewer 输入必须包含 verifier 身份与前后完整性证据，不能只给绿色输出。
+
+在人工裁决 V3 之前不启动 Vega treatment，不修改核心 Runtime，也不为了获得 approve
+自动重跑 Reviewer。公开记录见
+`eval/experiments/daily-value-validation/runs/DV-B05-native-r3-20260730.md`。
+
 ---
 
 ## 13. 参考资料
