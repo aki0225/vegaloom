@@ -3,6 +3,11 @@
 > 预注册日期：2026-07-30
 >
 > Owner 再次确认 Provider 已恢复稳定，并授权第三个独立实验版本。
+>
+> 2026-07-30 后续裁决：V3 作为 `historical_canary / unpairable` 保留。Native Worker、
+> 固定验证和独立 Reviewer 均已完成，但 Vega treatment 从未授权或启动，因此不能补成
+> Native/Vega pair。运行记录中的 `owner_manual_actions=0` 只描述该次 Native treatment，
+> 不能用于比较 Vega 的人工操作或经济性。
 
 ## 1. 历史结果边界
 
@@ -66,8 +71,11 @@ Reviewer 完成后已补充一次带前后哈希的固定验证：verifier hash 
 ```text
 run_status=completed
 final_disposition=needs_human
-comparison_eligibility=pending_human_adjudication
+evidence_role=historical_canary
+comparison_eligibility=unpairable
 ```
 
-Vega treatment 尚未授权。完整公开记录见
+该分类不追溯改写首次 Reviewer verdict，也不把 V3 改写为 `verified_success`。不再为了补齐
+旧 pair 单独启动 Vega treatment；未来若继续日用价值验证，必须重新预注册新的成对实验。
+完整公开记录见
 `eval/experiments/daily-value-validation/runs/DV-B05-native-r3-20260730.md`。

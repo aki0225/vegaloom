@@ -1,7 +1,7 @@
 # Vega 日用价值配对实验 V2
 
 > 2026-07-29 supersession：V2 可执行 Harness 与配套测试已因过度设计删除。
-> 本文只保留为未执行的历史预注册，正文中的脚本命令不再可用。后续若继续日用价值验证，
+> 本文只保留为未执行的历史预注册，原脚本命令已从正文移除。后续若继续日用价值验证，
 > 只能重新冻结一个最小 case，并直接复用 task、允许路径和固定 verifier，不恢复本 Harness。
 
 状态：`historical_design / harness_retired / no_treatment_started`。
@@ -21,9 +21,9 @@ V2 不是给 Vega 增加功能，而是修复 V1 暴露出的实验误差。DV-B
 
 不增加 SDK、队列、Web UI、Memory、Multi-Worker、A2A，也不修改 Vega 核心 Runtime。
 
-## 2. 共用环境资格门
+## 2. 历史共用环境资格门
 
-正式运行前使用 `scripts/daily_value_v2.py preflight` 生成本地产物。资格门必须同时满足：
+历史设计要求正式运行前生成一份本地环境资格结果，并同时满足：
 
 - 明确指定一个已存在的 Python executable；
 - `pip check` 通过；
@@ -34,43 +34,15 @@ V2 不是给 Vega 增加功能，而是修复 V1 暴露出的实验误差。DV-B
 - 第二个 treatment 的 `environment_fingerprint` 与第一个完全一致。
 
 `environment_fingerprint` 只绑定 Python 实现、版本、ABI、平台和已安装分发包的名称与版本，
-不绑定本机绝对路径。preflight 不调用 Provider；任一门禁失败都返回 `status=blocked`。
-
-示例：
-
-```powershell
-$python = Resolve-Path <shared-venv-python>
-$output = ".local-validation/daily-value-v2/<case>/<treatment>/preflight.json"
-
-python scripts/daily_value_v2.py preflight `
-  --python $python `
-  --workspace <treatment-workspace> `
-  --collect-target tests/test_target.py `
-  --max-control-latency-seconds 5 `
-  --active-formal-treatments 0 `
-  --competing-workload-observed false `
-  --output $output
-```
-
-第二个 treatment 还必须传入首个 preflight 中的 fingerprint：
-
-```powershell
-python scripts/daily_value_v2.py preflight `
-  --python $python `
-  --workspace <second-workspace> `
-  --collect-target tests/test_target.py `
-  --expected-environment-fingerprint <sha256> `
-  --max-control-latency-seconds 5 `
-  --active-formal-treatments 0 `
-  --competing-workload-observed false `
-  --output <second-preflight>
-```
+不绑定本机绝对路径。资格检查不调用 Provider；任一门禁失败都应返回 `status=blocked`。
 
 延迟上限属于 case 合同，不能看到运行结果后再放宽。
 
-## 3. Worker 事件接收时间
+对应可执行 Harness 已删除，本文不再提供命令，也不授权恢复同等入口。
 
-`scripts/daily_value_v2_worker.py` 只负责一次正式 Worker：
+## 3. 历史 Worker 事件设计
+
+已退役的 Worker 驱动原计划只负责一次正式 Worker：
 
 - 要求命令显式包含 `--json`；
 - 拒绝 `--ignore-user-config` 和绕过 sandbox 的危险参数；
@@ -80,24 +52,10 @@ python scripts/daily_value_v2.py preflight `
 - 非法 JSON 行只记录内容 hash，并增加 `invalid_event_count`；
 - 超时只终止当前驱动器明确创建的进程树。
 
-示例：
-
-```powershell
-python scripts/daily_value_v2_worker.py `
-  --workspace <treatment-workspace> `
-  --prompt <worker-prompt> `
-  --preflight <preflight-json> `
-  --events <worker-events-jsonl> `
-  --stderr <worker-stderr> `
-  --result <worker-result-json> `
-  --timeout-seconds 600 `
-  --expected-environment-fingerprint <sha256> `
-  -- codex exec --cd <treatment-workspace> --profile <profile> `
-     --model <model> --sandbox workspace-write --ephemeral --json -
-```
-
 `received_at` 是本地驱动器收到事件的时间，不是模型内部思考时间。它只能用来判断长时间空窗
 发生在事件之间，不能精确拆分 Provider、CLI、Shell 或 Harness 的内部耗时。
+
+该驱动器已经删除，不能把本节当作可执行入口，也不应为保留时间戳字段重新实现一套 Harness。
 
 ## 4. V2 结果字段
 
@@ -127,14 +85,6 @@ V2 使用独立结果文件，`schema_version=2` 且 `experiment_version=V2`。V
 Vega 的 Runtime verification 即使通过，也不能覆盖 post-seal 失败；Native 的封存
 verifier 通过，也不能把超时 Worker 改写为成功。
 
-校验命令：
-
-```powershell
-python scripts/daily_value_v2.py validate-results `
-  --results <v2-results-jsonl> `
-  --output .local-validation/daily-value-v2/summary.json
-```
-
 ## 5. 正式启动条件
 
 只有满足以下条件才允许登记第一个 V2 case：
@@ -155,5 +105,5 @@ pair 前，不扩建 Harness，不形成日用价值结论。
 风险证据重算期间的 Git 子进程，同机存在多个 Codex、Python 和 Node 进程。该结果支持增加
 环境与控制延迟门禁，不支持放宽 Runtime 超时或把 V1 timeout 归因给 Vega。
 
-当前只证明 V2 基础设施可以阻止缺依赖、环境漂移、并发 treatment、明显控制命令延迟和结果
-字段混淆。尚未运行 V2 正式 pair，因此仍是 `insufficient_evidence`。
+历史定向测试只证明当时的 V2 Harness 能检查这些输入条件，不代表当前仍有可执行基础设施，
+也不增加 Vega 产品能力。V2 从未运行正式 pair，因此结论保持 `insufficient_evidence`。

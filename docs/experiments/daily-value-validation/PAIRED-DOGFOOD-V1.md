@@ -160,7 +160,7 @@ Token 无法取得时记录 `null`，聚合必须显示覆盖率，不能把缺�
 
 ## 7. 聚合与结论边界
 
-`scripts/daily_value_eval.py` 只做结构校验和描述性聚合：
+已退役的本地聚合器只做过结构校验和描述性聚合：
 
 - 检查 case ledger revision；
 - 拒绝未达到 `runnable` 的正式结果；
@@ -197,23 +197,11 @@ Owner 最终判断至少同时查看：
 - treatment 之间模型、任务、路径或验证条件不一致；
 - 结果需要人工“润色”才能解释为成功。
 
-## 9. 本地命令
+## 9. 当前执行边界
 
-只校验当前 candidate ledger：
-
-```powershell
-python scripts/daily_value_eval.py
-```
-
-资格确认并追加 `runnable` revision 后，使用正式结果生成本地摘要：
-
-```powershell
-python scripts/daily_value_eval.py `
-  --results <results-jsonl> `
-  --output-dir .local-validation/daily-value-v1
-```
-
-本地输出默认不提交。正式证据是否进入 `eval/`，必须在运行完成后按 append-only 规则单独审核。
+本地聚合脚本已在过度设计清理中删除，本文不再提供可执行命令，也不授权恢复同等 Harness。
+历史 task、资格记录、正式运行结果和固定 verifier 继续保留；`eval/` 中的正式证据仍按
+append-only 规则单独审核。
 
 ## 10. 资格确认记录
 

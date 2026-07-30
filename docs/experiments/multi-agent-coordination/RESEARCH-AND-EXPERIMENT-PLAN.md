@@ -1255,7 +1255,7 @@ workspace 上独立执行两个冻结命令，verifier 8 个场景全部通过�
 合同返回 `needs_human`。
 
 Reviewer 完成后补充执行带前后哈希的固定验证，hash 均匹配冻结值，两项验证再次全绿；该
-补充不追溯改写首次 Reviewer verdict，也没有再次调用 Reviewer。因此 V3 如实登记为
+补充不追溯改写首次 Reviewer verdict，也没有再次调用 Reviewer。因此 V3 当时如实登记为
 `completed / needs_human / pending_human_adjudication`，不是 `verified_success`。
 
 这次运行证明 Provider 链路、独立上下文 Reviewer 和确定性封存流程能够真实完成，也暴露
@@ -1264,9 +1264,14 @@ Reviewer 完成后补充执行带前后哈希的固定验证，hash 均匹配冻
 1. Worker 的固定 `../pytest-temp` 与 `workspace-write` sandbox 写边界冲突；
 2. Reviewer 输入必须包含 verifier 身份与前后完整性证据，不能只给绿色输出。
 
-在人工裁决 V3 之前不启动 Vega treatment，不修改核心 Runtime，也不为了获得 approve
-自动重跑 Reviewer。公开记录见
+当时的停止点是在人工裁决 V3 之前不启动 Vega treatment，不修改核心 Runtime，也不为了
+获得 approve 自动重跑 Reviewer。公开记录见
 `eval/experiments/daily-value-validation/runs/DV-B05-native-r3-20260730.md`。
+
+后续 Owner 裁决将 V3 分类为 `historical_canary / unpairable`：其实现与验证结果可以作为
+单次链路正向样本保留，但首次 Reviewer 的 `needs_human` 不追溯改写，且没有 Vega treatment
+可组成配对。`owner_manual_actions=0` 仅描述这次 Native treatment，不能用于比较 Vega
+是否减少人工操作或形成经济性结论。当前不再为补齐旧 pair 启动单边 Vega treatment。
 
 ---
 

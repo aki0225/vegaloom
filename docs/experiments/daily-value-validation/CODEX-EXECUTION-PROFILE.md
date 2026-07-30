@@ -2,7 +2,7 @@
 
 > 2026-07-29 supersession：`daily_value_codex_preflight.py` 已随过度设计清理删除。
 > 本文继续保留 Provider 路由不能被 `--ignore-user-config` 意外移除的历史教训，
-> 但正文中的预检脚本命令不再是当前执行入口。
+> 原预检命令已从正文移除。
 
 状态：2026-07-29 起对后续 treatment 生效；不追溯修改
 `DV-B04/native` 的基础设施失败，也不允许重跑该 treatment。
@@ -35,33 +35,10 @@ docs/experiments/daily-value-validation/codex-profile.example.toml
 全局 `AGENTS.md` 属于 Owner 的日常 Codex 环境，两个 treatment 必须一致继承。任务 prompt
 中的明确盲测边界仍禁止联网、子代理和读取另一 treatment 产物。
 
-## 2. 离线预检
+## 2. 历史预检约束
 
-Worker 调用前执行：
-
-```powershell
-python scripts/daily_value_codex_preflight.py `
-  --model gpt-5.6-sol `
-  --profile vega-daily-value-v1 `
-  --reasoning-effort medium `
-  --sandbox workspace-write `
-  --output .local-validation/daily-value-v1/provider-worker-preflight.json
-```
-
-Reviewer 调用前执行：
-
-```powershell
-python scripts/daily_value_codex_preflight.py `
-  --model gpt-5.6-sol `
-  --profile vega-daily-value-v1 `
-  --reasoning-effort medium `
-  --sandbox read-only `
-  --expected-profile-fingerprint <worker-profile-fingerprint> `
-  --output .local-validation/daily-value-v1/provider-reviewer-preflight.json
-```
-
-预检只读取 `CODEX_HOME/config.toml`、`custom-models.json` 与命名 profile，不会调用
-Provider，也不会输出真实 endpoint。输出必须满足：
+已退役预检原本只读取 `CODEX_HOME/config.toml`、`custom-models.json` 与命名 profile，
+不会调用 Provider，也不会输出真实 endpoint。它检查的约束是：
 
 - `status=ready`；
 - 冻结模型存在于当前模型目录；
@@ -69,6 +46,9 @@ Provider，也不会输出真实 endpoint。输出必须满足：
 - `exec_args` 不包含 `--ignore-user-config`；
 - 命名 profile 关闭所有实验外 feature、workspace 网络和自动审批；
 - Native 与 Vega、Worker 与 Reviewer 的 `profile_fingerprint` 一致。
+
+该脚本已经删除，本文不再提供替代命令，也不构成新的 Provider 调用授权。未来若预注册新的
+实验版本，应直接在该版本中冻结最小启动条件，不能为复用本文重新建立通用预检 Harness。
 
 `.vega.yaml` 的 worker 与 reviewer 都必须指定：
 

@@ -3,7 +3,16 @@
 - 预注册日期：2026-07-30
 - 分支：`experiment/ma2b-pilot-next`
 - Harness code baseline：`dfeb479117d01cff75c069c24714404d5f1afca7`
-- 状态：`preregistered`
+- 状态：`reviewer_detection_passed / repair_recovery_not_started / repair_paused`
+
+> 2026-07-30 状态更新：正式运行已执行至首次 Reviewer。Reviewer 在有限 verification
+> 全绿的受控负向样本中准确发现 rolling bucket 与双额度组合语义遗漏，因此
+> `reviewer_detection=passed`。修复 Worker、第二次 verification 和最终 Reviewer 均未启动；
+> 当前不再授权继续 repair 阶段。下文未执行步骤只保留为预注册边界，不构成 Provider 调用
+> 授权。阶段证据见
+> `eval/experiments/daily-value-validation/runs/CLOSED-LOOP-PILOT-V2-20260730.md`。
+> 该 append-only 阶段记录保留当时的 `in_progress` 字样，不追溯改写；当前执行裁决以本文
+> 的 `repair_paused` 为准。
 
 ## 1. V1 边界
 
@@ -87,7 +96,7 @@ controlled negative patch 通过 V2 两条正式验证，但 V1 的完整 verifi
 | baseline `verification-result.json` | `05af023776b4e26fdfd99e94ec38d535f9cfacc6986cbcb016db437c61a0323f` |
 | controlled patch `verification-result.json` | `ec8d4386d39d9b18c29855345e38bc6b52ec708d5bd660c8d2a291b435c0ff65` |
 
-## 5. 正式流程
+## 5. 预注册流程与实际停点
 
 1. 使用同一任务合同以 `assist` 启动全新 loop，封存 V2 formal baseline。
 2. 操作者应用 SHA-256 已冻结的 controlled negative patch。
@@ -102,6 +111,24 @@ controlled negative patch 通过 V2 两条正式验证，但 V1 的完整 verifi
 8. 修复后再次执行同一 run 的 `loop continue`；两条 verification 全绿且新的 read-only
    Reviewer `approve` 时，`repair_recovery=passed`。
 
+实际运行 ID 为 `20260730-175833-282706-bug-loop`，执行至步骤 6 后停止：
+
+- controlled negative patch 只修改两个允许文件；
+- 两条正式 verification 全绿，`failed_count=0`；
+- 新的 read-only Reviewer 返回 `request_changes`；
+- finding 明确指出实现忽略 rolling bucket，且 daily/rolling 同时存在时没有取更严格剩余
+  额度；
+- Reviewer 未接收 Worker 对话，审查期间 workspace 未变化。
+
+因此当前只能记录：
+
+```text
+reviewer_detection=passed
+repair_recovery=not_started
+```
+
+步骤 7 和步骤 8 没有执行，不能写成完整闭环成功。
+
 ## 6. 停止线
 
 - 首次 detection Reviewer、repair Worker、最终 Reviewer 各只允许一次正式调用；
@@ -111,6 +138,7 @@ controlled negative patch 通过 V2 两条正式验证，但 V1 的完整 verifi
   变化、策略变化或证据不一致均 fail-closed；
 - 不修改 Runtime，不放宽 scope，不替换 verifier，不把 stopped/needs_human 改写为通过；
 - V2 失败后如需继续，必须再建版本并保留本次记录。
+- 当前 repair 阶段已暂停；不得依据已删除的临时交接说明续跑同一 run。
 
 ## 7. 结论边界
 
@@ -118,4 +146,5 @@ V2 只回答当前 Reviewer 能否发现一个“有限验证全绿但违反明�
 发现后能否由新 Worker 修复。它不改变 V1 normal 的失败结论，也不证明普遍成功率、经济性、
 Planner、Memory 或 Multi-Worker 价值。
 
-本文提交并推送后输入冻结，随后才允许 V2 正式 Provider 调用。
+当前证据已回答前半个问题：本次 Reviewer 成功检出受控遗漏。后半个 repair recovery
+没有执行，仍为未知；本文不再授权新的 Provider 调用。
