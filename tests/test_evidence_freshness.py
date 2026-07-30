@@ -446,6 +446,37 @@ def test_gate_records_failure_for_non_string_changed_files_evidence(
     _assert_failed_gate_run(gate_run, "evidence_changed_files_invalid")
 
 
+def test_gate_rejects_changed_files_that_do_not_match_current_workspace(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    reflect_run = ReflectRuntime(workspace).run(repo)
+    state_path = reflect_run / "state.json"
+    evidence_path = reflect_run / "review-evidence.json"
+    state = _read_json(state_path)
+    evidence = _read_json(evidence_path)
+    forged_changed_files = ["forged.py"]
+    state["changed_files"] = forged_changed_files
+    evidence["changed_files"] = forged_changed_files
+    evidence["changed_files_sha256"] = _sha256_json(forged_changed_files)
+    evidence["snapshot_id"] = _sha256_json(
+        {key: value for key, value in evidence.items() if key != "snapshot_id"}
+    )
+    state["review_snapshot_id"] = evidence["snapshot_id"]
+    _write_json(state_path, state)
+    _write_json(evidence_path, evidence)
+
+    gate_run = GateRuntime(workspace).run(repo, reflect_run.name)
+
+    _assert_failed_gate_run(gate_run, "changed_files_workspace_mismatch")
+    diagnostic = _read_json(gate_run / "gate-result.json")["diagnostic"]
+    assert "changed_files_mismatch" not in diagnostic
+    assert "changed_files_hash_mismatch" not in diagnostic
+    assert "snapshot_metadata_invalid" not in diagnostic
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [

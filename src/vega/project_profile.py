@@ -18,7 +18,7 @@ from .project_config import (
 )
 from .project_knowledge import load_agents_instructions
 from .redaction import filter_sensitive_memory_entries, redact_text, redact_value
-from .repository_identity import repository_scope, resolve_git_revision
+from .repository_identity import ResolvedGitRevision, repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
 from .trace import TraceWriter
 
@@ -128,7 +128,7 @@ def build_project_profile(
     repo_path: Path,
     *,
     tracked_only: bool = False,
-    tracked_revision: str | None = None,
+    tracked_revision: str | ResolvedGitRevision | None = None,
 ) -> ProjectProfile:
     repo = repo_path.resolve()
     resolved_revision = (
@@ -137,7 +137,7 @@ def build_project_profile(
         else None
     )
     tracked_files = (
-        _tracked_files(repo, resolved_revision)
+        _tracked_files(repo, resolved_revision.commit if resolved_revision else None)
         if tracked_only
         else None
     )
@@ -158,7 +158,7 @@ def build_project_profile(
     node_package_manager = _detect_node_package_manager(
         repo,
         config_files,
-        tracked_revision=resolved_revision,
+        tracked_revision=resolved_revision.commit if resolved_revision else None,
     )
     test_commands = _detect_test_commands(
         repo,
@@ -187,7 +187,7 @@ def build_project_profile(
         script_entrypoints=_detect_script_entrypoints(
             repo,
             config_files,
-            tracked_revision=resolved_revision,
+            tracked_revision=resolved_revision.commit if resolved_revision else None,
         ),
         key_directories=_existing_dirs(repo, KEY_DIRS, tracked_files=tracked_files),
         config_files=config_files,

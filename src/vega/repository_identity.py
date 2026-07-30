@@ -2,10 +2,42 @@ from __future__ import annotations
 
 import os
 import subprocess
+from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 
 from .git_read import coerce_git_output_bytes, run_git_capture
+
+
+_RESOLVED_GIT_REVISION_PROOF = object()
+
+
+@dataclass(frozen=True, init=False)
+class ResolvedGitRevision:
+    """绑定仓库根目录的已校验 commit，仅在同一次读取事务中复用。"""
+
+    repo_key: str
+    commit: str
+    _proof: object = field(repr=False, compare=False)
+
+
+def _make_resolved_git_revision(
+    *,
+    repo_key: str,
+    commit: str,
+) -> ResolvedGitRevision:
+    resolved = object.__new__(ResolvedGitRevision)
+    object.__setattr__(resolved, "repo_key", repo_key)
+    object.__setattr__(resolved, "commit", commit)
+    object.__setattr__(resolved, "_proof", _RESOLVED_GIT_REVISION_PROOF)
+    return resolved
+
+
+def _is_full_object_id(value: str) -> bool:
+    return len(value) in {40, 64} and all(
+        character in "0123456789abcdefABCDEF"
+        for character in value
+    )
 
 
 def _git_repository_root(repo_path: Path) -> Path | None:
@@ -30,9 +62,24 @@ def _git_repository_root(repo_path: Path) -> Path | None:
     return git_root
 
 
-def resolve_git_revision(repo_path: Path, revision: str = "HEAD") -> str | None:
+def resolve_git_revision(
+    repo_path: Path,
+    revision: str | ResolvedGitRevision = "HEAD",
+) -> ResolvedGitRevision | None:
     """在已确认的仓库根上解析固定 commit，避免多段上下文读取漂移。"""
-    repo = _git_repository_root(repo_path)
+    requested_repo = repo_path.resolve()
+    requested_repo_key = os.path.normcase(str(requested_repo))
+    if isinstance(revision, ResolvedGitRevision):
+        if (
+            getattr(revision, "_proof", None)
+            is not _RESOLVED_GIT_REVISION_PROOF
+        ):
+            raise RuntimeError("已解析 revision 未经过当前读取事务校验。")
+        if revision.repo_key != requested_repo_key:
+            raise RuntimeError("已解析 revision 与目标仓库不匹配。")
+        return revision
+
+    repo = _git_repository_root(requested_repo)
     if repo is None:
         return None
     try:
@@ -48,7 +95,13 @@ def resolve_git_revision(repo_path: Path, revision: str = "HEAD") -> str | None:
     )
     if result.returncode != 0 or not stdout.strip():
         raise RuntimeError("无法解析 tracked 项目上下文 revision；已拒绝使用空画像继续。")
-    return stdout.strip()
+    commit = stdout.strip()
+    if not _is_full_object_id(commit):
+        raise RuntimeError("tracked 项目上下文 revision 不是完整 commit OID。")
+    return _make_resolved_git_revision(
+        repo_key=os.path.normcase(str(repo)),
+        commit=commit,
+    )
 
 
 def repository_scope(repo_path: Path) -> str:

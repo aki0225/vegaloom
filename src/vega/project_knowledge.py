@@ -4,11 +4,17 @@ import os
 import re
 from pathlib import Path, PurePosixPath
 
+from pydantic import PrivateAttr
+
 from .extensions import search_memory
 from .git_read import run_git_bytes
 from .models import AgentsInstruction, MemoryHit, ProjectKnowledge
 from .redaction import filter_sensitive_memory_entries, redact_text
-from .repository_identity import repository_scope, resolve_git_revision
+from .repository_identity import (
+    ResolvedGitRevision,
+    repository_scope,
+    resolve_git_revision,
+)
 
 IGNORED_DIRS = {
     ".git",
@@ -37,6 +43,16 @@ IGNORED_DIR_PREFIXES = (
 MAX_AGENTS_FILES = 20
 MAX_AGENTS_CHARS = 8000
 MAX_MEMORY_HITS = 10
+_PROJECT_KNOWLEDGE_PROOF = object()
+
+
+class _LoadedProjectKnowledge(ProjectKnowledge):
+    """携带进程内来源证明，避免把事务元数据写入公开 schema。"""
+
+    _source_proof: object = PrivateAttr()
+    _repo_key: str = PrivateAttr()
+    _tracked_only: bool = PrivateAttr()
+    _tracked_revision: str | None = PrivateAttr()
 
 
 def load_project_knowledge(
@@ -46,7 +62,7 @@ def load_project_knowledge(
     related_paths: list[str] | None = None,
     *,
     tracked_only: bool = False,
-    tracked_revision: str | None = None,
+    tracked_revision: str | ResolvedGitRevision | None = None,
 ) -> ProjectKnowledge:
     repo = repo_path.resolve()
     revision = (
@@ -61,13 +77,42 @@ def load_project_knowledge(
         tracked_revision=revision,
     )
     memory_hits = search_related_memory(workspace, repo, input_text, related_paths or [])
-    return ProjectKnowledge(
+    knowledge = _LoadedProjectKnowledge(
         repo_name=repo.name,
         repo_path=str(repo),
         agents_instructions=instructions,
         memory_hits=memory_hits,
         missing_agents_md=not instructions,
     )
+    knowledge._source_proof = _PROJECT_KNOWLEDGE_PROOF
+    knowledge._repo_key = os.path.normcase(str(repo))
+    knowledge._tracked_only = tracked_only
+    knowledge._tracked_revision = revision.commit if revision else None
+    return knowledge
+
+
+def validate_project_knowledge_source(
+    knowledge: ProjectKnowledge,
+    repo_path: Path,
+    *,
+    tracked_only: bool,
+    tracked_revision: ResolvedGitRevision | None,
+) -> None:
+    """校验预加载知识与当前读取事务一致，拒绝可变规则混入 tracked context。"""
+    repo = repo_path.resolve()
+    if Path(knowledge.repo_path).resolve() != repo:
+        raise ValueError("预加载项目知识与目标仓库不匹配。")
+    if not tracked_only:
+        return
+    expected_revision = tracked_revision.commit if tracked_revision else None
+    if (
+        not isinstance(knowledge, _LoadedProjectKnowledge)
+        or knowledge._source_proof is not _PROJECT_KNOWLEDGE_PROOF
+        or knowledge._repo_key != os.path.normcase(str(repo))
+        or not knowledge._tracked_only
+        or knowledge._tracked_revision != expected_revision
+    ):
+        raise ValueError("预加载项目知识与 tracked revision 不匹配。")
 
 
 def load_agents_instructions(
@@ -75,7 +120,7 @@ def load_agents_instructions(
     related_paths: list[str] | None = None,
     *,
     tracked_only: bool = False,
-    tracked_revision: str | None = None,
+    tracked_revision: str | ResolvedGitRevision | None = None,
 ) -> list[AgentsInstruction]:
     repo = repo_path.resolve()
     if tracked_only:
@@ -87,7 +132,11 @@ def load_agents_instructions(
             return []
         if revision is None:
             return []
-        return _load_tracked_agents_instructions(repo, related_paths or [], revision)
+        return _load_tracked_agents_instructions(
+            repo,
+            related_paths or [],
+            revision.commit,
+        )
 
     discovered: list[Path] = []
 

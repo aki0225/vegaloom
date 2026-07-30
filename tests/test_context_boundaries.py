@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 
 from vega.experimental.memory import MemoryLedgerStore, install_memory_backend
+from vega.gate_runtime import evaluate_risk
 from vega.models import MemoryProposal
 from vega.project_context import build_project_context
 from vega.project_knowledge import load_agents_instructions, search_related_memory
 from vega.project_profile import build_project_profile
+from vega.reflect_runtime import ReflectRuntime
 from vega.repository_identity import repository_scope
 from vega.experimental.inspection.runtime import EngineeringChangeRuntime
 
@@ -278,6 +281,38 @@ def test_memory_search_does_not_mix_same_name_repositories(tmp_path: Path) -> No
     assert {item.proposal_id for item in hits} == {"mp-general"}
 
 
+def test_gate_queries_accepted_repo_memory_after_reflect(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_repo(repo, {"README.md": "# Demo\n"})
+    repo.joinpath("README.md").write_text(
+        "# Demo\n\n增加导出说明。\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    workspace.mkdir()
+    test_log = workspace / "tests.log"
+    test_log.write_text("1 passed\n", encoding="utf-8", newline="\n")
+
+    reflect_run = ReflectRuntime(workspace).run(repo, test_log=test_log)
+    _accept_memory(
+        workspace,
+        proposal_id="mp-gate-scoped",
+        repo=repository_scope(repo),
+        content="修改 README.md 的导出说明后需要核对空状态。",
+    )
+
+    result = evaluate_risk(workspace, repo, reflect_run.name)
+    memory_reason = next(
+        reason for reason in result.reasons if reason.code == "memory_hits"
+    )
+
+    assert memory_reason.severity == "medium"
+    assert memory_reason.evidence == "导出按钮经验"
+    assert result.risk == "medium"
+    assert result.recommendation == "isolated-review"
+
+
 def test_memory_store_rejects_conflicting_repo_filters(tmp_path: Path) -> None:
     store = MemoryLedgerStore(tmp_path)
 
@@ -495,6 +530,31 @@ def test_tracked_project_profile_reads_package_manager_from_fixed_revision(
     assert profile.package_managers == ["pnpm"]
     assert profile.test_commands == ["pnpm test"]
     assert profile.lint_commands == ["pnpm run lint"]
+
+
+def test_tracked_project_profile_keeps_non_git_directory_empty(
+    tmp_path: Path,
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="vega-non-git-") as directory:
+        repo = Path(directory) / "repo"
+        repo.mkdir()
+        repo.joinpath("AGENTS.md").write_text(
+            "# MUTABLE_RULE\n",
+            encoding="utf-8",
+        )
+        repo.joinpath("package.json").write_text(
+            _node_package_json("pnpm@10.13.1"),
+            encoding="utf-8",
+        )
+
+        profile = build_project_profile(tmp_path, repo, tracked_only=True)
+
+        assert profile.tech_stack == []
+        assert profile.package_managers == []
+        assert profile.test_commands == []
+        assert profile.lint_commands == []
+        assert profile.config_files == []
+        assert profile.agents_files == []
 
 
 def test_explicit_verification_commands_remain_above_node_auto_detection(

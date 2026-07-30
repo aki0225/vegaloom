@@ -8,10 +8,12 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .models import GateResult, LoopIterationState
+from .redaction import redact_text
 from .risk_review_evidence import (
     gate_blocks_reviewer_before_execution,
     gate_result_semantics,
 )
+from .workspace_check import collect_tracked_diff_parts, render_tracked_diff_sections
 
 
 REPORT_BINDING_START = "<!-- vega-risk-gate-binding\n"
@@ -29,6 +31,22 @@ class LoopRiskGateArtifactIntegrity:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def collect_gate_diff_check(repo_path: Path) -> str:
+    """独立收集 staged/unstaged 空白错误，避免沿用可被篡改的 Reflect 文本。"""
+    staged, unstaged = collect_tracked_diff_parts(repo_path, ["--check"])
+    return redact_text(render_tracked_diff_sections(staged, unstaged))
+
+
+def validated_reflect_changed_files(reflect_state: dict[str, object]) -> list[str]:
+    """读取经过 freshness 绑定的变更文件列表，并拒绝宽松类型转换。"""
+    changed_files = reflect_state.get("changed_files")
+    if not isinstance(changed_files, list) or not all(
+        isinstance(item, str) for item in changed_files
+    ):
+        raise ValueError("Gate source reflect changed_files 不合法。")
+    return changed_files
 
 
 def render_risk_gate_report_binding(

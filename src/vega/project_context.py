@@ -4,10 +4,13 @@ from pathlib import Path
 
 from .models import ProjectKnowledge, ProjectProfile
 from .project_config import load_project_config, render_project_config_summary
-from .project_knowledge import load_project_knowledge
+from .project_knowledge import (
+    load_project_knowledge,
+    validate_project_knowledge_source,
+)
 from .project_profile import build_project_profile
 from .redaction import redact_text
-from .repository_identity import resolve_git_revision
+from .repository_identity import ResolvedGitRevision, resolve_git_revision
 
 
 def build_project_context(
@@ -17,6 +20,8 @@ def build_project_context(
     related_paths: list[str] | None = None,
     *,
     tracked_only: bool = True,
+    tracked_revision: str | ResolvedGitRevision | None = None,
+    knowledge: ProjectKnowledge | None = None,
 ) -> str:
     """构建 worker/reviewer 共用的项目上下文。
 
@@ -24,27 +29,41 @@ def build_project_context(
     这样主会话、worker 和隔离 reviewer 能共享稳定项目知识，但仍保持审查上下文隔离。
     """
     repo = repo_path.resolve()
-    tracked_revision = resolve_git_revision(repo) if tracked_only else None
+    resolved_revision = (
+        resolve_git_revision(repo, tracked_revision or "HEAD")
+        if tracked_only
+        else None
+    )
     profile = build_project_profile(
         workspace,
         repo,
         tracked_only=tracked_only,
-        tracked_revision=tracked_revision,
+        tracked_revision=resolved_revision,
     )
-    knowledge = load_project_knowledge(
+    project_knowledge = knowledge or load_project_knowledge(
         workspace,
         repo,
         input_text,
         related_paths or [],
         tracked_only=tracked_only,
-        tracked_revision=tracked_revision,
+        tracked_revision=resolved_revision,
+    )
+    validate_project_knowledge_source(
+        project_knowledge,
+        repo,
+        tracked_only=tracked_only,
+        tracked_revision=resolved_revision,
     )
     config = load_project_config(
         repo,
         tracked_only=tracked_only,
-        tracked_revision=tracked_revision,
+        tracked_revision=resolved_revision,
     )
-    return render_project_context(profile, knowledge, render_project_config_summary(config))
+    return render_project_context(
+        profile,
+        project_knowledge,
+        render_project_config_summary(config),
+    )
 
 
 def render_project_context(
@@ -146,6 +165,8 @@ def write_project_context(
     related_paths: list[str] | None = None,
     *,
     tracked_only: bool = True,
+    tracked_revision: str | ResolvedGitRevision | None = None,
+    knowledge: ProjectKnowledge | None = None,
 ) -> None:
     run_dir.joinpath("project-context.md").write_text(
         build_project_context(
@@ -154,6 +175,8 @@ def write_project_context(
             input_text,
             related_paths or [],
             tracked_only=tracked_only,
+            tracked_revision=tracked_revision,
+            knowledge=knowledge,
         ),
         encoding="utf-8",
     )

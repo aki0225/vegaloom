@@ -7,7 +7,6 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .agents_proposal import render_agents_md_proposals
-from .git_read import run_git_text
 from .memory_artifacts import MemoryProposalStore, make_memory_proposal_id
 from .models import BriefInput, BriefState, MemoryProposal, ProjectKnowledge, ReflectState
 from .project_config import load_project_config
@@ -15,7 +14,7 @@ from .project_context import write_project_context
 from .project_knowledge import load_project_knowledge
 from .redaction import assert_not_sensitive_path, redact_text
 from .review_evidence import make_review_evidence as _make_review_evidence
-from .repository_identity import repository_scope
+from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir, resolve_run_dir
 from .trace import TraceWriter
 from .workspace_check import (
@@ -94,12 +93,14 @@ class ReflectRuntime:
             diagnostics=source_brief_diagnostics,
         )
         context_input = "\n".join([safe_note or "", profile_text, "\n".join(changed_files)])
+        tracked_revision = resolve_git_revision(repo)
         knowledge = load_project_knowledge(
             self.workspace,
             repo,
             context_input,
             changed_files,
             tracked_only=True,
+            tracked_revision=tracked_revision,
         )
 
         diff_summary = render_diff_summary(git_data, changed_files, untracked_files)
@@ -130,6 +131,8 @@ class ReflectRuntime:
             context_input,
             changed_files,
             tracked_only=True,
+            tracked_revision=tracked_revision,
+            knowledge=knowledge,
         )
         run_dir.joinpath("reflection.md").write_text(
             reflection,
@@ -243,33 +246,15 @@ class ReflectRuntime:
 
 
 def collect_git_reflection(repo_path: Path) -> dict[str, str]:
-    """以 staged + unstaged 双事实流收集 Reflect 所需 Git 摘要。
+    """以 staged + unstaged 双事实流收集 Reflect 的确定性检查结果。
 
     不能只使用 ``git diff HEAD``：同一文件处于 ``MM`` 时，HEAD 到工作区的净差异
-    可能抵消 index 中已有修改。Reflect 是后续 Gate/Review 的证据源，因此 stat、
-    check 和文件列表都必须分别采集后再合并。
+    可能抵消 index 中已有修改。完整 diff 和文件列表已经由 review workspace snapshot
+    提供，这里只保留不能从 snapshot 推导的 ``diff --check``。
     """
-    staged_stat, unstaged_stat = collect_tracked_diff_parts(repo_path, ["--stat"])
     staged_check, unstaged_check = collect_tracked_diff_parts(repo_path, ["--check"])
-    staged_names, unstaged_names = collect_tracked_diff_parts(
-        repo_path,
-        ["--name-only"],
-    )
-    name_only = "\n".join(
-        dict.fromkeys(
-            [
-                *[line for line in staged_names.splitlines() if line.strip()],
-                *[line for line in unstaged_names.splitlines() if line.strip()],
-            ]
-        )
-    )
     return {
-        "status": redact_text(
-            _run_git(repo_path, ["git", "status", "--short", "--untracked-files=no"])
-        ),
-        "stat": redact_text(render_tracked_diff_sections(staged_stat, unstaged_stat)),
         "check": redact_text(render_tracked_diff_sections(staged_check, unstaged_check)),
-        "name_only": redact_text(name_only),
     }
 
 
@@ -292,8 +277,6 @@ def render_diff_summary(
         )
     else:
         lines.append("- 无")
-    lines.extend(["", "## Git Status", "", "```text", git_data["status"].strip() or "<clean>", "```"])
-    lines.extend(["", "## Git Diff Stat", "", "```text", git_data["stat"].strip() or "<empty>", "```"])
     lines.extend(["", "## Git Diff Check", "", "```text", git_data["check"].strip() or "<ok>", "```"])
     return redact_text("\n".join(lines).rstrip() + "\n")
 
@@ -383,10 +366,6 @@ def _first_non_empty_line(text: str) -> str:
         if stripped:
             return stripped[:60]
     return "未命名经验"
-
-
-def _run_git(repo_path: Path, command: list[str]) -> str:
-    return run_git_text(repo_path, command)
 
 
 def _read_optional_log(

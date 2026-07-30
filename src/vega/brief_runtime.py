@@ -14,6 +14,7 @@ from .models import BriefInput, BriefState
 from .project_context import write_project_context
 from .project_knowledge import load_project_knowledge, write_knowledge_context
 from .redaction import redact_text
+from .repository_identity import resolve_git_revision
 from .run_utils import create_run_dir
 from .trace import TraceWriter
 
@@ -58,12 +59,15 @@ class BriefRuntime:
 
         related_paths = extract_related_paths(safe_input.text)
         state.current_step = "knowledge"
+        repo = Path(safe_input.repo_path)
+        tracked_revision = resolve_git_revision(repo)
         knowledge = load_project_knowledge(
             self.workspace,
-            Path(safe_input.repo_path),
+            repo,
             safe_input.text,
             related_paths,
             tracked_only=True,
+            tracked_revision=tracked_revision,
         )
         state.agents_files = [item.path for item in knowledge.agents_instructions]
         state.memory_hits = knowledge.memory_hits
@@ -71,10 +75,12 @@ class BriefRuntime:
         write_project_context(
             run_dir,
             self.workspace,
-            Path(safe_input.repo_path),
+            repo,
             safe_input.text,
             related_paths,
             tracked_only=True,
+            tracked_revision=tracked_revision,
+            knowledge=knowledge,
         )
         trace.write(
             "knowledge_loaded",

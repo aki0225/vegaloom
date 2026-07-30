@@ -15,15 +15,15 @@ from .project_config import (
     load_project_config, normalize_scope_profile,
     render_project_config_check,
 )
-from .project_knowledge import load_project_knowledge
+from .project_knowledge import search_related_memory
 from .redaction import redact_text, redact_value, write_redacted_json, write_redacted_text
-from .reflect_runtime import collect_git_reflection
 from .risk_review import (
     build_required_review_reasons,
     match_required_reviews,
 )
 from .risk_review_evidence import required_review_policy_consistent
 from .risk_review_reporting import render_gate_report
+from .risk_gate_evidence import collect_gate_diff_check, validated_reflect_changed_files
 from .run_utils import create_run_dir, resolve_run_dir
 from .trace import TraceWriter
 from .workspace_check import collect_tracked_diff_parts, render_tracked_diff_sections
@@ -235,9 +235,9 @@ def evaluate_risk(
             + ", ".join(freshness.issues)
         )
     reflect_state = _read_json(source_dir / "state.json")
-    git_data = collect_git_reflection(repo)
+    diff_check = collect_gate_diff_check(repo)
     status_all = _git(repo, ["git", "status", "--short", "--untracked-files=all"])
-    diff_files = reflect_state.get("changed_files") or git_data["name_only"].splitlines()
+    diff_files = validated_reflect_changed_files(reflect_state)
     changed_files = _dedupe([*diff_files, *_status_paths(status_all)])
     # 必须与 Reflect/review snapshot 使用相同的 staged + unstaged 双事实流。
     # `git diff HEAD` 在 MM 场景只会给出净差异，预算、删除检查会漏掉 index 中内容。
@@ -255,7 +255,7 @@ def evaluate_risk(
     reflection = _read_text(source_dir / "reflection.md")
     config = load_project_config(repo)
     budget = budget_for_scope(config, scope_profile)
-    knowledge = load_project_knowledge(
+    memory_hits = search_related_memory(
         workspace,
         repo,
         "\n".join([reflection, test_summary, " ".join(changed_files)]),
@@ -269,16 +269,16 @@ def evaluate_risk(
                 code="no_diff",
                 severity="high",
                 message="未发现工作区 diff，无法证明 worker 已完成实现。",
-                evidence="git diff --name-only 为空",
+                evidence="Reflect 变更文件列表与当前 Git 状态均为空",
             )
         )
-    if git_data["check"].strip():
+    if diff_check.strip():
         reasons.append(
             GateReason(
                 code="diff_check_failed",
                 severity="high",
                 message="git diff --check 存在空白或冲突标记问题。",
-                evidence=git_data["check"].strip()[:500],
+                evidence=diff_check.strip()[:500],
             )
         )
     if any(line.startswith("D") for line in name_status.splitlines()):
@@ -420,13 +420,13 @@ def evaluate_risk(
                 evidence="test-summary.md 未包含实际测试输出",
             )
         )
-    if knowledge.memory_hits:
+    if memory_hits:
         reasons.append(
             GateReason(
                 code="memory_hits",
                 severity="medium",
                 message="命中已接受 memory，需要按历史规则或踩坑核对。",
-                evidence=", ".join(hit.title for hit in knowledge.memory_hits[:5]),
+                evidence=", ".join(hit.title for hit in memory_hits[:5]),
             )
         )
 

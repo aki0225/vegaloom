@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from .git_read import coerce_git_output_bytes, run_git_capture
 from .redaction import redact_text
-from .repository_identity import resolve_git_revision
+from .repository_identity import ResolvedGitRevision, resolve_git_revision
 from .risk_review_config import (
     RequiredReviewRule,
     ensure_unique_required_review_ids,
@@ -394,7 +394,7 @@ def load_project_config(
     repo_path: Path,
     *,
     tracked_only: bool = False,
-    tracked_revision: str | None = None,
+    tracked_revision: str | ResolvedGitRevision | None = None,
 ) -> ProjectConfig:
     repo = repo_path.resolve()
     if tracked_only:
@@ -402,7 +402,7 @@ def load_project_config(
         if revision is None:
             return ProjectConfig()
         for name in CONFIG_FILENAMES:
-            content = _read_tracked_config(repo, revision, name)
+            content = _read_tracked_config(repo, revision.commit, name)
             if content is None:
                 continue
             data = yaml.safe_load(content) or {}

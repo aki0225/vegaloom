@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from vega import workspace_check as workspace_check_module
+from vega import reflect_runtime as reflect_runtime_module
 from vega import review_runtime as review_runtime_module
 from vega.brief_runtime import BriefRuntime
 from vega.finish_runtime import FinishRuntime
@@ -2016,6 +2017,70 @@ def test_reflect_diff_check_covers_staged_changes(tmp_path: Path) -> None:
     assert "staged trailing whitespace" in (reflect_run / "full-diff.patch").read_text(
         encoding="utf-8"
     )
+
+
+def test_gate_diff_check_covers_both_diff_streams_when_reflect_misses_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, repo = _init_repo(tmp_path)
+    original_run_reflect_eval = reflect_runtime_module._run_reflect_eval
+
+    def ignore_reflect_diff_check(
+        run_dir: Path,
+        git_data: dict[str, str],
+        expected_artifacts: list[str],
+    ) -> list[str]:
+        return [
+            (
+                "PASS: git diff --check 通过"
+                if result == "FAIL: git diff --check 存在问题"
+                else result
+            )
+            for result in original_run_reflect_eval(
+                run_dir,
+                git_data,
+                expected_artifacts,
+            )
+        ]
+
+    monkeypatch.setattr(
+        reflect_runtime_module,
+        "_run_reflect_eval",
+        ignore_reflect_diff_check,
+    )
+    repo.joinpath("README.md").write_text(
+        "# Demo\nstaged trailing whitespace   \n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(repo, "add", "README.md")
+    repo.joinpath("README.md").write_text(
+        "# Demo\nunstaged trailing whitespace   \n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    reflect_run = ReflectRuntime(workspace).run(repo, note="模拟上游漏检")
+    gate_run = GateRuntime(workspace).run(repo, reflect_run.name)
+
+    assert _read_json(reflect_run / "state.json")["status"] == "success"
+    gate_result = _read_json(gate_run / "gate-result.json")
+    reason = next(
+        item
+        for item in gate_result["reasons"]
+        if item["code"] == "diff_check_failed"
+    )
+    assert gate_result["risk"] == "high"
+    assert gate_result["recommendation"] == "human-review"
+    assert reason["severity"] == "high"
+    assert "# --- Vega staged diff: index vs HEAD ---" in reason["evidence"]
+    assert (
+        "# --- Vega unstaged diff: working tree vs index ---"
+        in reason["evidence"]
+    )
+    assert "staged trailing whitespace" in reason["evidence"]
+    assert "unstaged trailing whitespace" in reason["evidence"]
 
 
 def test_gate_counts_staged_diff_lines_against_budget(tmp_path: Path) -> None:

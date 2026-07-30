@@ -86,7 +86,9 @@ def harden_git_read_command(command: list[str]) -> list[str]:
         "-c",
         f"core.attributesFile={os.devnull}",
         "-c",
-        "core.fsmonitor=false",
+        # Git 2.35 及更早版本会把字符串 "false" 当作 fsmonitor hook 路径执行。
+        # 空值在旧版表示没有 hook，在新版也会关闭内置 fsmonitor。
+        "core.fsmonitor=",
         "-c",
         "core.untrackedCache=false",
         "-c",

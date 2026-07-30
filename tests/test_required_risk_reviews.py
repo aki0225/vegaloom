@@ -190,6 +190,62 @@ def test_gate_records_segment_glob_required_review_hits(
     assert "FAIL:" not in eval_text
 
 
+def test_gate_keeps_staged_rename_source_path_for_required_review(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        config="\n".join(
+            [
+                "version: 1",
+                "risk:",
+                "  required_reviews:",
+                "    - id: authorization",
+                "      label: 权限与敏感数据",
+                "      paths:",
+                "        - src/auth/**",
+            ]
+        )
+        + "\n",
+        files={"src/auth/token.py": "VALUE = 1\n"},
+    )
+    source = repo / "src" / "auth" / "token.py"
+    target = repo / "src" / "plain" / "renamed.py"
+    target.parent.mkdir(parents=True)
+    source.rename(target)
+    subprocess.run(
+        ["git", "add", "-A"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    workspace.mkdir()
+    test_log = workspace / "tests.log"
+    test_log.write_text("1 passed\n", encoding="utf-8", newline="\n")
+
+    reflect_run = ReflectRuntime(workspace).run(repo, test_log=test_log)
+    gate_run = GateRuntime(workspace).run(repo, reflect_run.name)
+
+    reflect_state = _read_json(reflect_run / "state.json")
+    result = _read_json(gate_run / "gate-result.json")
+
+    assert reflect_state["changed_files"] == [
+        "src/auth/token.py",
+        "src/plain/renamed.py",
+    ]
+    assert result["changed_files"] == reflect_state["changed_files"]
+    assert result["required_reviews"] == [
+        {
+            "id": "authorization",
+            "label": "权限与敏感数据",
+            "matched_files": ["src/auth/token.py"],
+        }
+    ]
+
+
 def test_gate_eval_binds_required_reviews_to_state(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     repo = tmp_path / "repo"

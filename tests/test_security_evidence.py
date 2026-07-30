@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -10,13 +11,20 @@ import pytest
 from vega import gate_runtime as gate_runtime_module
 from vega import git_read as git_read_module
 from vega import project_config as project_config_module
+from vega import project_context as project_context_module
 from vega import project_knowledge as project_knowledge_module
 from vega import project_profile as project_profile_module
 from vega import reflect_runtime as reflect_runtime_module
 from vega import repository_identity as repository_identity_module
+from vega import risk_gate_evidence as risk_gate_evidence_module
 from vega import workspace_check as workspace_check_module
 from vega.brief_runtime import BriefRuntime
-from vega.models import BriefInput
+from vega.models import (
+    AgentsInstruction,
+    BriefInput,
+    ProjectKnowledge,
+    ProjectProfile,
+)
 from vega.project_config import load_project_config
 from vega.project_knowledge import load_agents_instructions
 from vega.project_profile import build_project_profile
@@ -487,6 +495,270 @@ def test_git_read_environment_replaces_controlled_git_values(
     assert environment["GIT_PAGER"] == "cat"
 
 
+def test_resolved_git_revision_reuse_avoids_duplicate_git_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    commit = "a" * 40
+    calls: list[list[str]] = []
+
+    def fake_run(
+        repo_path: Path,
+        command: list[str],
+        **kwargs: object,
+    ) -> SimpleNamespace:
+        assert repo_path == repo.resolve()
+        calls.append(command)
+        stdout = (
+            str(repo.resolve()).encode("utf-8")
+            if "--show-toplevel" in command
+            else commit.encode("ascii")
+        )
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr=b"")
+
+    monkeypatch.setattr(repository_identity_module, "run_git_capture", fake_run)
+
+    resolved = repository_identity_module.resolve_git_revision(repo)
+    reused = repository_identity_module.resolve_git_revision(repo, resolved or "")
+
+    assert resolved is not None
+    assert resolved.commit == commit
+    assert reused is resolved
+    assert len(calls) == 2
+
+    other_repo = tmp_path / "other-repo"
+    other_repo.mkdir()
+    with pytest.raises(RuntimeError, match="目标仓库不匹配"):
+        repository_identity_module.resolve_git_revision(other_repo, resolved)
+    assert len(calls) == 2
+
+    forged = object.__new__(repository_identity_module.ResolvedGitRevision)
+    object.__setattr__(
+        forged,
+        "repo_key",
+        os.path.normcase(str(repo.resolve())),
+    )
+    object.__setattr__(forged, "commit", "")
+    with pytest.raises(RuntimeError, match="未经过当前读取事务校验"):
+        repository_identity_module.resolve_git_revision(repo, forged)
+    assert len(calls) == 2
+
+
+def test_project_context_reuses_preloaded_knowledge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    knowledge = ProjectKnowledge(
+        repo_name=repo.name,
+        repo_path=str(repo.resolve()),
+        agents_instructions=[
+            AgentsInstruction(
+                path="AGENTS.md",
+                scope=".",
+                content="- PRELOADED_RULE",
+            )
+        ],
+    )
+    profile = ProjectProfile(
+        repo_name=repo.name,
+        repo_path=str(repo.resolve()),
+    )
+
+    monkeypatch.setattr(
+        project_context_module,
+        "build_project_profile",
+        lambda *args, **kwargs: profile,
+    )
+    monkeypatch.setattr(
+        project_context_module,
+        "load_project_config",
+        lambda *args, **kwargs: project_config_module.ProjectConfig(),
+    )
+
+    def fail_reload(*args: object, **kwargs: object) -> ProjectKnowledge:
+        raise AssertionError("不应重复加载项目知识")
+
+    monkeypatch.setattr(
+        project_context_module,
+        "load_project_knowledge",
+        fail_reload,
+    )
+
+    context = project_context_module.build_project_context(
+        tmp_path,
+        repo,
+        "检查项目上下文",
+        tracked_only=False,
+        knowledge=knowledge,
+    )
+
+    assert "PRELOADED_RULE" in context
+    other_repo = tmp_path / "other-repo"
+    other_repo.mkdir()
+    foreign_knowledge = knowledge.model_copy(
+        update={"repo_path": str(other_repo.resolve())}
+    )
+    with pytest.raises(ValueError, match="目标仓库不匹配"):
+        project_context_module.build_project_context(
+            tmp_path,
+            repo,
+            "检查项目上下文",
+            tracked_only=False,
+            knowledge=foreign_knowledge,
+        )
+
+
+def test_tracked_project_context_rejects_worktree_knowledge(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo, {"AGENTS.md": "# TRACKED_RULE\n"})
+    repo.joinpath("AGENTS.md").write_text(
+        "# MUTABLE_WORKTREE_RULE\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    knowledge = project_knowledge_module.load_project_knowledge(
+        tmp_path,
+        repo,
+        "检查项目上下文",
+        tracked_only=False,
+    )
+    assert "MUTABLE_WORKTREE_RULE" in knowledge.agents_instructions[0].content
+
+    with pytest.raises(ValueError, match="tracked revision 不匹配"):
+        project_context_module.build_project_context(
+            tmp_path,
+            repo,
+            "检查项目上下文",
+            tracked_only=True,
+            knowledge=knowledge,
+        )
+
+
+def test_tracked_project_context_requires_loader_provenance(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo, {"AGENTS.md": "# TRACKED_RULE\n"})
+    plain_knowledge = ProjectKnowledge(
+        repo_name=repo.name,
+        repo_path=str(repo.resolve()),
+        agents_instructions=[
+            AgentsInstruction(
+                path="AGENTS.md",
+                scope=".",
+                content="# TRACKED_RULE\n",
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="tracked revision 不匹配"):
+        project_context_module.build_project_context(
+            tmp_path,
+            repo,
+            "检查项目上下文",
+            tracked_only=True,
+            knowledge=plain_knowledge,
+        )
+
+    loaded = project_knowledge_module.load_project_knowledge(
+        tmp_path,
+        repo,
+        "检查项目上下文",
+        tracked_only=True,
+    )
+    assert loaded.model_dump().keys() == plain_knowledge.model_dump().keys()
+
+
+def test_risk_gate_rejects_non_string_reflect_changed_files() -> None:
+    with pytest.raises(ValueError, match="changed_files 不合法"):
+        risk_gate_evidence_module.validated_reflect_changed_files(
+            {"changed_files": ["src/app.py", {"path": "forged.py"}]}
+        )
+
+
+@pytest.mark.parametrize("runtime_name", ["brief", "reflect"])
+def test_runtime_reuses_revision_and_knowledge_in_one_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_name: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            "AGENTS.md": "# TRACKED_RULE\n",
+            "README.md": "# Demo\n",
+        },
+    )
+    original_git_capture = repository_identity_module.run_git_capture
+    original_memory_search = project_knowledge_module.search_related_memory
+    revision_reads = 0
+    memory_searches = 0
+
+    def count_revision_reads(
+        repo_path: Path,
+        command: list[str],
+        **kwargs: object,
+    ) -> object:
+        nonlocal revision_reads
+        if command[1:3] == ["rev-parse", "--verify"]:
+            revision_reads += 1
+        return original_git_capture(repo_path, command, **kwargs)
+
+    def count_memory_searches(*args: object, **kwargs: object) -> list:
+        nonlocal memory_searches
+        memory_searches += 1
+        return original_memory_search(*args, **kwargs)
+
+    def fail_reload(*args: object, **kwargs: object) -> ProjectKnowledge:
+        raise AssertionError("project context 不应重复加载项目知识")
+
+    monkeypatch.setattr(
+        repository_identity_module,
+        "run_git_capture",
+        count_revision_reads,
+    )
+    monkeypatch.setattr(
+        project_knowledge_module,
+        "search_related_memory",
+        count_memory_searches,
+    )
+    monkeypatch.setattr(
+        project_context_module,
+        "load_project_knowledge",
+        fail_reload,
+    )
+
+    if runtime_name == "brief":
+        run_dir = BriefRuntime(workspace).run(
+            BriefInput(
+                mode="bug",
+                text="检查项目上下文复用",
+                source="fixture",
+                repo_path=str(repo),
+            )
+        )
+    else:
+        repo.joinpath("README.md").write_text(
+            "# Demo\n\nchanged\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        run_dir = reflect_runtime_module.ReflectRuntime(workspace).run(repo)
+
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["status"] == "success"
+    assert revision_reads == 1
+    assert memory_searches == 1
+
+
 def test_git_read_ignores_parent_repository_redirect(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -650,14 +922,19 @@ def test_reflect_git_reads_use_hardened_environment_and_diff_options(
     assert calls
     for command, kwargs in calls:
         assert ["-c", f"core.excludesFile={os.devnull}"] == command[1:3]
-        assert "core.fsmonitor=false" in command
+        assert "core.fsmonitor=" in command
+        assert "core.fsmonitor=false" not in command
         assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
         assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
         assert kwargs["env"]["GIT_ATTR_NOSYSTEM"] == "1"
     diff_commands = [command for command, _ in calls if "diff" in command]
     assert diff_commands
+    assert all("--check" in command for command in diff_commands)
+    assert all("--stat" not in command for command in diff_commands)
+    assert all("--name-only" not in command for command in diff_commands)
     assert all("--no-ext-diff" in command for command in diff_commands)
     assert all("--no-textconv" in command for command in diff_commands)
+    assert all("status" not in command for command, _ in calls)
 
 
 def test_gate_git_reads_use_hardened_environment(
@@ -682,7 +959,8 @@ def test_gate_git_reads_use_hardened_environment(
     assert output == "status"
     command, kwargs = calls[0]
     assert ["-c", f"core.excludesFile={os.devnull}"] == command[1:3]
-    assert "core.fsmonitor=false" in command
+    assert "core.fsmonitor=" in command
+    assert "core.fsmonitor=false" not in command
     assert kwargs["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
     assert kwargs["env"]["GIT_CONFIG_GLOBAL"] == os.devnull
     assert kwargs["env"]["GIT_ATTR_NOSYSTEM"] == "1"

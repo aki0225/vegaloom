@@ -1,10 +1,90 @@
 # Core Real-World Pilot v1 接力说明
 
-> 日期：2026-07-29
+> 日期：2026-07-30
 >
 > 分支：`main`
 >
 > 远端续做入口：`origin/main`
+
+## 2026-07-30 接力
+
+### 本轮完成
+
+本轮只整理主线既有可信性补丁，没有开始 Plan-first、Important Diff、Claude Code Runner，
+也没有启动 CRWP-V1 Worker。
+
+- Brief 与 Reflect 在同一次读取事务中复用固定 Git revision 和 ProjectKnowledge，避免
+  多次 `rev-parse HEAD` 之间发生上下文漂移。
+- 已解析 revision 绑定仓库根和进程内 proof，拒绝跨仓库复用及手工伪造。
+- tracked project context 只接受由受信 loader 生成、且绑定相同 revision 的预加载知识；
+  来源证明使用 Pydantic private attributes，不进入公开 JSON 或 Markdown。
+- Gate 复用经过 freshness 校验的 Reflect `changed_files`，不再回退到新的
+  `git diff --name-only` 事实源。
+- Gate 与 Reflect 仍分别执行 staged/unstaged `git diff --check`，避免 `MM` 文件的净差异
+  抵消 index 中问题。
+- staged rename 的源路径继续参与 `risk.required_reviews`，不能通过移出高风险目录绕过披露。
+- Git 读取使用空 `core.fsmonitor=`，兼容会把字符串 `false` 解释成 hook 路径的旧版 Git。
+- 删除 Reflect 重复的 status/stat/name-only 读取；完整 diff、变更文件和指纹继续以 review
+  workspace snapshot 为事实源。
+
+架构增长门禁已恢复：
+
+```text
+架构增长门禁通过：C901 38->38，Python 模块 76->76
+```
+
+### 已取得终态的验证
+
+```text
+python -m compileall -q src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py
+python scripts/check_repository_hygiene.py --base-ref origin/main
+python scripts/check_architecture_growth.py --base-ref origin/main
+ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py
+git diff --check
+```
+
+以上命令均通过。
+
+受影响测试共取得 `171 passed` 的明确终态：
+
+```text
+tests/test_security_evidence.py + tests/test_context_boundaries.py：80 passed
+tests/test_evidence_freshness.py：27 passed
+tests/test_required_risk_reviews.py：10 passed
+tests/test_p0_regressions.py：54 passed
+```
+
+其中 `tests/test_evidence_freshness.py` 用时约 12 分钟，
+`tests/test_p0_regressions.py` 用时约 17 分钟。测试较慢来自既有 Goal、Scope、Finish
+重算链路，不是本轮命令失联。
+
+### 未完成验证
+
+完整 `python -m pytest -q --durations=20` 已启动，但在取得最终汇总前因会话中断停止。
+残留 pytest 进程已经明确终止，因此：
+
+- 本轮不能记录 full suite 通过；
+- 不能沿用此前 `888 passed / 8 skipped` 作为当前补丁的新证据；
+- 晚间应重新从头执行完整 pytest，并等待正常退出码和最终计数。
+
+### 晚间固定顺序
+
+```powershell
+git fetch origin
+git switch main
+git pull --ff-only origin main
+git status -sb
+Get-Content docs/CORE-REAL-WORLD-PILOT-V1-HANDOFF.md -TotalCount 120
+python -m pytest -q --durations=20
+```
+
+完整 pytest 取得可信终态后：
+
+1. 重跑本文上方的静态检查和架构门禁；
+2. 按现有预注册只执行 CRWP-V1 Case 01/02；
+3. Case 03 继续记录为 `eligibility-changed-before-run`，不得启动 Worker；
+4. 不为 Pilot 新增 Runtime、状态或 Artifact；
+5. Pilot 有一次合同允许的真实终态后，再实现 Loop 内部 Plan-first 与 Important Diff。
 
 ## 2026-07-29 接力
 

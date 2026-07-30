@@ -266,9 +266,9 @@ vega reflect --repo <repo> [--run <run_id>] [--test-log <file>] [--note <text>] 
 
 它读取：
 
-- `git status --short`
-- staged：`git diff --cached HEAD --stat/check/name-only`
-- unstaged：`git diff --stat/check/name-only`
+- staged 与 unstaged 的完整 diff、文件列表和工作区指纹
+- staged：`git diff --cached HEAD --check`
+- unstaged：`git diff --check`
 - 可选测试日志
 - 可选上游 run 的 `agent-brief.md`
 - 相关 AGENTS.md 与 memory
