@@ -39,9 +39,12 @@ description: "当用户要求用 Vega/loop 做 bug 修复或需求开发时使�
    - bug：`vega loop bug --repo . --text "<用户需求>" --mode assist`
    - feature：`vega loop feature --repo . --text "<用户需求>" --mode assist`
    - 边界清晰的小任务也可用日常入口：`vega do feature --repo . --text "<用户需求>"`
-2. 读取命令输出里的 `worker-prompt.md` 和 `project-context.md`。
-3. 当前主会话按 `worker-prompt.md` 完成最小必要修改。
-4. 继续 loop；默认会自动执行 project profile 识别出的验证命令：
+2. 确认命令已生成 `workspace-baseline.json` 并停在 `waiting_for_worker`；如果启动前已有
+   tracked diff，Vega 会拒绝交出 Worker prompt，应先人工处理工作区后重开 loop。
+3. 读取命令输出里的 `worker-prompt.md` 和 `project-context.md`。
+4. 当前主会话按 `worker-prompt.md` 完成最小必要修改。
+5. 继续 loop；该入口与 auto Worker 复用同一条 workspace/scope、verification、Reflect、
+   Risk Gate、只读 Reviewer 和 verdict 流程：
    - `vega loop continue --repo . --run <loop_run_id>`
    - 如果已有外部测试日志，可显式传入：`vega loop continue --repo . --run <loop_run_id> --test-log test.log`
 6. 查看输出：

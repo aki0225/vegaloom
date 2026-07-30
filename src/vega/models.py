@@ -414,6 +414,7 @@ class LoopAutomationState(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     brief_run: str | None = None
     initial_head_sha: str | None = None
+    workspace_baseline_sha256: str | None = None
     project_policy_snapshot: dict[str, str | None] = Field(default_factory=dict)
     project_policy_snapshot_sha256: str | None = None
     scope_gate_required: bool = False
@@ -423,9 +424,7 @@ class LoopAutomationState(BaseModel):
     max_iterations: int = 2
     iterations: list[LoopIterationState] = Field(default_factory=list)
     last_recovery_id: str | None = None
-    superseded_terminal_events: list[SupersededTerminalRecord] = Field(
-        default_factory=list
-    )
+    superseded_terminal_events: list[SupersededTerminalRecord] = Field(default_factory=list)
     artifacts: list[str] = Field(default_factory=list)
     eval_results: list[str] = Field(default_factory=list)
     memory_proposals: list[MemoryProposal] = Field(default_factory=list)

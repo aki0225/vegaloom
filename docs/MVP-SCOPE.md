@@ -108,7 +108,10 @@ v0.1 baseline 的最小验收定义。
 - Config check：只读预检 `.vega.yaml`，拦截 schema、验证命令截断和未知 runner
 - Review pack 的 `review-pack.md`、`review-prompt.md`、`review-checklist.md`、`project-context.md`、`review-context.json`、`review-prompt-metrics.json/md`
 - 隔离 review 的 `review-findings.md`、`review-verdict.json`、`review-runner-output.txt`
-- 自动化 loop 的 `loop-plan.md`、`worker-prompt.md`、`worker-prompt-metrics.json/md`、`project-context.md`、`iterations/*/workspace-check.md`、`iterations/*/workspace-check.json`、`iterations/*/verification-summary.md`、`iterations/*/verification-result.json`、`final-report.md`
+- 自动化 loop 的 `loop-plan.md`、`workspace-baseline.json`、`worker-prompt.md`、
+  `worker-prompt-metrics.json/md`、`project-context.md`、`iterations/*/workspace-check.md`、
+  `iterations/*/workspace-check.json`、`iterations/*/verification-summary.md`、
+  `iterations/*/verification-result.json`、`final-report.md`
 - Worker/reviewer/verification execution lease：`execution.json`、`process-output.txt`、可选 `stop-request.json`
 - Stop/timeout report：中断 attempt 后进入 `needs_human`，不继续后续自动步骤
 - Runner error handoff：provider/网络/CLI 错误后写 `runner-error-report.md`，保留可能存在的部分改动并交还人工
@@ -124,6 +127,8 @@ v0.1 baseline 的最小验收定义。
   使用下一连续编号，中断轮不参与 success、verification 或 reviewer 判定
 - 验证失败不能被 reviewer approve 覆盖，必须进入修复或人工判断
 - `loop continue` 只允许同一仓库中处于 `needs_human` 的 run
+- `loop continue` 必须校验启动前封存的 workspace baseline、初始 HEAD 与 state/trace 哈希绑定
+- assist 与 auto 的 Worker 后处理必须复用同一条 verification / Reflect / Review / verdict 流程
 - `--max-iterations` 只限制 auto worker 自动重试，不阻止人工修复后的 `loop continue`
 - Finish 的 `finish-report.md`、`finish-summary.json`
 - Run status 的状态摘要、关键产物和下一步指引

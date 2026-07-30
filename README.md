@@ -70,10 +70,14 @@ vega --version
 推荐由当前主会话或人工负责实现，Vega 负责收集证据、执行验证并启动隔离审查：
 
 ```powershell
+git status --short
 vega loop bug --repo . --text "修复导出按钮无响应" --mode assist
 vega latest --kind loop
 vega loop continue --repo . --run <run_id>
 ```
+
+`loop` 会在交出 Worker prompt 前写入带哈希绑定的 `workspace-baseline.json`。启动前已有
+tracked diff 时，assist 会停止并要求清理后重开，避免把历史改动归因给本轮 Worker。
 
 后续命令应在同一个 workspace 中执行。边界清晰的小任务可以使用默认启用 auto 的 `do`；
 如需人工实现，仍可显式传入 `--mode assist`：

@@ -56,7 +56,12 @@ from .scope_gate import (
 )
 from .trace import TraceWriter, active_run_finished_indices, read_trace_items
 from .verification import VerificationRunResult, run_project_verification
-from .workspace_check import read_head_sha, run_workspace_check, snapshot_workspace
+from .workspace_baseline import read_workspace_baseline, write_workspace_baseline
+from .workspace_check import (
+    read_head_sha,
+    run_workspace_check,
+    snapshot_workspace,
+)
 
 LOOP_INITIALIZATION_ARTIFACTS = [
     "agent-brief.md",
@@ -76,6 +81,7 @@ LOOP_ARTIFACTS = [
 FINAL_LOOP_ARTIFACTS = [*LOOP_ARTIFACTS, "final-report.md"]
 RISK_GATE_RESULT_ARTIFACT = "risk-gate-result.json"
 RISK_GATE_REPORT_ARTIFACT = "risk-gate-report.md"
+WORKSPACE_BASELINE_ARTIFACT = "workspace-baseline.json"
 
 
 @dataclass(frozen=True)
@@ -89,6 +95,19 @@ class LoopRiskGateEvidence:
     @property
     def status(self) -> Literal["success", "failed"]:
         return "failed" if self.error else "success"
+
+
+@dataclass(frozen=True)
+class PostWorkerPipelineResult:
+    terminal: bool
+    verdict: ReviewVerdict | None = None
+
+
+@dataclass(frozen=True)
+class PostWorkerPreparationResult:
+    terminal: bool
+    iteration_state: LoopIterationState
+    reflect_run: Path | None = None
 
 
 class LoopAutomationRuntime:
@@ -211,12 +230,86 @@ class LoopAutomationRuntime:
         )
         write_prompt_metrics(run_dir, "worker-prompt", worker_metrics)
         trace.write("worker_prompt_measured", metrics=worker_metrics.model_dump())
+        initialization_artifacts = list(LOOP_INITIALIZATION_ARTIFACTS)
+        # 不论 Worker 由 Vega 还是外部主会话调度，都先封存同一份根基线。
+        # auto 的每轮 Worker 仍会捕获更近的运行时基线；根基线用于跨进程 continue 和归因审计。
+        workspace_baseline = snapshot_workspace(Path(brief_input.repo_path))
+        state.workspace_baseline_sha256 = write_workspace_baseline(
+            run_dir / WORKSPACE_BASELINE_ARTIFACT,
+            workspace_baseline,
+        )
+        initialization_artifacts.append(WORKSPACE_BASELINE_ARTIFACT)
+        state.artifacts = [WORKSPACE_BASELINE_ARTIFACT]
+        state.save(run_dir / "state.json")
+        trace.write(
+            "workspace_baseline_captured",
+            sha256=state.workspace_baseline_sha256,
+            head_sha=workspace_baseline.head_sha,
+            tracked_files=len(workspace_baseline.tracked_files),
+            untracked_files=len(workspace_baseline.untracked_files),
+            capture_complete=workspace_baseline.capture_complete,
+        )
         trace.write(
             "loop_initialized",
             brief_run=state.brief_run,
-            artifacts=LOOP_INITIALIZATION_ARTIFACTS,
+            artifacts=initialization_artifacts,
         )
         if automation_mode == "assist":
+            baseline_head_changed = bool(
+                state.initial_head_sha
+                and workspace_baseline.head_sha
+                and workspace_baseline.head_sha != state.initial_head_sha
+            )
+            if (
+                not workspace_baseline.capture_complete
+                or workspace_baseline.has_tracked_changes
+                or baseline_head_changed
+            ):
+                run_workspace_check(
+                    Path(brief_input.repo_path),
+                    run_dir,
+                    baseline=workspace_baseline,
+                    expected_head_sha=state.initial_head_sha,
+                )
+                if not workspace_baseline.capture_complete:
+                    conclusion = (
+                        "无法完整封存 Worker 启动前 workspace baseline，"
+                        "未把任务交给外部 Worker。"
+                    )
+                    current_step = "workspace_baseline_unavailable"
+                elif baseline_head_changed:
+                    conclusion = (
+                        "生成计划后 Git HEAD 已发生变化，"
+                        "为避免在错误提交上执行，未把任务交给外部 Worker。"
+                    )
+                    current_step = "workspace_head_changed"
+                else:
+                    conclusion = (
+                        "封存基线时已存在 tracked diff，"
+                        "无法把后续修改安全归因于本轮外部 Worker。"
+                    )
+                    current_step = "workspace_baseline_dirty"
+                trace.write(
+                    "workspace_baseline_blocked",
+                    capture_complete=workspace_baseline.capture_complete,
+                    tracked_files=len(workspace_baseline.tracked_files),
+                    baseline_head_changed=baseline_head_changed,
+                )
+                _write_final_report(run_dir, state, None, conclusion)
+                state.artifacts = [
+                    *LOOP_ARTIFACTS,
+                    WORKSPACE_BASELINE_ARTIFACT,
+                    "workspace-check.json",
+                    "workspace-check.md",
+                ]
+                self._save_loop_done(
+                    run_dir,
+                    state,
+                    "needs_human",
+                    trace,
+                    current_step=current_step,
+                )
+                return run_dir
             root_budget_artifact: str | None = None
             if worker_metrics.exceeded:
                 root_budget_artifact = write_context_budget_report(
@@ -228,6 +321,7 @@ class LoopAutomationRuntime:
             state.status = "needs_human"
             state.artifacts = [
                 *LOOP_ARTIFACTS,
+                WORKSPACE_BASELINE_ARTIFACT,
                 *([root_budget_artifact] if root_budget_artifact else []),
             ]
             trace.write("loop_waiting_for_worker", worker_prompt="worker-prompt.md")
@@ -299,6 +393,15 @@ class LoopAutomationRuntime:
             raise ValueError(
                 f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}"
             )
+        if state.current_step in {
+            "workspace_baseline_dirty",
+            "workspace_baseline_unavailable",
+            "workspace_head_changed",
+        }:
+            raise ValueError(
+                "loop 的启动基线不可用，不能继续归因当前 diff；"
+                "请清理工作区后重新启动新的 loop。"
+            )
         _require_recovery_trace_binding(run_dir, state)
         _require_loop_initialization(self.workspace, run_dir, state, repo)
         if _project_policy_changed(repo, state.project_policy_snapshot):
@@ -334,6 +437,19 @@ class LoopAutomationRuntime:
             return run_dir
         config = load_project_config(repo)
         _, reviewer_name = _apply_runner_defaults(config, "codex-exec", reviewer_name)
+        if not state.workspace_baseline_sha256:
+            raise ValueError(
+                "loop 缺少已封存的 workspace baseline；"
+                "不能把当前 diff 事后归因给外部 Worker，请重新启动 assist loop。"
+            )
+        workspace_baseline = read_workspace_baseline(
+            run_dir / WORKSPACE_BASELINE_ARTIFACT,
+            expected_sha256=state.workspace_baseline_sha256,
+        )
+        if workspace_baseline.head_sha != state.initial_head_sha:
+            raise ValueError(
+                "workspace baseline 的 HEAD 与 loop 初始 HEAD 不一致，已拒绝 continue。"
+            )
         trace = TraceWriter(run_dir / "trace.jsonl")
         iteration_number = _next_iteration_number(run_dir, state)
         iteration_state = LoopIterationState(
@@ -353,7 +469,8 @@ class LoopAutomationRuntime:
         workspace_check = run_workspace_check(
             repo,
             iteration_dir,
-            require_clean_untracked=True,
+            baseline=workspace_baseline,
+            expected_head_sha=state.initial_head_sha,
         )
         trace.write(
             "workspace_check_finished",
@@ -405,221 +522,103 @@ class LoopAutomationRuntime:
                 current_step=current_step,
             )
             return run_dir
-        state.current_step = "scope_gate"
-        state.save(run_dir / "state.json")
-        scope_evidence = write_loop_scope_gate_evidence(
-            repo,
-            config.scope,
-            iteration_dir,
-            trace,
-            iteration=iteration_number,
-            phase="pre_verification",
-            expected_head_sha=state.initial_head_sha,
-            expected_policy_sha256=state.scope_policy_sha256,
-        )
-        iteration_state = _update_iteration_state(
-            iteration_state,
-            **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-        )
-        if not scope_evidence.passed:
+        if workspace_check.new_untracked_count:
+            iteration_state = _update_iteration_state(
+                iteration_state,
+                workspace_status="failed",
+            )
             state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
-                render_scope_gate_fix_prompt(iteration_number + 1, scope_evidence),
+                render_untracked_files_fix_prompt(
+                    iteration_number + 1,
+                    workspace_check.new_untracked_files,
+                ),
             )
-            _write_final_report(
-                run_dir,
-                state,
-                None,
-                "精确路径范围门禁拒绝当前 tracked diff，未继续 verification、Reflect 或 reviewer。",
-            )
-            self._save_loop_done(
-                run_dir,
-                state,
-                "needs_human",
-                trace,
-                current_step="scope_gate_failed",
-            )
-            return run_dir
-        auto_test_log = test_log
-        if verify and auto_test_log is None:
-            state.current_step = "verify"
-            state.save(run_dir / "state.json")
-            verification = run_project_verification(
-                self.workspace,
-                repo,
-                iteration_dir,
-                iteration=iteration_number,
-                progress_reporter=self.progress_reporter,
-            )
-            verification_status = _verification_status(verification.command_count, verification.failed_count)
-            verification_failed_count = verification.failed_count
             trace.write(
-                "verification_finished",
+                "untracked_files_require_human",
                 iteration=iteration_number,
-                commands=verification.command_count,
-                failed=verification.failed_count,
-                interruption_status=verification.interruption_status,
+                count=workspace_check.new_untracked_count,
+                paths=workspace_check.new_untracked_files,
             )
-            auto_test_log = verification.summary_path
-            if verification.was_interrupted:
-                self._pause_for_verification_interruption(
-                    run_dir,
-                    state,
-                    iteration_dir,
-                    iteration_number,
-                    verification,
-                    trace,
-                    worker_status="skipped",
-                    scope_evidence=scope_evidence,
-                )
-                return run_dir
-        else:
-            verification_status = "skipped"
-            verification_failed_count = 0
-        iteration_state = _update_iteration_state(
-            iteration_state,
-            verification_status=verification_status,
-            verification_failed_count=verification_failed_count,
-        )
-
-        current_policy = project_policy_snapshot(repo)
-        if _project_policy_changed(repo, state.project_policy_snapshot):
-            if verification_status != "skipped" and auto_test_log is not None:
-                _copy_if_exists(auto_test_log, iteration_dir / "test-summary.md")
-            _write_project_policy_change_report(
-                iteration_dir,
-                state.project_policy_snapshot,
-                current_policy,
-            )
-            trace.write("project_policy_changed", iteration=iteration_number)
-            state.iterations.append(iteration_state)
-            state.current_iteration = iteration_number
             _write_final_report(
                 run_dir,
                 state,
                 None,
-                "verification 修改了项目策略文件，已停止 Reflect 和隔离审查。",
+                "外部 Worker 新增了未跟踪文件；reviewer 不读取其内容，已转人工确认。",
             )
             self._save_loop_done(
                 run_dir,
                 state,
                 "needs_human",
                 trace,
-                current_step="project_policy_changed",
+                current_step="untracked_files",
             )
             return run_dir
-
-        state.current_step = "scope_gate_post_verification"
-        state.save(run_dir / "state.json")
-        post_scope_evidence = write_loop_scope_gate_evidence(
-            repo,
-            config.scope,
-            iteration_dir,
-            trace,
-            iteration=iteration_number,
-            phase="post_verification",
-            expected_head_sha=state.initial_head_sha,
-            expected_policy_sha256=state.scope_policy_sha256,
+        outcome = self._run_post_worker_pipeline(
+            run_dir=run_dir,
+            state=state,
+            repo_path=repo,
+            reviewer_name=reviewer_name,
+            config=config,
+            trace=trace,
+            iteration_number=iteration_number,
+            iteration_state=iteration_state,
+            worker_status="skipped",
+            verify=verify,
+            test_log=test_log,
+            note=note,
+            retry_worker_on_request_changes=False,
         )
-        iteration_state = _update_iteration_state(
-            iteration_state,
-            **scope_gate_state_fields(
-                post_scope_evidence,
-                phase="post_verification",
-            ),
-        )
-        if not post_scope_evidence.passed:
-            if verification_status != "skipped" and auto_test_log is not None:
-                _copy_if_exists(auto_test_log, iteration_dir / "test-summary.md")
-            state.iterations.append(iteration_state)
-            state.current_iteration = iteration_number
-            _write_text_artifact(
-                iteration_dir / "fix-prompt.md",
-                render_scope_gate_fix_prompt(iteration_number + 1, post_scope_evidence),
-            )
-            _write_final_report(
-                run_dir,
-                state,
-                None,
-                "verification 后的精确路径范围门禁拒绝当前 tracked diff，未继续 Reflect 或 reviewer。",
-            )
-            self._save_loop_done(
-                run_dir,
-                state,
-                "needs_human",
-                trace,
-                current_step="scope_gate_post_verification_failed",
-            )
-            return run_dir
+        if not outcome.terminal:
+            raise RuntimeError("assist post-worker pipeline 不应请求自动重试 Worker")
+        return run_dir
 
-        state.current_step = "reflect"
-        state.save(run_dir / "state.json")
-        reflect_run = ReflectRuntime(self.workspace).run(
-            repo,
-            source_run=state.brief_run,
-            test_log=auto_test_log.resolve() if auto_test_log else None,
+    def _run_post_worker_pipeline(
+        self,
+        *,
+        run_dir: Path,
+        state: LoopAutomationState,
+        repo_path: Path,
+        reviewer_name: str,
+        config: ProjectConfig,
+        trace: TraceWriter,
+        iteration_number: int,
+        iteration_state: LoopIterationState,
+        worker_status: Literal["skipped", "success"],
+        verify: bool,
+        test_log: Path | None,
+        note: str | None,
+        retry_worker_on_request_changes: bool,
+    ) -> PostWorkerPipelineResult:
+        """统一执行 Worker 之后的门禁、验证、Reflect、隔离审查与 verdict。"""
+
+        preparation = self._prepare_post_worker_review(
+            run_dir=run_dir,
+            state=state,
+            repo_path=repo_path,
+            config=config,
+            trace=trace,
+            iteration_number=iteration_number,
+            iteration_state=iteration_state,
+            worker_status=worker_status,
+            verify=verify,
+            test_log=test_log,
             note=note,
         )
-        _record_reflect(iteration_dir, reflect_run)
-        iteration_state = _update_iteration_state(
-            iteration_state,
-            reflect_run=run_name(reflect_run),
-        )
-        if not _reflect_run_succeeded(reflect_run):
-            state.iterations.append(iteration_state)
-            state.current_iteration = iteration_number
-            _write_reflect_failure_report(iteration_dir, reflect_run)
-            trace.write(
-                "reflect_failed",
-                iteration=iteration_number,
-                reflect_run=run_name(reflect_run),
-                status=_read_reflect_run_status(reflect_run),
-            )
-            _write_final_report(
-                run_dir,
-                state,
-                None,
-                "Reflect 的确定性证据检查失败，未启动隔离 reviewer。",
-            )
-            self._save_loop_done(
-                run_dir,
-                state,
-                "needs_human",
-                trace,
-                current_step="reflect_failed",
-            )
-            return run_dir
-        trace.write(
-            "reflect_finished",
-            iteration=iteration_number,
-            reflect_run=run_name(reflect_run),
-            status="success",
-        )
-        current_policy = project_policy_snapshot(repo)
-        if current_policy != state.project_policy_snapshot:
-            self._pause_for_project_policy_change_after_reflect(
-                run_dir,
-                state,
-                iteration_dir,
-                iteration_number,
-                reflect_run,
-                trace,
-                worker_status="skipped",
-                workspace_status=workspace_check.status,
-                workspace_new_files_count=workspace_check.new_untracked_count,
-                verification_status=verification_status,
-                verification_failed_count=verification_failed_count,
-                scope_evidence=scope_evidence,
-                post_scope_evidence=post_scope_evidence,
-                current_policy=current_policy,
-            )
-            return run_dir
+        if preparation.terminal:
+            return PostWorkerPipelineResult(terminal=True)
+        if preparation.reflect_run is None:
+            raise RuntimeError("post-worker preparation 未返回 Reflect run")
+        iteration_state = preparation.iteration_state
+        reflect_run = preparation.reflect_run
+        iteration_dir = _iteration_dir(run_dir, iteration_number)
+
         state.current_step = "scope_gate_pre_review"
         state.save(run_dir / "state.json")
         review_scope_evidence = write_loop_scope_gate_evidence(
-            repo,
+            repo_path,
             config.scope,
             iteration_dir,
             trace,
@@ -655,7 +654,7 @@ class LoopAutomationRuntime:
                 trace,
                 current_step="scope_gate_pre_review_failed",
             )
-            return run_dir
+            return PostWorkerPipelineResult(terminal=True)
         if not _reflect_has_tracked_diff(reflect_run):
             state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
@@ -677,10 +676,11 @@ class LoopAutomationRuntime:
                 trace,
                 current_step="no_diff",
             )
-            return run_dir
+            return PostWorkerPipelineResult(terminal=True)
+
         gate_evidence = _evaluate_loop_risk_gate(
             self.workspace,
-            repo,
+            repo_path,
             reflect_run,
             iteration_dir,
             trace,
@@ -723,12 +723,13 @@ class LoopAutomationRuntime:
                 trace,
                 current_step=current_step,
             )
-            return run_dir
+            return PostWorkerPipelineResult(terminal=True)
+
         state.current_step = "review"
         state.save(run_dir / "state.json")
         trace.write("review_started", iteration=iteration_number)
         review_run = self._run_review(
-            repo,
+            repo_path,
             reflect_run,
             reviewer_name,
             run_dir,
@@ -750,8 +751,6 @@ class LoopAutomationRuntime:
         iteration_state = _update_iteration_state(
             iteration_state,
             reviewer_status=reviewer_status,
-            workspace_status="skipped",
-            workspace_new_files_count=0,
             review_run=run_name(review_run),
             verdict=verdict.verdict,
             findings_count=len(verdict.findings),
@@ -777,9 +776,256 @@ class LoopAutomationRuntime:
                 trace,
                 current_step="review_run_failed",
             )
-            return run_dir
+            return PostWorkerPipelineResult(terminal=True, verdict=verdict)
+
+        if verdict.verdict == "request_changes" and retry_worker_on_request_changes:
+            _write_text_artifact(
+                iteration_dir / "fix-prompt.md",
+                render_fix_prompt(verdict, iteration_number + 1),
+            )
+            trace.write("fix_prompt_written", iteration=iteration_number)
+            state.save(run_dir / "state.json")
+            return PostWorkerPipelineResult(terminal=False, verdict=verdict)
+
         self._finish_or_prepare_next(run_dir, state, verdict, iteration_dir, trace)
-        return run_dir
+        return PostWorkerPipelineResult(terminal=True, verdict=verdict)
+
+    def _prepare_post_worker_review(
+        self,
+        *,
+        run_dir: Path,
+        state: LoopAutomationState,
+        repo_path: Path,
+        config: ProjectConfig,
+        trace: TraceWriter,
+        iteration_number: int,
+        iteration_state: LoopIterationState,
+        worker_status: Literal["skipped", "success"],
+        verify: bool,
+        test_log: Path | None,
+        note: str | None,
+    ) -> PostWorkerPreparationResult:
+        """完成进入 Reviewer 前的 scope、verification 与 Reflect。"""
+
+        state.current_step = "scope_gate"
+        state.save(run_dir / "state.json")
+        iteration_dir = _iteration_dir(run_dir, iteration_number)
+        scope_evidence = write_loop_scope_gate_evidence(
+            repo_path,
+            config.scope,
+            iteration_dir,
+            trace,
+            iteration=iteration_number,
+            phase="pre_verification",
+            expected_head_sha=state.initial_head_sha,
+            expected_policy_sha256=state.scope_policy_sha256,
+        )
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
+        )
+        if not scope_evidence.passed:
+            state.iterations.append(iteration_state)
+            state.current_iteration = iteration_number
+            _write_text_artifact(
+                iteration_dir / "fix-prompt.md",
+                render_scope_gate_fix_prompt(iteration_number + 1, scope_evidence),
+            )
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "精确路径范围门禁拒绝当前 tracked diff，未继续 verification、Reflect 或 reviewer。",
+            )
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="scope_gate_failed",
+            )
+            return PostWorkerPreparationResult(True, iteration_state)
+
+        verification_log = test_log
+        verification_status: Literal["skipped", "passed", "failed"] = "skipped"
+        verification_failed_count = 0
+        if verify and verification_log is None:
+            state.current_step = "verify"
+            state.save(run_dir / "state.json")
+            verification = run_project_verification(
+                self.workspace,
+                repo_path,
+                iteration_dir,
+                iteration=iteration_number,
+                progress_reporter=self.progress_reporter,
+            )
+            verification_status = _verification_status(
+                verification.command_count,
+                verification.failed_count,
+            )
+            verification_failed_count = verification.failed_count
+            trace.write(
+                "verification_finished",
+                iteration=iteration_number,
+                commands=verification.command_count,
+                failed=verification.failed_count,
+                interruption_status=verification.interruption_status,
+            )
+            verification_log = verification.summary_path
+            if verification.was_interrupted:
+                self._pause_for_verification_interruption(
+                    run_dir,
+                    state,
+                    iteration_dir,
+                    iteration_number,
+                    verification,
+                    trace,
+                    worker_status=worker_status,
+                    workspace_status=iteration_state.workspace_status,
+                    workspace_new_files_count=iteration_state.workspace_new_files_count,
+                    scope_evidence=scope_evidence,
+                )
+                return PostWorkerPreparationResult(True, iteration_state)
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            verification_status=verification_status,
+            verification_failed_count=verification_failed_count,
+        )
+
+        current_policy = project_policy_snapshot(repo_path)
+        if _project_policy_changed(repo_path, state.project_policy_snapshot):
+            if verification_status != "skipped" and verification_log is not None:
+                _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
+            _write_project_policy_change_report(
+                iteration_dir,
+                state.project_policy_snapshot,
+                current_policy,
+            )
+            trace.write("project_policy_changed", iteration=iteration_number)
+            state.iterations.append(iteration_state)
+            state.current_iteration = iteration_number
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "verification 修改了项目策略文件，已停止 Reflect 和隔离审查。",
+            )
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="project_policy_changed",
+            )
+            return PostWorkerPreparationResult(True, iteration_state)
+
+        state.current_step = "scope_gate_post_verification"
+        state.save(run_dir / "state.json")
+        post_scope_evidence = write_loop_scope_gate_evidence(
+            repo_path,
+            config.scope,
+            iteration_dir,
+            trace,
+            iteration=iteration_number,
+            phase="post_verification",
+            expected_head_sha=state.initial_head_sha,
+            expected_policy_sha256=state.scope_policy_sha256,
+        )
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            **scope_gate_state_fields(
+                post_scope_evidence,
+                phase="post_verification",
+            ),
+        )
+        if not post_scope_evidence.passed:
+            if verification_status != "skipped" and verification_log is not None:
+                _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
+            state.iterations.append(iteration_state)
+            state.current_iteration = iteration_number
+            _write_text_artifact(
+                iteration_dir / "fix-prompt.md",
+                render_scope_gate_fix_prompt(iteration_number + 1, post_scope_evidence),
+            )
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "verification 后的精确路径范围门禁拒绝当前 tracked diff，未继续 Reflect 或 reviewer。",
+            )
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="scope_gate_post_verification_failed",
+            )
+            return PostWorkerPreparationResult(True, iteration_state)
+
+        state.current_step = "reflect"
+        state.save(run_dir / "state.json")
+        reflect_run = ReflectRuntime(self.workspace).run(
+            repo_path,
+            source_run=state.brief_run,
+            test_log=verification_log.resolve() if verification_log else None,
+            note=note,
+        )
+        _record_reflect(iteration_dir, reflect_run)
+        iteration_state = _update_iteration_state(
+            iteration_state,
+            reflect_run=run_name(reflect_run),
+        )
+        if not _reflect_run_succeeded(reflect_run):
+            state.iterations.append(iteration_state)
+            state.current_iteration = iteration_number
+            _write_reflect_failure_report(iteration_dir, reflect_run)
+            trace.write(
+                "reflect_failed",
+                iteration=iteration_number,
+                reflect_run=run_name(reflect_run),
+                status=_read_reflect_run_status(reflect_run),
+            )
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "Reflect 的确定性证据检查失败，未启动隔离 reviewer。",
+            )
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="reflect_failed",
+            )
+            return PostWorkerPreparationResult(True, iteration_state)
+        trace.write(
+            "reflect_finished",
+            iteration=iteration_number,
+            reflect_run=run_name(reflect_run),
+            status="success",
+        )
+
+        current_policy = project_policy_snapshot(repo_path)
+        if current_policy != state.project_policy_snapshot:
+            self._pause_for_project_policy_change_after_reflect(
+                run_dir,
+                state,
+                iteration_dir,
+                iteration_number,
+                reflect_run,
+                trace,
+                worker_status=worker_status,
+                workspace_status=iteration_state.workspace_status,
+                workspace_new_files_count=iteration_state.workspace_new_files_count,
+                verification_status=verification_status,
+                verification_failed_count=verification_failed_count,
+                scope_evidence=scope_evidence,
+                post_scope_evidence=post_scope_evidence,
+                current_policy=current_policy,
+            )
+            return PostWorkerPreparationResult(True, iteration_state)
+        return PostWorkerPreparationResult(False, iteration_state, reflect_run)
 
     def _run_auto_iterations(
         self,
@@ -1095,390 +1341,24 @@ class LoopAutomationRuntime:
                 )
                 return run_dir
 
-            state.current_step = "scope_gate"
-            state.save(run_dir / "state.json")
-            scope_evidence = write_loop_scope_gate_evidence(
-                repo_path,
-                config.scope,
-                iteration_dir,
-                trace,
-                iteration=iteration_number,
-                phase="pre_verification",
-                expected_head_sha=state.initial_head_sha,
-                expected_policy_sha256=state.scope_policy_sha256,
-            )
-            iteration_state = _update_iteration_state(
-                iteration_state,
-                **scope_gate_state_fields(scope_evidence, phase="pre_verification"),
-            )
-            if not scope_evidence.passed:
-                state.iterations.append(iteration_state)
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_scope_gate_fix_prompt(iteration_number + 1, scope_evidence),
-                )
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "精确路径范围门禁拒绝当前 tracked diff，未继续 verification、Reflect 或 reviewer。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="scope_gate_failed",
-                )
-                return run_dir
-            verification_log: Path | None = None
-            verification_status = "skipped"
-            verification_failed_count = 0
-            if verify:
-                state.current_step = "verify"
-                state.save(run_dir / "state.json")
-                verification = run_project_verification(
-                    self.workspace,
-                    repo_path,
-                    iteration_dir,
-                    iteration=iteration_number,
-                    progress_reporter=self.progress_reporter,
-                )
-                verification_log = verification.summary_path
-                verification_status = _verification_status(verification.command_count, verification.failed_count)
-                verification_failed_count = verification.failed_count
-                trace.write(
-                    "verification_finished",
-                    iteration=iteration_number,
-                    commands=verification.command_count,
-                    failed=verification.failed_count,
-                    interruption_status=verification.interruption_status,
-                )
-                if verification.was_interrupted:
-                    self._pause_for_verification_interruption(
-                        run_dir,
-                        state,
-                        iteration_dir,
-                        iteration_number,
-                        verification,
-                        trace,
-                        worker_status="success",
-                        workspace_status=workspace_check.status,
-                        workspace_new_files_count=workspace_check.new_untracked_count,
-                        scope_evidence=scope_evidence,
-                    )
-                    return run_dir
-            iteration_state = _update_iteration_state(
-                iteration_state,
-                verification_status=verification_status,
-                verification_failed_count=verification_failed_count,
-            )
-
-            current_policy = project_policy_snapshot(repo_path)
-            if _project_policy_changed(repo_path, state.project_policy_snapshot):
-                if verification_status != "skipped" and verification_log is not None:
-                    _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
-                _write_project_policy_change_report(
-                    iteration_dir,
-                    state.project_policy_snapshot,
-                    current_policy,
-                )
-                trace.write("project_policy_changed", iteration=iteration_number)
-                state.iterations.append(iteration_state)
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "verification 修改了项目策略文件，已停止 Reflect 和隔离审查。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="project_policy_changed",
-                )
-                return run_dir
-
-            state.current_step = "scope_gate_post_verification"
-            state.save(run_dir / "state.json")
-            post_scope_evidence = write_loop_scope_gate_evidence(
-                repo_path,
-                config.scope,
-                iteration_dir,
-                trace,
-                iteration=iteration_number,
-                phase="post_verification",
-                expected_head_sha=state.initial_head_sha,
-                expected_policy_sha256=state.scope_policy_sha256,
-            )
-            iteration_state = _update_iteration_state(
-                iteration_state,
-                **scope_gate_state_fields(
-                    post_scope_evidence,
-                    phase="post_verification",
-                ),
-            )
-            if not post_scope_evidence.passed:
-                if verification_status != "skipped" and verification_log is not None:
-                    _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
-                state.iterations.append(iteration_state)
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_scope_gate_fix_prompt(iteration_number + 1, post_scope_evidence),
-                )
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "verification 后的精确路径范围门禁拒绝当前 tracked diff，未继续 Reflect 或 reviewer。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="scope_gate_post_verification_failed",
-                )
-                return run_dir
-
-            state.current_step = "reflect"
-            state.save(run_dir / "state.json")
-            reflect_run = ReflectRuntime(self.workspace).run(
-                repo_path,
-                source_run=state.brief_run,
-                test_log=verification_log,
+            outcome = self._run_post_worker_pipeline(
+                run_dir=run_dir,
+                state=state,
+                repo_path=repo_path,
+                reviewer_name=reviewer_name,
+                config=config,
+                trace=trace,
+                iteration_number=iteration_number,
+                iteration_state=iteration_state,
+                worker_status="success",
+                verify=verify,
+                test_log=None,
                 note=f"auto loop 第 {iteration_number} 轮执行后复盘",
+                retry_worker_on_request_changes=True,
             )
-            _record_reflect(iteration_dir, reflect_run)
-            iteration_state = _update_iteration_state(
-                iteration_state,
-                reflect_run=run_name(reflect_run),
-            )
-            if not _reflect_run_succeeded(reflect_run):
-                state.iterations.append(iteration_state)
-                _write_reflect_failure_report(iteration_dir, reflect_run)
-                trace.write(
-                    "reflect_failed",
-                    iteration=iteration_number,
-                    reflect_run=run_name(reflect_run),
-                    status=_read_reflect_run_status(reflect_run),
-                )
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "Reflect 的确定性证据检查失败，未启动隔离 reviewer。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="reflect_failed",
-                )
+            previous_verdict = outcome.verdict or previous_verdict
+            if outcome.terminal:
                 return run_dir
-            trace.write(
-                "reflect_finished",
-                iteration=iteration_number,
-                reflect_run=run_name(reflect_run),
-                status="success",
-            )
-            current_policy = project_policy_snapshot(repo_path)
-            if current_policy != state.project_policy_snapshot:
-                self._pause_for_project_policy_change_after_reflect(
-                    run_dir,
-                    state,
-                    iteration_dir,
-                    iteration_number,
-                    reflect_run,
-                    trace,
-                    worker_status="success",
-                    workspace_status=workspace_check.status,
-                    workspace_new_files_count=workspace_check.new_untracked_count,
-                    verification_status=verification_status,
-                    verification_failed_count=verification_failed_count,
-                    scope_evidence=scope_evidence,
-                    post_scope_evidence=post_scope_evidence,
-                    current_policy=current_policy,
-                )
-                return run_dir
-            state.current_step = "scope_gate_pre_review"
-            state.save(run_dir / "state.json")
-            review_scope_evidence = write_loop_scope_gate_evidence(
-                repo_path,
-                config.scope,
-                iteration_dir,
-                trace,
-                iteration=iteration_number,
-                phase="pre_review",
-                expected_head_sha=state.initial_head_sha,
-                expected_policy_sha256=state.scope_policy_sha256,
-            )
-            iteration_state = _update_iteration_state(
-                iteration_state,
-                **scope_gate_state_fields(
-                    review_scope_evidence,
-                    phase="pre_review",
-                ),
-            )
-            if not review_scope_evidence.passed:
-                state.iterations.append(iteration_state)
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_scope_gate_fix_prompt(iteration_number + 1, review_scope_evidence),
-                )
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "Reflect 后的精确路径范围门禁拒绝当前 tracked diff，未继续风险门禁或 reviewer。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="scope_gate_pre_review_failed",
-                )
-                return run_dir
-            if not _reflect_has_tracked_diff(reflect_run):
-                state.iterations.append(iteration_state)
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_no_diff_fix_prompt(iteration_number + 1),
-                )
-                trace.write("zero_diff_requires_human", iteration=iteration_number)
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "本轮没有可审查的 tracked diff，不能自动判定成功。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="no_diff",
-                )
-                return run_dir
-            gate_evidence = _evaluate_loop_risk_gate(
-                self.workspace,
-                repo_path,
-                reflect_run,
-                iteration_dir,
-                trace,
-                iteration_number,
-            )
-            gate_result = gate_evidence.result
-            iteration_state = _update_iteration_state(
-                iteration_state,
-                **_risk_gate_state_fields(gate_evidence),
-            )
-            if gate_evidence.error or gate_result is None:
-                state.iterations.append(iteration_state)
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_risk_gate_fix_prompt(iteration_number + 1, None),
-                )
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "风险门禁评估失败，未启动隔离 reviewer。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="risk_gate_failed",
-                )
-                return run_dir
-            if gate_result.recommendation == "human-review":
-                state.iterations.append(iteration_state)
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_risk_gate_fix_prompt(iteration_number + 1, gate_result),
-                )
-                _write_final_report(
-                    run_dir,
-                    state,
-                    None,
-                    "风险门禁要求人工确认，未继续自动隔离审查。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="risk_gate_needs_human",
-                )
-                return run_dir
-            state.current_step = "review"
-            state.save(run_dir / "state.json")
-            trace.write("review_started", iteration=iteration_number)
-            review_run = self._run_review(
-                repo_path,
-                reflect_run,
-                reviewer_name,
-                run_dir,
-                iteration_number,
-                config,
-                gate_result,
-                state.project_policy_snapshot,
-            )
-            verdict = _read_verdict(review_run)
-            reviewer_status = _read_review_runner_status(review_run)
-            review_run_status = _read_review_run_status(review_run)
-            _record_review(iteration_dir, review_run)
-            trace.write(
-                "review_finished",
-                iteration=iteration_number,
-                status=review_run_status,
-                verdict=verdict.verdict,
-            )
-            iteration_state = _update_iteration_state(
-                iteration_state,
-                reviewer_status=reviewer_status,
-                review_run=run_name(review_run),
-                verdict=verdict.verdict,
-                findings_count=len(verdict.findings),
-            )
-            state.iterations.append(iteration_state)
-            previous_verdict = verdict
-            if not _review_run_allows_verdict(review_run_status, verdict):
-                trace.write(
-                    "review_run_not_successful",
-                    iteration=iteration_number,
-                    status=review_run_status,
-                )
-                _write_final_report(
-                    run_dir,
-                    state,
-                    verdict,
-                    f"Review run 自身状态为 {review_run_status}，不能采用其 verdict。",
-                )
-                self._save_loop_done(
-                    run_dir,
-                    state,
-                    "needs_human",
-                    trace,
-                    current_step="review_run_failed",
-                )
-                return run_dir
-            if verdict.verdict == "approve":
-                self._finish_or_prepare_next(run_dir, state, verdict, iteration_dir, trace)
-                return run_dir
-            if verdict.verdict == "needs_human":
-                self._finish_or_prepare_next(run_dir, state, verdict, iteration_dir, trace)
-                return run_dir
-            _write_text_artifact(
-                iteration_dir / "fix-prompt.md",
-                render_fix_prompt(verdict, iteration_number + 1),
-            )
-            trace.write("fix_prompt_written", iteration=iteration_number)
 
         _write_final_report(run_dir, state, previous_verdict, "达到最大自动迭代轮数，需要人工接管。")
         self._save_loop_done(run_dir, state, "needs_human", trace)
@@ -1756,16 +1636,17 @@ def render_loop_plan(
             "",
             "1. 生成 agent brief，编译 AGENTS.md 和已接受 memory。",
             "2. 生成 project-context.md，稳定注入项目画像、验证命令、AGENTS.md 和 accepted memory。",
-            "3. auto 模式先确认启动前不存在 tracked diff，再启动 worker。",
-            "4. worker 结束后检查工作区污染，超过预算则停止并交给人工判断。",
-            "5. 执行 verification 前的精确路径范围门禁；越界 diff 不进入后续流程。",
-            "6. 自动执行项目画像识别出的最小验证命令。",
-            "7. 验证后再次执行精确路径范围门禁；验证脚本造成越界也不进入 Reflect。",
-            "8. Reflect 收集当前 diff、验证日志和复盘材料；其确定性检查失败时停止。",
-            "9. Reflect 后再次执行精确路径范围门禁，绑定即将进入 review 的工作区状态。",
-            "10. 运行风险/变更预算门禁；需要人工确认时不启动自动 reviewer。",
-            "11. 隔离 reviewer 使用只读 runner 审查 review-pack。",
-            "12. approve 则生成 final-report；request_changes 则生成 fix-prompt。",
+            "3. 封存 workspace-baseline.json，并把内容哈希绑定到 state 与 trace。",
+            "4. assist 交给外部 Worker；auto 先确认运行时基线后启动受控 Worker。",
+            "5. Worker 结束后进入两种模式共用的后处理流程，先检查工作区污染。",
+            "6. 执行 verification 前的精确路径范围门禁；越界 diff 不进入后续流程。",
+            "7. 自动执行项目画像识别出的最小验证命令。",
+            "8. 验证后再次执行精确路径范围门禁；验证脚本造成越界也不进入 Reflect。",
+            "9. Reflect 收集当前 diff、验证日志和复盘材料；其确定性检查失败时停止。",
+            "10. Reflect 后再次执行精确路径范围门禁，绑定即将进入 review 的工作区状态。",
+            "11. 运行风险/变更预算门禁；需要人工确认时不启动自动 reviewer。",
+            "12. 隔离 reviewer 使用只读 runner 审查 review-pack。",
+            "13. approve 则生成 final-report；request_changes 则生成 fix-prompt。",
             "",
             "## 禁止动作",
             "",
@@ -2407,6 +2288,49 @@ def _next_iteration_number(
     return next_iteration
 
 
+def _expected_initialization_artifacts(
+    state: LoopAutomationState,
+) -> list[str]:
+    artifacts = list(LOOP_INITIALIZATION_ARTIFACTS)
+    if state.workspace_baseline_sha256:
+        artifacts.append(WORKSPACE_BASELINE_ARTIFACT)
+    return artifacts
+
+
+def _workspace_baseline_initialization_issues(
+    run_dir: Path,
+    state: LoopAutomationState,
+) -> list[str]:
+    if not state.workspace_baseline_sha256:
+        return ["workspace_baseline_binding_missing"]
+    try:
+        baseline = read_workspace_baseline(
+            run_dir / WORKSPACE_BASELINE_ARTIFACT,
+            expected_sha256=state.workspace_baseline_sha256,
+        )
+    except ValueError:
+        return ["workspace_baseline_invalid"]
+    if baseline.head_sha != state.initial_head_sha:
+        return ["workspace_baseline_head_mismatch"]
+    return []
+
+
+def _workspace_baseline_trace_issues(
+    trace_items: list[dict[str, object]],
+    state: LoopAutomationState,
+) -> list[str]:
+    baseline_events = [
+        item
+        for item in trace_items
+        if item.get("event") == "workspace_baseline_captured"
+    ]
+    if len(baseline_events) != 1:
+        return ["workspace_baseline_event_count_invalid"]
+    if baseline_events[0].get("sha256") != state.workspace_baseline_sha256:
+        return ["workspace_baseline_trace_mismatch"]
+    return []
+
+
 def loop_initialization_issues(
     workspace: Path,
     run_dir: Path,
@@ -2452,7 +2376,10 @@ def loop_initialization_issues(
         if source_bytes != loop_bytes:
             issues.append(f"{name}_source_mismatch")
 
-    for name in LOOP_INITIALIZATION_ARTIFACTS:
+    expected_initialization_artifacts = _expected_initialization_artifacts(state)
+    issues.extend(_workspace_baseline_initialization_issues(run_dir, state))
+
+    for name in expected_initialization_artifacts:
         path = run_dir / name
         try:
             if not path.is_file() or not path.read_bytes():
@@ -2499,8 +2426,9 @@ def loop_initialization_issues(
                 initialized = initialized_events[0]
                 if initialized.get("brief_run") != state.brief_run:
                     issues.append("loop_initialized_brief_mismatch")
-                if initialized.get("artifacts") != LOOP_INITIALIZATION_ARTIFACTS:
+                if initialized.get("artifacts") != expected_initialization_artifacts:
                     issues.append("loop_initialized_artifacts_mismatch")
+                issues.extend(_workspace_baseline_trace_issues(trace_items, state))
         else:
             # 兼容旧 run：根级 worker_prompt_measured 发生在全部初始化文件写完之后。
             legacy_markers = [

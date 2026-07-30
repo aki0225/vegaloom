@@ -148,6 +148,9 @@ v0.1.0 完成核心证据一致性和口径统一后进入功能冻结：
 
 - 保持上下文编译、受控执行、确定性验证、隔离审查和恢复交接稳定。
 - `loop continue` 必须绑定原仓库和 `needs_human` 状态。
+- Worker 启动前必须封存 workspace baseline；baseline 缺失、被改写或无法归因时不得继续。
+- assist 与 auto 只允许在 Worker 调度方式上不同，后续验证、Reflect、ReviewRuntime 和 verdict
+  必须复用同一条流程。
 - Reflect 与 Review 必须使用同一工作区快照，证据过期时停止并交还人工。
 - Goal P0 完成前必须重新校验 child run 或 manual evidence。
 - 不实现 Goal P1、多 Agent、数据库、Web UI、向量 Memory、后台 daemon 或自动提交发布。

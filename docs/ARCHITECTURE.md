@@ -330,12 +330,16 @@ eval.md
 自动化 loop 是一个轻量 orchestrator，不是多 Agent 平台：
 
 ```text
-brief -> project-context -> worker -> workspace-check -> verification -> reflect -> risk gate -> review-pack -> isolated reviewer -> verdict
+brief -> project-context -> loop-plan -> workspace-baseline
+      -> worker dispatch
+      -> workspace-check -> scope gate -> verification -> reflect
+      -> risk gate -> review-pack -> isolated reviewer -> verdict
 ```
 
 两种模式：
 
-- `assist`：主会话或人工负责实现；Vega 生成 worker prompt，后续通过 `loop continue` 收集 diff、自动验证日志并触发隔离 reviewer。
+- `assist`：主会话或人工负责实现；Vega 生成 worker prompt 并封存启动基线，后续通过
+  `loop continue` 接管同一条后处理链。
 - `auto`：通过 `loop --mode auto` 或命令级自动入口 `do` 显式选择，用 `codex exec` 作为
   worker。首次启动必须没有 staged 或 unstaged tracked diff；否则不启动 worker，避免把历史
   改动归因给本轮。后续自动迭代保留同一 run 前一轮的 diff 作为基线。worker 后先做工作区污染
@@ -343,6 +347,14 @@ brief -> project-context -> worker -> workspace-check -> verification -> reflect
   执行 `.vega.yaml` 或 project profile 识别出的最多两个验证命令。验证结束后会再次执行 scope gate，
   防止验证脚本写出越界 tracked diff；Reflect 固化 review 输入后还会进行一次 scope recheck。三次
   检查与 reviewer 的工作区快照校验共同防止异步进程把越界 diff 带入隔离审查，默认最多 2 轮。
+
+两种模式只在 Worker 调度上不同。Worker 返回或外部主会话完成修改后，都调用
+`_run_post_worker_pipeline`，复用相同的 scope gate、verification、Reflect、Risk Gate、
+ReviewRuntime 和 verdict 语义，不再由实验脚本手工拼 Reviewer Prompt。
+
+根级 `workspace-baseline.json` 在 Worker 启动前生成，其内容哈希同时写入 `state.json` 和
+`trace.jsonl`。`loop continue` 会先校验 artifact 哈希、初始 HEAD 和仓库绑定；证据缺失、
+被改写或启动时已有 tracked diff 时 fail-closed，不能事后把当前 diff 归因给本轮 Worker。
 
 验证门禁优先于 LLM 结论：如果自动验证失败，即使隔离 reviewer 返回 `approve`，loop 也会进入 `needs_human` 并生成 `fix-prompt.md`，不会进入 `success/ready_to_commit`。
 
@@ -371,6 +383,7 @@ runs/<run_id>-loop/
   project-context.md
   project-policy-snapshot.json
   loop-plan.md
+  workspace-baseline.json
   worker-prompt.md
   iterations/
     01/executions/worker/execution.json

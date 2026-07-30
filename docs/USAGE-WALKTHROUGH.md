@@ -5,7 +5,8 @@
 示例目标不是展示复杂功能，而是验证一条最小但真实的研发闭环：
 
 ```text
-需求 -> auto worker -> 自动验证 -> 隔离 reviewer -> request_changes
+需求 -> 计划/上下文 -> 封存 workspace baseline -> auto worker
+-> 自动验证 -> 隔离 reviewer -> request_changes
 -> 人工修复 -> loop continue -> 再验证/再审查 -> finish -> decision
 ```
 
@@ -52,6 +53,12 @@ runner:
 
 ## 1. 启动日常入口
 
+先确认没有需要保留但尚未归因的 tracked diff：
+
+```powershell
+git status --short
+```
+
 ```powershell
 vega do feature `
   --repo <target-repo> `
@@ -65,6 +72,8 @@ Vega 会生成并执行：
 ```text
 brief
 project-context
+loop-plan
+workspace-baseline
 worker-prompt
 codex exec worker
 verification-summary
@@ -79,6 +88,8 @@ codex exec read-only reviewer
 runs/<loop_run>/
   agent-brief.md
   project-context.md
+  loop-plan.md
+  workspace-baseline.json
   worker-prompt.md
   iterations/01/
     verification-summary.md
@@ -86,6 +97,10 @@ runs/<loop_run>/
     review-verdict.json
     fix-prompt.md
 ```
+
+`workspace-baseline.json` 的哈希同时绑定在 `state.json` 与 `trace.jsonl`。assist 与 auto
+只在谁启动 Worker 上不同；Worker 结束后的 workspace/scope gate、verification、Reflect、
+Risk Gate、只读 Reviewer 和 verdict 使用同一条 Runtime 流程。
 
 ## 2. 第一轮 reviewer 打回
 
