@@ -33,7 +33,30 @@
 架构增长门禁通过：C901 38->38，Python 模块 76->76
 ```
 
-### 已取得终态的验证
+### 可信 pytest 终态（2026-07-30 后续补充）
+
+当前 `main` 的 `a8a58cb` 已取得完整、可正常退出的本机测试终态。此前把 60 秒外层
+观察窗口内尚未输出最终汇总的情况误判为 pytest 退出异常；本次按 CI 的 Python 3.12
+分片边界执行，并为每个测试使用 `58` 秒 timeout。
+
+```json
+{
+  "collected": 908,
+  "passed": 900,
+  "failed": 0,
+  "errors": 0,
+  "skipped": 8
+}
+```
+
+- 六个分片均以退出码 `0` 正常结束，JUnit 结果只保存在被忽略的
+  `.tmp/pytest/diagnostics/`。
+- 最慢单项为 `25.22` 秒，仍低于 `58` 秒上限。
+- 本机共享 pytest cache 目录存在 ACL 警告；本次每个分片使用独立 cache，因此该本机
+  卫生问题没有污染测试结论，也不应通过修改产品代码掩盖。
+- 这只解除主仓库验证前置条件；正式 CRWP-V1 Worker、Reviewer 和 Finish 仍然都没有启动。
+
+### 已取得终态的静态验证
 
 ```text
 python -m compileall -q src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py
@@ -45,7 +68,7 @@ git diff --check
 
 以上命令均通过。
 
-受影响测试共取得 `171 passed` 的明确终态：
+此前受影响测试曾单独取得 `171 passed` 的明确终态：
 
 ```text
 tests/test_security_evidence.py + tests/test_context_boundaries.py：80 passed
@@ -58,16 +81,13 @@ tests/test_p0_regressions.py：54 passed
 `tests/test_p0_regressions.py` 用时约 17 分钟。测试较慢来自既有 Goal、Scope、Finish
 重算链路，不是本轮命令失联。
 
-### 未完成验证
+### 已解除的历史验证阻断
 
-完整 `python -m pytest -q --durations=20` 已启动，但在取得最终汇总前因会话中断停止。
-残留 pytest 进程已经明确终止，因此：
+完整测试此前在最终汇总前被外层会话截断，不能作为通过证据。上方 `908` 节点的六分片
+结果替代该阻断，后续不得再把旧的部分 JUnit 或历史 `896` 节点统计当作当前 `a8a58cb`
+的测试结论。
 
-- 本轮不能记录 full suite 通过；
-- 不能沿用此前 `888 passed / 8 skipped` 作为当前补丁的新证据；
-- 晚间应重新从头执行完整 pytest，并等待正常退出码和最终计数。
-
-### 晚间固定顺序
+### 下一步固定顺序
 
 ```powershell
 git fetch origin
@@ -75,16 +95,16 @@ git switch main
 git pull --ff-only origin main
 git status -sb
 Get-Content docs/CORE-REAL-WORLD-PILOT-V1-HANDOFF.md -TotalCount 120
-python -m pytest -q --durations=20
 ```
 
-完整 pytest 取得可信终态后：
-
-1. 重跑本文上方的静态检查和架构门禁；
-2. 按现有预注册只执行 CRWP-V1 Case 01/02；
-3. Case 03 继续记录为 `eligibility-changed-before-run`，不得启动 Worker；
-4. 不为 Pilot 新增 Runtime、状态或 Artifact；
-5. Pilot 有一次合同允许的真实终态后，再实现 Loop 内部 Plan-first 与 Important Diff。
+1. 从冻结 SHA 重建 CRWP-V1 Case 01/02 目标副本，只写入对应 `.vega.yaml`。
+2. 重新登记 prepared HEAD、tree、配置摘要、非 oracle baseline、双次 oracle、Issue/PR
+   资格和 Provider 探测。
+3. Case 03 继续固定为 `eligibility-changed-before-run`，不得启动 Worker。
+4. 只有控制哈希、资格、workspace baseline、Provider 和本节的可信 pytest 终态同时满足，
+   才能按预注册顺序启动 Case 01/02 的正式 Worker。
+5. 不为 Pilot 新增 Runtime、状态或 Artifact；在至少一次合同允许的真实终态前，不实现
+   Loop 内部 Plan-first 与 Important Diff。
 
 ## 2026-07-29 接力
 
