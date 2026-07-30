@@ -56,6 +56,35 @@
   卫生问题没有污染测试结论，也不应通过修改产品代码掩盖。
 - 这只解除主仓库验证前置条件；正式 CRWP-V1 Worker、Reviewer 和 Finish 仍然都没有启动。
 
+### Case 01/02 预检终态（2026-07-30）
+
+本轮只完成预注册已有前置检查，没有启动正式 Worker、Reviewer 或 Finish，也没有新增
+Runtime、测试框架或证据格式。
+
+- 两个活跃目标副本均从冻结 SHA 重建，关闭 `core.autocrlf`，移除 remote，并只提交
+  `.vega.yaml`：
+  - Case 01 prepared HEAD：`3cde5c71416275f573bb7d6b8823464014f9d3df`
+  - Case 02 prepared HEAD：`fde6ef505a84aef2a5377ac6f27f253b3a453d0b`
+- 两个副本的 workspace snapshot 均为 `capture_complete=true`、
+  `ignored_manifest_complete=true`、`git_control_complete=true`，且 tracked changes 和
+  untracked files 都为 `0`。`ignored_content_complete=false` 仍是既有有界内容覆盖语义。
+- Case 01 的定向 build、`59 passed`、typecheck、Biome、`git diff --check` 均通过；
+  oracle 两次均以 `1` 退出，stdout SHA-256 都是
+  `4308870971d831b3f42883a42ea06057da9267782574b278a527f614172095e1`，stderr 为空。
+- Case 02 的 workspace build、`41 passing`、ESLint、`git diff --check` 均通过；
+  oracle 两次均以 `1` 退出，stdout SHA-256 都是
+  `0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b`，stderr 为空。
+- 资格复核没有变化：Dormice Issue `#33` 仍为 open、无 assignee、无评论，未发现关联
+  修复 PR；Sequelize Issue `#18265` 仍为 open、无 assignee、无评论，受控公开 PR
+  `#18274` 仍保持登记的 base、head 和 `6934` 字节 diff 哈希。
+- Sequelize 冻结目标的 tracked 输入面未命中第十节四个负向词条。正式 Worker 和 Reviewer
+  启动前仍必须扫描当次最终编译输入；命中即停止，不得调用外部 runner。
+- `codex-cli 0.145.0` 使用 read-only、ephemeral 的 `gpt-5.4` 短探测返回 `READY`，
+  退出码为 `0`。两个目标都没有遗留相关进程。
+
+当前可以按预注册顺序进入 Case 01 的正式 Worker。不要再次重跑已经通过的 setup 或
+baseline；Case 01 取得终态后，再决定是否继续 Case 02。
+
 ### 已取得终态的静态验证
 
 ```text
