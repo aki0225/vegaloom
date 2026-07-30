@@ -19,7 +19,8 @@
 > 不接入 Reviewer，也不生成新的证据 artifact。
 >
 > 2026-07-28 A2A 纠偏：当前只冻结最小互操作探针设计，不进入 MA-5 实现，不新增 SDK、
-> Runtime、fixture、测试或 Provider 调用。设计见 `A2A-MINIMAL-INTEROP-PROBE-V1.md`。
+> Runtime、fixture、测试或 Provider 调用。该历史预注册后被 Owner 裁决取代并删除，当前
+> 边界以第 8.2 与 12.9 节为准。
 >
 > 2026-07-29 过度设计清理：A2A P0 不实施；日用价值 V2 的可执行 Harness 与配套测试
 > 已退役。历史 task、资格记录、运行结果和固定 verifier 保留，后续不再为实验账本、
@@ -560,8 +561,8 @@ A2A 探针：
    不要求恢复 `PlanContract`、新增 `HandoffPacket` 数据模型或增加证据层。
 
 未满足时继续使用本地 `WorkerAdapter` 与现有 task-pack。日后接入 A2A 时，只把现有任务事实
-映射到 `Message` / `Task` / `Artifact`，不先造持久化聊天协议再寻找用途。最小映射、P0/P1
-边界和停止线见 `A2A-MINIMAL-INTEROP-PROBE-V1.md`。
+映射到 `Message` / `Task` / `Artifact`，不先造持久化聊天协议再寻找用途。远端 Agent 无权
+改变本地 verifier 或成功语义；没有真实跨运行时目标和单独授权时，不执行 P0/P1。
 
 ---
 
@@ -1030,9 +1031,9 @@ Owner 同意继续在 `experiment/ma2b-pilot-next` 上准备 A2A 后续验证，
 `MA2B-F01` 与确定性 fake Agent 检查本地协议资格，不计入能力结论；未来 P1 才可在另行授权后
 使用 `MA2B-C07` 检查真实跨运行时互操作。
 
-完整变量、协议映射、资格条件和停止线见 `A2A-MINIMAL-INTEROP-PROBE-V1.md`。该设计不修改
-正式 task-pack、ground truth、hash 或 12-case readiness；也不改变 C07/C05 的既有能力与
-经济性结论。
+该历史预注册随后被 12.9 的 Owner 裁决取代并删除，未进入实现。它没有修改正式 task-pack、
+ground truth、hash 或 12-case readiness，也不改变 C07/C05 的既有能力与经济性结论，更不
+构成未来 A2A 实现授权。
 
 ### 12.9 2026-07-29 Owner 裁决：转入日用价值对照验证
 
@@ -1149,8 +1150,7 @@ V2 基础设施由两个有界脚本组成：
 
 V2 结果显式区分 Runtime verification 与 post-seal verifier，并把
 `owner_manual_actions` 与 `automation_actions` 分开。V1 ledger 与运行记录不改写，也没有
-新增 V2 正式 treatment。完整合同见
-`docs/experiments/daily-value-validation/PAIRED-DOGFOOD-V2.md`。
+新增 V2 正式 treatment。该历史可执行合同随后按 12.16 退役并删除，当前没有 V2 执行入口。
 
 ### 12.16 2026-07-29 Owner 裁决：删除日用实验过度设计 Harness
 
