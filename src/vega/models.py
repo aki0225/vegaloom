@@ -412,6 +412,8 @@ class LoopAutomationState(BaseModel):
     scope_gate_required: bool = False
     scope_policy_sha256: str | None = None
     verification_artifact_version: Literal[2] | None = None
+    workspace_baseline_artifact_version: Literal[1] | None = None
+    workspace_baseline_sha256: str | None = None
     current_iteration: int = 0
     max_iterations: int = 2
     iterations: list[LoopIterationState] = Field(default_factory=list)
