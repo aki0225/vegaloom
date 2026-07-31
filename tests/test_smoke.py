@@ -3128,7 +3128,12 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     review_skill = repo_dir / ".codex" / "skills" / "vega-review" / "SKILL.md"
     assert loop_skill.exists()
     assert review_skill.exists()
-    assert "vega loop bug" in loop_skill.read_text(encoding="utf-8")
+    loop_skill_text = loop_skill.read_text(encoding="utf-8")
+    assert "vega loop bug" in loop_skill_text
+    assert "workspace-baseline.json" in loop_skill_text
+    assert "不要执行 Worker，也不要 `loop continue`" in loop_skill_text
+    assert "宿主原生子代理" in loop_skill_text
+    assert "不把子代理完整聊天传给 Reviewer" in loop_skill_text
     assert "vega gate" in review_skill.read_text(encoding="utf-8")
 
     second = CliRunner().invoke(app, ["adapters", "init", "codex", "--repo", str(repo_dir)])

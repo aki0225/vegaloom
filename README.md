@@ -56,6 +56,7 @@ Worker（编写）与 Reviewer（评审）使用彼此独立的新会话。Revie
 
 - 从任务、`AGENTS.md`、项目画像和 `.vega.yaml` 编译执行上下文。
 - 支持 bug、feature 的人工协作 `assist` 与显式自动化 `auto` 流程。
+- `assist` 在生成 Worker Prompt 前封存可校验的工作区基线，避免把旧改动归因给本轮任务。
 - 运行项目自己的测试、静态检查和其他确定性验证。
 - 使用独立只读 reviewer 会话审查 diff、测试证据和项目规则，不传递 worker 完整对话。
 - 根据变更路径、diff 规模和预算输出风险等级与审查建议。
@@ -94,6 +95,15 @@ vega latest --kind loop
 vega loop continue --repo . --run <run_id>
 ```
 
+启动 `assist` 前应先清理 staged 与 unstaged tracked diff。Vega 会先写入并校验
+`workspace-baseline.json`，确认基线可用后才生成 `worker-prompt.md`。当前主会话或宿主工具的
+原生子代理按 Prompt 实现后，再运行 `loop continue`；Vega 依据真实工作区和验证证据继续，
+不采信 Worker 的口头完成结论。
+
+如果基线不完整、已有 tracked diff 或 HEAD 在初始化期间变化，Vega 不会生成 Worker Prompt，
+也不会创建 iteration。应保留该 run 作为失败证据，清理或稳定仓库后新建 loop，而不是强行
+continue。
+
 后续命令应在同一个 workspace 中执行。边界清晰的小任务可以使用默认启用 auto 的 `do`；
 如需人工实现，仍可显式传入 `--mode assist`：
 
@@ -120,6 +130,7 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 ## 关键行为
 
 - 确定性验证高于模型结论；测试失败时 reviewer 的 `approve` 不能把运行变成成功。
+- assist 的工作区基线、根状态和 trace 使用内容哈希绑定；缺失、篡改或不一致时拒绝 continue。
 - auto 首轮不会接管已有 tracked diff，避免把历史改动错误归因给本轮 worker。
 - staged 与 unstaged 变更都会进入审查证据，不使用可能相互抵消的净差异代替。
 - 高风险路径、超预算变更或明确的 `human-review` 不会被 AI reviewer 自动放行。

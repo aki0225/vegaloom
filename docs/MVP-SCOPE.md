@@ -108,7 +108,11 @@ v0.1 baseline 的最小验收定义。
 - Config check：只读预检 `.vega.yaml`，拦截 schema、验证命令截断和未知 runner
 - Review pack 的 `review-pack.md`、`review-prompt.md`、`review-checklist.md`、`project-context.md`、`review-context.json`、`review-prompt-metrics.json/md`
 - 隔离 review 的 `review-findings.md`、`review-verdict.json`、`review-runner-output.txt`
-- 自动化 loop 的 `loop-plan.md`、`worker-prompt.md`、`worker-prompt-metrics.json/md`、`project-context.md`、`iterations/*/workspace-check.md`、`iterations/*/workspace-check.json`、`iterations/*/verification-summary.md`、`iterations/*/verification-result.json`、`final-report.md`
+- 自动化 loop 的 `loop-plan.md`、`workspace-baseline.json`（assist）、`worker-prompt.md`、`worker-prompt-metrics.json/md`、`project-context.md`、`iterations/*/workspace-check.md`、`iterations/*/workspace-check.json`、`iterations/*/verification-summary.md`、`iterations/*/verification-result.json`、`final-report.md`
+- Assist 启动基线：Worker Prompt 前封存 HEAD、tracked/untracked、ignored 和 Git 控制摘要，
+  并与 state/trace/hash 绑定；已有 tracked diff、捕获不完整或 HEAD 漂移时不把任务交给 Worker
+- Assist 恢复边界：continue 在创建 iteration 前校验启动基线；artifact 缺失、篡改或旧 run
+  没有基线时拒绝继续，要求清理现场后新建 loop
 - Worker/reviewer/verification execution lease：`execution.json`、`process-output.txt`、可选 `stop-request.json`
 - Stop/timeout report：中断 attempt 后进入 `needs_human`，不继续后续自动步骤
 - Runner error handoff：provider/网络/CLI 错误后写 `runner-error-report.md`，保留可能存在的部分改动并交还人工

@@ -22,6 +22,7 @@ vega run engineering-change
 vega do / vega loop
   -> Brief / Project Context
   -> LoopAutomationRuntime
+  -> Worker 前工作区基线
   -> Worker
   -> Workspace / Scope Gate
   -> Verification
@@ -351,12 +352,15 @@ eval.md
 自动化 loop 是一个轻量 orchestrator，不是多 Agent 平台：
 
 ```text
-brief -> project-context -> worker -> workspace-check -> verification -> reflect -> risk gate -> review-pack -> isolated reviewer -> verdict
+brief -> project-context -> workspace baseline -> worker prompt -> worker -> workspace-check
+-> verification -> reflect -> risk gate -> review-pack -> isolated reviewer -> verdict
 ```
 
 两种模式：
 
-- `assist`：主会话或人工负责实现；Vega 生成 worker prompt，后续通过 `loop continue` 收集 diff、自动验证日志并触发隔离 reviewer。
+- `assist`：主会话或宿主工具的原生子代理负责实现。Vega 在生成 worker prompt 前先把
+  `workspace-baseline.json` 与根状态、trace 进行内容哈希绑定，后续通过 `loop continue`
+  对照真实工作区收集 diff、自动验证日志并触发隔离 reviewer。
 - `auto`：通过 `loop --mode auto` 或命令级自动入口 `do` 显式选择，用 `codex exec` 作为
   worker。首次启动必须没有 staged 或 unstaged tracked diff；否则不启动 worker，避免把历史
   改动归因给本轮。后续自动迭代保留同一 run 前一轮的 diff 作为基线。worker 后先做工作区污染
@@ -364,6 +368,19 @@ brief -> project-context -> worker -> workspace-check -> verification -> reflect
   执行 `.vega.yaml` 或 project profile 识别出的最多两个验证命令。验证结束后会再次执行 scope gate，
   防止验证脚本写出越界 tracked diff；Reflect 固化 review 输入后还会进行一次 scope recheck。三次
   检查与 reviewer 的工作区快照校验共同防止异步进程把越界 diff 带入隔离审查，默认最多 2 轮。
+
+assist 基线要求捕获完整、没有 staged 或 unstaged tracked diff，且 HEAD 与初始化时一致。
+任一条件不满足时，run 会保留 `workspace-check.md/json`、`final-report.md`、state 和 trace，
+但不会生成 `worker-prompt.md`，也不会创建 iteration 或把任务交给 Worker。清理或稳定仓库后
+必须新建 loop；这类失败 run 不能强行 continue。
+
+`loop continue` 会在创建 iteration 前重新验证 baseline artifact 的 schema、内容哈希和根状态
+绑定，再用该基线检查当前 HEAD、启动前未跟踪文件、ignored 清单和 Git 控制状态。缺失或被
+改写的基线会 fail-closed。没有 baseline 的旧 assist run 仍可查看，但不能继续自动归因。
+
+当 Vega 的 `runs/` 根目录位于目标仓库中时，runtime 会把这个由 Harness 自己持续写入的 ignored
+目录记录为 baseline exclusion，并把 exclusion 一并写入哈希绑定的 artifact。该例外只避免
+Vega 把自己的运行产物误判为 Worker 污染，不会放宽对目标仓库其他 ignored 文件的检查。
 
 验证门禁优先于 LLM 结论：如果自动验证失败，即使隔离 reviewer 返回 `approve`，loop 也会进入 `needs_human` 并生成 `fix-prompt.md`，不会进入 `success/ready_to_commit`。
 
@@ -392,6 +409,7 @@ runs/<run_id>-loop/
   project-context.md
   project-policy-snapshot.json
   loop-plan.md
+  workspace-baseline.json       # assist 模式
   worker-prompt.md
   iterations/
     01/executions/worker/execution.json
@@ -406,6 +424,10 @@ runs/<run_id>-loop/
 
 Vega 只负责编译上下文、调用 runner、记录证据和控制迭代；不自动 commit、push、
 release，也不要求每次运行生成长期经验候选。
+
+因此 Vega 是控制面，Codex、Claude Code 或人工主会话是执行面。宿主可以选择直接实现或调用
+原生子代理，但 Vega 不接管宿主内部的多 Worker 调度，也不依赖 Worker 自述判断完成；是否进入
+审查和成功状态只由工作区事实、确定性验证与隔离 Reviewer 证据决定。
 
 ### Execution Control
 

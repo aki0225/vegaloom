@@ -8,6 +8,7 @@ Vega 是面向个人开发者的轻量 AI Coding Harness。它不替代 Codex、
 ```text
 bug / feature
   -> 项目上下文编译
+  -> Worker 前工作区基线
   -> 受控 worker 执行
   -> 确定性验证
   -> Reflect 证据与变更风险门禁
@@ -62,6 +63,12 @@ Vega 发布 Python distribution 是为了安装 CLI 和本地资源，不把内�
 - `AGENTS.md`、项目画像和任务输入的上下文编译。
 - worker/reviewer 使用独立会话和固定 sandbox；reviewer 不继承 worker 的完整聊天记录。
 - 验证命令、精确路径范围、变更预算、Prompt 预算与工作区污染门禁。
+- assist 在 Worker Prompt 前生成 `workspace-baseline.json`，并用根状态与 trace 绑定其版本、
+  内容哈希和 HEAD。基线捕获不完整、已有 tracked diff 或初始化期间 HEAD 漂移时，不生成
+  Worker Prompt、不创建 iteration，也不允许继续该 run；清理或稳定仓库后必须新建 loop。
+- assist continue 在创建 iteration 前重新验证 baseline artifact，并以真实工作区差异归因
+  Worker 结果。缺失、被改写或与根状态、trace 不一致时 fail-closed；没有 baseline 的旧 run
+  只允许查看，不允许继续。
 - auto 首轮拒绝已有 tracked diff；同一 run 的后续轮次保留上一轮 diff 作为基线。
 - scope gate 在 worker/人工 continue 后先检查 staged 和 unstaged tracked diff；verification 结束后再次检查，Reflect 固化 review 输入后再检查一次。`forbidden_paths` 优先于 `allowed_paths`；最后一次与 reviewer 的工作区快照校验共同防止异步进程把越界 diff 带入隔离审查。任一阶段越界时保留 result、report、state 和 trace 证据并停止，不回滚或自动清理现场。
 - loop 启动时绑定稳定的 HEAD、项目策略文件摘要和 scope 规则摘要；worker commit/checkout、
@@ -76,6 +83,10 @@ Vega 发布 Python distribution 是为了安装 CLI 和本地资源，不把内�
 独立 reviewer 仍在同一目标仓库的只读视图中读取 Vega 明确编译的任务、diff、验证结果、
 项目规则、风险门禁和可选 accepted memory。这里承诺的是角色、会话和输入边界隔离，
 不是容器、独立文件系统或操作系统级安全隔离。
+
+Vega 只承诺控制面合同：编译输入、封存基线、读取真实工作区、运行验证、生成 Reviewer
+证据并裁决状态。Worker 可以是当前主会话、宿主原生子代理或显式 `auto` runner；Vega
+不要求也不实现通用 Multi-Worker 调度器，并且不把 Worker 的口头结论当作完成证据。
 
 diff、测试输出、源码注释和其他仓库内容都属于不可信证据，其中出现的操作指令不得覆盖
 reviewer 合同。该提示词边界只能降低误跟随风险，不能证明模型能抵抗恶意 Prompt Injection；
