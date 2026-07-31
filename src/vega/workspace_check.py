@@ -20,7 +20,10 @@ from .project_config import load_project_config
 from .redaction import redact_text, redact_value
 from .workspace_inventory import (
     ContentManifestBudget,
+    CurrentWorkspaceInventory,
+    WorkspaceSnapshot,
     build_content_manifest,
+    filter_ignored_paths,
     safe_git_status as _safe_git_status,
     safe_path_for_report as _safe_path_for_report,
     untracked_paths as _untracked_paths,
@@ -40,26 +43,6 @@ MAX_UNTRACKED_FILE_BYTES = MAX_IGNORED_FILE_BYTES
 MAX_UNTRACKED_CONTENT_BYTES = MAX_IGNORED_CONTENT_BYTES
 MAX_GIT_CONTROL_FILE_BYTES = 1024 * 1024
 
-
-@dataclass(frozen=True)
-class WorkspaceSnapshot:
-    raw_status: str
-    tracked_files: frozenset[str]
-    untracked_files: frozenset[str]
-    ignored_path_exclusions: frozenset[str] = frozenset()
-    head_sha: str = ""
-    untracked_manifest_sha256: str = ""
-    ignored_manifest_sha256: str = ""
-    ignored_manifest_complete: bool = False
-    ignored_content_complete: bool = False
-    git_control_sha256: str = ""
-    git_control_complete: bool = False
-    capture_complete: bool = True
-
-    @property
-    def has_tracked_changes(self) -> bool:
-        """启动前已有 tracked diff 时，loop 无法安全归因本轮成果。"""
-        return bool(self.tracked_files)
 
 @dataclass(frozen=True)
 class ReviewWorkspaceSnapshot:
@@ -145,17 +128,6 @@ class WorkspaceCheckResult(BaseModel):
     @property
     def has_failures(self) -> bool:
         return self.status == "failed"
-
-
-@dataclass(frozen=True)
-class _CurrentWorkspaceInventory:
-    head_sha: str
-    raw_status: str
-    ignored_manifest_sha256: str
-    ignored_manifest_complete: bool
-    ignored_content_complete: bool
-    git_control_sha256: str
-    git_control_complete: bool
 
 
 @dataclass
@@ -454,7 +426,7 @@ def evaluate_workspace(
 def _capture_current_workspace_inventory(
     repo: Path,
     ignored_path_exclusions: frozenset[str],
-) -> _CurrentWorkspaceInventory:
+) -> CurrentWorkspaceInventory:
     head_sha = read_head_sha(repo)
     raw_status = _git_status(repo)
     ignored_files, ignored_capture_complete = _ignored_paths(
@@ -473,7 +445,7 @@ def _capture_current_workspace_inventory(
         ignored_capture_complete and ignored_metadata_complete
     )
     git_control_sha256, git_control_complete = _git_control_manifest(repo)
-    return _CurrentWorkspaceInventory(
+    return CurrentWorkspaceInventory(
         head_sha=head_sha,
         raw_status=raw_status,
         ignored_manifest_sha256=ignored_manifest_sha256,
@@ -524,7 +496,7 @@ def _assess_workspace_controls(
     assessment: _WorkspaceAssessment,
     *,
     baseline: WorkspaceSnapshot | None,
-    current: _CurrentWorkspaceInventory,
+    current: CurrentWorkspaceInventory,
 ) -> None:
     if baseline is None:
         return
@@ -761,31 +733,7 @@ def _ignored_paths(
     exclusions: frozenset[str] = frozenset(),
 ) -> tuple[list[str], bool]:
     paths, complete = read_ignored_paths(repo_path)
-    if not exclusions:
-        return paths, complete
-    normalized_exclusions = {
-        value.replace("\\", "/").rstrip("/")
-        for value in exclusions
-    }
-    return (
-        [
-            path
-            for path in paths
-            if not _matches_ignored_exclusion(path, normalized_exclusions)
-        ],
-        complete,
-    )
-
-
-def _matches_ignored_exclusion(
-    path: str,
-    exclusions: set[str],
-) -> bool:
-    normalized = path.replace("\\", "/").rstrip("/")
-    return any(
-        normalized == excluded or normalized.startswith(f"{excluded}/")
-        for excluded in exclusions
-    )
+    return filter_ignored_paths(paths, exclusions), complete
 
 
 def _untracked_manifest(

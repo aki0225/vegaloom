@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .models import BriefInput, GateResult, ReviewVerdict
 from .redaction import redact_text
 from .scope_gate import LoopScopeGateEvidence
+
+if TYPE_CHECKING:
+    from .workspace_check import WorkspaceCheckResult
+
+
+@dataclass(frozen=True)
+class AssistWorkspaceFailureGuidance:
+    current_step: str
+    conclusion: str
+    fix_prompt: str
+    report_untracked_files: bool = False
 
 
 def render_loop_plan(
@@ -198,6 +211,39 @@ def render_untracked_files_fix_prompt(
         ]
     )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def assist_workspace_failure_guidance(
+    result: WorkspaceCheckResult,
+    next_iteration: int,
+) -> AssistWorkspaceFailureGuidance:
+    if result.baseline_head_changed:
+        return AssistWorkspaceFailureGuidance(
+            current_step="workspace_head_changed",
+            conclusion=(
+                "Git HEAD 在 loop 启动后发生变化；当前 diff 无法继续归因，"
+                "已在 scope gate 前停止。"
+            ),
+            fix_prompt=render_workspace_fix_prompt(next_iteration),
+        )
+    if result.new_untracked_count:
+        return AssistWorkspaceFailureGuidance(
+            current_step="untracked_files",
+            conclusion=(
+                "当前工作区存在未跟踪文件；reviewer 不读取其内容，"
+                "已在 verification 前转人工确认。"
+            ),
+            fix_prompt=render_untracked_files_fix_prompt(
+                next_iteration,
+                result.new_untracked_files,
+            ),
+            report_untracked_files=True,
+        )
+    return AssistWorkspaceFailureGuidance(
+        current_step="workspace_check_failed",
+        conclusion="工作区完整性检查失败，未继续 verification、reflect 或 review。",
+        fix_prompt=render_workspace_fix_prompt(next_iteration),
+    )
 
 
 def render_scope_gate_fix_prompt(

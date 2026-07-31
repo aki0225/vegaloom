@@ -12,7 +12,9 @@ from .execution_control import (
     ExecutionRecord,
     find_execution_records,
 )
+from .workspace_baseline import classify_legacy_assist_status
 from .run_status_guidance import (
+    initialization_next_steps as _initialization_next_steps,
     latest_iteration_file as _latest_iteration_file,
     verification_failure_next_steps as _verification_failure_next_steps,
 )
@@ -78,7 +80,7 @@ def render_run_status(workspace: Path, run: str) -> str:
 
 def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     run_dir = resolve_run_dir(workspace, run)
-    state = _read_state(run_dir)
+    state = classify_legacy_assist_status(run_dir, _read_state(run_dir))
     kind = _infer_kind(run_dir, state)
     decisions = DecisionStore(run_dir).list()
     execution = _latest_execution_payload(run_dir)
@@ -267,23 +269,10 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
 
 
 def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
-    status = state.get("status")
-    current_step = state.get("current_step")
-    if status == "needs_human" and current_step in {
-        "workspace_baseline_dirty",
-        "workspace_baseline_unavailable",
-        "workspace_head_changed",
-    }:
-        return [
-            f"读取 `{run_dir / 'workspace-check.md'}` 和 `final-report.md`，确认启动基线问题。",
-            "当前 run 没有把任务交给 Worker，也不能安全 continue。",
-            "清理或稳定目标仓库后，保留本 run 作为证据并重新创建新的 loop。",
-        ]
-    if status == "needs_human" and current_step == "waiting_for_worker":
-        return [
-            f"读取 `{run_dir / 'worker-prompt.md'}`，让主会话/人工完成实现。",
-            f"实现后运行：`vega loop continue --repo <repo> --run {run_dir.name}`；如已有外部日志再加 `--test-log <log>`。",
-        ]
+    status, current_step = state.get("status"), state.get("current_step")
+    initialization_steps = _initialization_next_steps(run_dir, state)
+    if initialization_steps is not None:
+        return initialization_steps
     if (
         status == "needs_human"
         and current_step == "recovered_initialization_incomplete"

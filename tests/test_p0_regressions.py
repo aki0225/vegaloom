@@ -295,8 +295,11 @@ def test_auto_records_terminal_artifacts_when_ignored_inventory_times_out(
     worker = CountingWorker("worker change")
     reviewer = CountingReviewer()
 
-    def timeout_ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
-        del repo_path
+    def timeout_ignored_paths(
+        repo_path: Path,
+        exclusions: frozenset[str] = frozenset(),
+    ) -> tuple[list[str], bool]:
+        del repo_path, exclusions
         raise subprocess.TimeoutExpired(
             cmd=["git", "ls-files"],
             timeout=30,

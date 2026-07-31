@@ -1554,6 +1554,63 @@ def test_loop_assist_continue_generates_fix_prompt_from_review_findings(tmp_path
     assert reviewer.calls[0]["sandbox"] == "read-only"
 
 
+def test_assist_continue_rejects_reordered_initialization_trace(
+    tmp_path: Path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    runtime = LoopAutomationRuntime(tmp_path)
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="验证初始化 trace 的完整顺序",
+            source="initialization-trace-order",
+            repo_path=str(repo_dir),
+        ),
+        "assist",
+    )
+    trace_path = run_dir / "trace.jsonl"
+    trace_items = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    worker_index = next(
+        index
+        for index, item in enumerate(trace_items)
+        if item.get("event") == "worker_prompt_measured"
+        and "iteration" not in item
+    )
+    initialized_index = next(
+        index
+        for index, item in enumerate(trace_items)
+        if item.get("event") == "loop_initialized"
+    )
+    trace_items[worker_index], trace_items[initialized_index] = (
+        trace_items[initialized_index],
+        trace_items[worker_index],
+    )
+    trace_path.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in trace_items
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="workspace_baseline_trace_order_invalid",
+    ):
+        runtime.continue_assist(run_dir.name, repo_dir, verify=False)
+    state = json.loads(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert state["current_step"] == "waiting_for_worker"
+    assert state["iterations"] == []
+
+
 def test_assist_start_blocks_dirty_tracked_baseline_before_worker_handoff(
     tmp_path,
 ) -> None:

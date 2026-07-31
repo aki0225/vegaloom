@@ -222,8 +222,11 @@ def test_incomplete_ignored_path_enumeration_is_exposed(
     repo = _init_repo(tmp_path)
     original_ignored_paths = workspace_check_module._ignored_paths
 
-    def incomplete_ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
-        paths, _ = original_ignored_paths(repo_path)
+    def incomplete_ignored_paths(
+        repo_path: Path,
+        exclusions: frozenset[str] = frozenset(),
+    ) -> tuple[list[str], bool]:
+        paths, _ = original_ignored_paths(repo_path, exclusions)
         return paths, False
 
     monkeypatch.setattr(
