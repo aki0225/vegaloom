@@ -9,7 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .execution_control import ExecutionRecoveryInspection, inspect_execution_for_recovery
-from .loop_runtime import loop_initialization_issues
+from .loop_initialization import loop_initialization_issues
 from .models import (
     LoopAutomationState,
     LoopIterationState,
@@ -24,6 +24,7 @@ from .trace import (
     active_run_finished_indices,
     read_trace_items,
 )
+from .workspace_baseline import recovered_initialization_step
 
 
 class RecoveryTransaction(BaseModel):
@@ -282,10 +283,8 @@ class RecoveryRuntime:
             state.superseded_terminal_events.append(superseded_terminal_record)
         state.status = "needs_human"
         state.last_recovery_id = recovery_id
-        state.current_step = (
-            "recovered_initialization_incomplete"
-            if initialization_incomplete
-            else "recovered"
+        state.current_step = recovered_initialization_step(
+            initialization_issues
         )
         state.artifacts = _dedupe([*state.artifacts, "recovery-report.md", "state.json", "trace.jsonl"])
         state.save(state_path)
@@ -773,10 +772,8 @@ def _recovery_transaction_applied_to_state(
         ):
             return False
     if state.status == "needs_human":
-        expected_step = (
-            "recovered_initialization_incomplete"
-            if transaction.initialization_issues
-            else "recovered"
+        expected_step = recovered_initialization_step(
+            transaction.initialization_issues
         )
         return state.current_step == expected_step
     return (

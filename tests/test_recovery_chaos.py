@@ -24,6 +24,10 @@ from vega.run_lock import RunMutationLock
 from vega.run_status import run_status_payload
 from vega.runner import RunnerResult
 from vega.trace import TraceWriter
+from vega.workspace_baseline import (
+    is_legacy_assist_initialization_unavailable,
+    recovered_initialization_step,
+)
 
 
 OWNER_SCRIPT = textwrap.dedent(
@@ -740,6 +744,380 @@ def test_recovery_after_partial_initialization_rejects_continue_before_iteration
             verify=False,
         )
     assert not list(run_dir.glob("iterations/*"))
+
+
+def test_recovery_after_baseline_capture_before_worker_prompt_rejects_continue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    workspace = tmp_path / "workspace"
+
+    def crash_before_worker_prompt(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise RuntimeError("simulated crash after workspace baseline")
+
+    monkeypatch.setattr(
+        loop_runtime_module,
+        "build_worker_prompt",
+        crash_before_worker_prompt,
+    )
+    with pytest.raises(RuntimeError, match="after workspace baseline"):
+        LoopAutomationRuntime(workspace).start(
+            BriefInput(
+                mode="bug",
+                text="验证基线后初始化中断",
+                source="baseline-initialization",
+                repo_path=str(repo),
+            ),
+            "assist",
+        )
+
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    assert run_dir.joinpath("workspace-baseline.json").is_file()
+    assert not run_dir.joinpath("worker-prompt.md").exists()
+
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "owner exited after workspace baseline",
+    )
+
+    recovered_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert recovered_state.current_step == "recovered_initialization_incomplete"
+    report = run_dir.joinpath("recovery-report.md").read_text(encoding="utf-8")
+    assert "worker-prompt.md" in report
+    with pytest.raises(ValueError, match="初始化未完成"):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+
+
+def test_recovery_after_baseline_state_save_before_trace_rejects_continue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    workspace = tmp_path / "workspace"
+    original_write = TraceWriter.write
+
+    def crash_before_baseline_trace(
+        writer: TraceWriter,
+        event: str,
+        **payload: object,
+    ) -> None:
+        if event == "workspace_baseline_captured":
+            raise RuntimeError("simulated crash before workspace baseline trace")
+        original_write(writer, event, **payload)
+
+    monkeypatch.setattr(TraceWriter, "write", crash_before_baseline_trace)
+    with pytest.raises(RuntimeError, match="before workspace baseline trace"):
+        LoopAutomationRuntime(workspace).start(
+            BriefInput(
+                mode="bug",
+                text="验证基线状态已保存但 trace 尚未写入的恢复边界",
+                source="baseline-trace-window",
+                repo_path=str(repo),
+            ),
+            "assist",
+        )
+
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    crashed_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert crashed_state.workspace_baseline_artifact_version == 1
+    assert crashed_state.workspace_baseline_sha256
+    assert run_dir.joinpath("workspace-baseline.json").is_file()
+    assert not run_dir.joinpath("worker-prompt.md").exists()
+    assert not any(
+        item.get("event") == "workspace_baseline_captured"
+        for item in _read_jsonl(run_dir / "trace.jsonl")
+    )
+
+    monkeypatch.setattr(TraceWriter, "write", original_write)
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "owner exited before workspace baseline trace",
+    )
+
+    recovered_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert recovered_state.current_step == "recovered_initialization_incomplete"
+    report = run_dir.joinpath("recovery-report.md").read_text(encoding="utf-8")
+    assert "workspace_baseline_trace_event_count_invalid" in report
+    with pytest.raises(ValueError, match="初始化未完成"):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+
+
+@pytest.mark.parametrize(
+    "damage_kind",
+    [
+        "workspace_baseline_event_missing",
+        "loop_initialized_event_missing",
+        "workspace_baseline_artifact_missing",
+    ],
+)
+def test_status_rejects_modern_assist_initialization_damage(
+    tmp_path: Path,
+    damage_kind: str,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    workspace = tmp_path / "workspace"
+    run_dir = LoopAutomationRuntime(workspace).start(
+        BriefInput(
+            mode="bug",
+            text="验证现代 assist 初始化证据损坏时不建议 continue",
+            source="modern-assist-initialization-damage",
+            repo_path=str(repo),
+        ),
+        "assist",
+    )
+
+    if damage_kind == "workspace_baseline_artifact_missing":
+        run_dir.joinpath("workspace-baseline.json").unlink()
+    else:
+        removed_event = {
+            "workspace_baseline_event_missing": "workspace_baseline_captured",
+            "loop_initialized_event_missing": "loop_initialized",
+        }[damage_kind]
+        trace_path = run_dir / "trace.jsonl"
+        trace_items = [
+            item
+            for item in _read_jsonl(trace_path)
+            if item.get("event") != removed_event
+        ]
+        trace_path.write_text(
+            "".join(
+                json.dumps(item, ensure_ascii=False) + "\n"
+                for item in trace_items
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    status = run_status_payload(workspace, run_dir.name)
+    assert status["current_step"] == "initialization_evidence_unavailable"
+    assert not any("loop continue" in item for item in status["next_steps"])
+    with pytest.raises(ValueError, match="初始化未完成"):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+
+
+def test_recovery_classifies_legacy_assist_run_as_view_only(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    workspace = tmp_path / "workspace"
+    run_dir = LoopAutomationRuntime(workspace).start(
+        BriefInput(
+            mode="bug",
+            text="验证旧版 assist 初始化协议只读兼容",
+            source="legacy-assist-initialization",
+            repo_path=str(repo),
+        ),
+        "assist",
+    )
+
+    state_path = run_dir / "state.json"
+    state = _read_json(state_path)
+    state.pop("workspace_baseline_artifact_version")
+    state.pop("workspace_baseline_sha256")
+    state["current_step"] = "waiting_for_worker"
+    state["artifacts"] = [
+        item
+        for item in state["artifacts"]
+        if item != "workspace-baseline.json"
+    ]
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    run_dir.joinpath("workspace-baseline.json").unlink()
+    legacy_trace_with_baseline = _read_jsonl(run_dir / "trace.jsonl")
+    assert not is_legacy_assist_initialization_unavailable(
+        run_dir,
+        LoopAutomationState.model_validate(state),
+        legacy_trace_with_baseline,
+    )
+    legacy_trace: list[dict[str, object]] = []
+    legacy_initialization_artifacts = [
+        "agent-brief.md",
+        "project-context.md",
+        "project-policy-snapshot.json",
+        "loop-plan.md",
+        "worker-prompt.md",
+        "worker-prompt-metrics.json",
+        "worker-prompt-metrics.md",
+    ]
+    for item in legacy_trace_with_baseline:
+        if item.get("event") == "workspace_baseline_captured":
+            continue
+        if item.get("event") == "loop_initialized":
+            item["artifacts"] = legacy_initialization_artifacts
+        legacy_trace.append(item)
+    legacy_trace_text = "".join(
+        json.dumps(item, ensure_ascii=False) + "\n"
+        for item in legacy_trace
+    )
+    trace_path = run_dir / "trace.jsonl"
+    trace_path.write_text(
+        legacy_trace_text,
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    incomplete_legacy_trace = [
+        item
+        for item in legacy_trace
+        if item.get("event") != "loop_initialized"
+    ]
+    trace_path.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in incomplete_legacy_trace
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    incomplete_legacy_status = run_status_payload(workspace, run_dir.name)
+    assert (
+        incomplete_legacy_status["current_step"]
+        == "initialization_evidence_unavailable"
+    )
+    assert not any(
+        "loop continue" in item
+        for item in incomplete_legacy_status["next_steps"]
+    )
+
+    trace_path.write_text("{invalid-json\n", encoding="utf-8", newline="\n")
+    invalid_trace_status = run_status_payload(workspace, run_dir.name)
+    assert invalid_trace_status["current_step"] == "initialization_trace_unavailable"
+    assert not any(
+        "loop continue" in item
+        for item in invalid_trace_status["next_steps"]
+    )
+    trace_path.write_text(legacy_trace_text, encoding="utf-8", newline="\n")
+
+    metrics_path = run_dir / "worker-prompt-metrics.json"
+    original_metrics = metrics_path.read_text(encoding="utf-8")
+    metrics = json.loads(original_metrics)
+    metrics["chars"] += 1
+    metrics_path.write_text(
+        json.dumps(metrics, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    mixed_damage_status = run_status_payload(workspace, run_dir.name)
+    assert mixed_damage_status["current_step"] == "initialization_evidence_unavailable"
+    assert not any(
+        "loop continue" in item
+        for item in mixed_damage_status["next_steps"]
+    )
+    metrics_path.write_text(
+        original_metrics,
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    status = run_status_payload(workspace, run_dir.name)
+    assert status["current_step"] == "legacy_workspace_baseline_unavailable"
+    assert not any("loop continue" in item for item in status["next_steps"])
+    with pytest.raises(
+        ValueError,
+        match="legacy_workspace_baseline_unavailable",
+    ):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+
+    state["status"] = "running"
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "owner exited from legacy assist run",
+    )
+
+    recovered_state = LoopAutomationState.model_validate_json(
+        state_path.read_text(encoding="utf-8")
+    )
+    assert (
+        recovered_state.current_step
+        == "legacy_workspace_baseline_unavailable"
+    )
+    report = run_dir.joinpath("recovery-report.md").read_text(encoding="utf-8")
+    assert "legacy_workspace_baseline_unavailable" in report
+    with pytest.raises(
+        ValueError,
+        match="legacy_workspace_baseline_unavailable",
+    ):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+    recovered_trace = _read_jsonl(run_dir / "trace.jsonl")
+    recovered_event = next(
+        item
+        for item in recovered_trace
+        if item.get("event") == "loop_recovered"
+    )
+    recovered_event["recovery_id"] = "tampered-recovery-id"
+    run_dir.joinpath("trace.jsonl").write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in recovered_trace
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    with pytest.raises(
+        ValueError,
+        match="loop_recovered 与 state.last_recovery_id 不一致",
+    ):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+
+
+def test_legacy_recovery_step_does_not_hide_additional_initialization_damage(
+) -> None:
+    assert recovered_initialization_step(
+        [
+            "legacy_workspace_baseline_unavailable",
+            "worker_prompt_metrics_mismatch",
+        ]
+    ) == "recovered_initialization_incomplete"
 
 
 def test_continue_rejects_pending_recovery_without_terminal_event(

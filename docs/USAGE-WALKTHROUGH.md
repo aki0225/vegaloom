@@ -50,6 +50,38 @@ runner:
 使用 `medium` 控制日常小任务成本；reviewer 负责找问题，保留 `high`。两者都使用临时 session，
 但 Vega 的 run 证据仍会保存在当前项目的 `runs/`。
 
+## Assist：主会话实现，Vega 负责证据与隔离审查
+
+日常使用推荐先以干净的 tracked 工作区启动 assist：
+
+```powershell
+vega loop bug --repo <target-repo> --text "修复导出按钮无响应" --mode assist
+vega status --run <loop_run>
+```
+
+正常情况下，Vega 会先生成：
+
+```text
+runs/<loop_run>/
+  workspace-baseline.json
+  worker-prompt.md
+  project-context.md
+```
+
+只有 `status` 显示 `waiting_for_worker` 且 `worker-prompt.md` 确实存在，才开始实现。可以由当前
+主会话直接修改，也可以调用 Codex 或 Claude Code 的原生子代理；Vega 不限制宿主内部怎样执行，
+但不会采信子代理的“已完成”自述，也不会把其完整聊天记录传给 Reviewer。
+
+实现结束后运行：
+
+```powershell
+vega loop continue --repo <target-repo> --run <loop_run>
+```
+
+Vega 会用启动基线检查真实 workspace，再执行 scope、verification、reflect、risk gate 和隔离
+review。如果启动时已有 tracked diff、基线捕获不完整或 HEAD 漂移，则不会生成 Worker Prompt，
+也不能 continue；应读取 `workspace-check.md`，清理或稳定仓库后新建 loop。
+
 ## 1. 启动日常入口
 
 ```powershell

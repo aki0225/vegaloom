@@ -6,6 +6,39 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .redaction import is_sensitive_path, redact_text, sensitive_path_reason
+from .run_utils import resolve_runs_root
+
+
+@dataclass(frozen=True)
+class WorkspaceSnapshot:
+    raw_status: str
+    tracked_files: frozenset[str]
+    untracked_files: frozenset[str]
+    ignored_path_exclusions: frozenset[str] = frozenset()
+    head_sha: str = ""
+    untracked_manifest_sha256: str = ""
+    ignored_manifest_sha256: str = ""
+    ignored_manifest_complete: bool = False
+    ignored_content_complete: bool = False
+    git_control_sha256: str = ""
+    git_control_complete: bool = False
+    capture_complete: bool = True
+
+    @property
+    def has_tracked_changes(self) -> bool:
+        """启动前已有 tracked diff 时，loop 无法安全归因本轮成果。"""
+        return bool(self.tracked_files)
+
+
+@dataclass(frozen=True)
+class CurrentWorkspaceInventory:
+    head_sha: str
+    raw_status: str
+    ignored_manifest_sha256: str
+    ignored_manifest_complete: bool
+    ignored_content_complete: bool
+    git_control_sha256: str
+    git_control_complete: bool
 
 
 @dataclass(frozen=True)
@@ -125,6 +158,41 @@ def safe_path_for_report(path: str) -> str:
     if reason:
         return f"<sensitive-path:{reason}>"
     return redact_text(path)
+
+
+def filter_ignored_paths(
+    paths: list[str],
+    exclusions: frozenset[str],
+) -> list[str]:
+    normalized_exclusions = {
+        value.replace("\\", "/").rstrip("/")
+        for value in exclusions
+    }
+    if not normalized_exclusions:
+        return paths
+    return [
+        path
+        for path in paths
+        if not _matches_ignored_exclusion(path, normalized_exclusions)
+    ]
+
+
+def workspace_ignored_path_exclusions(
+    workspace: Path,
+    repo_path: Path,
+) -> frozenset[str]:
+    """排除位于目标仓库内、由 Vega 自己持续写入的 runs 根目录。"""
+
+    runs_root = resolve_runs_root(workspace)
+    if runs_root is None:
+        return frozenset()
+    try:
+        relative = runs_root.resolve().relative_to(repo_path.resolve())
+    except ValueError:
+        return frozenset()
+    if not relative.parts:
+        return frozenset()
+    return frozenset({relative.as_posix()})
 
 
 def _fingerprint_entry(
@@ -258,6 +326,14 @@ def safe_status_path_expression(path_text: str) -> str:
             for part in path_text.split(" -> ")
         )
     return safe_path_for_report(path_text)
+
+
+def _matches_ignored_exclusion(path: str, exclusions: set[str]) -> bool:
+    normalized = path.replace("\\", "/").rstrip("/")
+    return any(
+        normalized == excluded or normalized.startswith(f"{excluded}/")
+        for excluded in exclusions
+    )
 
 
 def stat_metadata(stat_result) -> bytes:

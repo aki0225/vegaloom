@@ -194,6 +194,7 @@ jobs:
               tests/test_finish_artifact_integrity.py
               tests/test_runtime_safety_integration.py
               tests/test_security_evidence.py
+              tests/test_workspace_baseline.py
               tests/test_workspace_manifest_containment.py
           - name: semantics-evidence-review
             test_timeout: 58
@@ -224,6 +225,7 @@ jobs:
               tests/test_redaction.py
               tests/test_repository_hygiene.py
               tests/test_architecture_growth.py
+              tests/test_crwp_v1_control.py
               tests/test_workspace_snapshot_budget.py
               tests/test_context_boundaries.py
 

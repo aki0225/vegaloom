@@ -295,8 +295,11 @@ def test_auto_records_terminal_artifacts_when_ignored_inventory_times_out(
     worker = CountingWorker("worker change")
     reviewer = CountingReviewer()
 
-    def timeout_ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
-        del repo_path
+    def timeout_ignored_paths(
+        repo_path: Path,
+        exclusions: frozenset[str] = frozenset(),
+    ) -> tuple[list[str], bool]:
+        del repo_path, exclusions
         raise subprocess.TimeoutExpired(
             cmd=["git", "ls-files"],
             timeout=30,
@@ -1096,13 +1099,16 @@ def test_assist_continue_rejects_head_change_after_loop_start(tmp_path: Path) ->
     runtime.continue_assist(run_dir.name, repo, verify=False)
 
     state = _read_json(run_dir / "state.json")
-    result = _read_json(run_dir / "iterations" / "01" / "scope-gate-result.json")
+    workspace_result = _read_json(
+        run_dir / "iterations" / "01" / "workspace-check.json"
+    )
     assert state["status"] == "needs_human"
-    assert state["current_step"] == "scope_gate_failed"
+    assert state["current_step"] == "workspace_head_changed"
     assert reviewer.calls == 0
-    assert result["failure_code"] == "scope_head_changed"
-    assert result["expected_head_sha"] == state["initial_head_sha"]
-    assert result["current_head_sha"] != state["initial_head_sha"]
+    assert workspace_result["baseline_head_changed"] is True
+    assert workspace_result["baseline_head_sha"] == state["initial_head_sha"]
+    assert workspace_result["current_head_sha"] != state["initial_head_sha"]
+    assert not (run_dir / "iterations" / "01" / "scope-gate-result.json").exists()
 
 
 @pytest.mark.parametrize("mode", ["auto", "assist"])

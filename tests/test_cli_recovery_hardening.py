@@ -574,7 +574,8 @@ def test_initial_assist_waiting_for_worker_keeps_zero_exit_code(
 
     assert result.exit_code == 0, result.output
     assert "状态：`needs_human`" in result.output
-    assert "waiting_for_worker" in result.output
+    assert "initialization_trace_unavailable" in result.output
+    assert "loop continue" not in result.output
 
 
 @pytest.mark.parametrize(

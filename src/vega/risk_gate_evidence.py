@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .models import GateResult, LoopIterationState
+from .models import GateResult, LoopAutomationState, LoopIterationState
 from .redaction import redact_text
 from .risk_review_evidence import (
     gate_blocks_reviewer_before_execution,
@@ -31,6 +31,31 @@ class LoopRiskGateArtifactIntegrity:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def project_policy_snapshot_eval_results(
+    run_dir: Path,
+    state: LoopAutomationState,
+) -> list[str]:
+    expected_hash = state.project_policy_snapshot_sha256
+    if expected_hash is None:
+        return []
+    path = run_dir / "project-policy-snapshot.json"
+    if not path.is_file():
+        return ["FAIL: project-policy-snapshot.json 不存在"]
+    try:
+        text = path.read_text(encoding="utf-8")
+        payload = json.loads(text)
+    except (OSError, json.JSONDecodeError):
+        return ["FAIL: project-policy-snapshot.json 不合法"]
+    results: list[str] = []
+    if sha256_text(text) != expected_hash:
+        results.append("FAIL: project policy snapshot hash mismatch")
+    if payload != state.project_policy_snapshot:
+        results.append("FAIL: project policy snapshot 与 state 不一致")
+    if not results:
+        results.append("PASS: project policy snapshot 与根状态绑定")
+    return results
 
 
 def collect_gate_diff_check(repo_path: Path) -> str:

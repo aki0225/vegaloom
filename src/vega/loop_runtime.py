@@ -6,14 +6,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
-from pydantic import ValidationError
-
 from .brief_runtime import BriefRuntime
 from .execution_control import RunnerExecutionContext, inspect_execution_for_recovery
 from .gate_runtime import evaluate_risk, render_gate_report
 from .loop_evidence import validate_loop_evidence_snapshot
-from .loop_integrity import trusted_verification_passed
+from .loop_initialization import loop_initialization_issues
+from .loop_integrity import (
+    trusted_verification_passed,
+    workspace_baseline_eval_results,
+)
 from .loop_prompts import (
+    assist_workspace_failure_guidance,
     build_worker_prompt,
     render_fix_prompt,
     render_loop_plan,
@@ -27,7 +30,6 @@ from .loop_prompts import (
 )
 from .models import (
     BriefInput,
-    BriefState,
     GateResult,
     LoopAutomationState,
     LoopIterationState,
@@ -41,7 +43,6 @@ from .project_config import (
     scope_policy_sha256,
 )
 from .prompt_metrics import (
-    PromptMetrics,
     measure_prompt,
     write_context_budget_report,
     write_prompt_metrics,
@@ -50,6 +51,7 @@ from .redaction import redact_text, redact_value
 from .reflect_runtime import ReflectRuntime
 from .review_runtime import PrecomputedReviewRiskGate, ReviewRuntime
 from .risk_gate_evidence import (
+    project_policy_snapshot_eval_results,
     render_risk_gate_report_binding,
     sha256_text,
     validate_iteration_risk_gate_artifacts,
@@ -67,17 +69,22 @@ from .scope_gate import (
 )
 from .trace import TraceWriter, active_run_finished_indices, read_trace_items
 from .verification import VerificationRunResult, run_project_verification
+from .workspace_baseline import (
+    ASSIST_BASELINE_BLOCKED_ARTIFACTS,
+    ASSIST_INITIALIZATION_ARTIFACTS,
+    LEGACY_ASSIST_INITIALIZATION_ARTIFACTS,
+    LEGACY_WORKSPACE_BASELINE_UNAVAILABLE,
+    WORKSPACE_BASELINE_ARTIFACT,
+    capture_assist_workspace_baseline,
+    load_assist_workspace_baseline,
+    require_assist_workspace_baseline_continuable,
+)
 from .workspace_check import read_head_sha, run_workspace_check, snapshot_workspace
+from .workspace_inventory import workspace_ignored_path_exclusions
 
-LOOP_INITIALIZATION_ARTIFACTS = [
-    "agent-brief.md",
-    "project-context.md",
-    "project-policy-snapshot.json",
-    "loop-plan.md",
-    "worker-prompt.md",
-    "worker-prompt-metrics.json",
-    "worker-prompt-metrics.md",
-]
+LOOP_INITIALIZATION_ARTIFACTS = list(
+    LEGACY_ASSIST_INITIALIZATION_ARTIFACTS
+)
 LOOP_ARTIFACTS = [
     "state.json",
     "trace.jsonl",
@@ -207,6 +214,31 @@ class LoopAutomationRuntime:
             run_dir / "loop-plan.md",
             render_loop_plan(brief_input, automation_mode, max_iterations),
         )
+        initialization_artifacts = LOOP_INITIALIZATION_ARTIFACTS
+        if automation_mode == "assist":
+            baseline_block = capture_assist_workspace_baseline(
+                self.workspace,
+                Path(brief_input.repo_path),
+                run_dir,
+                state,
+                trace,
+            )
+            if baseline_block is not None:
+                _write_final_report(
+                    run_dir,
+                    state,
+                    None,
+                    baseline_block.conclusion,
+                )
+                _finalize_loop_eval(
+                    run_dir,
+                    state,
+                    "needs_human",
+                    list(ASSIST_BASELINE_BLOCKED_ARTIFACTS),
+                    trace,
+                )
+                return run_dir
+            initialization_artifacts = list(ASSIST_INITIALIZATION_ARTIFACTS)
         worker_prompt, worker_sections = build_worker_prompt(
             brief_input,
             brief_run,
@@ -225,7 +257,7 @@ class LoopAutomationRuntime:
         trace.write(
             "loop_initialized",
             brief_run=state.brief_run,
-            artifacts=LOOP_INITIALIZATION_ARTIFACTS,
+            artifacts=initialization_artifacts,
         )
         if automation_mode == "assist":
             root_budget_artifact: str | None = None
@@ -239,6 +271,7 @@ class LoopAutomationRuntime:
             state.status = "needs_human"
             state.artifacts = [
                 *LOOP_ARTIFACTS,
+                WORKSPACE_BASELINE_ARTIFACT,
                 *([root_budget_artifact] if root_budget_artifact else []),
             ]
             trace.write("loop_waiting_for_worker", worker_prompt="worker-prompt.md")
@@ -310,6 +343,7 @@ class LoopAutomationRuntime:
             raise ValueError(
                 f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}"
             )
+        require_assist_workspace_baseline_continuable(state)
         _require_execution_recoverable(run_dir)
         _require_recovery_trace_binding(run_dir, state)
         _require_loop_initialization(self.workspace, run_dir, state, repo)
@@ -346,6 +380,7 @@ class LoopAutomationRuntime:
             return run_dir
         config = load_project_config(repo)
         _, reviewer_name = _apply_runner_defaults(config, "codex-exec", reviewer_name)
+        workspace_baseline = load_assist_workspace_baseline(run_dir, state)
         trace = TraceWriter(run_dir / "trace.jsonl")
         iteration_number = _next_iteration_number(run_dir, state)
         iteration_state = LoopIterationState(
@@ -365,6 +400,10 @@ class LoopAutomationRuntime:
         workspace_check = run_workspace_check(
             repo,
             iteration_dir,
+            baseline=workspace_baseline,
+            expected_head_sha=(
+                state.initial_head_sha if workspace_baseline is not None else None
+            ),
             require_clean_untracked=True,
         )
         trace.write(
@@ -373,6 +412,9 @@ class LoopAutomationRuntime:
             status=workspace_check.status,
             new_untracked_count=workspace_check.new_untracked_count,
             baseline_untracked_changed=workspace_check.baseline_untracked_changed,
+            baseline_ignored_changed=workspace_check.baseline_ignored_changed,
+            git_control_changed=workspace_check.git_control_changed,
+            baseline_head_changed=workspace_check.baseline_head_changed,
         )
         iteration_state = _update_iteration_state(
             iteration_state,
@@ -382,39 +424,28 @@ class LoopAutomationRuntime:
         if workspace_check.has_failures:
             state.iterations.append(iteration_state)
             state.current_iteration = iteration_number
-            if workspace_check.new_untracked_count:
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_untracked_files_fix_prompt(
-                        iteration_number + 1,
-                        workspace_check.new_untracked_files,
-                    ),
-                )
+            guidance = assist_workspace_failure_guidance(
+                workspace_check,
+                iteration_number + 1,
+            )
+            _write_text_artifact(
+                iteration_dir / "fix-prompt.md",
+                guidance.fix_prompt,
+            )
+            if guidance.report_untracked_files:
                 trace.write(
                     "untracked_files_require_human",
                     iteration=iteration_number,
                     count=workspace_check.new_untracked_count,
                     paths=workspace_check.new_untracked_files,
                 )
-                conclusion = (
-                    "当前工作区存在未跟踪文件；reviewer 不读取其内容，"
-                    "已在 verification 前转人工确认。"
-                )
-                current_step = "untracked_files"
-            else:
-                _write_text_artifact(
-                    iteration_dir / "fix-prompt.md",
-                    render_workspace_fix_prompt(iteration_number + 1),
-                )
-                conclusion = "工作区完整性检查失败，未继续 verification、reflect 或 review。"
-                current_step = "workspace_check_failed"
-            _write_final_report(run_dir, state, None, conclusion)
+            _write_final_report(run_dir, state, None, guidance.conclusion)
             self._save_loop_done(
                 run_dir,
                 state,
                 "needs_human",
                 trace,
-                current_step=current_step,
+                current_step=guidance.current_step,
             )
             return run_dir
         state.current_step = "scope_gate"
@@ -864,7 +895,13 @@ class LoopAutomationRuntime:
                     current_step="worker_context_budget",
                 )
                 return run_dir
-            workspace_baseline = snapshot_workspace(repo_path)
+            workspace_baseline = snapshot_workspace(
+                repo_path,
+                ignored_path_exclusions=workspace_ignored_path_exclusions(
+                    self.workspace,
+                    repo_path,
+                ),
+            )
             head_changed_before_worker = bool(
                 state.initial_head_sha
                 and workspace_baseline.head_sha
@@ -1946,7 +1983,8 @@ def run_loop_eval(
         )
     else:
         results.append("PASS: state.artifacts 与必需 artifact 一致")
-    results.extend(_project_policy_snapshot_eval_results(run_dir, state))
+    results.extend(project_policy_snapshot_eval_results(run_dir, state))
+    results.extend(workspace_baseline_eval_results(run_dir, state))
 
     effective_status = status_for_eval or state.status
     if require_terminal:
@@ -2129,31 +2167,6 @@ def _loop_trace_checks(
     if not isinstance(status, str):
         return ["FAIL: run_finished 终态缺少 status"], None
     return ["PASS: trace.jsonl 非空且包含 run_finished 终态事件"], status
-
-
-def _project_policy_snapshot_eval_results(
-    run_dir: Path,
-    state: LoopAutomationState,
-) -> list[str]:
-    expected_hash = state.project_policy_snapshot_sha256
-    if expected_hash is None:
-        return []
-    path = run_dir / "project-policy-snapshot.json"
-    if not path.is_file():
-        return ["FAIL: project-policy-snapshot.json 不存在"]
-    try:
-        text = path.read_text(encoding="utf-8")
-        payload = json.loads(text)
-    except (OSError, json.JSONDecodeError):
-        return ["FAIL: project-policy-snapshot.json 不合法"]
-    results: list[str] = []
-    if sha256_text(text) != expected_hash:
-        results.append("FAIL: project policy snapshot hash mismatch")
-    if payload != state.project_policy_snapshot:
-        results.append("FAIL: project policy snapshot 与 state 不一致")
-    if not results:
-        results.append("PASS: project policy snapshot 与根状态绑定")
-    return results
 
 
 def _loop_terminal_eval_results(
@@ -2340,113 +2353,6 @@ def _next_iteration_number(
     return next_iteration
 
 
-def loop_initialization_issues(
-    workspace: Path,
-    run_dir: Path,
-    state: LoopAutomationState,
-    repo_path: Path,
-) -> list[str]:
-    """返回 loop 初始化证据问题，供 recovery 与 continue 使用同一判断。"""
-
-    issues: list[str] = []
-    if not state.brief_run:
-        return ["brief_run_missing"]
-    try:
-        brief_dir = resolve_run_dir(workspace, state.brief_run)
-    except (FileNotFoundError, ValueError):
-        return ["brief_run_unresolvable"]
-    state_path = brief_dir / "state.json"
-    try:
-        brief_state = BriefState.model_validate_json(
-            state_path.read_text(encoding="utf-8")
-        )
-    except (OSError, ValueError, ValidationError):
-        return ["brief_state_invalid"]
-
-    if brief_state.run_id != brief_dir.name:
-        issues.append("brief_run_id_mismatch")
-    try:
-        if Path(brief_state.repo_path).resolve() != repo_path.resolve():
-            issues.append("brief_repo_mismatch")
-    except OSError:
-        issues.append("brief_repo_unresolvable")
-    if brief_state.mode != state.task_mode:
-        issues.append("brief_task_mode_mismatch")
-    if brief_state.status != "success":
-        issues.append("brief_status_not_success")
-
-    for name in ("agent-brief.md", "project-context.md"):
-        try:
-            source_bytes = brief_dir.joinpath(name).read_bytes()
-            loop_bytes = run_dir.joinpath(name).read_bytes()
-        except OSError:
-            issues.append(f"{name}_missing_or_unreadable")
-            continue
-        if source_bytes != loop_bytes:
-            issues.append(f"{name}_source_mismatch")
-
-    for name in LOOP_INITIALIZATION_ARTIFACTS:
-        path = run_dir / name
-        try:
-            if not path.is_file() or not path.read_bytes():
-                issues.append(f"{name}_missing_or_empty")
-        except OSError:
-            issues.append(f"{name}_missing_or_unreadable")
-
-    prompt_path = run_dir / "worker-prompt.md"
-    metrics_path = run_dir / "worker-prompt-metrics.json"
-    try:
-        prompt = prompt_path.read_text(encoding="utf-8")
-        metrics = PromptMetrics.model_validate_json(
-            metrics_path.read_text(encoding="utf-8")
-        )
-    except (OSError, ValueError, ValidationError):
-        issues.append("worker_prompt_metrics_invalid")
-    else:
-        if (
-            metrics.role != "worker"
-            or metrics.chars != len(prompt)
-            or metrics.utf8_bytes != len(prompt.encode("utf-8"))
-            or metrics.lines != len(prompt.splitlines())
-        ):
-            issues.append("worker_prompt_metrics_mismatch")
-
-    if any(
-        result.startswith("FAIL:")
-        for result in _project_policy_snapshot_eval_results(run_dir, state)
-    ):
-        issues.append("project_policy_snapshot_invalid")
-
-    try:
-        trace_items = read_trace_items(run_dir / "trace.jsonl")
-    except (OSError, ValueError):
-        issues.append("initialization_trace_invalid")
-    else:
-        initialized_events = [
-            item for item in trace_items if item.get("event") == "loop_initialized"
-        ]
-        if initialized_events:
-            if len(initialized_events) != 1:
-                issues.append("loop_initialized_event_count_invalid")
-            else:
-                initialized = initialized_events[0]
-                if initialized.get("brief_run") != state.brief_run:
-                    issues.append("loop_initialized_brief_mismatch")
-                if initialized.get("artifacts") != LOOP_INITIALIZATION_ARTIFACTS:
-                    issues.append("loop_initialized_artifacts_mismatch")
-        else:
-            # 兼容旧 run：根级 worker_prompt_measured 发生在全部初始化文件写完之后。
-            legacy_markers = [
-                item
-                for item in trace_items
-                if item.get("event") == "worker_prompt_measured"
-                and "iteration" not in item
-            ]
-            if len(legacy_markers) != 1:
-                issues.append("loop_initialization_marker_missing")
-    return list(dict.fromkeys(issues))
-
-
 def _require_loop_initialization(
     workspace: Path,
     run_dir: Path,
@@ -2504,6 +2410,7 @@ def _require_recovery_trace_binding(
     if state.current_step not in {
         "recovered",
         "recovered_initialization_incomplete",
+        LEGACY_WORKSPACE_BASELINE_UNAVAILABLE,
     }:
         return
 
@@ -2526,9 +2433,10 @@ def _require_recovery_trace_binding(
     if len(recovered_matches) != 1:
         raise ValueError("loop_recovered 与 state.last_recovery_id 不一致。")
     recovered = recovered_matches[0]
-    continuation_allowed = (
-        state.current_step != "recovered_initialization_incomplete"
-    )
+    continuation_allowed = state.current_step not in {
+        "recovered_initialization_incomplete",
+        LEGACY_WORKSPACE_BASELINE_UNAVAILABLE,
+    }
     if recovered.get("continuation_allowed") != continuation_allowed:
         raise ValueError("loop_recovered 的 continuation_allowed 与 state 不一致。")
     expected_superseded = next(

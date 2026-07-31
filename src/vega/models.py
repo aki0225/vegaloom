@@ -412,13 +412,13 @@ class LoopAutomationState(BaseModel):
     scope_gate_required: bool = False
     scope_policy_sha256: str | None = None
     verification_artifact_version: Literal[2] | None = None
+    workspace_baseline_artifact_version: Literal[1] | None = None
+    workspace_baseline_sha256: str | None = None
     current_iteration: int = 0
     max_iterations: int = 2
     iterations: list[LoopIterationState] = Field(default_factory=list)
     last_recovery_id: str | None = None
-    superseded_terminal_events: list[SupersededTerminalRecord] = Field(
-        default_factory=list
-    )
+    superseded_terminal_events: list[SupersededTerminalRecord] = Field(default_factory=list)
     artifacts: list[str] = Field(default_factory=list)
     eval_results: list[str] = Field(default_factory=list)
     memory_proposals: list[MemoryProposal] = Field(default_factory=list)
