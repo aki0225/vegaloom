@@ -3,6 +3,56 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .loop_initialization import loop_initialization_issues
+from .models import LoopAutomationState
+from .trace import read_trace_items
+from .workspace_baseline import (
+    INITIALIZATION_EVIDENCE_UNAVAILABLE,
+    INITIALIZATION_TRACE_UNAVAILABLE,
+    LEGACY_WORKSPACE_BASELINE_UNAVAILABLE,
+)
+
+
+def classify_assist_initialization_status(
+    workspace: Path,
+    run_dir: Path,
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    if (
+        state.get("status") != "needs_human"
+        or state.get("automation_mode") != "assist"
+        or state.get("current_step") != "waiting_for_worker"
+    ):
+        return state
+    try:
+        loop_state = LoopAutomationState.model_validate(state)
+        repo_path = Path(loop_state.repo_path).resolve()
+    except (OSError, ValueError):
+        return {
+            **state,
+            "current_step": INITIALIZATION_EVIDENCE_UNAVAILABLE,
+        }
+    try:
+        read_trace_items(run_dir / "trace.jsonl")
+    except (OSError, ValueError):
+        return {
+            **state,
+            "current_step": INITIALIZATION_TRACE_UNAVAILABLE,
+        }
+    issues = loop_initialization_issues(
+        workspace,
+        run_dir,
+        loop_state,
+        repo_path,
+    )
+    if not issues:
+        return state
+    if issues == [LEGACY_WORKSPACE_BASELINE_UNAVAILABLE]:
+        current_step = LEGACY_WORKSPACE_BASELINE_UNAVAILABLE
+    else:
+        current_step = INITIALIZATION_EVIDENCE_UNAVAILABLE
+    return {**state, "current_step": current_step}
+
 
 def initialization_next_steps(
     run_dir: Path,

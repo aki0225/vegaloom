@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .models import LoopAutomationState
 from .prompt_metrics import PromptMetrics
-from .trace import TraceWriter, read_trace_items
+from .trace import TraceWriter
 from .workspace_check import (
     run_workspace_check,
     snapshot_workspace,
@@ -364,36 +364,6 @@ def recovered_initialization_step(initialization_issues: list[str]) -> str:
     if initialization_issues:
         return "recovered_initialization_incomplete"
     return "recovered"
-
-
-def classify_legacy_assist_status(
-    run_dir: Path,
-    state: dict[str, Any],
-) -> dict[str, Any]:
-    if state.get("status") != "needs_human":
-        return state
-    try:
-        loop_state = LoopAutomationState.model_validate(state)
-    except ValueError:
-        return state
-    if (
-        loop_state.automation_mode != "assist"
-        or loop_state.current_step != "waiting_for_worker"
-    ):
-        return state
-    try:
-        trace_items = read_trace_items(run_dir / "trace.jsonl")
-    except (OSError, ValueError):
-        return {**state, "current_step": INITIALIZATION_TRACE_UNAVAILABLE}
-    if is_legacy_assist_initialization_unavailable(
-        run_dir,
-        loop_state,
-        trace_items,
-    ):
-        return {**state, "current_step": LEGACY_WORKSPACE_BASELINE_UNAVAILABLE}
-    if _has_legacy_assist_protocol_markers(run_dir, loop_state, trace_items):
-        return {**state, "current_step": INITIALIZATION_EVIDENCE_UNAVAILABLE}
-    return state
 
 
 def _has_legacy_assist_protocol_markers(

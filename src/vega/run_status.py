@@ -12,8 +12,8 @@ from .execution_control import (
     ExecutionRecord,
     find_execution_records,
 )
-from .workspace_baseline import classify_legacy_assist_status
 from .run_status_guidance import (
+    classify_assist_initialization_status as _classify_init,
     initialization_next_steps as _initialization_next_steps,
     latest_iteration_file as _latest_iteration_file,
     verification_failure_next_steps as _verification_failure_next_steps,
@@ -80,7 +80,7 @@ def render_run_status(workspace: Path, run: str) -> str:
 
 def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     run_dir = resolve_run_dir(workspace, run)
-    state = classify_legacy_assist_status(run_dir, _read_state(run_dir))
+    state = _classify_init(workspace, run_dir, _read_state(run_dir))
     kind = _infer_kind(run_dir, state)
     decisions = DecisionStore(run_dir).list()
     execution = _latest_execution_payload(run_dir)

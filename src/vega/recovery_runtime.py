@@ -9,7 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .execution_control import ExecutionRecoveryInspection, inspect_execution_for_recovery
-from .loop_runtime import loop_initialization_issues
+from .loop_initialization import loop_initialization_issues
 from .models import (
     LoopAutomationState,
     LoopIterationState,

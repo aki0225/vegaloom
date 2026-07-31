@@ -862,6 +862,65 @@ def test_recovery_after_baseline_state_save_before_trace_rejects_continue(
     assert not list(run_dir.glob("iterations/*"))
 
 
+@pytest.mark.parametrize(
+    "damage_kind",
+    [
+        "workspace_baseline_event_missing",
+        "loop_initialized_event_missing",
+        "workspace_baseline_artifact_missing",
+    ],
+)
+def test_status_rejects_modern_assist_initialization_damage(
+    tmp_path: Path,
+    damage_kind: str,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    workspace = tmp_path / "workspace"
+    run_dir = LoopAutomationRuntime(workspace).start(
+        BriefInput(
+            mode="bug",
+            text="验证现代 assist 初始化证据损坏时不建议 continue",
+            source="modern-assist-initialization-damage",
+            repo_path=str(repo),
+        ),
+        "assist",
+    )
+
+    if damage_kind == "workspace_baseline_artifact_missing":
+        run_dir.joinpath("workspace-baseline.json").unlink()
+    else:
+        removed_event = {
+            "workspace_baseline_event_missing": "workspace_baseline_captured",
+            "loop_initialized_event_missing": "loop_initialized",
+        }[damage_kind]
+        trace_path = run_dir / "trace.jsonl"
+        trace_items = [
+            item
+            for item in _read_jsonl(trace_path)
+            if item.get("event") != removed_event
+        ]
+        trace_path.write_text(
+            "".join(
+                json.dumps(item, ensure_ascii=False) + "\n"
+                for item in trace_items
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    status = run_status_payload(workspace, run_dir.name)
+    assert status["current_step"] == "initialization_evidence_unavailable"
+    assert not any("loop continue" in item for item in status["next_steps"])
+    with pytest.raises(ValueError, match="初始化未完成"):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+
+
 def test_recovery_classifies_legacy_assist_run_as_view_only(
     tmp_path: Path,
 ) -> None:
@@ -925,6 +984,29 @@ def test_recovery_classifies_legacy_assist_run_as_view_only(
         legacy_trace_text,
         encoding="utf-8",
         newline="\n",
+    )
+
+    incomplete_legacy_trace = [
+        item
+        for item in legacy_trace
+        if item.get("event") != "loop_initialized"
+    ]
+    trace_path.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in incomplete_legacy_trace
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    incomplete_legacy_status = run_status_payload(workspace, run_dir.name)
+    assert (
+        incomplete_legacy_status["current_step"]
+        == "initialization_evidence_unavailable"
+    )
+    assert not any(
+        "loop continue" in item
+        for item in incomplete_legacy_status["next_steps"]
     )
 
     trace_path.write_text("{invalid-json\n", encoding="utf-8", newline="\n")

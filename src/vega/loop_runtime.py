@@ -10,17 +10,10 @@ from .brief_runtime import BriefRuntime
 from .execution_control import RunnerExecutionContext, inspect_execution_for_recovery
 from .gate_runtime import evaluate_risk, render_gate_report
 from .loop_evidence import validate_loop_evidence_snapshot
+from .loop_initialization import loop_initialization_issues
 from .loop_integrity import (
-    brief_initialization_binding_issues,
-    expected_initialization_artifacts,
-    initialization_artifact_issues,
-    initialization_trace_issues,
-    load_brief_initialization_evidence,
-    read_initialization_trace,
     trusted_verification_passed,
-    worker_prompt_metric_issues,
     workspace_baseline_eval_results,
-    workspace_baseline_initialization_issues,
 )
 from .loop_prompts import (
     assist_workspace_failure_guidance,
@@ -83,7 +76,6 @@ from .workspace_baseline import (
     LEGACY_WORKSPACE_BASELINE_UNAVAILABLE,
     WORKSPACE_BASELINE_ARTIFACT,
     capture_assist_workspace_baseline,
-    is_legacy_assist_initialization_unavailable,
     load_assist_workspace_baseline,
     require_assist_workspace_baseline_continuable,
 )
@@ -2359,63 +2351,6 @@ def _next_iteration_number(
             "已拒绝复用或覆盖旧证据。"
         )
     return next_iteration
-
-
-def loop_initialization_issues(
-    workspace: Path,
-    run_dir: Path,
-    state: LoopAutomationState,
-    repo_path: Path,
-) -> list[str]:
-    """返回 loop 初始化证据问题，供 recovery 与 continue 使用同一判断。"""
-
-    evidence, issues = load_brief_initialization_evidence(workspace, state)
-    if evidence is None:
-        return issues
-    issues.extend(
-        brief_initialization_binding_issues(
-            evidence,
-            run_dir,
-            state,
-            repo_path,
-        )
-    )
-    trace_items, trace_read_issues = read_initialization_trace(run_dir)
-    legacy_assist_initialization = (
-        is_legacy_assist_initialization_unavailable(
-            run_dir, state, trace_items
-        )
-    )
-    expected_artifacts = expected_initialization_artifacts(
-        state,
-        legacy_assist_initialization,
-    )
-    issues.extend(initialization_artifact_issues(run_dir, expected_artifacts))
-    issues.extend(worker_prompt_metric_issues(run_dir))
-    if any(
-        result.startswith("FAIL:")
-        for result in project_policy_snapshot_eval_results(run_dir, state)
-    ):
-        issues.append("project_policy_snapshot_invalid")
-    issues.extend(
-        workspace_baseline_initialization_issues(
-            run_dir,
-            state,
-            legacy_assist_initialization,
-        )
-    )
-    if trace_items is None:
-        issues.extend(trace_read_issues)
-    else:
-        issues.extend(
-            initialization_trace_issues(
-                trace_items,
-                state,
-                expected_artifacts,
-                legacy_assist_initialization=legacy_assist_initialization,
-            )
-        )
-    return list(dict.fromkeys(issues))
 
 
 def _require_loop_initialization(
