@@ -46,6 +46,7 @@ class WorkspaceSnapshot:
     raw_status: str
     tracked_files: frozenset[str]
     untracked_files: frozenset[str]
+    ignored_path_exclusions: frozenset[str] = frozenset()
     head_sha: str = ""
     untracked_manifest_sha256: str = ""
     ignored_manifest_sha256: str = ""
@@ -57,7 +58,7 @@ class WorkspaceSnapshot:
 
     @property
     def has_tracked_changes(self) -> bool:
-        """启动前已有 tracked diff 时，auto worker 无法安全归因本轮成果。"""
+        """启动前已有 tracked diff 时，loop 无法安全归因本轮成果。"""
         return bool(self.tracked_files)
 
 @dataclass(frozen=True)
@@ -166,7 +167,11 @@ class _WorkspaceAssessment:
     git_control_changed: bool = False
 
 
-def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
+def snapshot_workspace(
+    repo_path: Path,
+    *,
+    ignored_path_exclusions: frozenset[str] = frozenset(),
+) -> WorkspaceSnapshot:
     repo = repo_path.resolve()
     try:
         tracked_snapshot = capture_tracked_scope_snapshot(
@@ -178,6 +183,7 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
             raw_status=f"<git status failed before worker: {exc}>",
             tracked_files=frozenset(),
             untracked_files=frozenset(),
+            ignored_path_exclusions=ignored_path_exclusions,
             capture_complete=False,
         )
     tracked_files = [
@@ -186,7 +192,10 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
     ]
     untracked_files = list(tracked_snapshot.untracked_files)
     try:
-        ignored_files, ignored_capture_complete = _ignored_paths(repo)
+        ignored_files, ignored_capture_complete = _ignored_paths(
+            repo,
+            ignored_path_exclusions,
+        )
         (
             ignored_manifest_sha256,
             ignored_metadata_complete,
@@ -202,6 +211,7 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
             raw_status=f"<workspace control snapshot failed before worker: {exc}>",
             tracked_files=frozenset(dict.fromkeys(tracked_files)),
             untracked_files=frozenset(untracked_files),
+            ignored_path_exclusions=ignored_path_exclusions,
             head_sha=tracked_snapshot.head_sha,
             untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
             capture_complete=False,
@@ -210,6 +220,7 @@ def snapshot_workspace(repo_path: Path) -> WorkspaceSnapshot:
         raw_status="",
         tracked_files=frozenset(dict.fromkeys(tracked_files)),
         untracked_files=frozenset(untracked_files),
+        ignored_path_exclusions=ignored_path_exclusions,
         head_sha=tracked_snapshot.head_sha,
         untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
         ignored_manifest_sha256=ignored_manifest_sha256,
@@ -352,7 +363,10 @@ def evaluate_workspace(
 ) -> WorkspaceCheckResult:
     repo = repo_path.resolve()
     try:
-        current = _capture_current_workspace_inventory(repo)
+        current = _capture_current_workspace_inventory(
+            repo,
+            baseline.ignored_path_exclusions if baseline else frozenset(),
+        )
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         return WorkspaceCheckResult(
             status="failed",
@@ -437,10 +451,16 @@ def evaluate_workspace(
     )
 
 
-def _capture_current_workspace_inventory(repo: Path) -> _CurrentWorkspaceInventory:
+def _capture_current_workspace_inventory(
+    repo: Path,
+    ignored_path_exclusions: frozenset[str],
+) -> _CurrentWorkspaceInventory:
     head_sha = read_head_sha(repo)
     raw_status = _git_status(repo)
-    ignored_files, ignored_capture_complete = _ignored_paths(repo)
+    ignored_files, ignored_capture_complete = _ignored_paths(
+        repo,
+        ignored_path_exclusions,
+    )
     (
         ignored_manifest_sha256,
         ignored_metadata_complete,
@@ -489,7 +509,7 @@ def _assess_baseline_integrity(
         else:
             assessment.status = "failed"
             assessment.reasons.append(
-                "worker 启动前已存在 tracked diff；auto 无法将其安全归因于本轮 worker。"
+                "worker 启动前已存在 tracked diff；loop 无法将其安全归因于本轮 worker。"
             )
     if (
         baseline
@@ -736,8 +756,36 @@ def _untracked_manifest_hash(repo_path: Path, paths: list[str]) -> str:
     return _untracked_manifest(repo_path, paths)[0]
 
 
-def _ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
-    return read_ignored_paths(repo_path)
+def _ignored_paths(
+    repo_path: Path,
+    exclusions: frozenset[str] = frozenset(),
+) -> tuple[list[str], bool]:
+    paths, complete = read_ignored_paths(repo_path)
+    if not exclusions:
+        return paths, complete
+    normalized_exclusions = {
+        value.replace("\\", "/").rstrip("/")
+        for value in exclusions
+    }
+    return (
+        [
+            path
+            for path in paths
+            if not _matches_ignored_exclusion(path, normalized_exclusions)
+        ],
+        complete,
+    )
+
+
+def _matches_ignored_exclusion(
+    path: str,
+    exclusions: set[str],
+) -> bool:
+    normalized = path.replace("\\", "/").rstrip("/")
+    return any(
+        normalized == excluded or normalized.startswith(f"{excluded}/")
+        for excluded in exclusions
+    )
 
 
 def _untracked_manifest(

@@ -846,10 +846,7 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
 ) -> None:
     workspace = tmp_path / "workspace"
     repo = tmp_path / "repo"
-    if flow == "auto":
-        _init_clean_git_repo(repo)
-    else:
-        _init_changed_git_repo(repo)
+    _init_clean_git_repo(repo)
     reviewer = QueueRunner([_review_json("approve")])
 
     seen_iterations: list[int] = []
@@ -942,6 +939,11 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
         verify=True,
     )
     if flow == "continue":
+        repo.joinpath("README.md").write_text(
+            "# Demo\nworker completed\n",
+            encoding="utf-8",
+            newline="\n",
+        )
         run_dir = runtime.continue_assist(run_dir.name, repo, verify=True)
 
     state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))

@@ -742,6 +742,58 @@ def test_recovery_after_partial_initialization_rejects_continue_before_iteration
     assert not list(run_dir.glob("iterations/*"))
 
 
+def test_recovery_after_baseline_capture_before_worker_prompt_rejects_continue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    workspace = tmp_path / "workspace"
+
+    def crash_before_worker_prompt(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise RuntimeError("simulated crash after workspace baseline")
+
+    monkeypatch.setattr(
+        loop_runtime_module,
+        "build_worker_prompt",
+        crash_before_worker_prompt,
+    )
+    with pytest.raises(RuntimeError, match="after workspace baseline"):
+        LoopAutomationRuntime(workspace).start(
+            BriefInput(
+                mode="bug",
+                text="验证基线后初始化中断",
+                source="baseline-initialization",
+                repo_path=str(repo),
+            ),
+            "assist",
+        )
+
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    assert run_dir.joinpath("workspace-baseline.json").is_file()
+    assert not run_dir.joinpath("worker-prompt.md").exists()
+
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "owner exited after workspace baseline",
+    )
+
+    recovered_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert recovered_state.current_step == "recovered_initialization_incomplete"
+    report = run_dir.joinpath("recovery-report.md").read_text(encoding="utf-8")
+    assert "worker-prompt.md" in report
+    with pytest.raises(ValueError, match="初始化未完成"):
+        LoopAutomationRuntime(workspace).continue_assist(
+            run_dir.name,
+            repo,
+            verify=False,
+        )
+    assert not list(run_dir.glob("iterations/*"))
+
+
 def test_continue_rejects_pending_recovery_without_terminal_event(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

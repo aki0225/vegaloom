@@ -1510,7 +1510,7 @@ def test_parse_review_verdict_rejects_invalid_approve_contract(
 
 def test_loop_assist_continue_generates_fix_prompt_from_review_findings(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
+    _init_clean_git_repo(repo_dir)
     reviewer = StaticRunner([_review_json("request_changes")])
     runtime = LoopAutomationRuntime(tmp_path, reviewer_runner=reviewer)
     brief_input = BriefInput(
@@ -1520,6 +1520,30 @@ def test_loop_assist_continue_generates_fix_prompt_from_review_findings(tmp_path
         repo_path=str(repo_dir),
     )
     loop_run = runtime.start(brief_input, "assist")
+    start_state = json.loads(
+        loop_run.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert start_state["workspace_baseline_artifact_version"] == 1
+    assert start_state["workspace_baseline_sha256"]
+    trace_items = [
+        json.loads(line)
+        for line in loop_run.joinpath("trace.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+    event_names = [item["event"] for item in trace_items]
+    assert event_names.index("workspace_baseline_captured") < event_names.index(
+        "worker_prompt_measured"
+    )
+    assert event_names.index("worker_prompt_measured") < event_names.index(
+        "loop_initialized"
+    )
+    repo_dir.joinpath("README.md").write_text(
+        "# Demo\nworker change\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
     result_run = runtime.continue_assist(loop_run.name, repo_dir, reviewer_name="codex-exec")
 
@@ -1528,6 +1552,187 @@ def test_loop_assist_continue_generates_fix_prompt_from_review_findings(tmp_path
     assert state["iterations"][0]["verdict"] == "request_changes"
     assert result_run.joinpath("iterations", "01", "fix-prompt.md").exists()
     assert reviewer.calls[0]["sandbox"] == "read-only"
+
+
+def test_assist_start_blocks_dirty_tracked_baseline_before_worker_handoff(
+    tmp_path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_changed_git_repo(repo_dir)
+    runtime = LoopAutomationRuntime(tmp_path)
+
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="修复 README 展示问题",
+            source="inline-text",
+            repo_path=str(repo_dir),
+        ),
+        "assist",
+    )
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "workspace_baseline_dirty"
+    assert state["iterations"] == []
+    assert run_dir.joinpath("workspace-baseline.json").exists()
+    assert run_dir.joinpath("workspace-check.json").exists()
+    for name in (
+        "worker-prompt.md",
+        "worker-prompt-metrics.json",
+        "worker-prompt-metrics.md",
+    ):
+        assert not run_dir.joinpath(name).exists()
+        assert name not in state["artifacts"]
+    assert "无法把后续修改安全归因" in run_dir.joinpath(
+        "final-report.md"
+    ).read_text(encoding="utf-8")
+    next_steps = run_status_payload(tmp_path, run_dir.name)["next_steps"]
+    assert not any("loop continue" in item for item in next_steps)
+    with pytest.raises(ValueError, match="启动基线不可用"):
+        runtime.continue_assist(run_dir.name, repo_dir, verify=False)
+    assert not list(run_dir.glob("iterations/*"))
+
+
+def test_assist_continue_rejects_tampered_workspace_baseline_without_iteration(
+    tmp_path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    runtime = LoopAutomationRuntime(tmp_path)
+    run_dir = runtime.start(
+        BriefInput(
+            mode="feature",
+            text="新增 README 使用说明",
+            source="inline-text",
+            repo_path=str(repo_dir),
+        ),
+        "assist",
+    )
+    baseline_path = run_dir / "workspace-baseline.json"
+    baseline_path.write_bytes(baseline_path.read_bytes() + b" ")
+    repo_dir.joinpath("README.md").write_text(
+        "# Demo\nworker change\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    with pytest.raises(ValueError, match="workspace_baseline_invalid"):
+        runtime.continue_assist(run_dir.name, repo_dir, verify=False)
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    assert state["current_step"] == "waiting_for_worker"
+    assert state["iterations"] == []
+
+
+def test_assist_continue_rejects_missing_workspace_baseline_without_iteration(
+    tmp_path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    runtime = LoopAutomationRuntime(tmp_path)
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="修复 README 展示问题",
+            source="inline-text",
+            repo_path=str(repo_dir),
+        ),
+        "assist",
+    )
+    run_dir.joinpath("workspace-baseline.json").unlink()
+
+    with pytest.raises(ValueError, match="workspace-baseline.json_missing_or_empty"):
+        runtime.continue_assist(run_dir.name, repo_dir, verify=False)
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    assert state["current_step"] == "waiting_for_worker"
+    assert state["iterations"] == []
+
+
+def test_assist_continue_rejects_head_drift_before_iteration(tmp_path) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    runtime = LoopAutomationRuntime(tmp_path)
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="修复 README 展示问题",
+            source="inline-text",
+            repo_path=str(repo_dir),
+        ),
+        "assist",
+    )
+    repo_dir.joinpath("README.md").write_text(
+        "# Demo\nworker change\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _commit_repo_paths(repo_dir, "README.md", message="unexpected worker commit")
+
+    result_run = runtime.continue_assist(run_dir.name, repo_dir, verify=False)
+
+    state = json.loads(result_run.joinpath("state.json").read_text(encoding="utf-8"))
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "workspace_head_changed"
+    assert len(state["iterations"]) == 1
+    assert state["iterations"][0]["workspace_status"] == "failed"
+    assert "无法继续归因" in result_run.joinpath("final-report.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_assist_baseline_ignores_harness_artifacts_in_same_repository(
+    tmp_path,
+) -> None:
+    repo_dir = tmp_path / "repo"
+    _init_clean_git_repo(repo_dir)
+    repo_dir.joinpath(".gitignore").write_text(
+        "runs/*\n!runs/.gitkeep\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo_dir.joinpath(".vega.yaml").write_text(
+        "version: 1\nscope:\n  forbidden_paths:\n    - README.md\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _commit_repo_paths(
+        repo_dir,
+        ".gitignore",
+        ".vega.yaml",
+        message="configure harness repository",
+    )
+    runtime = LoopAutomationRuntime(repo_dir)
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="修复 README 展示问题",
+            source="inline-text",
+            repo_path=str(repo_dir),
+        ),
+        "assist",
+        verify=False,
+    )
+    repo_dir.joinpath("README.md").write_text(
+        "# Demo\nworker change\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    runtime.continue_assist(run_dir.name, repo_dir, verify=False)
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    assert state["iterations"][0]["workspace_status"] != "failed"
+    assert state["current_step"] == "scope_gate_failed"
+    workspace_check = json.loads(
+        run_dir.joinpath(
+            "iterations",
+            "01",
+            "workspace-check.json",
+        ).read_text(encoding="utf-8")
+    )
+    assert workspace_check["baseline_ignored_changed"] is False
 
 
 def test_loop_runtime_propagates_progress_reporter_to_worker_and_reviewer(
@@ -1567,8 +1772,8 @@ def test_loop_runtime_propagates_progress_reporter_to_worker_and_reviewer(
 def test_loop_continue_rejects_repo_mismatch_without_mutating_run(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
     other_repo = tmp_path / "other-repo"
-    _init_changed_git_repo(repo_dir)
-    _init_changed_git_repo(other_repo)
+    _init_clean_git_repo(repo_dir)
+    _init_clean_git_repo(other_repo)
     runtime = LoopAutomationRuntime(tmp_path)
     run_dir = runtime.start(
         BriefInput(
@@ -1620,7 +1825,7 @@ def test_loop_continue_rejects_terminal_run(tmp_path) -> None:
 
 def test_loop_writes_project_context_into_worker_prompt(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
+    _init_clean_git_repo(repo_dir)
     runtime = LoopAutomationRuntime(tmp_path)
     brief_input = BriefInput(
         mode="feature",
@@ -2258,7 +2463,7 @@ def test_loop_auto_stops_on_workspace_pollution_before_review(tmp_path) -> None:
 
 def test_latest_and_status_cli_show_next_steps_for_loop(tmp_path, monkeypatch) -> None:
     repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
+    _init_clean_git_repo(repo_dir)
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(
@@ -2288,7 +2493,7 @@ def test_latest_and_status_cli_show_next_steps_for_loop(tmp_path, monkeypatch) -
 
 def test_do_cli_runs_assist_loop_as_daily_entry(tmp_path, monkeypatch) -> None:
     repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
+    _init_clean_git_repo(repo_dir)
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(
@@ -3309,7 +3514,7 @@ def test_loop_continue_can_resume_auto_loop_after_manual_fix(tmp_path) -> None:
 
 def test_recover_marks_running_loop_as_needs_human(tmp_path, monkeypatch) -> None:
     repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
+    _init_clean_git_repo(repo_dir)
     runtime = LoopAutomationRuntime(tmp_path)
     run_dir = runtime.start(
         BriefInput(
@@ -3469,7 +3674,7 @@ def test_stop_cli_only_stops_recorded_owned_process(tmp_path, monkeypatch) -> No
 
 def test_recover_rejects_live_execution_even_when_lease_expires(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
+    _init_clean_git_repo(repo_dir)
     runtime = LoopAutomationRuntime(tmp_path)
     run_dir = runtime.start(
         BriefInput(

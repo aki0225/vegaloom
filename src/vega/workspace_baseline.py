@@ -19,6 +19,7 @@ class WorkspaceBaselineArtifact(BaseModel):
     head_sha: str
     tracked_files: list[str] = Field(default_factory=list)
     untracked_files: list[str] = Field(default_factory=list)
+    ignored_path_exclusions: list[str] = Field(default_factory=list)
     untracked_manifest_sha256: str
     ignored_manifest_sha256: str
     ignored_manifest_complete: bool
@@ -35,6 +36,7 @@ def write_workspace_baseline(path: Path, snapshot: WorkspaceSnapshot) -> str:
         head_sha=snapshot.head_sha,
         tracked_files=sorted(snapshot.tracked_files),
         untracked_files=sorted(snapshot.untracked_files),
+        ignored_path_exclusions=sorted(snapshot.ignored_path_exclusions),
         untracked_manifest_sha256=snapshot.untracked_manifest_sha256,
         ignored_manifest_sha256=snapshot.ignored_manifest_sha256,
         ignored_manifest_complete=snapshot.ignored_manifest_complete,
@@ -75,10 +77,15 @@ def read_workspace_baseline(
         raise ValueError("workspace baseline 内容不合法") from exc
     _validate_baseline_paths(artifact.tracked_files, "tracked")
     _validate_baseline_paths(artifact.untracked_files, "untracked")
+    _validate_baseline_paths(
+        artifact.ignored_path_exclusions,
+        "ignored exclusion",
+    )
     return WorkspaceSnapshot(
         raw_status="",
         tracked_files=frozenset(artifact.tracked_files),
         untracked_files=frozenset(artifact.untracked_files),
+        ignored_path_exclusions=frozenset(artifact.ignored_path_exclusions),
         head_sha=artifact.head_sha,
         untracked_manifest_sha256=artifact.untracked_manifest_sha256,
         ignored_manifest_sha256=artifact.ignored_manifest_sha256,
