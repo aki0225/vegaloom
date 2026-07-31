@@ -56,6 +56,60 @@
   卫生问题没有污染测试结论，也不应通过修改产品代码掩盖。
 - 这只解除主仓库验证前置条件；正式 CRWP-V1 Worker、Reviewer 和 Finish 仍然都没有启动。
 
+### Case 01/02 预检终态（2026-07-30）
+
+本轮只完成预注册已有前置检查，没有启动正式 Worker、Reviewer 或 Finish，也没有新增
+Runtime、测试框架或证据格式。
+
+- 两个活跃目标副本均从冻结 SHA 重建，关闭 `core.autocrlf`，移除 remote，并只提交
+  `.vega.yaml`：
+  - Case 01 prepared HEAD：`3cde5c71416275f573bb7d6b8823464014f9d3df`
+  - Case 02 prepared HEAD：`fde6ef505a84aef2a5377ac6f27f253b3a453d0b`
+- 两个副本的 workspace snapshot 均为 `capture_complete=true`、
+  `ignored_manifest_complete=true`、`git_control_complete=true`，且 tracked changes 和
+  untracked files 都为 `0`。`ignored_content_complete=false` 仍是既有有界内容覆盖语义。
+- Case 01 的定向 build、`59 passed`、typecheck、Biome、`git diff --check` 均通过；
+  oracle 两次均以 `1` 退出，stdout SHA-256 都是
+  `4308870971d831b3f42883a42ea06057da9267782574b278a527f614172095e1`，stderr 为空。
+- Case 02 的 workspace build、`41 passing`、ESLint、`git diff --check` 均通过；
+  oracle 两次均以 `1` 退出，stdout SHA-256 都是
+  `0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b`，stderr 为空。
+- 资格复核没有变化：Dormice Issue `#33` 仍为 open、无 assignee、无评论，未发现关联
+  修复 PR；Sequelize Issue `#18265` 仍为 open、无 assignee、无评论，受控公开 PR
+  `#18274` 仍保持登记的 base、head 和 `6934` 字节 diff 哈希。
+- Sequelize 冻结目标的 tracked 输入面未命中第十节四个负向词条。正式 Worker 和 Reviewer
+  启动前仍必须扫描当次最终编译输入；命中即停止，不得调用外部 runner。
+- `codex-cli 0.145.0` 使用 read-only、ephemeral 的 `gpt-5.4` 短探测返回 `READY`，
+  退出码为 `0`。两个目标都没有遗留相关进程。
+
+当前可以按预注册顺序进入 Case 01 的正式 Worker。不要再次重跑已经通过的 setup 或
+baseline；Case 01 取得终态后，再决定是否继续 Case 02。
+
+### Case 01 正式运行结果（2026-07-30）
+
+Case 01 已形成终态，正式 run 为 `20260730-223403-019133-bug-loop`。
+
+- `gpt-5.4 / medium` Worker 正常退出，耗时约 `464` 秒，runner 报告
+  `58,637` tokens。
+- Worker 只修改两个允许文件，但新增未跟踪缓存
+  `.pnpm-store/v11/index.db`。Workspace Gate 在 verification 和 reviewer 前停止，
+  最终状态为 `needs_human / workspace_check_failed`。
+- 候选 diff 为 `344` 行新增、`210` 行删除，共 `554` 行，已经超过预注册的
+  `max_diff_lines=350`。其中 `main.ts` 被整体重排为可导入的 `createProgram()`，
+  不属于本题期望的小范围参数解析修复。
+- 因为清理缓存后仍会被 diff 预算拒绝，本轮不删除现场、不继续同一 run，也不为得到更好
+  结果而重跑 Case 01。
+- Worker 最终输入在 `worker_started` 前已写入两份相同 artifact，SHA-256 为
+  `bc045e73d25a921258dc952aec8fa85ca0e68d06ab567575e77cf030cb1586b9`；但控制端在外部
+  runner 启动后才读取并登记该哈希，因此本次存在输入哈希登记时序偏差，不能描述为完全无
+  协议偏差的样本。
+- 没有启动 verification、Reflect、Reviewer 或 Finish，没有自动 commit、push、release
+  或写入长期 Memory，目标相关残留进程为 `0`。
+
+该结果证明 Vega 会在 Worker 产生未登记文件时按设计 fail-closed，但不能证明候选修复正确，
+也不能算完成 Coding Loop。Case 02 尚未启动；下一步只评估如何在不增加 Runtime 机制的前提下，
+在调用前完成其既定负向输入扫描。
+
 ### 已取得终态的静态验证
 
 ```text

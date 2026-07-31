@@ -225,3 +225,30 @@ Dormice 的一次并行控制尝试触发 `cli_timeout`，该无效现场被保�
 合同完整，但 PR `#125` 已触发
 `eligibility-changed-before-run`，因此 Case 03 停止。后续只允许在重新完成 preflight 后运行
 Case 01/02，不据此计算成功率。
+
+## 2026-07-30 执行结果：CRWP-V1-01 Dormice #33
+
+本条追加 Case 01 的首个正式 auto run，不修改此前预注册、Amendment 或前置阻断记录。
+
+- Run：`20260730-223403-019133-bug-loop`。
+- `gpt-5.4 / medium` Worker 正常退出，约耗时 `464` 秒，runner 报告
+  `58,637` tokens。
+- Worker 修改了预注册允许的 `packages/cli/src/main.ts` 和
+  `packages/cli/src/commands.test.ts`，但同时新增未跟踪的
+  `.pnpm-store/v11/index.db`。
+- Workspace Gate 在 verification 和 reviewer 前拒绝现场，最终状态为
+  `needs_human / workspace_check_failed`。没有运行 verification、Reflect、Reviewer
+  或 Finish。
+- 候选 diff 为 `344` 行新增、`210` 行删除，共 `554` 行，超过预注册的
+  `max_diff_lines=350`。`main.ts` 还被整体重排为可导入的 `createProgram()`，因此即使
+  人工清理缓存，候选仍不满足本题的小范围变更预算。
+- 控制端没有删除缓存、修改候选或选择性重跑。目标现场继续保存在 ignored 本地目录，
+  没有自动 commit、push 或 release。
+- 最终 Worker prompt 在 `worker_started` 事件前已写入两份相同 artifact，SHA-256 为
+  `bc045e73d25a921258dc952aec8fa85ca0e68d06ab567575e77cf030cb1586b9`。但该哈希在外部
+  runner 启动后才由控制端读取并登记，构成输入哈希登记时序偏差；本结果不能描述为完全无
+  协议偏差的正式样本。
+
+该运行证明 Workspace Gate 能阻止带有额外未登记文件的 Worker 结果继续进入验证与审查。
+它不证明候选代码正确，也不构成一次完成的 Coding Loop。Case 01 不按结果选择性重跑；
+Case 02 在完成既定调用前负向输入扫描前不会启动。
