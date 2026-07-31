@@ -1,0 +1,4 @@
+sequelize/sequelize#18274
+fix(sqlite3): preserve autoincrement on alter sync
+14aab37348d0d8d7bdca7dbe1faeeb4f8dedb67b
+91bb5f43bed59d82f4db47d8cece9431558fdc4405463551d3441aefdc605b37

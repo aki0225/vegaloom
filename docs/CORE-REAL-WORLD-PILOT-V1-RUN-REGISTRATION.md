@@ -623,3 +623,291 @@ worker-not-started
 
 下一步只准备和执行 `CRWP-V1-01`、`CRWP-V1-02`。不得顺带增加 Runtime、测试框架、
 Memory、LangGraph、多 Reviewer 或新的 Pilot Case。
+
+## 十四、2026-07-31 Runtime 与正式输入 Amendment
+
+本修订发生在任何正式 Worker、Reviewer 或 Finish 启动之前，只补齐 Case 01/02 的运行时
+基线、独立任务输入、调用前扫描和总墙钟控制。历史失败与更正记录保持不变。
+
+### 14.1 Runtime 与目标副本
+
+本轮准备起点为：
+
+```text
+Preparation base: 6cfd51a9ca047bfc6cb4df3793c8925e17b351f4
+```
+
+`6cfd51a` 相比已完整测试的 `a8a58cb` 只追加接力文档，两者产品 `src` tree 相同。既有产品
+Runtime 的可信 pytest 终态为 `908 collected / 900 passed / 8 skipped`。
+
+正式控制输入采用严格的两提交冻结：
+
+1. Runtime 提交 A 包含最终 controller、两个 task、两个 oracle、负向词表、native helper、
+   控制测试和当时的 `src/`；
+2. 登记提交 B 必须是 A 的单父直接子提交，并且只能新增
+   `scripts/pilot/crwp-v1/crwp-v1-control-manifest.json`；
+3. manifest 登记 A 的 commit/tree/`src` tree，以及每个控制文件在 A 中的 Git blob、
+   SHA-256 与大小；
+4. 正式命令显式传入完整 `--registration-head B`，当前 `HEAD` 必须精确等于 B。合并、
+   rebase、squash 或后续提交都不能沿用本次登记，必须重新生成冻结。
+
+Supervisor 启动 child 前、child 创建根 run 前、Finish 后以及 Supervisor 接受成功前都会
+重新校验同一组冻结证据。任何工作区候选、HEAD 漂移、manifest 漂移、受控 Git blob 或
+工作区字节变化都会 fail-closed；因此 A/B 尚未完成时不能启动正式 Worker。
+
+两个目标均从冻结 SHA 新建，不复用旧 `.local-validation/` 副本：
+
+| Case | Upstream base | Prepared HEAD | Prepared tree | `.vega.yaml` SHA-256 |
+|---|---|---|---|---|
+| `CRWP-V1-01` | `f26ba3748e79c7225f4aafb757c6f9f1f6b2d733` | `1b2084e4cae0e88c7fdabee7a851094832f6d0cf` | `7735e8269afab4a26b2b7c8cf66e074961f8ce28` | `d4322d5ce2c9e86dad259bfcf4795dc70d548a81eb01d115d5f84cc40c2711a7` |
+| `CRWP-V1-02` | `f0cea95e38b4f2c9096267371ab305d08f7b8497` | `18431b84c44eaa14736a2f4f6e9d92fe812a923e` | `67f271bb1fbd2506fc556ecab4ea319b827b234f` | `844800d61f6dbd016357e796f3db5bb7f371b22c0cdc1e50ccf25d47e92b2024` |
+
+两个准备提交都只包含 `.vega.yaml`，remote 为空，tracked、index 和未跟踪状态为空。
+首次准备后的 review workspace fingerprint 分别为：
+
+```text
+CRWP-V1-01: 07dbe0954425174602496c88f0dca22419fb5094d6ecda5cb23e7af7d0d8ab29
+CRWP-V1-02: 79a123bbf7bf716839a27f4043bf63a95924d78207db99d7c29d76e99887d4ec
+```
+
+这些指纹早于最终 Worker 启动，只用于说明准备现场。每个 Case 都必须在自身正式 Worker
+前由控制器重新捕获 `workspace-preflight.json`；本表不能替代最终启动证据。
+
+### 14.2 Case 02 SQLite 本机依赖准备
+
+`--mode=skip-build` 安装后，正式准备只执行：
+
+```text
+corepack yarn --cwd node_modules/sqlite3 exec prebuild-install -r napi
+```
+
+该命令在 `node_modules/sqlite3` 内直接启动 `prebuild-install`，不进入项目级 install/build
+阶段。结果为 `exit=0`、`7825 ms`，唯一新增本机产物为：
+
+```text
+node_modules/sqlite3/build/Release/node_sqlite3.node
+bytes: 1980416
+SHA-256: 5e1d1275e126c3fc584bcf5752fbf747bff89454bfcf8bc76c982b24e7815057
+```
+
+`require("sqlite3")` 在 Node `22.22.0 / win32-x64` 下成功并报告 SQLite `3.52.0`。
+`ibm_db`、`oracledb`、全部既有 `.node` 文件、Yarn 状态文件、`package.json` 和 `yarn.lock`
+均未变化；目标 Git clean、HEAD 未变、remote 为空，相关残余进程为 `0`。
+
+本地证据：
+
+```text
+.local-validation/crwp-v1/preflight-20260731/case-02/native-setup/attempt-01-isolated-prebuild/
+summary.json SHA-256:
+2793ee75171ab8260226a2d25d9c5197e78857f466995b8ddf9abf1c48b241d8
+```
+
+一次人工残余进程复查命令发生 PowerShell ParserError，解析阶段未执行。该错误已单独保留，
+随后正确复查得到 `match_count=0`；不得把更正包装成首次命令成功。
+
+首次 native setup 后 baseline 在第二条命令的 Mocha 收集阶段停止。决定性异常是未使用的
+IBM i `odbc` 包缺少本机 binding；该次运行没有进入 SQLite 用例，不能计入有效基线：
+
+```text
+.local-validation/crwp-v1/preflight-20260731/case-02/baseline-after-native/aborted.json
+SHA-256: 139ef1d99a60e4cafb0e8f1871eabaf8e46554dd5a19be57c7679013588f1c8a
+```
+
+`ignore-native-drivers.cjs` 随后从只隔离顶层 `ibm_db`，收紧为精确隔离顶层 `ibm_db` 与
+`odbc`；`sqlite3`、`@sequelize/sqlite3`、`odbc-extra` 和其他请求仍交给原 loader。
+helper 的新 SHA-256 为
+`2e6a0f95133df1ba2a928d2f99be5068ee13bad75e2bba01b10213b284020bde`。
+
+修正后在全新目录从第一条命令重新执行完整 baseline，不从失败命令续跑：
+
+```text
+.local-validation/crwp-v1/preflight-20260731/case-02/baseline-after-native-v2/
+preflight.json SHA-256:
+94af6c67d6b8287bd8836c9ec5b33a9e8698aa4d3b7e804914191b9a9f830f31
+summary.json SHA-256:
+ed84e7fba9bb949df4d4b4115d2ce0a0bce8d26b3531a402557195e8163e5057
+final-state.json SHA-256:
+87d5bbf317eedfddc8196eddd82aa41a1f5ad3f55f376d56ea4053516ec5306a
+```
+
+结果为 `accepted=true`：build、`41 passing` 的定向 SQLite tests、ESLint 与
+`git diff --check` 均 `exit=0`；oracle 两次均 `exit=1`，完整输出字节一致，SHA-256 为
+`0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b`。
+全部六次 owned execution 均 `termination_unconfirmed=false`，目标 Git clean、remote 为空，
+相关残余进程为 `0`。
+
+本轮保留但不计入有效结果的控制更正还包括：
+`setup-control-error.json`、`prepared-attestation-control-error.json`、
+`workspace-snapshot-control-error.json`、provider process audit 的 control error、
+native setup 的 ParserError，以及 Case 01 的 hash normalization correction。Case 01
+权威 baseline 是 `summary-final.json`，SHA-256 为
+`52b754c163d5444e722ed5495c91b142a46b016b17b03a3a1024bc427f4645ff`。
+
+### 14.3 资格与 Provider
+
+2026-07-31 的只读资格复核得到：
+
+- Dormice Issue `#33` 仍为 open、无 assignee、`0` comments，正文 SHA-256 仍为
+  `efcabe0528e47271a5003b356340df6a120000c6f010859f70341007fc0f4021`；
+- timeline 无 cross-reference，冻结 SHA 到默认分支 compare 为 `identical`；公开文本搜索未
+  找到关联修复，但该搜索不能穷举无关联或无关键词的开放补丁；
+- Sequelize Issue `#18265` 仍为 open、无 assignee、`0` comments，正文 SHA-256 仍为
+  `2effa9288425d1227a5b3c61bf68eb33d8fd0ba81f023c2530d2cfb712df481e`；
+- PR `#18274` 仍为 open、非 draft、未合并，base/head、`6934` bytes diff 和 diff SHA-256
+  均与冻结值一致。
+
+Codex CLI 为 `0.144.6`。`gpt-5.4 / medium / ephemeral / read-only` 与
+`gpt-5.4 / high / ephemeral / read-only` 各执行一次，分别用时 `94.038s` 与 `86.057s`，
+均 `exit=0` 且 stdout 精确为 `READY\n`。两个已知探测 PID 均已退出，没有换模型或挑结果
+重跑。CLI 同时明确提示使用 fallback model metadata，并省略未声明支持的 `priority`
+service tier；这不影响本次可用性探测，但必须作为环境限制保留。
+
+本地汇总：
+
+```text
+.local-validation/crwp-v1/preflight-20260731/qualification/summary.json
+SHA-256: 224e11f37faa21fe52ce31d2bcab80ca4aef863552ee186d389a9b4729d93223
+
+.local-validation/crwp-v1/preflight-20260731/qualification/manifest.json
+SHA-256: 974cf9961204a41319631fee0c2d11f1c25bac58734f17bacc419f9baba0c7e0
+```
+
+资格与 Provider 只证明启动条件的一部分，不证明模型会修复任务。正式控制器同时校验上述
+两个文件的冻结哈希、`overall_preflight_component_passed=true` 和生成时间不超过 24 小时；
+超期时必须重新复核，不能沿用旧探测启动 Worker。
+
+### 14.4 独立任务合同与负向词表
+
+正式 Worker 只接收对应 Case 的独立任务合同，不接收本文或整份预注册：
+
+| 控制输入 | Runtime 提交 A 候选 SHA-256 |
+|---|---|
+| `scripts/pilot/crwp-v1/tasks/crwp-v1-01-task.md` | `25400d4a907ee90153cf9f69f659a44a06dc197fff7c67789b1b6f971033401c` |
+| `scripts/pilot/crwp-v1/tasks/crwp-v1-02-task.md` | `803c3a516e833d41a8cb8c3009595fa66d2386776204ff8d14fea18dc2c22ad6` |
+| `scripts/pilot/crwp-v1/crwp-v1-02-blocked-terms.txt` | `3c6cb6f708588702865b15cab2fa0dc0bb7a0044401e4cd7fe154a6cf40d05d8` |
+| `scripts/pilot/crwp-v1/crwp-v1-01-timeout-oracle.py` | `a1a9152a9d96f0ac935f6c26baccba7ce4632453b388ba570ceb62731ae65b5f` |
+| `scripts/pilot/crwp-v1/crwp-v1-02-sqlite-autoincrement-oracle.cjs` | `f784abc3518e12991f3f0b93628773adda1d68c9add4fe2a75d9e93b318e93d0` |
+| `scripts/pilot/crwp-v1/ignore-native-drivers.cjs` | `2e6a0f95133df1ba2a928d2f99be5068ee13bad75e2bba01b10213b284020bde` |
+
+两个任务合同都补充了必须由目标仓库测试直接证明的职责：Case 01 必须覆盖 Commander
+入口并用 mock/spy 证明无效值不会调用连接或执行路径；Case 02 必须直接覆盖 SQL、metadata、
+数据保留、主键不复用、连续两次 alter、行注释与块注释负对照。Case 02 任务合同按 UTF-8
+原始字节扫描冻结的四项负向词表，命中数为 `0`；不在任务合同、项目规则或角色输入中主动
+提供公开补丁。
+
+最终权威值不依赖本文手工抄录：登记提交 B 的 manifest 会同时登记上述文件、controller 和
+`tests/test_crwp_v1_control.py` 在 Runtime 提交 A 中的 Git blob、SHA-256 与大小；控制器
+还会逐项确认登记提交 B 没有改写这些 blob。
+
+### 14.5 Pilot 专用控制器
+
+正式调用使用：
+
+```text
+scripts/pilot/crwp-v1/run_crwp_case.py
+```
+
+该文件的最终 Git blob、SHA-256 和大小由登记提交 B 的 manifest 绑定，不在本文复制易失
+哈希。它是 Pilot 控制输入，不增加 Vega 产品 CLI、状态或 artifact schema；仍调用当前
+`LoopAutomationRuntime` 与 `FinishRuntime`，并增加以下 Pilot 专用控制与证据边界：
+
+1. 只允许在已登记的 Windows 环境运行；正式证据目录必须是
+   `.local-validation/crwp-v1/formal-runs/` 下的独立子目录，且不得与目标仓库互相包含。
+2. 隐藏 child 必须持有 supervisor 生成的一次性 nonce，并校验登记提交、当前父 PID、
+   live owned execution、`execution_id`、child PID、lease 和固定 execution 路径；手工调用
+   `--execute-child` 会在创建根 run 前拒绝。
+3. 严格校验 Runtime 提交 A 与登记提交 B：B 必须是 A 的单父直接子提交且只能新增 manifest；
+   当前 HEAD 必须精确等于 B；`src` tree、controller、tasks、oracles、负向词表、helper 和
+   控制测试必须与 A 的 Git blob 及 manifest 完全一致。另绑定资格/Provider、对应 Case 的
+   baseline、`.vega.yaml` 和 sqlite native 文件哈希。
+4. 每个 Case 在根 run 创建前捕获 `workspace-preflight.json`，要求 HEAD、tracked/untracked、
+   unsafe index、ignored manifest 和 Git control 证据满足冻结边界。
+5. `PromptAuditRunner` 在每次真实 `Runner.run()` 前取得最终 prompt，经 Vega redaction 后把
+   实际发送字节的 SHA-256、字符数、字节数和行数写入证据。它同时强制 Worker
+   `workspace-write`、Reviewer `read-only`、角色 step、目标 repo、iteration、根 run ID 与
+   `runs/<run-id>/iterations/<iteration>/executions/<role>` 路径一致；Case 02 每轮精确扫描
+   负向词表，命中时不调用外部 runner。
+6. Pilot 子进程只在运行期间包裹实际 `create_run_dir` 调用，把其真实返回 ID 独占写入
+   `run-created.json`，随后恢复原函数；第一轮 Worker 前再用 `execution_context.run_id`
+   交叉校验并独占写入 `wall-clock-start.json`。不扫描 `runs/`，也不猜“最新 run”。
+7. 外层 supervisor 以 Vega owned process 运行整个 Case。首个 Worker 到 `1800` 秒时先对
+   精确 run 执行 `vega stop`；stop 无 active execution、未在宽限期结束或 monitor 异常时，
+   只停止自己创建的控制进程树。controller 返回后再严格重读 launch、workspace preflight、
+   input attestation、根 state 和真实 Finish，并用 `validate_loop_evidence_snapshot()`、
+   artifact integrity、freshness、最新验证与 Reviewer verdict 独立重算成功门禁；不会只信任
+   child 写出的 `ready_to_commit`。同时用 controller 实际返回时刻复核 deadline。
+8. controller 终止确认后始终检查精确根状态；仍为 `running` 时调用
+   `RecoveryRuntime` 并确认转为同一 run 的 `needs_human`。任何 deadline、startup timeout、
+   monitor error、termination-unconfirmed、身份冲突、recovery 或非 `ready_to_commit`
+   Finish 都返回非零。
+
+首个 Worker 在控制子进程启动后 `300` 秒内仍未开始时，同样停止该 owned 控制进程并保留
+现场。外层 owned process 另有 `2400` 秒失效保护，只用于处理控制器异常，不放宽 `1800`
+秒正式总墙钟。
+
+`tests/test_crwp_v1_control.py` 当前包含 `33` 个测试函数、`40` 个 pytest case；本轮定向执行
+结果为 `40 passed`。覆盖：
+
+- prompt 阻断、实际 UTF-8 哈希、角色 sandbox、execution 路径、Reviewer 正向和跨 run 拒绝；
+- 根 run 实际返回 ID、Worker 起点幂等和 direct child 阻断；
+- live supervisor lease 正向，以及过期 lease、错误 child PID 的负向；
+- evidence/repo 双向路径边界；
+- 在线 deadline stop、controller 结束竞态 postcheck 和 monitor 异常；
+- 两提交 Runtime 冻结的正向、额外登记改动、错误 manifest 和错误 HEAD；
+- 表面成功与真实 state/Finish 冲突、缺失或 `null` artifact、独立重算失败与异常；
+- Supervisor 对 child 伪成功和 owned controller 异常的最终拒绝，非法 JSON 终态摘要，
+  以及精确 running run recovery 到 `needs_human` 与 recovery 权限失败；
+- native helper 只隔离 `ibm_db`、`odbc`，继续转发 SQLite 与相邻模块名。
+
+### 14.6 正式命令与顺序
+
+Case 01：
+
+```powershell
+$env:PYTHONPATH = "$repoRoot\src"
+$registrationHead = git rev-parse HEAD
+python scripts/pilot/crwp-v1/run_crwp_case.py `
+  --case-id CRWP-V1-01 `
+  --repo .tmp/crwp-v1/targets/dormice-33 `
+  --task scripts/pilot/crwp-v1/tasks/crwp-v1-01-task.md `
+  --registration-head $registrationHead `
+  --evidence-dir .local-validation/crwp-v1/formal-runs/<case-01-run-id>
+```
+
+Case 02：
+
+```powershell
+$env:PYTHONPATH = "$repoRoot\src"
+$registrationHead = git rev-parse HEAD
+python scripts/pilot/crwp-v1/run_crwp_case.py `
+  --case-id CRWP-V1-02 `
+  --repo .tmp/crwp-v1/targets/sequelize-18265 `
+  --task scripts/pilot/crwp-v1/tasks/crwp-v1-02-task.md `
+  --blocked-terms scripts/pilot/crwp-v1/crwp-v1-02-blocked-terms.txt `
+  --registration-head $registrationHead `
+  --evidence-dir .local-validation/crwp-v1/formal-runs/<case-02-run-id>
+```
+
+`<case-*-run-id>` 是控制端在启动前创建的唯一证据目录名，不是 Vega 根 run ID；真实 run ID
+由控制器在根 run 创建点登记，再与角色 `execution_context` 交叉校验。`$registrationHead`
+必须是只新增 manifest 的登记提交 B；控制器拒绝任何其他 HEAD。两个 Case 不并行，一项形成
+终态记录后才进入下一项。Case 03 继续固定为 `eligibility-changed-before-run`。
+
+### 14.7 提交前与 Worker 前最后门禁
+
+严格的 Runtime 提交 A 与登记提交 B 完成前不得启动 Worker。固定顺序为：
+
+1. 对 controller 与控制测试执行定向 pytest、Ruff、compileall 和 `git diff --check`；
+2. 把 controller、tasks、oracles、负向词表、helper、控制测试、本 Amendment 与当前 `src/`
+   提交为 Runtime 提交 A；
+3. 从 A 的 Git blob 生成 `crwp-v1-control-manifest.json`，再创建只新增该 manifest 的
+   单父登记提交 B；
+4. 在 B 上确认 `git diff --name-status A..B` 只有 manifest，并运行仓库卫生、完整 pytest、
+   全量 Ruff、compileall 与 `git diff --check`；
+5. 确认 Case 02 v2 baseline 仍为 `accepted=true`、oracle 两次稳定失败，资格/Provider
+   证据仍在 24 小时有效期内；超期必须重新生成资格证据并更新冻结合同；
+6. 每个 Case 都由控制器在自身 Worker 前重新捕获 workspace snapshot，并确认目标 HEAD、
+   Git clean、remote 为空、冻结文件未变且没有目标相关残余进程。
+
+上述条件同时满足后，才先启动 Case 01。Case 01 的真实结果必须形成终态并追加
+`eval/real-world-runs.md`，之后才能判断是否进入 Case 02。
