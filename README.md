@@ -17,6 +17,7 @@
 **[核心能力](#核心能力)** ·
 **[安装](#安装)** ·
 **[快速开始](#快速开始)** ·
+**[Codex 接入](#codex-接入)** ·
 **[关键行为](#关键行为)** ·
 **[文档](#文档)** ·
 **[定位与边界](#定位与边界)**
@@ -126,6 +127,26 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 
 `vega do/loop` 使用 `LoopAutomationRuntime`，是当前日常 Coding Harness 主线；
 `vega run engineering-change` 使用 `EngineeringChangeRuntime`，保留为 YAML 驱动的只读基线。
+
+## Codex 接入
+
+需要让 Codex 主会话按 Skill 调用 Vega 时，在目标仓库显式初始化：
+
+```powershell
+vega adapters init codex --repo .
+```
+
+命令会生成仓库级 Skill：
+
+```text
+.agents/skills/vega-loop/SKILL.md
+.agents/skills/vega-review/SKILL.md
+```
+
+在该仓库的新 Codex 任务中可通过 `$vega-loop` 或 `$vega-review` 显式调用。Skill 只提供
+Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会自行启动自动 worker。
+初始化默认不覆盖已有文件；`--force` 只覆盖新的 `.agents/skills` 目标，不删除或改写历史
+`.codex/skills` 文件。是否将生成的仓库级 Skill 纳入版本控制，由目标项目自行决定。
 
 ## 关键行为
 

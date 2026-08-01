@@ -132,7 +132,7 @@ v0.1 baseline 的最小验收定义。
 - Finish 的 `finish-report.md`、`finish-summary.json`
 - Run status 的状态摘要、关键产物和下一步指引
 - Decision ledger 的 `decisions.jsonl`
-- Codex adapter 的 `.codex/skills/vega-loop/SKILL.md` 与 `.codex/skills/vega-review/SKILL.md`
+- Codex adapter 的 `.agents/skills/vega-loop/SKILL.md` 与 `.agents/skills/vega-review/SKILL.md`
 - Goal P0 的 `goal-contract.md/json`
 - `goal-state.json`
 - `goal-trace.jsonl`

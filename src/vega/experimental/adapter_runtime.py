@@ -121,6 +121,8 @@ description: "当用户要求审查当前 Vega run、当前 diff 或 AI 修改�
 """,
 }
 
+CODEX_SKILLS_ROOT = Path(".agents") / "skills"
+
 
 def init_adapter(repo_path: Path, target: str, force: bool = False) -> AdapterInitResult:
     normalized = target.strip().lower()
@@ -136,7 +138,7 @@ def init_adapter(repo_path: Path, target: str, force: bool = False) -> AdapterIn
     created: list[Path] = []
     skipped: list[Path] = []
     targets = [
-        (repo / ".codex" / "skills" / skill_name / "SKILL.md", content)
+        (repo / CODEX_SKILLS_ROOT / skill_name / "SKILL.md", content)
         for skill_name, content in CODEX_SKILLS.items()
     ]
 

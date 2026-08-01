@@ -64,7 +64,7 @@ def test_adapter_init_rejects_external_directory_link(
         for skill_path in outside_skills:
             skill_path.parent.mkdir(parents=True)
             skill_path.write_text("outside sentinel\n", encoding="utf-8")
-    link_path = repo / ".codex"
+    link_path = repo / ".agents"
     _create_directory_link(link_path, outside)
 
     args = ["adapters", "init", "codex", "--repo", str(repo)]
@@ -80,7 +80,7 @@ def test_adapter_init_rejects_external_directory_link(
         result = CliRunner().invoke(app, args)
 
         assert result.exit_code != 0
-        assert ".codex/skills/vega-loop/SKILL.md" in result.output
+        assert ".agents/skills/vega-loop/SKILL.md" in result.output
         assert str(outside) not in result.output
         if preexisting:
             assert all(
@@ -95,7 +95,7 @@ def test_adapter_init_rejects_external_directory_link(
 
 def test_adapter_init_preflights_all_targets_before_writing(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
-    skills_dir = repo / ".codex" / "skills"
+    skills_dir = repo / ".agents" / "skills"
     outside = tmp_path / "outside-review"
     skills_dir.mkdir(parents=True)
     outside.mkdir()
@@ -118,7 +118,7 @@ def test_adapter_init_allows_directory_link_resolving_inside_repo(tmp_path: Path
     internal_target = repo / "adapter-data"
     repo.mkdir()
     internal_target.mkdir()
-    link_path = repo / ".codex"
+    link_path = repo / ".agents"
     _create_directory_link(link_path, internal_target)
 
     try:

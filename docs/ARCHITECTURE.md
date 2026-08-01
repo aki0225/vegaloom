@@ -544,11 +544,13 @@ vega adapters init codex --repo <repo>
 它在目标仓库生成：
 
 ```text
-.codex/skills/vega-loop/SKILL.md
-.codex/skills/vega-review/SKILL.md
+.agents/skills/vega-loop/SKILL.md
+.agents/skills/vega-review/SKILL.md
 ```
 
 这些 skill 只描述什么时候调用 `vega loop`、`vega gate`、`vega review`、`vega status`，不安装 hook，不修改全局配置，也不自动执行危险动作。这样可以让主会话理解 Vega 流程，同时保持核心 runtime 与具体工具解耦。
+旧版生成的 `.codex/skills` 不会被自动删除或改写；新命令只管理 `.agents/skills`
+下的两个 Vega Skill。
 
 初始化会先解析整批目标文件的真实路径；任一目标越过目标仓库或无法确认边界时，在写入前
 停止。创建父目录后还会在写文件前再次解析，`--force` 只能覆盖仓库内文件，不能绕过边界。
