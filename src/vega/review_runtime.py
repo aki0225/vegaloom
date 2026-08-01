@@ -1242,7 +1242,7 @@ def _read_json_artifact(
 
 def _extract_review_verdict(text: str) -> ReviewVerdict:
     # codex exec 这类 runner 可能在 JSON 后追加 transcript/token 统计；
-    # 必须完整扫描并确认只有一个合法 verdict，避免歧义输出被错误接受。
+    # 允许 transcript 重复最终结果，但不同合法 verdict 仍视为歧义输出。
     verdicts: list[ReviewVerdict] = []
     for candidate in _iter_json_object_candidates(text):
         try:
@@ -1252,7 +1252,7 @@ def _extract_review_verdict(text: str) -> ReviewVerdict:
             continue
     if not verdicts:
         raise ValueError("review verdict json not found")
-    if len(verdicts) > 1:
+    if any(verdict != verdicts[0] for verdict in verdicts[1:]):
         raise ValueError("multiple review verdict json candidates found")
     return verdicts[0]
 
