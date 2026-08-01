@@ -91,10 +91,15 @@ vega --version
 推荐由当前主会话或人工负责实现，Vega 负责收集证据、执行验证并启动隔离审查：
 
 ```powershell
+vega config check --repo .
 vega loop bug --repo . --text "修复导出按钮无响应" --mode assist
 vega latest --kind loop
 vega loop continue --repo . --run <run_id>
 ```
+
+首次启动 loop 前先处理 `config check` 的 warning：项目策略应进入明确的准备提交；Python
+`src` layout 的 pytest 命令应确保导入当前 checkout；Windows 正式 Pilot 应在干净副本
+checkout 前冻结行尾策略。warning 只暴露准备风险，不执行验证命令，也不等同于运行验收通过。
 
 启动 `assist` 前应先清理 staged 与 unstaged tracked diff。Vega 会先写入并校验
 `workspace-baseline.json`，确认基线可用后才生成 `worker-prompt.md`。当前主会话或宿主工具的

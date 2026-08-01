@@ -76,6 +76,66 @@ def run_git_capture(
     return result
 
 
+def read_git_config_value(repo_path: Path, key: str) -> str | None:
+    """按 Git 优先级读取仓库、用户全局和系统配置。"""
+
+    repo = repo_path.resolve()
+    try:
+        local = run_git_capture(repo, ["git", "config", "--get", key])
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if local.returncode == 0:
+        return coerce_git_output_bytes(local.stdout).decode(
+            "utf-8", errors="replace"
+        ).strip()
+    if local.returncode != 1:
+        return None
+
+    global_environment = git_read_environment()
+    global_environment.pop("GIT_CONFIG_GLOBAL", None)
+    global_value = _read_scoped_git_config(
+        repo,
+        key,
+        "--global",
+        global_environment,
+    )
+    if global_value is not None:
+        return global_value
+
+    system_environment = git_read_environment()
+    system_environment.pop("GIT_CONFIG_NOSYSTEM", None)
+    return _read_scoped_git_config(
+        repo,
+        key,
+        "--system",
+        system_environment,
+    )
+
+
+def _read_scoped_git_config(
+    repo: Path,
+    key: str,
+    scope: str,
+    environment: dict[str, str],
+) -> str | None:
+    try:
+        result = subprocess.run(
+            harden_git_read_command(["git", "config", scope, "--get", key]),
+            cwd=repo,
+            capture_output=True,
+            env=environment,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return coerce_git_output_bytes(result.stdout).decode(
+        "utf-8", errors="replace"
+    ).strip()
+
+
 def harden_git_read_command(command: list[str]) -> list[str]:
     if not command or command[0] != "git":
         raise ValueError("Git 读取命令必须以 git 开头")
