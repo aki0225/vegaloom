@@ -100,6 +100,14 @@ class CodexExecRunner:
             str(repo_path.resolve()),
             "--sandbox",
             sandbox,
+            "--config",
+            "notify=[]",
+            "--disable",
+            "hooks",
+            "--disable",
+            "memories",
+            "--disable",
+            "plugins",
         ]
         if self.options.profile:
             command.extend(["--profile", self.options.profile])

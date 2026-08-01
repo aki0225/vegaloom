@@ -280,3 +280,37 @@ Worker 或 Reviewer 提供 Issue 评论、官方 PR、修复提交或补丁。Is
 该案例证明当前主线能在一个冻结的真实 Python 异步库任务上，由新 Worker 生成小范围补丁，
 经过确定性验证、范围与风险门禁、隔离 Reviewer 和 Finish 得到可人工提交的结果。它仍只是一个
 单案例，不能解释为成功率、跨仓库泛化能力、生产安全或对未知上游修复的独立发现。
+
+## 2026-08-02 Codex 上下文隔离 Dogfood：Node SemVer #512
+
+本条验证 `codex exec` 角色关闭个人 memories、plugins、hooks 和 legacy notify 后，Vega 是否
+仍能在 Windows 上完成真实 JavaScript 修复。任务冻结在 Node SemVer 的准备提交
+`21fdfaaa9c5181ca4346e7334a65db0a7c95d132`，要求修复 `includePrerelease` 下 tilde X-range
+的下界，并限制在 3 个既有文件内。Issue 正文已经给出期望行为，因此该案例不是盲测。
+
+- Run `20260802-001152-196015-bug-loop` 的 Worker 产生了范围内补丁，但 Codex 写工具留下空的
+  根 `.agents/`，Workspace Gate 在验证前停止；该现场证明原 Gate 会把工具自身的空目录副作用
+  当成项目污染。
+- Run `20260802-004006-025433-bug-loop` 已禁用个人上下文，Codex 仍会在使用写工具时创建空
+  `.agents/`。加入“仅豁免完全为空、非链接、可读取的根目录”规则后，continue 通过 Workspace、
+  Scope 与 3 条验证，但 Reflect 拒绝了整文件 CRLF diff。目标副本继承了系统级
+  `core.autocrlf=true`，与既有 `windows_autocrlf_enabled` 预检告警一致；该负结果保留，未通过
+  放宽 evidence 语义绕过。
+- 最终 Run `20260802-014034-608450-bug-loop` 使用新的 `--no-checkout` 本地副本，在 checkout 前
+  固定 `core.autocrlf=false`，其余任务、HEAD、配置、模型与迭代预算不变。Worker 与 Reviewer
+  均为 `gpt-5.5 / xhigh`，实际一轮完成；Worker 约 `278.5` 秒，Reviewer 约 `52.4` 秒，runner
+  未提供可核验 token usage。
+- Worker 只修改 `classes/range.js`、`test/fixtures/range-parse.js` 和
+  `test/fixtures/range-include.js`，共 `10` 行新增、`2` 行删除；根 `.agents/` 保持完全为空，
+  没有新增依赖或越界路径。
+- 两条 Node 行为 oracle 与 `git diff --check` 全部通过；Workspace Gate、三阶段 Scope Gate、
+  Risk Gate 均通过，risk 为 `low / self-check`。隔离只读 Reviewer 返回 `approve`、findings 为
+  `0`，Finish 为 `ready_to_commit`，artifact integrity valid 且 evidence freshness fresh。
+- Worker 与 Reviewer 的 execution command 均显式包含 `notify=[]` 以及关闭 hooks、memories、
+  plugins 的参数。run artifacts 高置信凭证模式扫描为 `0`，相关控制进程均已退出；目标副本的
+  push URL 被禁用，Vega 没有自动 commit、push、release 或写入长期 memory。
+
+这组三次运行证明了两点：个人 Codex 上下文可以从 Vega 角色输入中移除而不破坏主闭环；空
+`.agents/` 可以按严格条件视为工具残留，同时其中任何内容仍会触发 fail-closed。它也再次证明
+Windows 行尾策略必须在 checkout 前冻结。最终成功仍只是一个公开 Issue 单案例，不能外推为
+跨仓库成功率或未知任务泛化能力。

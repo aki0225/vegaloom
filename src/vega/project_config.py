@@ -744,4 +744,5 @@ def _render_codex_exec_options(role: str, options: CodexExecOptions) -> list[str
         f"- `{role}.model`：`{options.model or '继承用户配置'}`",
         f"- `{role}.reasoning_effort`：`{options.reasoning_effort or '继承用户配置'}`",
         f"- `{role}.ephemeral`：`{options.ephemeral}`",
+        f"- `{role}.个人上下文`：`禁用 memories / plugins / hooks / notify`",
     ]
