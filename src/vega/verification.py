@@ -10,7 +10,6 @@ from .execution_control import RunnerExecutionContext, run_owned_process
 from .project_config import (
     VERIFICATION_TEMP_ENV,
     VERIFICATION_TEMP_PLACEHOLDER,
-    VERIFICATION_TEMP_ROOT,
     build_verification_shell_command,
     check_project_config,
     current_verification_shell_kind,
@@ -21,6 +20,7 @@ from .project_config import (
 from .project_profile import build_project_profile
 from .redaction import redact_text, redact_value
 from .runtime_workspace import capture_runtime_workspace
+from .workspace_inventory import prepare_verification_temp_root
 
 MAX_OUTPUT_CHARS = 8000
 VerificationInterruptionStatus = Literal[
@@ -386,18 +386,16 @@ def _run_command(
     execution_context: RunnerExecutionContext,
 ) -> dict[str, Any]:
     started = time.perf_counter()
-    process_options: dict[str, Any] = {}
+    environment = {"PYTHONDONTWRITEBYTECODE": "1"}
     if verification_temp is not None:
-        process_options["environment"] = {
-            VERIFICATION_TEMP_ENV: str(verification_temp)
-        }
+        environment[VERIFICATION_TEMP_ENV] = str(verification_temp)
     result = run_owned_process(
         _shell_command(executed_command),
         "",
         repo_path,
         timeout_seconds,
         execution_context,
-        **process_options,
+        environment=environment,
     )
     interruption_status: VerificationInterruptionStatus | None = None
     if result.termination_unconfirmed:
@@ -461,10 +459,7 @@ def _verification_temp_dir(
     if iteration < 1 or command_index < 1:
         raise ValueError("verification iteration 和 command index 必须从 1 开始")
 
-    repo = repo_path.resolve()
-    root = (repo / VERIFICATION_TEMP_ROOT).resolve()
-    if not root.is_relative_to(repo):
-        raise ValueError("verification 临时目录根路径逃出目标仓库")
+    root = prepare_verification_temp_root(repo_path)
 
     command_dir = (
         root
