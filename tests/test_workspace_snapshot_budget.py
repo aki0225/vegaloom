@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from vega import codex_workspace as codex_workspace_module
 from vega.experimental.inspection import context_loader
 from vega import workspace_check as workspace_check_module
 from vega.experimental.inspection.context_loader import load_target_context
@@ -178,6 +181,62 @@ def test_ignored_directory_is_folded_without_exhausting_metadata_budget(
     assert review_snapshot.ignored_manifest_complete is True
     assert review_snapshot.ignored_content_complete is False
     assert review_snapshot.ignored_coverage_level == "metadata_bounded"
+
+
+def test_workspace_check_allows_new_empty_root_agents_directory(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    _ignore_root_agents_directory(repo)
+    baseline = snapshot_workspace(repo)
+
+    repo.joinpath(".agents").mkdir()
+    result = evaluate_workspace(repo, baseline=baseline)
+
+    assert result.status == "passed"
+    assert result.baseline_ignored_changed is False
+
+
+@pytest.mark.parametrize("entry_kind", ["file", "directory"])
+def test_workspace_check_rejects_nonempty_root_agents_directory(
+    tmp_path: Path,
+    entry_kind: str,
+) -> None:
+    repo = _init_repo(tmp_path)
+    _ignore_root_agents_directory(repo)
+    baseline = snapshot_workspace(repo)
+    agents_dir = repo / ".agents"
+    agents_dir.mkdir()
+    if entry_kind == "file":
+        agents_dir.joinpath("local.md").write_text("local\n", encoding="utf-8")
+    else:
+        agents_dir.joinpath("skills").mkdir()
+
+    result = evaluate_workspace(repo, baseline=baseline)
+
+    assert result.status == "failed"
+    assert result.baseline_ignored_changed is True
+    assert any("ignored 路径" in reason for reason in result.reasons)
+
+
+@pytest.mark.parametrize(
+    ("mode", "file_attributes"),
+    [(stat.S_IFLNK, 0), (stat.S_IFDIR, 0x400)],
+)
+def test_root_agents_link_metadata_is_not_exempted(
+    mode: int,
+    file_attributes: int,
+) -> None:
+    path_stat = SimpleNamespace(
+        st_mode=mode,
+        st_dev=1,
+        st_ino=2,
+        st_ctime_ns=3,
+        st_mtime_ns=4,
+        st_file_attributes=file_attributes,
+    )
+
+    assert codex_workspace_module._plain_directory_identity(path_stat) is None
 
 
 def test_workspace_check_fails_when_ignored_manifest_is_incomplete(
@@ -553,6 +612,25 @@ def _init_repo(tmp_path: Path) -> Path:
         "init",
     )
     return repo
+
+
+def _ignore_root_agents_directory(repo: Path) -> None:
+    repo.joinpath(".gitignore").write_text("/.agents/\n", encoding="utf-8")
+    repo.joinpath(".vega.yaml").write_text(
+        "version: 1\nbudget:\n  max_new_files: 0\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "--", ".gitignore", ".vega.yaml")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "ignore local agent directory",
+    )
 
 
 def _git(repo: Path, *args: str) -> str:

@@ -105,6 +105,12 @@ review-pack
 codex exec read-only reviewer
 ```
 
+Vega 调用 `codex exec` 时保留用户配置中的 provider、profile、model 与 Windows sandbox，
+但固定关闭个人 memories、plugins、hooks 和 legacy notify。任务上下文应来自 Vega 编译的
+brief、项目规则与证据包，而不是当前用户的其他会话记忆或插件回调。
+Codex 写工具留下的根目录空 `.agents/` 不阻断 Workspace Gate；只要其中出现文件、子目录、
+链接或无法确认的目录状态，Vega 仍会 fail-closed 并交还人工。
+
 关键产物：
 
 ```text

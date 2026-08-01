@@ -9,6 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .codex_workspace import filter_codex_runtime_ignored_paths
 from .git_inventory import (
     build_git_control_manifest,
     read_core_ignorecase as _read_core_ignorecase,
@@ -23,7 +24,6 @@ from .workspace_inventory import (
     CurrentWorkspaceInventory,
     WorkspaceSnapshot,
     build_content_manifest,
-    filter_ignored_paths,
     safe_git_status as _safe_git_status,
     safe_path_for_report as _safe_path_for_report,
     untracked_paths as _untracked_paths,
@@ -733,7 +733,7 @@ def _ignored_paths(
     exclusions: frozenset[str] = frozenset(),
 ) -> tuple[list[str], bool]:
     paths, complete = read_ignored_paths(repo_path)
-    return filter_ignored_paths(paths, exclusions), complete
+    return filter_codex_runtime_ignored_paths(repo_path, paths, exclusions), complete
 
 
 def _untracked_manifest(

@@ -62,6 +62,10 @@ Vega 发布 Python distribution 是为了安装 CLI 和本地资源，不把内�
 
 - `AGENTS.md`、项目画像和任务输入的上下文编译。
 - worker/reviewer 使用独立会话和固定 sandbox；reviewer 不继承 worker 的完整聊天记录。
+- `codex exec` 角色仍可继承用户选择的 provider、profile、model 和 Windows sandbox，但 Vega
+  固定禁用个人 memories、plugins、hooks 与 legacy notify，避免个人上下文和回调污染目标仓库。
+- Codex 写工具可能留下仓库根部的空 `.agents/`。Workspace Gate 仅把完全为空的普通目录视为
+  工具残留；目录含内容、不可读取、symlink 或 Windows reparse point 时仍按工作区变化停止。
 - 验证命令、精确路径范围、变更预算、Prompt 预算与工作区污染门禁。
 - assist 在 Worker Prompt 前生成 `workspace-baseline.json`，并用根状态与 trace 绑定其版本、
   内容哈希和 HEAD。基线捕获不完整、已有 tracked diff 或初始化期间 HEAD 漂移时，不生成
