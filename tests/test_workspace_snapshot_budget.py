@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from vega import codex_workspace as codex_workspace_module
 from vega.experimental.inspection import context_loader
 from vega import workspace_check as workspace_check_module
 from vega.experimental.inspection.context_loader import load_target_context
@@ -235,7 +236,7 @@ def test_root_agents_link_metadata_is_not_exempted(
         st_file_attributes=file_attributes,
     )
 
-    assert workspace_check_module._plain_directory_identity(path_stat) is None
+    assert codex_workspace_module._plain_directory_identity(path_stat) is None
 
 
 def test_workspace_check_fails_when_ignored_manifest_is_incomplete(
