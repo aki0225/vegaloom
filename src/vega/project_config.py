@@ -13,6 +13,10 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from .git_read import coerce_git_output_bytes, run_git_capture
+from .project_config_preflight import (
+    ProjectConfigIssue,
+    validate_repository_preflight,
+)
 from .redaction import redact_text
 from .repository_identity import ResolvedGitRevision, resolve_git_revision
 from .risk_review_config import (
@@ -337,20 +341,6 @@ class ProjectMemoryConfig(BaseModel):
     default_tags: list[str] = Field(default_factory=list)
 
 
-class ProjectConfigIssue(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    code: str
-    severity: Literal["error", "warning"]
-    message: str
-    evidence: str = ""
-
-    @field_validator("message", "evidence")
-    @classmethod
-    def redact_issue_text(cls, value: str) -> str:
-        return redact_text(value)
-
-
 class ProjectConfigCheckResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -459,6 +449,13 @@ def check_project_config(repo_path: Path) -> ProjectConfigCheckResult:
 
     issues = validate_project_config(config)
     issues.extend(_validate_runtime_dependencies(config))
+    issues.extend(
+        validate_repository_preflight(
+            repo,
+            source_path=config.source_path,
+            verification_commands=config.verification.commands or [],
+        )
+    )
     return ProjectConfigCheckResult(
         repo_path=str(repo),
         source_path=config.source_path,

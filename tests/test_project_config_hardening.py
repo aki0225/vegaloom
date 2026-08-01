@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from vega import project_config
+from vega import git_read, project_config, project_config_preflight
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
 from vega.project_config import check_project_config, render_project_config_check
 from vega.project_profile import ProjectProfileRuntime
@@ -184,6 +184,177 @@ def test_config_check_redacts_sensitive_command_and_evidence(tmp_path: Path) -> 
     assert all(fake_secret not in command for command in result.verification_commands)
     assert "[REDACTED]" in rendered
     assert "[REDACTED]" in dumped
+
+
+def test_config_check_warns_when_project_config_is_not_tracked(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "version: 1\nverification:\n  commands:\n    - echo ok\n",
+        encoding="utf-8",
+    )
+
+    result = check_project_config(repo)
+
+    assert result.status == "passed"
+    issue = next(
+        issue
+        for issue in result.issues
+        if issue.code == "project_config_not_tracked"
+    )
+    assert issue.severity == "warning"
+    assert issue.evidence == ".vega.yaml"
+
+
+def test_config_check_warns_when_pytest_src_import_path_is_unspecified(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath("setup.cfg").write_text("[metadata]\nname = demo\n", encoding="utf-8")
+    package = repo / "src" / "demo"
+    package.mkdir(parents=True)
+    package.joinpath("__init__.py").write_text("", encoding="utf-8")
+    config_path = repo / ".vega.yaml"
+    config_path.write_text(
+        "version: 1\nverification:\n  commands:\n    - python -m pytest -q\n",
+        encoding="utf-8",
+    )
+    _stage_paths(repo, ".vega.yaml")
+
+    result = check_project_config(repo)
+
+    assert result.status == "passed"
+    issue = next(
+        issue
+        for issue in result.issues
+        if issue.code == "pytest_src_import_path_unspecified"
+    )
+    assert issue.evidence == "verification.commands[1]"
+
+    config_path.write_text(
+        "version: 1\nverification:\n  commands:\n"
+        "    - python -m pytest -q -o pythonpath=src\n",
+        encoding="utf-8",
+    )
+    corrected = check_project_config(repo)
+
+    assert not any(
+        issue.code == "pytest_src_import_path_unspecified"
+        for issue in corrected.issues
+    )
+
+
+def test_config_check_warns_when_windows_autocrlf_is_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "version: 1\nverification:\n  commands:\n    - echo ok\n",
+        encoding="utf-8",
+    )
+    _stage_paths(repo, ".vega.yaml")
+    monkeypatch.setattr(
+        project_config_preflight,
+        "_is_windows_environment",
+        lambda: True,
+    )
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "true"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    result = check_project_config(repo)
+
+    assert result.status == "passed"
+    assert any(issue.code == "windows_autocrlf_enabled" for issue in result.issues)
+
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "false"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    corrected = check_project_config(repo)
+
+    assert not any(
+        issue.code == "windows_autocrlf_enabled"
+        for issue in corrected.issues
+    )
+
+
+def test_config_check_skips_optional_preflight_when_git_read_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath(".vega.yaml").write_text("version: 1\n", encoding="utf-8")
+
+    def fail_git_read(*args, **kwargs):
+        raise OSError("git unavailable")
+
+    monkeypatch.setattr(project_config_preflight, "run_git_capture", fail_git_read)
+
+    result = check_project_config(repo)
+
+    assert result.status == "passed"
+    assert not any(
+        issue.code.startswith(("project_config_", "pytest_src_", "windows_"))
+        for issue in result.issues
+    )
+
+
+def test_config_check_fails_when_git_security_configuration_is_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath(".vega.yaml").write_text("version: 1\n", encoding="utf-8")
+
+    def fail_git_security_check(*args, **kwargs):
+        raise RuntimeError("safe.directory mismatch")
+
+    monkeypatch.setattr(
+        project_config_preflight,
+        "run_git_capture",
+        fail_git_security_check,
+    )
+
+    result = check_project_config(repo)
+
+    assert result.status == "failed"
+    assert any(issue.code == "repository_preflight_failed" for issue in result.issues)
+
+
+def test_git_config_read_does_not_fallback_after_repository_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        git_read,
+        "run_git_capture",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=["git", "config"],
+            returncode=128,
+            stdout=b"",
+            stderr=b"fatal",
+        ),
+    )
+
+    def reject_fallback(*args, **kwargs):
+        pytest.fail("repository Git error must not fall back to lower precedence")
+
+    monkeypatch.setattr(git_read, "_read_scoped_git_config", reject_fallback)
+
+    assert git_read.read_git_config_value(tmp_path, "core.autocrlf") is None
 
 
 @pytest.mark.parametrize(
@@ -384,4 +555,14 @@ def _init_changed_git_repo(repo: Path) -> None:
         "# Demo\nchanged\n",
         encoding="utf-8",
         newline="\n",
+    )
+
+
+def _stage_paths(repo: Path, *paths: str) -> None:
+    subprocess.run(
+        ["git", "add", "--", *paths],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
