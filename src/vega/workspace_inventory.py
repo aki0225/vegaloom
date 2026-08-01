@@ -5,6 +5,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from .project_config import VERIFICATION_TEMP_ROOT
 from .redaction import is_sensitive_path, redact_text, sensitive_path_reason
 from .run_utils import resolve_runs_root
 
@@ -181,18 +182,35 @@ def workspace_ignored_path_exclusions(
     workspace: Path,
     repo_path: Path,
 ) -> frozenset[str]:
-    """排除位于目标仓库内、由 Vega 自己持续写入的 runs 根目录。"""
+    """排除目标仓库内由 Vega 独占维护的运行目录。"""
 
+    exclusions = {VERIFICATION_TEMP_ROOT.as_posix()}
     runs_root = resolve_runs_root(workspace)
     if runs_root is None:
-        return frozenset()
+        return frozenset(exclusions)
     try:
         relative = runs_root.resolve().relative_to(repo_path.resolve())
     except ValueError:
-        return frozenset()
-    if not relative.parts:
-        return frozenset()
-    return frozenset({relative.as_posix()})
+        return frozenset(exclusions)
+    if relative.parts:
+        exclusions.add(relative.as_posix())
+    return frozenset(exclusions)
+
+
+def prepare_verification_temp_root(repo_path: Path) -> Path:
+    """建立受控根目录，供 Assist 基线封存其父目录元数据。"""
+
+    repo = repo_path.resolve(strict=True)
+    root = (repo / VERIFICATION_TEMP_ROOT).resolve()
+    if not root.is_relative_to(repo):
+        raise ValueError("verification 临时目录根路径逃出目标仓库")
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ValueError("无法创建 verification 临时目录根路径") from exc
+    if not root.is_dir():
+        raise ValueError("verification 临时目录根路径不是目录")
+    return root
 
 
 def _fingerprint_entry(

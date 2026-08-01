@@ -519,7 +519,10 @@ def test_verification_temp_placeholder_isolates_iterations_and_commands(
             / f"command-{command_index}"
         )
         assert expected_temp.is_dir()
-        assert environment == {"VEGA_VERIFICATION_TEMP": str(expected_temp)}
+        assert environment == {
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "VEGA_VERIFICATION_TEMP": str(expected_temp),
+        }
         shell_text = command if isinstance(command, str) else " ".join(command)
         assert "VEGA_VERIFICATION_TEMP" in shell_text
         assert str(expected_temp) not in shell_text
@@ -600,6 +603,7 @@ def test_verification_temp_artifacts_redact_sensitive_repo_path(
         environment,
     ):
         del command, input_text, cwd, timeout_seconds, context
+        assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
         assert FAKE_SECRET in environment["VEGA_VERIFICATION_TEMP"]
         return OwnedProcessResult(
             status="success",
@@ -799,7 +803,16 @@ def test_verification_continues_after_failure_and_short_circuits_on_interruption
     ]
     calls: list[list[str]] = []
 
-    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+    def fake_run_owned_process(
+        command,
+        input_text,
+        cwd,
+        timeout_seconds,
+        context,
+        *,
+        environment,
+    ):
+        assert environment == {"PYTHONDONTWRITEBYTECODE": "1"}
         calls.append(command)
         return responses[len(calls) - 1]
 

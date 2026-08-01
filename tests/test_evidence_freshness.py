@@ -330,6 +330,52 @@ def test_same_repo_runtime_outputs_do_not_stale_review_evidence(
     assert freshness.fresh is True
 
 
+def test_same_repo_verification_outputs_do_not_block_assist_retry(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_same_repo_workspace(repo)
+    runner = StaticRunner(
+        [_review_json("request_changes"), _review_json("approve")]
+    )
+    runtime = LoopAutomationRuntime(repo, reviewer_runner=runner)
+    loop_run = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="修复 README 展示问题",
+            source="test",
+            repo_path=str(repo),
+        ),
+        "assist",
+        verify=True,
+    )
+    repo.joinpath("README.md").write_text(
+        "# Demo\nchanged\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    runtime.continue_assist(loop_run.name, repo, verify=True)
+
+    first_state = _read_json(loop_run / "state.json")
+    verification_root = repo / ".tmp" / "vega-verification" / loop_run.name
+    assert first_state["status"] == "needs_human"
+    assert verification_root.is_dir()
+    assert not repo.joinpath("__pycache__").exists()
+
+    runtime.continue_assist(loop_run.name, repo, verify=True)
+
+    state = _read_json(loop_run / "state.json")
+    workspace_check = _read_json(
+        loop_run / "iterations" / "02" / "workspace-check.json"
+    )
+    assert runner.outputs == []
+    assert state["status"] == "success"
+    assert state["current_iteration"] == 2
+    assert workspace_check["status"] != "failed"
+    assert workspace_check["baseline_ignored_changed"] is False
+
+
 def test_same_repo_external_ignored_change_still_blocks_reviewer(
     tmp_path: Path,
 ) -> None:
@@ -999,7 +1045,12 @@ def _init_changed_git_repo(repo: Path) -> None:
 def _init_same_repo_workspace(repo: Path) -> None:
     _init_clean_git_repo(repo)
     repo.joinpath(".gitignore").write_text(
-        "runs/\n*.tmp\n",
+        "runs/\n.tmp/\n__pycache__/\n*.tmp\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo.joinpath("verification_probe.py").write_text(
+        "VALUE = 'verification probe'\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -1009,7 +1060,11 @@ def _init_same_repo_workspace(repo: Path) -> None:
                 "version: 1",
                 "verification:",
                 "  commands:",
-                "    - python -c \"print('same repo verification passed')\"",
+                (
+                    "    - python -c \"import verification_probe; "
+                    "print('same repo verification passed')\" "
+                    "{{vega_verification_temp}}"
+                ),
                 "  max_commands: 1",
                 "",
             ]
@@ -1018,7 +1073,14 @@ def _init_same_repo_workspace(repo: Path) -> None:
         newline="\n",
     )
     subprocess.run(
-        ["git", "add", "--", ".gitignore", ".vega.yaml"],
+        [
+            "git",
+            "add",
+            "--",
+            ".gitignore",
+            ".vega.yaml",
+            "verification_probe.py",
+        ],
         cwd=repo,
         check=True,
         capture_output=True,

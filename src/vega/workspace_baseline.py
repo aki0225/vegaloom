@@ -17,6 +17,7 @@ from .workspace_check import (
 )
 from .workspace_inventory import (
     WorkspaceSnapshot,
+    prepare_verification_temp_root,
     workspace_ignored_path_exclusions,
 )
 
@@ -169,6 +170,7 @@ def capture_assist_workspace_baseline(
 
     state.current_step = "workspace_baseline"
     state.save(run_dir / "state.json")
+    prepare_verification_temp_root(repo_path)
     baseline = snapshot_workspace(
         repo_path,
         ignored_path_exclusions=workspace_ignored_path_exclusions(
