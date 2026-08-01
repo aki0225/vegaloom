@@ -206,7 +206,9 @@ def snapshot_workspace(
     )
 
 
-def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
+def capture_review_workspace(
+    repo_path: Path, *, ignored_path_exclusions: frozenset[str] = frozenset()
+) -> ReviewWorkspaceSnapshot:
     """捕获 reviewer 使用的确定性工作区快照，不修改 Git index。"""
     repo = repo_path.resolve()
     head_sha = _run_git_bytes(repo, ["git", "rev-parse", "HEAD"]).decode(
@@ -222,7 +224,7 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         ["--binary", "--full-index"],
     )
     tracked_files, untracked_files = _parse_porcelain_v1_paths(status)
-    ignored_files, ignored_capture_complete = _ignored_paths(repo)
+    ignored_files, ignored_capture_complete = _ignored_paths(repo, ignored_path_exclusions)
     index_flags = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
     unsafe_index_paths = _unsafe_index_paths(index_flags)
     # 未跟踪文件只参与工作区指纹，不把其内容带入 reflect/reviewer 输入。
@@ -240,9 +242,7 @@ def capture_review_workspace(repo_path: Path) -> ReviewWorkspaceSnapshot:
         repo,
         ignored_files,
     )
-    ignored_manifest_complete = (
-        ignored_capture_complete and ignored_metadata_complete
-    )
+    ignored_manifest_complete = ignored_capture_complete and ignored_metadata_complete
     git_control_sha256, git_control_complete = _git_control_manifest(repo)
     status_sha256 = _sha256(status)
     full_diff_sha256 = _sha256(full_diff.encode("utf-8"))

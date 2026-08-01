@@ -366,8 +366,10 @@ def test_loop_pauses_with_structured_artifacts_when_verification_workspace_captu
     _init_clean_git_repo(repo)
     reviewer = QueueRunner([_review_json("approve")])
     monkeypatch.setattr(
-        "vega.verification.capture_review_workspace",
-        lambda _: (_ for _ in ()).throw(RuntimeError("workspace capture failed")),
+        "vega.verification.capture_runtime_workspace",
+        lambda *_: (_ for _ in ()).throw(
+            RuntimeError("workspace capture failed")
+        ),
     )
 
     runtime = LoopAutomationRuntime(
@@ -1079,16 +1081,16 @@ def test_reviewer_termination_unconfirmed_does_not_parse_or_persist_verdict(
         }
     )
     capture_calls = 0
-    original_capture = review_runtime_module.capture_review_workspace
+    original_capture = review_runtime_module.capture_runtime_workspace
 
-    def capture_once_before_runner(repo_path: Path):
+    def capture_once_before_runner(*args, **kwargs):
         nonlocal capture_calls
         capture_calls += 1
-        return original_capture(repo_path)
+        return original_capture(*args, **kwargs)
 
     monkeypatch.setattr(
         review_runtime_module,
-        "capture_review_workspace",
+        "capture_runtime_workspace",
         capture_once_before_runner,
     )
 

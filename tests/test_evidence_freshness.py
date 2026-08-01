@@ -285,6 +285,75 @@ def test_gate_records_failure_for_stale_reflect_snapshot(tmp_path: Path) -> None
     _assert_failed_gate_run(gate_run, "workspace_changed_since_reflect")
 
 
+def test_same_repo_runtime_outputs_do_not_stale_review_evidence(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_same_repo_workspace(repo)
+    runner = StaticRunner([_review_json("approve")])
+    runtime = LoopAutomationRuntime(repo, reviewer_runner=runner)
+    loop_run = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="修复 README 展示问题",
+            source="test",
+            repo_path=str(repo),
+        ),
+        "assist",
+        verify=True,
+    )
+    repo.joinpath("README.md").write_text(
+        "# Demo\nchanged\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    runtime.continue_assist(loop_run.name, repo, verify=True)
+
+    state = _read_json(loop_run / "state.json")
+    review_run = repo / "runs" / state["iterations"][0]["review_run"]
+    context = _read_json(review_run / "review-context.json")
+    freshness = loop_evidence_module.validate_review_evidence_freshness(
+        repo,
+        repo,
+        review_run.name,
+    )
+    assert runner.outputs == []
+    assert state["status"] == "success"
+    assert context["evidence_issues"] == []
+    verification = _read_json(
+        loop_run / "iterations" / "01" / "verification-result.json"
+    )
+    assert verification["workspace_fingerprint"] == context[
+        "reviewer_end_workspace_fingerprint"
+    ]
+    assert freshness.fresh is True
+
+
+def test_same_repo_external_ignored_change_still_blocks_reviewer(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_same_repo_workspace(repo)
+    repo.joinpath("README.md").write_text(
+        "# Demo\nchanged\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    reflect_run = ReflectRuntime(repo).run(repo)
+    repo.joinpath("cache.tmp").write_text("changed\n", encoding="utf-8")
+    runner = StaticRunner([_review_json("approve")])
+
+    review_run = ReviewRuntime(repo, runner=runner).run(repo, reflect_run.name)
+
+    state = _read_json(review_run / "state.json")
+    context = _read_json(review_run / "review-context.json")
+    assert runner.outputs == [_review_json("approve")]
+    assert state["status"] == "needs_human"
+    assert "ignored_manifest_sha256_mismatch" in context["evidence_issues"]
+    assert "workspace_changed_since_reflect" in context["evidence_issues"]
+
+
 def test_gate_rejects_incomplete_ignored_evidence(
     tmp_path: Path,
 ) -> None:
@@ -348,17 +417,17 @@ def test_reflect_freshness_rejects_current_incomplete_ignored_snapshot(
     repo = tmp_path / "repo"
     _init_changed_git_repo(repo)
     reflect_run = ReflectRuntime(workspace).run(repo)
-    original_capture = loop_evidence_module.capture_review_workspace
+    original_capture = loop_evidence_module.capture_runtime_workspace
 
-    def incomplete_capture(repo_path: Path):
+    def incomplete_capture(*args, **kwargs):
         return replace(
-            original_capture(repo_path),
+            original_capture(*args, **kwargs),
             ignored_manifest_complete=False,
         )
 
     monkeypatch.setattr(
         loop_evidence_module,
-        "capture_review_workspace",
+        "capture_runtime_workspace",
         incomplete_capture,
     )
 
@@ -924,6 +993,52 @@ def _init_changed_git_repo(repo: Path) -> None:
         "# Demo\nchanged\n",
         encoding="utf-8",
         newline="\n",
+    )
+
+
+def _init_same_repo_workspace(repo: Path) -> None:
+    _init_clean_git_repo(repo)
+    repo.joinpath(".gitignore").write_text(
+        "runs/\n*.tmp\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                "    - python -c \"print('same repo verification passed')\"",
+                "  max_commands: 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    subprocess.run(
+        ["git", "add", "--", ".gitignore", ".vega.yaml"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-m",
+            "ignore runtime outputs",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     )
 
 

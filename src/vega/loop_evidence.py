@@ -38,11 +38,9 @@ from .risk_gate_evidence import validate_iteration_risk_gate_artifacts
 from .review_evidence import review_evidence_schema_issues
 from .risk_review_evidence import disclosure_issues, gate_result_semantics
 from .run_utils import resolve_run_dir
+from .runtime_workspace import capture_runtime_workspace
 from .scope_gate import validate_iteration_scope_gate_artifacts
-from .workspace_check import (
-    ReviewWorkspaceSnapshot,
-    capture_review_workspace,
-)
+from .workspace_check import ReviewWorkspaceSnapshot
 
 
 @dataclass(frozen=True)
@@ -85,8 +83,7 @@ def validate_reflect_evidence_freshness(
     state = _read_json(source_dir / "state.json")
     evidence = _read_json(source_dir / "review-evidence.json")
     current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
-        repo,
-        current_workspace_snapshot,
+        workspace, repo, current_workspace_snapshot
     )
     current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
     issues = list(snapshot_issues)
@@ -202,6 +199,7 @@ def validate_review_evidence_freshness(
     context, context_issue = _load_json_object(review_dir / "review-context.json")
     verdict, verdict_issue = _load_review_verdict(review_dir / "review-verdict.json")
     current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
+        workspace,
         repo,
         current_workspace_snapshot,
     )
@@ -600,6 +598,7 @@ def _validate_loop_evidence_freshness(
         else _read_json(loop_dir / "state.json")
     )
     current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
+        workspace,
         repo,
         None,
     )
@@ -1264,13 +1263,14 @@ def _is_string_list(value: object) -> bool:
 
 
 def _capture_current_workspace_snapshot(
+    workspace: Path,
     repo_path: Path,
     current_workspace_snapshot: ReviewWorkspaceSnapshot | None,
 ) -> tuple[ReviewWorkspaceSnapshot | None, list[str]]:
     if current_workspace_snapshot is not None:
         return current_workspace_snapshot, []
     try:
-        snapshot = capture_review_workspace(repo_path)
+        snapshot = capture_runtime_workspace(workspace, repo_path)
     except (OSError, RuntimeError, subprocess.SubprocessError):
         return None, ["workspace_snapshot_failed"]
     return snapshot, []

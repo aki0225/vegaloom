@@ -470,17 +470,17 @@ def test_current_ignored_evidence_incomplete_blocks_reviewer(
     reflect_run = ReflectRuntime(tmp_path).run(repo)
     original_capture = __import__(
         "vega.review_runtime",
-        fromlist=["capture_review_workspace"],
-    ).capture_review_workspace
+        fromlist=["capture_runtime_workspace"],
+    ).capture_runtime_workspace
 
-    def incomplete_capture(repo_path: Path):
+    def incomplete_capture(*args, **kwargs):
         return replace(
-            original_capture(repo_path),
+            original_capture(*args, **kwargs),
             ignored_manifest_complete=False,
         )
 
     monkeypatch.setattr(
-        "vega.review_runtime.capture_review_workspace",
+        "vega.review_runtime.capture_runtime_workspace",
         incomplete_capture,
     )
     runner = RecordingRunner()
@@ -520,17 +520,17 @@ def test_incomplete_untracked_content_fingerprint_blocks_reviewer(
     _init_changed_repo(repo)
     original_capture = __import__(
         "vega.reflect_runtime",
-        fromlist=["capture_review_workspace"],
-    ).capture_review_workspace
+        fromlist=["capture_runtime_workspace"],
+    ).capture_runtime_workspace
 
-    def incomplete_capture(repo_path: Path):
+    def incomplete_capture(*args, **kwargs):
         return replace(
-            original_capture(repo_path),
+            original_capture(*args, **kwargs),
             untracked_content_complete=False,
         )
 
     monkeypatch.setattr(
-        "vega.reflect_runtime.capture_review_workspace",
+        "vega.reflect_runtime.capture_runtime_workspace",
         incomplete_capture,
     )
     reflect_run = ReflectRuntime(tmp_path).run(repo)

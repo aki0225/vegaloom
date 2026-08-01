@@ -20,7 +20,7 @@ from .project_config import (
 )
 from .project_profile import build_project_profile
 from .redaction import redact_text, redact_value
-from .workspace_check import capture_review_workspace
+from .runtime_workspace import capture_runtime_workspace
 
 MAX_OUTPUT_CHARS = 8000
 VerificationInterruptionStatus = Literal[
@@ -75,6 +75,7 @@ def run_project_verification(
         return _write_verification_config_failure(
             output_dir,
             config_check,
+            workspace=workspace,
             repo_path=repo_path,
             iteration=iteration,
         )
@@ -135,7 +136,7 @@ def run_project_verification(
         None,
     )
     workspace_fingerprint, workspace_capture_error_type = (
-        _capture_workspace_fingerprint(repo_path)
+        _capture_workspace_fingerprint(workspace, repo_path)
     )
     failure_kind: VerificationFailureKind | None = (
         None if workspace_fingerprint is not None else "workspace_capture_failed"
@@ -205,6 +206,7 @@ def _write_verification_config_failure(
     output_dir: Path,
     config_check: Any,
     *,
+    workspace: Path,
     repo_path: Path,
     iteration: int,
 ) -> VerificationRunResult:
@@ -212,7 +214,7 @@ def _write_verification_config_failure(
     run_id = _find_parent_run_id(output_dir)
     shell_kind = current_verification_shell_kind()
     workspace_fingerprint, workspace_capture_error_type = (
-        _capture_workspace_fingerprint(repo_path)
+        _capture_workspace_fingerprint(workspace, repo_path)
     )
     failure_kind: VerificationFailureKind = (
         "project_config_invalid"
@@ -365,10 +367,11 @@ def render_verification_summary(payload: dict[str, Any]) -> str:
 
 
 def _capture_workspace_fingerprint(
+    workspace: Path,
     repo_path: Path,
 ) -> tuple[str | None, str | None]:
     try:
-        return capture_review_workspace(repo_path).fingerprint, None
+        return capture_runtime_workspace(workspace, repo_path).fingerprint, None
     except (OSError, RuntimeError) as exc:
         return None, type(exc).__name__
 
