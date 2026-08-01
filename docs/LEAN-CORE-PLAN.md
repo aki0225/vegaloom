@@ -196,7 +196,7 @@ vega list-loops
 |---|---|---|
 | Memory | `memory-proposals.jsonl`、`memory/ledger.jsonl` | 可选；不存在时核心闭环必须完整工作 |
 | Goal | `goal-state.json`、`goal-trace.jsonl`、contract/checkpoint/report | 实验目录和模型隔离 |
-| Adapter | `.codex/skills/.../SKILL.md` | 仅显式命令写入目标仓库 |
+| Adapter | `.agents/skills/.../SKILL.md` | 仅显式命令写入目标仓库 |
 | Assurance | 输入 bundle 和 `AdequacyResult` | 独立实验，不写默认 run |
 | Inspection | `plan.md`、`report.md`、`review.md`、`eval.md` | 兼容路径，不扩建 |
 

@@ -3176,15 +3176,21 @@ def test_goal_cli_latest_and_status_recognize_goal_runs(tmp_path, monkeypatch) -
 def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
+    legacy_skill = repo_dir / ".codex" / "skills" / "vega-loop" / "SKILL.md"
+    legacy_skill.parent.mkdir(parents=True)
+    legacy_skill.write_text("legacy skill\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(app, ["adapters", "init", "codex", "--repo", str(repo_dir)])
 
     assert result.exit_code == 0, result.output
-    loop_skill = repo_dir / ".codex" / "skills" / "vega-loop" / "SKILL.md"
-    review_skill = repo_dir / ".codex" / "skills" / "vega-review" / "SKILL.md"
+    loop_skill = repo_dir / ".agents" / "skills" / "vega-loop" / "SKILL.md"
+    review_skill = repo_dir / ".agents" / "skills" / "vega-review" / "SKILL.md"
     assert loop_skill.exists()
     assert review_skill.exists()
+    assert legacy_skill.read_text(encoding="utf-8") == "legacy skill\n"
+    assert ".agents" in result.output
+    assert ".codex" not in result.output
     loop_skill_text = loop_skill.read_text(encoding="utf-8")
     assert "vega loop bug" in loop_skill_text
     assert "workspace-baseline.json" in loop_skill_text
