@@ -1445,6 +1445,23 @@ def test_parse_review_verdict_ignores_codex_exec_transcript_suffix() -> None:
     assert verdict.summary == "测试 reviewer 结论"
 
 
+def test_parse_review_verdict_accepts_identical_codex_exec_candidates() -> None:
+    payload = _review_json("approve")
+    output = "\n".join(
+        [
+            "codex",
+            payload,
+            "tokens used: 1234",
+            payload,
+        ]
+    )
+
+    verdict = parse_review_verdict(output)
+
+    assert verdict.verdict == "approve"
+    assert verdict.summary == "测试 reviewer 结论"
+
+
 def test_parse_review_verdict_rejects_multiple_valid_candidates() -> None:
     output = "\n".join(
         [
