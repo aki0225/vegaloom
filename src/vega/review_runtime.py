@@ -62,8 +62,9 @@ from .risk_review_runtime import (
 )
 from .run_utils import create_run_dir, resolve_run_dir
 from .runner import Runner, RunnerResult, make_runner
+from .runtime_workspace import capture_runtime_workspace
 from .trace import TraceWriter
-from .workspace_check import capture_review_workspace, ignored_coverage_level
+from .workspace_check import ignored_coverage_level
 
 REVIEW_PACK_ARTIFACTS = [
     "state.json",
@@ -260,7 +261,7 @@ class ReviewRuntime:
         authorization_issues = list(initial_authorization_issues)
         try:
             current_policy_snapshot = project_policy_snapshot(repo_path)
-            authorization_snapshot = capture_review_workspace(repo_path)
+            authorization_snapshot = capture_runtime_workspace(self.workspace, repo_path)
         except Exception:  # noqa: BLE001 - reviewer 授权快照失败时不得启动外部 runner
             authorization_issues.append("review_authorization_snapshot_failed")
         else:
@@ -349,9 +350,7 @@ class ReviewRuntime:
             )
         result = _redact_runner_result(result)
         review_execution_issues = _capture_post_review_workspace(
-            run_dir,
-            repo_path,
-            inputs,
+            run_dir, self.workspace, repo_path, inputs,
             reviewer_started=reviewer_started,
             reviewer_start_fingerprint=reviewer_start_fingerprint,
             termination_unconfirmed=result.termination_unconfirmed,
@@ -491,7 +490,7 @@ def collect_review_inputs(
         source_dir / "state.json",
         "source_state",
     )
-    current_snapshot = capture_review_workspace(repo)
+    current_snapshot = capture_runtime_workspace(workspace, repo)
     source_evidence, evidence_read_issues, evidence_read_diagnostics = _read_json_artifact(
         source_dir / "review-evidence.json",
         "source_evidence",
@@ -1037,6 +1036,7 @@ def _write_review_pack_artifacts(run_dir: Path, inputs: dict[str, Any]) -> Promp
 
 def _capture_post_review_workspace(
     run_dir: Path,
+    workspace: Path,
     repo_path: Path,
     inputs: dict[str, Any],
     *,
@@ -1051,7 +1051,7 @@ def _capture_post_review_workspace(
         issues.append("reviewer_termination_unconfirmed")
     elif reviewer_started:
         try:
-            end_fingerprint = capture_review_workspace(repo_path).fingerprint
+            end_fingerprint = capture_runtime_workspace(workspace, repo_path).fingerprint
         except (OSError, RuntimeError, subprocess.SubprocessError):
             issues.append("workspace_snapshot_failed_after_reviewer")
         else:

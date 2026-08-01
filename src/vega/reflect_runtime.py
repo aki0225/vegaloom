@@ -16,10 +16,10 @@ from .redaction import assert_not_sensitive_path, redact_text
 from .review_evidence import make_review_evidence as _make_review_evidence
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir, resolve_run_dir
+from .runtime_workspace import capture_runtime_workspace
 from .trace import TraceWriter
 from .workspace_check import (
     ReviewWorkspaceSnapshot,
-    capture_review_workspace,
     collect_tracked_diff_parts,
     render_tracked_diff_sections,
 )
@@ -74,7 +74,7 @@ class ReflectRuntime:
         trace.write("reflect_started", repo_path=str(repo), source_run=safe_source_run)
 
         git_data = collect_git_reflection(repo)
-        workspace_snapshot = capture_review_workspace(repo)
+        workspace_snapshot = capture_runtime_workspace(self.workspace, repo)
         changed_files = _tracked_changed_files(workspace_snapshot)
         untracked_files = [redact_text(path) for path in workspace_snapshot.untracked_files]
         state.changed_files = changed_files
