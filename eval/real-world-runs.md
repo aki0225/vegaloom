@@ -252,3 +252,31 @@ Case 01/02，不据此计算成功率。
 该运行证明 Workspace Gate 能阻止带有额外未登记文件的 Worker 结果继续进入验证与审查。
 它不证明候选代码正确，也不构成一次完成的 Coding Loop。Case 01 不按结果选择性重跑；
 Case 02 在完成既定调用前负向输入扫描前不会启动。
+
+## 2026-08-01 独立 fresh auto Dogfood：AnyIO #1231
+
+本条是主线 `5ec575c` 上的独立能力验证，不属于 CRWP-V1，也不启动 Assurance Stage 4。
+任务冻结在 AnyIO `2ba69a649011e4608ab9485a0dcfe72b6f956ecc`，正式运行前没有向
+Worker 或 Reviewer 提供 Issue 评论、官方 PR、修复提交或补丁。Issue 正文和任务合同已经明确
+期望行为，因此该案例不是盲目根因发现，也不能证明模型训练数据未见过上游修复。
+
+- Run：`20260801-224148-327305-bug-loop`；Worker 与 Reviewer 均为
+  `gpt-5.5 / xhigh`，最多两轮，实际一轮完成。
+- Worker 耗时约 `380.6` 秒，Reviewer 耗时约 `51.7` 秒；runner 本次没有提供可核验的
+  token usage，因此成本记为 `unavailable`，不按输出字符估算。
+- Worker 只修改预注册的 `src/anyio/_backends/_trio.py`、`tests/test_taskgroups.py` 和
+  `docs/versionhistory.rst`，共 `23` 行新增、`1` 行删除；没有新增文件、依赖或越界路径。
+- 修复让 Trio `TaskHandle` 使用运行任务已经解析出的 `final_name`；回归测试同时覆盖默认名和
+  显式自定义名，并核对 handle name、start value 与 repr。
+- 五条验证命令全部通过：独立 asyncio/Trio oracle、相关测试
+  （`24 passed, 486 deselected`）、完整 `test_taskgroups.py`
+  （`496 passed, 10 skipped, 4 xfailed`）、Ruff 和 `git diff --check`。
+- Workspace Gate、三阶段 Scope Gate、Risk Gate 均通过；risk 为 `low / self-check`。
+  隔离只读 Reviewer 返回 `approve` 且 findings 为 `0`。
+- Finish 为 `ready_to_commit`；artifact integrity 为 valid，review evidence freshness 为 fresh。
+  Worker、Reviewer 与控制进程均已退出；60 个 run 文件的高置信凭证模式扫描为 `0`。
+- 目标副本没有 remote；Vega 没有自动 commit、push、release 或写入长期 memory。
+
+该案例证明当前主线能在一个冻结的真实 Python 异步库任务上，由新 Worker 生成小范围补丁，
+经过确定性验证、范围与风险门禁、隔离 Reviewer 和 Finish 得到可人工提交的结果。它仍只是一个
+单案例，不能解释为成功率、跨仓库泛化能力、生产安全或对未知上游修复的独立发现。
