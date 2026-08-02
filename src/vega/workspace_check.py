@@ -13,6 +13,7 @@ from .codex_workspace import (
     filter_codex_runtime_ignored_paths,
     filter_codex_runtime_porcelain_v1_status,
     filter_codex_runtime_short_status,
+    filter_codex_runtime_untracked_paths,
 )
 from .git_inventory import (
     build_git_control_manifest,
@@ -168,7 +169,7 @@ def snapshot_workspace(
         *tracked_snapshot.staged_files,
         *tracked_snapshot.unstaged_files,
     ]
-    untracked_files = filter_codex_runtime_ignored_paths(
+    untracked_files = filter_codex_runtime_untracked_paths(
         repo,
         list(tracked_snapshot.untracked_files),
         ignored_path_exclusions,

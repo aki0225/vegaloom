@@ -3,6 +3,7 @@ from __future__ import annotations
 import stat
 from pathlib import Path
 
+from .project_config import VERIFICATION_TEMP_ROOT
 from .workspace_inventory import filter_ignored_paths, untracked_paths
 
 
@@ -19,6 +20,24 @@ def filter_codex_runtime_ignored_paths(
         for path in filtered
         if path.replace("\\", "/").rstrip("/") != ".agents"
     ]
+
+
+def filter_codex_runtime_untracked_paths(
+    repo_path: Path,
+    paths: list[str],
+    exclusions: frozenset[str],
+) -> list[str]:
+    verification_root = VERIFICATION_TEMP_ROOT.as_posix()
+    untracked_exclusions = frozenset(
+        path
+        for path in exclusions
+        if path.replace("\\", "/").rstrip("/") != verification_root
+    )
+    return filter_codex_runtime_ignored_paths(
+        repo_path,
+        paths,
+        untracked_exclusions,
+    )
 
 
 def filter_codex_runtime_short_status(
@@ -69,7 +88,7 @@ def _hidden_runtime_paths(
     paths: list[str],
     exclusions: frozenset[str],
 ) -> set[str]:
-    visible = filter_codex_runtime_ignored_paths(repo_path, paths, exclusions)
+    visible = filter_codex_runtime_untracked_paths(repo_path, paths, exclusions)
     return set(paths) - set(visible)
 
 

@@ -226,6 +226,25 @@ def test_workspace_check_keeps_non_owned_untracked_paths_fail_closed(
     assert result.new_untracked_files == [relative_path]
 
 
+def test_workspace_check_keeps_untracked_verification_temp_fail_closed(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo_with_zero_new_file_budget(tmp_path)
+    exclusions = workspace_ignored_path_exclusions(repo, repo)
+    baseline = snapshot_workspace(repo, ignored_path_exclusions=exclusions)
+    target = repo / ".tmp" / "vega-verification" / "payload.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("unexpected\n", encoding="utf-8")
+
+    result = evaluate_workspace(repo, baseline=baseline)
+
+    assert result.status == "failed"
+    assert result.new_untracked_count == 1
+    assert result.new_untracked_files == [
+        ".tmp/vega-verification/payload.txt"
+    ]
+
+
 def test_verification_temp_root_rejects_logical_path_resolution_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
