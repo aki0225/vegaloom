@@ -1605,6 +1605,7 @@ def _run_supervisor(args: argparse.Namespace, workspace: Path) -> int:
         raise ValueError("证据目录已存在内容；为避免覆盖，正式重跑必须使用新目录")
     evidence_dir.mkdir(parents=True, exist_ok=True)
     supervisor_root = evidence_dir / "supervisor-run"
+    supervisor_root.mkdir(exist_ok=False)
     launch_nonce = _prepare_launch_attestation(
         args.case_id,
         evidence_dir,
