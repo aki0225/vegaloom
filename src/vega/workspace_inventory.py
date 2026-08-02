@@ -79,6 +79,17 @@ class _BudgetUsage:
     content_bytes: int = 0
 
 
+def ignored_coverage_level(
+    manifest_complete: object,
+    content_complete: object,
+) -> str:
+    if manifest_complete is not True:
+        return "incomplete"
+    if content_complete is True:
+        return "full_content"
+    return "metadata_bounded"
+
+
 def build_content_manifest(
     repo_path: Path,
     paths: list[str],

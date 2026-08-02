@@ -9,12 +9,17 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .codex_workspace import filter_codex_runtime_ignored_paths
+from .codex_workspace import (
+    filter_codex_runtime_ignored_paths,
+    filter_codex_runtime_porcelain_v1_status,
+    filter_codex_runtime_short_status,
+)
 from .git_inventory import (
     build_git_control_manifest,
     read_core_ignorecase as _read_core_ignorecase,
     read_head_sha as _read_head_sha,
     read_ignored_paths,
+    read_short_status as _git_status,
 )
 from .git_read import run_git_bytes as _run_git_bytes
 from .project_config import load_project_config
@@ -24,6 +29,7 @@ from .workspace_inventory import (
     CurrentWorkspaceInventory,
     WorkspaceSnapshot,
     build_content_manifest,
+    ignored_coverage_level,
     safe_git_status as _safe_git_status,
     safe_path_for_report as _safe_path_for_report,
     untracked_paths as _untracked_paths,
@@ -227,17 +233,10 @@ def capture_review_workspace(
         repo,
         ["--binary", "--full-index"],
     )
+    status = filter_codex_runtime_porcelain_v1_status(
+        repo, status, ignored_path_exclusions
+    )
     tracked_files, untracked_files = _parse_porcelain_v1_paths(status)
-    visible_untracked_files = filter_codex_runtime_ignored_paths(
-        repo,
-        untracked_files,
-        ignored_path_exclusions,
-    )
-    status = _filter_porcelain_v1_untracked_records(
-        status,
-        excluded_paths=set(untracked_files) - set(visible_untracked_files),
-    )
-    untracked_files = visible_untracked_files
     ignored_files, ignored_capture_complete = _ignored_paths(repo, ignored_path_exclusions)
     index_flags = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
     unsafe_index_paths = _unsafe_index_paths(index_flags)
@@ -442,16 +441,10 @@ def _capture_current_workspace_inventory(
     ignored_path_exclusions: frozenset[str],
 ) -> CurrentWorkspaceInventory:
     head_sha = read_head_sha(repo)
-    raw_status = _git_status(repo)
-    untracked_files = _untracked_paths(raw_status)
-    visible_untracked_files = filter_codex_runtime_ignored_paths(
+    raw_status = filter_codex_runtime_short_status(
         repo,
-        untracked_files,
+        _git_status(repo),
         ignored_path_exclusions,
-    )
-    raw_status = _filter_short_untracked_status(
-        raw_status,
-        excluded_paths=set(untracked_files) - set(visible_untracked_files),
     )
     ignored_files, ignored_capture_complete = _ignored_paths(
         repo,
@@ -628,49 +621,6 @@ def render_workspace_check(result: WorkspaceCheckResult) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _git_status(repo_path: Path) -> str:
-    return _run_git_bytes(
-        repo_path,
-        ["git", "status", "--short", "--untracked-files=all"],
-    ).decode("utf-8", errors="replace")
-
-
-def _filter_short_untracked_status(
-    status: str,
-    *,
-    excluded_paths: set[str],
-) -> str:
-    if not excluded_paths:
-        return status
-    return "\n".join(
-        line
-        for line in status.splitlines()
-        if not (
-            line.startswith("?? ")
-            and line[3:].strip() in excluded_paths
-        )
-    )
-
-
-def _filter_porcelain_v1_untracked_records(
-    status: bytes,
-    *,
-    excluded_paths: set[str],
-) -> bytes:
-    if not excluded_paths:
-        return status
-    records = status.split(b"\0")
-    filtered = [
-        record
-        for record in records
-        if not (
-            record.startswith(b"?? ")
-            and record[3:].decode("utf-8", errors="replace") in excluded_paths
-        )
-    ]
-    return b"\0".join(filtered)
-
-
 def collect_tracked_diff_parts(
     repo_path: Path,
     options: list[str],
@@ -833,17 +783,6 @@ def _ignored_manifest(
         result.metadata_complete,
         result.content_complete,
     )
-
-
-def ignored_coverage_level(
-    manifest_complete: object,
-    content_complete: object,
-) -> str:
-    if manifest_complete is not True:
-        return "incomplete"
-    if content_complete is True:
-        return "full_content"
-    return "metadata_bounded"
 
 
 def _git_control_manifest(repo_path: Path) -> tuple[str, bool]:
