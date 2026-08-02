@@ -14,6 +14,9 @@ v0.1.4 是 v0.1.x 的可信执行维护版本，不增加新的默认 Runtime、
   reviewer 读取或放行未跟踪内容的授权。
 - PR CI 将完整测试集中在 Python 3.12 四个均衡分片，Python 3.11 保留编译与节点收集，
   Windows 只重复平台专项；main、release 和手工触发工作流仍执行 Python 3.11 全量测试。
+- Codex worker/reviewer 改用 JSONL 输出，在运行期间只显示回合、命令、文件修改、计划与工具
+  调用的安全事件名称和耗时；原始命令、输出、模型正文和推理内容不会进入实时提示，缺少最终
+  模型消息时保持 fail closed。
 
 ## 不变边界
 

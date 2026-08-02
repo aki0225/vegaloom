@@ -172,6 +172,151 @@ def test_codex_exec_runner_propagates_termination_unconfirmed(
     assert result.termination_unconfirmed is True
 
 
+def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    fake_secret = "sk-jsonl-fake-secret-123456"
+    events: list[tuple[str, int]] = []
+    captured_command: list[str] = []
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "jsonl" / "executions" / "worker",
+        run_id="jsonl",
+        step="worker",
+        progress_reporter=lambda step, elapsed: events.append((step, elapsed)),
+    )
+
+    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, stream_context):
+        del input_text, cwd, timeout_seconds
+        captured_command.extend(command)
+        observer = stream_context.output_line_observer
+        assert observer is not None
+        observer("not-json")
+        payloads = [
+            {"type": "turn.started"},
+            {
+                "type": "item.completed",
+                "item": {"type": "reasoning", "text": fake_secret},
+            },
+            {
+                "type": "item.started",
+                "item": {
+                    "type": "command_execution",
+                    "command": f"tool --token {fake_secret}",
+                    "status": "in_progress",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "aggregated_output": fake_secret,
+                    "status": "completed",
+                    "exit_code": 0,
+                },
+            },
+            {
+                "type": "item.updated",
+                "item": {
+                    "type": "todo_list",
+                    "items": [{"text": fake_secret, "completed": False}],
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "file_change",
+                    "changes": [{"path": fake_secret, "kind": "update"}],
+                    "status": "completed",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": f"READY {fake_secret}"},
+            },
+            {"type": "turn.completed", "usage": {"input_tokens": 10}},
+        ]
+        for payload in payloads:
+            observer(json.dumps(payload))
+        return OwnedProcessResult(
+            status="success",
+            output="raw jsonl output",
+            error=None,
+            returncode=0,
+        )
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+
+    result = CodexExecRunner().run(
+        "test prompt",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=5,
+        execution_context=context,
+    )
+
+    assert result.status == "success"
+    assert result.output.startswith("READY ")
+    assert fake_secret not in result.output
+    assert "--json" in captured_command
+    assert [step for step, _ in events] == [
+        "worker.turn_started",
+        "worker.command_started",
+        "worker.command_completed",
+        "worker.plan_updated",
+        "worker.file_changed",
+        "worker.turn_completed",
+    ]
+    assert fake_secret not in json.dumps(events)
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        [],
+        ["not-json"],
+        [json.dumps({"type": "future.event"})],
+        [
+            json.dumps({"type": "turn.started"}),
+            json.dumps({"type": "turn.completed", "usage": {}}),
+        ],
+    ],
+    ids=["empty", "malformed", "unknown-event", "known-events"],
+)
+def test_codex_exec_runner_rejects_success_without_final_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lines: list[str],
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+        del command, input_text, cwd, timeout_seconds
+        observer = context.output_line_observer
+        assert observer is not None
+        for line in lines:
+            observer(line)
+        return OwnedProcessResult("success", "\n".join(lines), None, 0)
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+
+    result = CodexExecRunner().run(
+        "test prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "error"
+    assert result.error == "codex exec JSONL 未包含最终 agent_message。"
+
+
 def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> None:
     context = RunnerExecutionContext(
         execution_root=tmp_path,
@@ -300,6 +445,100 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
     assert broken_result.status == "success"
     assert "review completed" in broken_result.output
     assert broken_lease.status == "completed"
+
+
+def test_owned_process_observes_complete_lines_before_child_exit(tmp_path: Path) -> None:
+    fake_secret = "sk-stream-fake-secret-123456"
+    first_line = threading.Event()
+    observed: list[str] = []
+    result_holder: dict[str, OwnedProcessResult] = {}
+
+    def observe(line: str) -> None:
+        observed.append(line)
+        if line == '{"type":"turn.started"}':
+            first_line.set()
+
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "stream" / "executions" / "worker",
+        run_id="stream",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        output_line_observer=observe,
+    )
+    child_code = (
+        "import time; "
+        "print('{\"type\":\"turn.started\"}', flush=True); "
+        "time.sleep(0.6); "
+        f"print('api_key={fake_secret}', flush=True)"
+    )
+
+    thread = threading.Thread(
+        target=lambda: result_holder.setdefault(
+            "result",
+            run_owned_process(
+                [sys.executable, "-c", child_code],
+                "",
+                tmp_path,
+                5,
+                context,
+            ),
+        )
+    )
+    thread.start()
+    assert first_line.wait(3)
+    assert thread.is_alive()
+    thread.join(5)
+
+    assert not thread.is_alive()
+    assert result_holder["result"].status == "success"
+    assert observed == ['{"type":"turn.started"}', f"api_key={fake_secret}"]
+    persisted = context.execution_dir.joinpath("process-output.txt").read_text(encoding="utf-8")
+    assert fake_secret not in persisted
+    assert all(item.name != "vega-output-reader" for item in threading.enumerate())
+
+
+def test_output_reader_start_failure_terminates_owned_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "reader-start" / "executions" / "worker",
+        run_id="reader-start",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        terminate_grace_seconds=0.2,
+        output_line_observer=lambda _: None,
+    )
+    original_start = threading.Thread.start
+
+    def fail_output_reader_start(thread: threading.Thread) -> None:
+        if thread.name == "vega-output-reader":
+            raise RuntimeError("simulated thread start failure")
+        original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", fail_output_reader_start)
+
+    result = run_owned_process(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        "",
+        tmp_path,
+        5,
+        context,
+    )
+
+    lease = ExecutionLease.model_validate_json(
+        context.execution_dir.joinpath("execution.json").read_text(encoding="utf-8")
+    )
+    assert result.status == "error"
+    assert "输出读取线程启动失败" in (result.error or "")
+    assert lease.status == "failed"
+    assert lease.child_pid is not None
+    assert not execution_control.is_process_alive(lease.child_pid)
+    assert context.execution_dir.joinpath("process-output.txt").is_file()
 
 
 def test_owned_process_tree_stays_active_for_posix_descendants() -> None:

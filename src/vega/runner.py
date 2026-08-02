@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import shutil
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
 from uuid import uuid4
@@ -40,6 +42,99 @@ class Runner(Protocol):
         execution_context: RunnerExecutionContext | None = None,
     ) -> RunnerResult:
         ...
+
+
+class _CodexJsonlProgress:
+    """从 Codex JSONL 中提取最终消息，并只发出无正文的安全进度事件。"""
+
+    _EVENT_TYPES = {
+        "thread.started",
+        "turn.started",
+        "turn.completed",
+        "turn.failed",
+        "item.started",
+        "item.updated",
+        "item.completed",
+        "error",
+    }
+
+    def __init__(self, context: RunnerExecutionContext) -> None:
+        self.final_message: str | None = None
+        self._reporter = context.progress_reporter
+        self._step = context.step if context.step in {"worker", "reviewer"} else "runner"
+        self._started_at = time.monotonic()
+
+    def observe(self, line: str) -> None:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(event, dict) or event.get("type") not in self._EVENT_TYPES:
+            return
+        event_type = event["type"]
+        if event_type == "turn.started":
+            self._emit("turn_started")
+        elif event_type == "turn.completed":
+            self._emit("turn_completed")
+        elif event_type in {"turn.failed", "error"}:
+            self._emit("turn_failed")
+        elif event_type.startswith("item."):
+            self._observe_item(event_type, event.get("item"))
+
+    def _observe_item(self, event_type: str, item: object) -> None:
+        if not isinstance(item, dict):
+            return
+        item_type = item.get("type")
+        if event_type == "item.completed" and item_type == "agent_message":
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                self.final_message = text
+            return
+        handlers = {
+            "command_execution": self._observe_command,
+            "file_change": self._observe_file_change,
+            "todo_list": self._observe_plan,
+            "mcp_tool_call": self._observe_tool,
+            "collab_tool_call": self._observe_tool,
+            "web_search": self._observe_tool,
+        }
+        handler = handlers.get(item_type)
+        if handler is not None:
+            handler(event_type, item)
+
+    def _observe_command(self, event_type: str, item: dict[str, object]) -> None:
+        if event_type == "item.started":
+            self._emit("command_started")
+        elif event_type == "item.completed":
+            failed = item.get("status") in {"failed", "declined"}
+            self._emit("command_failed" if failed else "command_completed")
+
+    def _observe_file_change(self, event_type: str, item: dict[str, object]) -> None:
+        if event_type != "item.completed":
+            return
+        failed = item.get("status") == "failed"
+        self._emit("file_change_failed" if failed else "file_changed")
+
+    def _observe_plan(self, event_type: str, item: dict[str, object]) -> None:
+        del item
+        if event_type in {"item.started", "item.updated"}:
+            self._emit("plan_updated")
+
+    def _observe_tool(self, event_type: str, item: dict[str, object]) -> None:
+        if event_type == "item.started":
+            self._emit("tool_started")
+        elif event_type == "item.completed":
+            failed = item.get("status") == "failed"
+            self._emit("tool_failed" if failed else "tool_completed")
+
+    def _emit(self, event: str) -> None:
+        reporter = self._reporter
+        if reporter is None:
+            return
+        try:
+            reporter(f"{self._step}.{event}", int(time.monotonic() - self._started_at))
+        except Exception:  # noqa: BLE001 - 进度输出失败不能改变 runner 结果
+            self._reporter = None
 
 
 class NoneRunner:
@@ -122,6 +217,7 @@ class CodexExecRunner:
             )
         if self.options.ephemeral:
             command.append("--ephemeral")
+        command.append("--json")
         command.append("-")
         prompt = redact_text(prompt)
         standalone_root = Path.cwd()
@@ -134,6 +230,8 @@ class CodexExecRunner:
             run_id="standalone-runner",
             step="codex-exec",
         )
+        progress = _CodexJsonlProgress(context)
+        context = replace(context, output_line_observer=progress.observe)
         result = run_owned_process(
             command,
             prompt,
@@ -141,10 +239,16 @@ class CodexExecRunner:
             timeout_seconds,
             context,
         )
+        status = result.status
+        error = result.error
+        output = progress.final_message if progress.final_message is not None else result.output
+        if status == "success" and progress.final_message is None:
+            status = "error"
+            error = "codex exec JSONL 未包含最终 agent_message。"
         return RunnerResult(
-            status=result.status,
-            output=result.output,
-            error=result.error,
+            status=status,
+            output=output,
+            error=error,
             command=command,
             termination_unconfirmed=getattr(result, "termination_unconfirmed", False),
         )

@@ -1339,6 +1339,10 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
                 "context": context,
             }
         )
+        assert context.output_line_observer is not None
+        context.output_line_observer(
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}})
+        )
         return SimpleNamespace(status="success", output="ok", error=None)
 
     monkeypatch.setattr(
@@ -1385,6 +1389,7 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
         "--config",
         'model_reasoning_effort="medium"',
         "--ephemeral",
+        "--json",
         "-",
     ]
     assert captured["input_text"] == "完成最小修改"
@@ -1400,8 +1405,12 @@ def test_codex_exec_runner_executes_raw_command_but_redacts_result_command(
     captured: dict[str, object] = {}
 
     def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
-        del input_text, cwd, timeout_seconds, context
+        del input_text, cwd, timeout_seconds
         captured["command"] = command
+        assert context.output_line_observer is not None
+        context.output_line_observer(
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}})
+        )
         return SimpleNamespace(status="success", output="ok", error=None)
 
     monkeypatch.setattr(

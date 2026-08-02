@@ -14,13 +14,34 @@ _PROGRESS_STEP_LABELS = {
     "worker": "worker",
     "reviewer": "reviewer",
     "verification": "verification",
+    "runner": "runner",
+}
+_PROGRESS_EVENT_MESSAGES = {
+    "turn_started": "开始分析任务",
+    "command_started": "开始执行命令",
+    "command_completed": "命令执行完成",
+    "command_failed": "命令执行失败",
+    "file_changed": "已应用文件修改",
+    "file_change_failed": "文件修改失败",
+    "plan_updated": "更新执行计划",
+    "tool_started": "开始调用工具",
+    "tool_completed": "工具调用完成",
+    "tool_failed": "工具调用失败",
+    "turn_completed": "完成模型回合",
+    "turn_failed": "模型回合失败",
 }
 
 
 def report_execution_progress(step: str, elapsed_seconds: int) -> None:
-    label = _PROGRESS_STEP_LABELS.get(step, "runner")
+    base_step, _, event = step.partition(".")
+    label = _PROGRESS_STEP_LABELS.get(base_step, "runner")
+    event_message = _PROGRESS_EVENT_MESSAGES.get(event)
+    if event_message is not None:
+        message = f"[vega] {label} {event_message}，已用时 {max(0, elapsed_seconds)} 秒"
+    else:
+        message = f"[vega] {label} 运行中，已用时 {max(0, elapsed_seconds)} 秒"
     typer.echo(
-        f"[vega] {label} 运行中，已用时 {max(0, elapsed_seconds)} 秒",
+        message,
         err=True,
     )
 
