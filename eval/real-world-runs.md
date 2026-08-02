@@ -347,3 +347,40 @@ Windows 行尾策略必须在 checkout 前冻结。最终成功仍只是一个�
 中断点的一致性或跨仓库泛化能力。复盘还暴露了一个状态展示缺陷：根状态已经终止时，旧的
 `running` execution 曾被误报为当前活动进程；配套修复只调整状态选择和提示，不改变恢复或成功
 语义。
+
+## 2026-08-02 独立 fresh auto Dogfood：testify #1585
+
+本条是在主线 `72abe84` 上对 `stretchr/testify#1585` 的受控公开重放，参考 PR 为 `#1587`。
+任务冻结在上游基线 `a61e9e59d659c95de716df845b99f2ac6c443939`；官方补丁只用于筛选任务
+规模，没有进入 Worker 或 Reviewer 输入。Issue 已明确期望行为，因此该案例不是盲目根因发现，
+也不能证明模型未见过上游修复。
+
+- 首次 Run `20260802-105756-990084-bug-loop` 使用的验证命令包含 POSIX 单引号；Windows
+  `cmd.exe` 没有按预期保护 `-run` 和 `-skip` 中的元字符，导致 oracle 假通过、包测试命令被
+  解释为管道。Reviewer 因证据不可信返回 `needs_human`，终态为
+  `needs_human / review_run_failed`。该候选保持原样、禁止复用，也不计作 Worker 成败样本。
+- 修正后的协议先通过 `cmd.exe` 预检，再以 fresh target 和准备提交
+  `5f2bb474faf1b1e1fefb437c037ef8a4eeff1f77` 启动 Run
+  `20260802-111105-614884-bug-loop`。Worker 与 Reviewer 均为 `gpt-5.5 / xhigh`，实际一轮完成。
+- Worker 约耗时 `216` 秒、报告 `49,841` tokens；Reviewer 约耗时 `54` 秒、报告
+  `16,797` tokens。候选只修改 `assert/assertions.go` 和 `assert/assertions_test.go`，共
+  `19` 行新增、`0` 行删除；diff object ID 为
+  `cee77d4002f15b58dbb5a4c95d3898e50226951d`，stable patch ID 为
+  `e7dda663e64f7c6f10dea379ef602e815dca8aeb`。
+- 独立 byte-slice Regexp oracle、预注册排除 4 个 Windows symlink 权限测试后的完整 `assert`
+  包、`go vet ./assert` 和 `git diff --check` 全部通过。三阶段 Scope Gate、Workspace Gate、
+  Risk Gate 均通过；Risk 为 `low / self-check`，隔离只读 Reviewer 返回 `approve` 且 findings
+  为 `0`。Eval 无 FAIL，artifact integrity 为 valid，evidence freshness 为 fresh，Finish 为
+  `ready_to_commit`。
+- Worker 自检曾把 Go cache 写入仓库外的盘符根临时目录，共 `2,317` 个文件、
+  `109,042,875` bytes。该目录在用户明确确认后由控制端精确删除并验证不存在；没有触碰同级其他
+  内容。此事实暴露的是通用 Worker prompt 缺少输出位置约束，不代表 Vega 拥有操作系统级写入
+  隔离。后续 prompt 仅明确要求自检缓存和临时输出留在目标仓库专用目录，Runtime 行为和成功语义
+  均未改变。
+- 两次 run 登记的 Worker、Reviewer 与 verification 子进程均已退出；共 `117` 个相关 run 和
+  控制 artifact 的高置信凭据模式扫描为 `0`。v2 目标无 remote、无未跟踪文件，候选未被控制端
+  修改、提交或推送。
+
+该案例证明当前主线能在一个冻结的真实 Go 库任务上生成范围内补丁，并通过确定性验证、门禁、
+隔离 Reviewer 与 Finish；同时证明协议命令必须按宿主 shell 预检，prompt 约束不能替代 OS 级
+边界。它仍只是单案例，不能外推为总体成功率、跨仓库泛化能力或生产安全证明。

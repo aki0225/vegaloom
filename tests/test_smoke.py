@@ -1928,6 +1928,8 @@ def test_loop_writes_project_context_into_worker_prompt(tmp_path) -> None:
     assert "## 项目上下文" in worker_prompt
     assert "测试必须说明结果" in worker_prompt
     assert "Vega 会在 worker 返回后独立执行" in worker_prompt
+    assert "所有自检产生的缓存、临时文件和中间输出" in worker_prompt
+    assert "不得使用仓库父目录、工作区集合根目录、兄弟仓库或盘符根目录" in worker_prompt
     assert "不要运行带 `{{vega_verification_temp}}` 的 harness-owned 命令" in worker_prompt
     assert "不共享 harness 临时目录的最小检查" in worker_prompt
 
