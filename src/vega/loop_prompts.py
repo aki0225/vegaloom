@@ -79,6 +79,8 @@ def build_worker_prompt(
         "- 只修改满足需求所需的文件。",
         "- 不要 git commit、git push、发布或改长期 memory。",
         "- Vega 会在 worker 返回后独立执行 Runtime 策略中的固定验证命令。",
+        "- 所有自检产生的缓存、临时文件和中间输出都必须放在目标仓库内的专用目录（例如 `.tmp/`）。",
+        "- 不得使用仓库父目录、工作区集合根目录、兄弟仓库或盘符根目录存放这些产物。",
         "- 不要运行带 `{{vega_verification_temp}}` 的 harness-owned 命令，"
         "也不要清理 harness 临时目录。",
         "- 如需自检，只运行不共享 harness 临时目录的最小检查，并在输出里总结结果。",
