@@ -58,11 +58,12 @@ def render_run_status(workspace: Path, run: str) -> str:
         lines.append(f"- 人工决策：`{payload['decision_count']}` 条")
     execution = payload.get("execution")
     if execution:
+        execution_is_current = bool(execution.get("termination_unconfirmed")) or (
+            payload["status"] == "running" and execution["status"] in ACTIVE_EXECUTION_STATUSES
+        )
         lines.extend([
             f"- execution：`{execution['status']}` / `{execution['step']}`",
-            render_owned_child_pid_line(
-                execution["status"] in ACTIVE_EXECUTION_STATUSES, execution["child_pid"]
-            ),
+            render_owned_child_pid_line(execution_is_current, execution["child_pid"]),
             f"- 最后心跳：`{execution['last_heartbeat']}`",
         ])
         if execution.get("termination_unconfirmed"):
@@ -83,7 +84,7 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     state = _classify_init(workspace, run_dir, _read_state(run_dir))
     kind = _infer_kind(run_dir, state)
     decisions = DecisionStore(run_dir).list()
-    execution = _latest_execution_payload(run_dir)
+    execution = _latest_execution_payload(run_dir, state.get("status"))
     return {
         "run_id": run_dir.name,
         "run_dir": str(run_dir.resolve()),
@@ -103,7 +104,7 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
 
 def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], kind: str | None = None) -> list[str]:
     run_kind = kind or _infer_kind(run_dir, state)
-    execution = _latest_execution_payload(run_dir)
+    execution = _latest_execution_payload(run_dir, state.get("status"))
     if (
         run_kind in {"loop", "review"}
         and execution
@@ -116,7 +117,7 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
         ]
     if (
         run_kind in {"loop", "review"}
-        and execution
+        and execution and state.get("status") == "running"
         and execution["status"] in ACTIVE_EXECUTION_STATUSES
     ):
         return [
@@ -620,14 +621,13 @@ def _latest_goal_artifacts(run_dir: Path) -> list[str]:
     return result
 
 
-def _latest_execution_payload(run_dir: Path) -> dict[str, Any] | None:
+def _latest_execution_payload(run_dir: Path, run_status: object) -> dict[str, Any] | None:
     records = find_execution_records(run_dir)
     if not records:
         return None
-    active_records = [
-        record for record in records if record.lease.status in ACTIVE_EXECUTION_STATUSES
-    ]
-    record = max(active_records or records, key=_execution_heartbeat_utc)
+    unconfirmed = [record for record in records if record.lease.termination_unconfirmed]
+    preferred = [r for r in records if (r.lease.status in ACTIVE_EXECUTION_STATUSES) == (run_status == "running")]
+    record = max(unconfirmed or preferred or records, key=_execution_heartbeat_utc)
     lease = record.lease
     return {
         "status": lease.status,

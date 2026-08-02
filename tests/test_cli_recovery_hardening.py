@@ -861,7 +861,10 @@ def test_status_and_latest_cli_report_corrupt_selected_state(
 def test_status_prefers_active_execution_over_newer_terminal(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "active-loop"
     run_dir.mkdir(parents=True)
-    _loop_state(tmp_path / "repo", run_dir.name).save(run_dir / "state.json")
+    state = _loop_state(tmp_path / "repo", run_dir.name)
+    state.status = "running"
+    state.current_step = "worker"
+    state.save(run_dir / "state.json")
     _write_execution(
         run_dir,
         "worker",
@@ -883,10 +886,73 @@ def test_status_prefers_active_execution_over_newer_terminal(tmp_path: Path) -> 
     assert execution["step"] == "worker"
 
 
+def test_status_success_prefers_terminal_execution_over_historical_active(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "continued-loop"
+    run_dir.mkdir(parents=True)
+    state = _loop_state(tmp_path / "repo", run_dir.name)
+    state.status = "success"
+    state.current_step = "done"
+    state.save(run_dir / "state.json")
+    _write_execution(
+        run_dir,
+        "interrupted-worker",
+        step="worker",
+        status="running",
+        last_heartbeat="2026-07-11T03:00:00+00:00",
+        child_pid=24680,
+    )
+    _write_execution(
+        run_dir,
+        "continued-reviewer",
+        step="reviewer",
+        status="completed",
+        last_heartbeat="2026-07-11T02:00:00+00:00",
+        child_pid=13579,
+    )
+
+    text = render_run_status(tmp_path, run_dir.name)
+    execution = run_status_payload(tmp_path, run_dir.name)["execution"]
+
+    assert execution["status"] == "completed"
+    assert execution["step"] == "reviewer"
+    assert "当前 `worker` 仍在运行" not in text
+    assert "历史 owned child PID（仅供审计，不表示当前存活）：`13579`" in text
+
+
+def test_status_recovered_marks_stale_active_execution_as_history(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "recovered-loop"
+    run_dir.mkdir(parents=True)
+    state = _loop_state(tmp_path / "repo", run_dir.name)
+    state.status = "needs_human"
+    state.current_step = "recovered"
+    state.save(run_dir / "state.json")
+    _write_execution(
+        run_dir,
+        "interrupted-worker",
+        step="worker",
+        status="running",
+        last_heartbeat="2026-07-11T01:00:00+00:00",
+        child_pid=24680,
+    )
+
+    text = render_run_status(tmp_path, run_dir.name)
+
+    assert "当前 `worker` 仍在运行" not in text
+    assert "历史 owned child PID（仅供审计，不表示当前存活）：`24680`" in text
+    assert "读取 `" + str((run_dir / "recovery-report.md").resolve()) + "`" in text
+
+
 def test_status_text_keeps_active_owned_child_pid(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "active-child-loop"
     run_dir.mkdir(parents=True)
-    _loop_state(tmp_path / "repo", run_dir.name).save(run_dir / "state.json")
+    state = _loop_state(tmp_path / "repo", run_dir.name)
+    state.status = "running"
+    state.current_step = "worker"
+    state.save(run_dir / "state.json")
     _write_execution(
         run_dir,
         "worker",
@@ -957,7 +1023,10 @@ def test_status_text_terminal_without_child_pid_reports_not_recorded_and_preserv
 def test_status_sorts_active_execution_heartbeat_as_utc(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "timezone-loop"
     run_dir.mkdir(parents=True)
-    _loop_state(tmp_path / "repo", run_dir.name).save(run_dir / "state.json")
+    state = _loop_state(tmp_path / "repo", run_dir.name)
+    state.status = "running"
+    state.current_step = "worker"
+    state.save(run_dir / "state.json")
     _write_execution(
         run_dir,
         "offset-worker",
