@@ -342,8 +342,8 @@ def run_owned_process(
                 process.pid,
                 controller.child_created,
             )
-            output_capture.start(process)
             controller.child_started(process.pid)
+            output_capture.start(process)
             progress.started()
             while _owned_process_tree_is_active(
                 process,
