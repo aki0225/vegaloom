@@ -124,8 +124,10 @@ class CodexExecRunner:
             command.append("--ephemeral")
         command.append("-")
         prompt = redact_text(prompt)
+        standalone_root = Path.cwd()
         context = execution_context or RunnerExecutionContext(
-            execution_dir=Path.cwd()
+            execution_root=standalone_root,
+            execution_dir=standalone_root
             / "runs"
             / "_standalone-executions"
             / f"codex-{uuid4().hex[:12]}",

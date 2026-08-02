@@ -3644,7 +3644,9 @@ def test_recover_marks_running_loop_as_needs_human(tmp_path, monkeypatch) -> Non
 
 def test_owned_process_updates_heartbeat_and_times_out(tmp_path) -> None:
     run_dir = tmp_path / "runs" / "timeout-loop"
+    run_dir.mkdir(parents=True)
     context = RunnerExecutionContext(
+        execution_root=run_dir,
         execution_dir=run_dir / "executions" / "worker",
         run_id=run_dir.name,
         step="worker",
@@ -3674,6 +3676,7 @@ def test_owned_process_updates_heartbeat_and_times_out(tmp_path) -> None:
 
 def test_owned_process_success_persists_output_and_completed_lease(tmp_path) -> None:
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "success-loop" / "executions" / "reviewer",
         run_id="success-loop",
         step="reviewer",
@@ -3703,6 +3706,7 @@ def test_stop_cli_only_stops_recorded_owned_process(tmp_path, monkeypatch) -> No
     run_dir.mkdir(parents=True)
     run_dir.joinpath("trace.jsonl").touch()
     context = RunnerExecutionContext(
+        execution_root=run_dir,
         execution_dir=run_dir / "executions" / "worker",
         run_id=run_dir.name,
         step="worker",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -228,11 +229,66 @@ def prepare_verification_temp_root(repo_path: Path) -> Path:
     return root
 
 
+def create_verification_temp_dir(
+    repo_path: Path,
+    run_id: str,
+    iteration: int,
+    command_index: int,
+) -> Path:
+    if not run_id or run_id in {".", ".."} or "/" in run_id or "\\" in run_id:
+        raise ValueError("verification run_id 必须是单个安全路径段")
+    if iteration < 1 or command_index < 1:
+        raise ValueError("verification iteration 和 command index 必须从 1 开始")
+
+    root = prepare_verification_temp_root(repo_path)
+    command_dir = (
+        root
+        / run_id
+        / f"iteration-{iteration}"
+        / f"command-{command_index}"
+    )
+    current = root
+    for part in command_dir.parent.relative_to(root).parts:
+        current = current / part
+        if os.path.lexists(current):
+            _require_plain_verification_directory(current)
+            continue
+        try:
+            current.mkdir()
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise ValueError("无法创建 verification 临时目录父路径") from exc
+        _require_plain_verification_directory(current)
+
+    try:
+        command_dir.mkdir(exist_ok=False)
+    except FileExistsError as exc:
+        raise ValueError("verification 临时目录已存在；拒绝复用或清理预置内容") from exc
+    except OSError as exc:
+        raise ValueError("无法独占创建 verification 临时目录") from exc
+    _require_plain_verification_directory(command_dir)
+    resolved = command_dir.resolve(strict=True)
+    if not resolved.is_relative_to(root):
+        raise ValueError("verification 临时目录逃出受控根路径")
+    return resolved
+
+
 def _validate_verification_temp_root(repo: Path, root: Path) -> None:
     if not root.is_relative_to(repo):
         raise ValueError("verification 临时目录根路径逃出目标仓库")
     if root.relative_to(repo) != VERIFICATION_TEMP_ROOT:
         raise ValueError("verification 临时目录根路径不能经链接或 reparse point 改道")
+
+
+def _require_plain_verification_directory(path: Path) -> None:
+    metadata = path.lstat()
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    file_attributes = getattr(metadata, "st_file_attributes", 0)
+    if stat.S_ISLNK(metadata.st_mode) or bool(file_attributes & reparse_flag):
+        raise ValueError("verification 临时目录不能经链接或 reparse point 改道")
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("verification 临时目录路径必须是目录")
 
 
 def _fingerprint_entry(

@@ -35,6 +35,20 @@ from vega.workspace_check import capture_review_workspace, run_workspace_check
 FAKE_SECRET = "sk-runtime-fake-secret-123456"
 
 
+def _create_directory_link(link_path: Path, target_path: Path) -> None:
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd", "/d", "/c", "mklink", "/J", str(link_path), str(target_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip("当前 Windows 环境不能创建 junction")
+        return
+    link_path.symlink_to(target_path, target_is_directory=True)
+
+
 class QueueRunner:
     def __init__(self, outputs: list[str]) -> None:
         self.outputs = outputs
@@ -570,6 +584,63 @@ def test_verification_temp_placeholder_isolates_iterations_and_commands(
                 path.relative_to(repo.resolve()).as_posix()
                 for _, _, path, _ in calls
             }
+
+
+@pytest.mark.parametrize("preexisting_kind", ["directory", "link"])
+def test_verification_temp_leaf_must_be_created_exclusively(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    preexisting_kind: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                "    - echo {{vega_verification_temp}}",
+                "  max_commands: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    leaf = (
+        repo
+        / ".tmp"
+        / "vega-verification"
+        / "exclusive-run"
+        / "iteration-1"
+        / "command-1"
+    )
+    leaf.parent.mkdir(parents=True)
+    preserved = tmp_path / "preserved"
+    if preexisting_kind == "directory":
+        leaf.mkdir()
+        preserved = leaf
+    else:
+        preserved.mkdir()
+        _create_directory_link(leaf, preserved)
+    marker = preserved / "do-not-remove.txt"
+    marker.write_text("preserve", encoding="utf-8")
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "vega.verification.run_owned_process",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(ValueError, match="已存在；拒绝复用或清理"):
+        run_project_verification(
+            workspace,
+            repo,
+            workspace / "runs" / "exclusive-run" / "iterations" / "01",
+        )
+
+    assert calls == []
+    assert marker.read_text(encoding="utf-8") == "preserve"
 
 
 def test_verification_temp_artifacts_redact_sensitive_repo_path(

@@ -153,6 +153,38 @@ def test_config_check_rejects_unsafe_verification_temp_placeholder_context(
     )
 
 
+@pytest.mark.parametrize(
+    ("command", "accepted"),
+    [
+        ("echo 'grouped value'", False),
+        ("echo left | findstr left", False),
+        ('python -c "print(\'ok\')"', True),
+    ],
+)
+def test_windows_config_check_rejects_unsafe_cmd_grouping_and_single_pipe(
+    tmp_path: Path,
+    command: str,
+    accepted: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath(".vega.yaml").write_text(
+        "version: 1\nverification:\n  commands:\n"
+        f"    - {json.dumps(command)}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(project_config, "current_verification_shell_kind", lambda: "cmd")
+
+    result = check_project_config(repo)
+    unsafe = [
+        issue for issue in result.issues if issue.code == "unsafe_windows_verification_syntax"
+    ]
+
+    assert bool(unsafe) is not accepted
+    assert (result.status == "passed") is accepted
+
+
 def test_config_check_redacts_sensitive_command_and_evidence(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

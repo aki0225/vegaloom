@@ -387,7 +387,9 @@ Risk gate 会据此识别：
 
 这些命中后会升级到 `human-review`，避免小需求被 AI 写成大改动。
 
-auto worker 结束后还有一层更早的工作区污染门禁：如果本轮新增未跟踪文件超过 `budget.max_new_files`，Vega 会写入 `workspace-check.md/json` 并停止在 `needs_human`，不会继续跑验证或 reviewer。它只保留证据，不自动删文件。
+auto worker 结束后还有一层更早的工作区污染门禁：只要本轮新增未跟踪文件，即使数量没有
+超过 `budget.max_new_files`，Vega 也会写入 `workspace-check.md/json` 并停止在 `needs_human`，
+不会继续跑验证或 reviewer。隔离 reviewer 不读取这些文件的内容；Vega 只保留证据，不自动删文件。
 
 如果用户明确给的是大目标或重构文档，不应该用小任务预算硬拦，而应该先声明 scope：
 

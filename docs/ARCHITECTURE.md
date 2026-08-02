@@ -389,7 +389,10 @@ ReviewRuntime，避免相邻阶段重复执行整套 Git 快照。独立执行 `
 Risk Gate；无论哪条路径，reviewer 启动前都会重新捕获授权快照，终态 Eval/Finish 也会独立重算
 风险语义。因此这里复用的是 Runtime 自己刚生成的结果，不是信任 worker 或 LLM 提供的结论。
 
-工作区污染门禁早于验证和 review：如果 auto worker 新增的未跟踪文件数量超过 `budget.max_new_files`，Vega 会写入 `workspace-check.md/json`，停止在 `needs_human`。它不会自动删除文件，因为这里的核心价值是保留现场、阻止继续扩大影响，而不是替用户判断哪些文件可删。
+工作区污染门禁早于验证和 review：auto worker 只要新增未跟踪文件，即使数量没有超过
+`budget.max_new_files`，Vega 也会写入 `workspace-check.md/json` 并停止在 `needs_human`，
+因为隔离 reviewer 不读取这些文件的内容。Vega 不会自动删除文件；数量预算仍用于展示变更规模，
+不能作为放行未跟踪内容的授权。
 
 `max_iterations` 只限制 auto 模式中的自动 worker 重试次数，不限制用户在 `request_changes` 或 `needs_human` 后进行人工修复并继续运行 `loop continue`。这是为了保留“自动化有边界、人工可以接管”的设计。
 

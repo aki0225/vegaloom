@@ -78,6 +78,7 @@ class _FakeWorkerStart:
 
 def _context(tmp_path: Path, role: str = "worker") -> RunnerExecutionContext:
     return RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=(
             tmp_path
             / "runs"
@@ -558,6 +559,7 @@ def test_prompt_audit_rejects_run_id_different_from_root_binding(
         expected_workspace=tmp_path,
     )
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=(
             tmp_path
             / "runs"
@@ -600,6 +602,7 @@ def test_prompt_audit_rejects_execution_dir_outside_bound_iteration(
         expected_workspace=tmp_path,
     )
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "unbound-execution",
         run_id="crwp-test-run",
         step="worker",

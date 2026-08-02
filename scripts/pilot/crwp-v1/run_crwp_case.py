@@ -1613,6 +1613,7 @@ def _run_supervisor(args: argparse.Namespace, workspace: Path) -> int:
         runtime_supervisor_before,
     )
     context = RunnerExecutionContext(
+        execution_root=supervisor_root,
         execution_dir=supervisor_root / "executions" / "controller",
         run_id=supervisor_root.name,
         step="crwp-case-controller",

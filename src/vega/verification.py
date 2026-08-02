@@ -20,7 +20,7 @@ from .project_config import (
 from .project_profile import build_project_profile
 from .redaction import redact_text, redact_value
 from .runtime_workspace import capture_runtime_workspace
-from .workspace_inventory import prepare_verification_temp_root
+from .workspace_inventory import create_verification_temp_dir
 
 MAX_OUTPUT_CHARS = 8000
 VerificationInterruptionStatus = Literal[
@@ -96,7 +96,7 @@ def run_project_verification(
     for index, configured_command in enumerate(commands, start=1):
         verification_temp = None
         if VERIFICATION_TEMP_PLACEHOLDER in configured_command:
-            verification_temp = _verification_temp_dir(
+            verification_temp = create_verification_temp_dir(
                 repo_path,
                 run_id,
                 iteration,
@@ -106,8 +106,6 @@ def run_project_verification(
             configured_command,
             shell_kind,
         )
-        if verification_temp is not None:
-            verification_temp.mkdir(parents=True, exist_ok=True)
         result = _run_command(
             repo_path,
             configured_command,
@@ -116,6 +114,7 @@ def run_project_verification(
             index,
             command_timeout,
             RunnerExecutionContext(
+                execution_root=output_dir,
                 execution_dir=output_dir / "executions" / f"verification-{index:02d}",
                 run_id=run_id,
                 step="verification",
@@ -446,30 +445,6 @@ def _find_parent_run_id(output_dir: Path) -> str:
         if candidate.parent.name == "runs":
             return candidate.name
     return resolved.name
-
-
-def _verification_temp_dir(
-    repo_path: Path,
-    run_id: str,
-    iteration: int,
-    command_index: int,
-) -> Path:
-    if not run_id or run_id in {".", ".."} or "/" in run_id or "\\" in run_id:
-        raise ValueError("verification run_id 必须是单个安全路径段")
-    if iteration < 1 or command_index < 1:
-        raise ValueError("verification iteration 和 command index 必须从 1 开始")
-
-    root = prepare_verification_temp_root(repo_path)
-
-    command_dir = (
-        root
-        / run_id
-        / f"iteration-{iteration}"
-        / f"command-{command_index}"
-    ).resolve()
-    if not command_dir.is_relative_to(root):
-        raise ValueError("verification 临时目录逃出受控根路径")
-    return command_dir
 
 
 def _verification_temp_artifact_path(repo_path: Path, verification_temp: Path) -> str:

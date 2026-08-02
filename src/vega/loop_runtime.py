@@ -82,9 +82,7 @@ from .workspace_baseline import (
 from .workspace_check import read_head_sha, run_workspace_check, snapshot_workspace
 from .workspace_inventory import workspace_ignored_path_exclusions
 
-LOOP_INITIALIZATION_ARTIFACTS = list(
-    LEGACY_ASSIST_INITIALIZATION_ARTIFACTS
-)
+LOOP_INITIALIZATION_ARTIFACTS = list(LEGACY_ASSIST_INITIALIZATION_ARTIFACTS)
 LOOP_ARTIFACTS = [
     "state.json",
     "trace.jsonl",
@@ -972,6 +970,7 @@ class LoopAutomationRuntime:
                 sandbox="workspace-write",
                 timeout_seconds=self.timeout_seconds,
                 execution_context=RunnerExecutionContext(
+                    execution_root=run_dir,
                     execution_dir=iteration_dir / "executions" / "worker",
                     run_id=state.run_id,
                     step="worker",
@@ -1829,6 +1828,7 @@ class LoopAutomationRuntime:
             run_name(reflect_run),
             runner_name=reviewer_name,
             execution_context=RunnerExecutionContext(
+                execution_root=loop_run_dir,
                 execution_dir=_iteration_dir(loop_run_dir, iteration)
                 / "executions"
                 / "reviewer",

@@ -1051,7 +1051,7 @@ def test_status_sorts_active_execution_heartbeat_as_utc(tmp_path: Path) -> None:
 def test_cli_exposes_version_and_validates_latest_kind(tmp_path: Path, monkeypatch) -> None:
     version = CliRunner().invoke(app, ["--version"])
     assert version.exit_code == 0
-    assert version.output.strip() == "0.1.3"
+    assert version.output.strip() == "0.1.4"
 
     monkeypatch.chdir(tmp_path)
     invalid = CliRunner().invoke(app, ["latest", "--kind", "looop"])

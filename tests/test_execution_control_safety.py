@@ -19,6 +19,7 @@ import vega.execution_control as execution_control
 import vega.execution_feedback as execution_feedback
 import vega.execution_process as execution_process
 from vega.execution_control import (
+    ExecutionController,
     ExecutionLease,
     OwnedProcessResult,
     RunnerExecutionContext,
@@ -27,6 +28,20 @@ from vega.execution_control import (
     run_owned_process,
 )
 from vega.runner import CodexExecRunner
+
+
+def _create_directory_link(link_path: Path, target_path: Path) -> None:
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd", "/d", "/c", "mklink", "/J", str(link_path), str(target_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip("当前 Windows 环境不能创建 junction")
+        return
+    link_path.symlink_to(target_path, target_is_directory=True)
 
 
 def test_execution_model_temp_path_preserves_windows_path_budget(
@@ -51,6 +66,65 @@ def test_execution_model_temp_path_preserves_windows_path_budget(
     assert temp_path.parent == execution_path.parent
     assert temp_path.name == ".e.7fffffff.aaaaaaaa"
     assert len(str(temp_path)) < 260
+
+
+def test_execution_prepare_rejects_linked_descendant_before_launch(tmp_path: Path) -> None:
+    trusted_root = tmp_path / "trusted"
+    outside = tmp_path / "outside"
+    trusted_root.mkdir()
+    outside.mkdir()
+    _create_directory_link(trusted_root / "executions", outside)
+    marker = tmp_path / "child-started.txt"
+    context = RunnerExecutionContext(
+        execution_root=trusted_root,
+        execution_dir=trusted_root / "executions" / "worker",
+        run_id="linked-execution",
+        step="worker",
+    )
+
+    with pytest.raises(OSError, match="符号链接、junction 或 reparse point"):
+        run_owned_process(
+            [sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+            "",
+            tmp_path,
+            5,
+            context,
+        )
+
+    assert not marker.exists()
+    assert not outside.joinpath("worker").exists()
+
+
+@pytest.mark.parametrize("operation", ["heartbeat", "output"])
+def test_execution_revalidates_directory_before_later_writes(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    trusted_root = tmp_path / "trusted"
+    trusted_root.mkdir()
+    execution_dir = trusted_root / "executions" / "worker"
+    context = RunnerExecutionContext(
+        execution_root=trusted_root,
+        execution_dir=execution_dir,
+        run_id="redirected-execution",
+        step="worker",
+    )
+    controller = ExecutionController(context)
+    controller.prepare(["runner"], 5)
+    preserved = trusted_root / "preserved-execution"
+    execution_dir.rename(preserved)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _create_directory_link(execution_dir, outside)
+
+    with pytest.raises(OSError, match="符号链接、junction 或 reparse point"):
+        if operation == "heartbeat":
+            controller.heartbeat()
+        else:
+            controller.persist_output(io.BytesIO(b"must stay inside the trusted root"))
+
+    assert preserved.joinpath("execution.json").is_file()
+    assert list(outside.iterdir()) == []
 
 
 def test_execution_model_temp_paths_are_unique_within_one_process(
@@ -100,6 +174,7 @@ def test_codex_exec_runner_propagates_termination_unconfirmed(
 
 def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> None:
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "stdin-timeout" / "executions" / "worker",
         run_id="stdin-timeout",
         step="worker",
@@ -131,6 +206,7 @@ def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> Non
 
 def test_owned_process_redacts_output_before_persisting_and_returning(tmp_path: Path) -> None:
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "redacted-output" / "executions" / "worker",
         run_id="redacted-output",
         step="worker",
@@ -171,6 +247,7 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
     events: list[tuple[str, int]] = []
     monkeypatch.setattr(execution_feedback, "PROGRESS_INTERVAL_SECONDS", 0.03)
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "progress" / "executions" / "worker",
         run_id="progress",
         step="worker",
@@ -200,6 +277,7 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
         raise RuntimeError(f"progress failed: {step}/{elapsed}")
 
     broken_context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "broken-progress" / "executions" / "reviewer",
         run_id="broken-progress",
         step="reviewer",
@@ -250,6 +328,7 @@ def test_posix_background_descendant_prevents_early_success(
         f"subprocess.Popen([sys.executable, '-c', {child_code!r}])"
     )
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "posix-descendant" / "executions" / "worker",
         run_id="posix-descendant",
         step="worker",
@@ -275,6 +354,7 @@ def test_posix_background_descendant_prevents_early_success(
 
 def test_owned_process_persists_partial_output_after_keyboard_interrupt(tmp_path: Path) -> None:
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "interrupted-output" / "executions" / "worker",
         run_id="interrupted-output",
         step="worker",
@@ -677,6 +757,7 @@ def test_windows_detached_grandchild_prevents_success_and_is_terminated_on_timeo
         ")"
     )
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=execution_dir,
         run_id=run_id,
         step="worker",
@@ -730,6 +811,7 @@ def test_windows_job_startup_failure_never_runs_child(
     execution_dir = tmp_path / "runs" / run_id / "executions" / "worker"
     child_marker = tmp_path / f"{failure_stage}.started"
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=execution_dir,
         run_id=run_id,
         step="worker",
@@ -940,6 +1022,7 @@ def test_windows_taskkill_nonzero_keeps_stop_execution_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "taskkill-failure" / "executions" / "worker",
         run_id="taskkill-failure",
         step="worker",
@@ -1184,6 +1267,7 @@ def test_windows_final_wait_timeout_keeps_timeout_execution_active(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = RunnerExecutionContext(
+        execution_root=tmp_path,
         execution_dir=tmp_path / "runs" / "wait-timeout" / "executions" / "worker",
         run_id="wait-timeout",
         step="worker",

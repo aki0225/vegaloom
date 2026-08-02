@@ -339,6 +339,7 @@ def case_execution_control(workspace: Path, base_dir: Path) -> EvalCase:
     case_dir = base_dir / "execution-control"
     case_dir.mkdir()
     context = RunnerExecutionContext(
+        execution_root=case_dir,
         execution_dir=case_dir / "executions" / "worker",
         run_id=case_dir.name,
         step="worker",
