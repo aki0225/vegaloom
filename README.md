@@ -9,7 +9,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Baseline-v0.1.3-4fb8d8?style=for-the-badge" alt="v0.1.3">
+  <img src="https://img.shields.io/badge/Baseline-v0.1.4-4fb8d8?style=for-the-badge" alt="v0.1.4">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -181,6 +181,7 @@ Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会
 | v0.1 范围与取舍 | [MVP-SCOPE](docs/MVP-SCOPE.md) |
 | 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |
 | 工作区与验证规范 | [WORKSPACE-HYGIENE](docs/WORKSPACE-HYGIENE.md) |
+| v0.1.4 可信执行维护 | [RELEASE-NOTES-0.1.4](docs/RELEASE-NOTES-0.1.4.md) |
 | v0.1.3 维护发布 | [RELEASE-NOTES-0.1.3](docs/RELEASE-NOTES-0.1.3.md) |
 | v0.1.1 安全维护更新与迁移 | [RELEASE-NOTES-0.1.1](docs/RELEASE-NOTES-0.1.1.md) |
 | v0.1.2 成功语义安全修复 | [RELEASE-NOTES-0.1.2](docs/RELEASE-NOTES-0.1.2.md) |
@@ -192,8 +193,8 @@ Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal 和 adapters 是可选能力，不扩大核心 loop 的成功条件。
-- 当前稳定基线为 `v0.1.3`。它在 v0.1.2 成功语义安全修复基线上补充 Stage 2/3
-  实验性证据、发布准备清单和公开说明，不扩大 v0.1 产品范围。
+- 当前稳定基线为 `v0.1.4`。它在 v0.1.3 基线上修复 execution 路径、Windows 验证命令
+  预检和 verification 临时目录复用风险，不扩大 v0.1 产品范围。
 
 ## 开发验证
 

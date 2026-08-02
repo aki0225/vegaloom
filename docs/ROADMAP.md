@@ -1,7 +1,7 @@
 # Vega 后续演进路线
 
 > 更新时间：2026-07-29
-> 稳定基线：`v0.1.3`
+> 稳定基线：`v0.1.4`
 > 当前状态：`M-001`、`M-002`、`M-003`、`M-004`、Assurance Stage 1、Stage 2 两个 SQLite 个案
 > 与 Stage 3 有界 DML/Backfill 个案均已进入 `main`。它们仍不属于 Runtime 或默认能力，
 > 也不能解释为生产数据库安全证明。当前 `Now` 是执行已预注册的 CRWP-V1 真实代码任务
@@ -22,7 +22,7 @@
 ## 一、当前主线
 
 ```text
-v0.1.3 稳定与冻结
+v0.1.4 可信执行维护
   -> Assurance Stage 0 维护完成
   -> Assurance Stage 1：Threat / Evidence 数据合同
   -> Assurance Stage 2：数据库 Migration 纵向实验

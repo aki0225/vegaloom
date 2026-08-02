@@ -118,7 +118,8 @@ v0.1 baseline 的最小验收定义。
 - Runner error handoff：provider/网络/CLI 错误后写 `runner-error-report.md`，保留可能存在的部分改动并交还人工
 - Owned process 边界：worker、reviewer 和 verification 只终止 Vega 自己启动并记录 PID
   的 process tree，不扫描用户其他 Codex/Node 进程
-- Worker 污染门禁：auto worker 新增未跟踪文件超过 `budget.max_new_files` 时停止在 `needs_human`
+- Worker 污染门禁：auto worker 只要新增未跟踪文件就停止在 `needs_human`；数量预算不授权
+  reviewer 读取或放行未跟踪内容
 - Prompt 预算门禁：记录实际 prompt 规模，worker/reviewer 超预算时不启动外部 runner
 - Review 快照门禁：Reflect 固化工作区指纹和完整 diff；工作区变化或证据 artifact 被改写时，
   reviewer 不启动并进入 `needs_human`
@@ -208,4 +209,5 @@ future optional: SQLite + FTS5 memory ledger、replay UI
 当前产品范围以 `docs/PRODUCT-CONTRACT.md` 为准：核心是上下文编译、受控执行、确定性验证、
 隔离审查和证据化恢复；Memory、Goal P0 与 adapter 保持实验状态。
 
-当前稳定版本为 `v0.1.3`，在成功语义维护修复基础上补充公开实验和发布准备材料，不扩大上述范围。
+当前稳定版本为 `v0.1.4`，在 v0.1.3 基线上补充可信 execution 路径与 verification 临时目录
+维护修复，不扩大上述范围。

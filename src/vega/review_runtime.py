@@ -335,6 +335,7 @@ class ReviewRuntime:
                 options=execution_config.runner.codex_exec.reviewer,
             )
             execution_context = execution_context or RunnerExecutionContext(
+                execution_root=run_dir,
                 execution_dir=run_dir / "executions" / "reviewer",
                 run_id=run_id,
                 step="reviewer",
@@ -1059,9 +1060,7 @@ def _capture_post_review_workspace(
                 issues.append("workspace_changed_during_review")
     inputs["reviewer_start_workspace_fingerprint"] = reviewer_start_fingerprint
     inputs["reviewer_end_workspace_fingerprint"] = end_fingerprint
-    inputs["workspace_changed_during_review"] = (
-        "workspace_changed_during_review" in issues
-    )
+    inputs["workspace_changed_during_review"] = "workspace_changed_during_review" in issues
     inputs["review_execution_issues"] = issues
     inputs["evidence_issues"] = list(dict.fromkeys([*inputs["evidence_issues"], *issues]))
     inputs["evidence_consistent"] = not inputs["evidence_issues"]

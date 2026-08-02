@@ -16,6 +16,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from .execution_feedback import ExecutionProgressReporter, ExecutionProgressTicker
+from .execution_paths import ExecutionPathGuard
 from .execution_process import (
     ProcessProbe,
     ProcessTerminationResult,
@@ -100,6 +101,7 @@ class StopRequest(BaseModel):
 class RunnerExecutionContext:
     """Runner 的窄执行上下文，不携带业务 prompt 或 worker 聊天。"""
 
+    execution_root: Path
     execution_dir: Path
     run_id: str
     step: str
@@ -145,6 +147,7 @@ class ExecutionController:
 
     def __init__(self, context: RunnerExecutionContext) -> None:
         self.context = context
+        self.path_guard = ExecutionPathGuard(context.execution_root, context.execution_dir)
         self.execution_path = context.execution_dir / "execution.json"
         self.stop_request_path = context.execution_dir / "stop-request.json"
         self.output_path = context.execution_dir / "process-output.txt"
@@ -153,7 +156,7 @@ class ExecutionController:
     def prepare(self, command: list[str] | str, timeout_seconds: int) -> ExecutionLease:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds 必须大于 0")
-        self.context.execution_dir.mkdir(parents=True, exist_ok=True)
+        self.path_guard.prepare()
         now = _now()
         command_parts = [command] if isinstance(command, str) else command
         self.lease = ExecutionLease(
@@ -170,19 +173,19 @@ class ExecutionController:
             deadline=(now + timedelta(seconds=timeout_seconds)).isoformat(),
             status="starting",
         )
-        _write_model_atomic(self.execution_path, self.lease)
+        self._write_lease()
         return self.lease
 
     def attach_windows_job(self, job_name: str) -> None:
         lease = self._require_lease()
         lease.windows_job_name = job_name
-        _write_model_atomic(self.execution_path, lease)
+        self._write_lease()
 
     def child_created(self, child_pid: int) -> None:
         lease = self._require_lease()
         lease.child_pid = child_pid
         lease.child_creation_token = _get_process_creation_token(child_pid)
-        _write_model_atomic(self.execution_path, lease)
+        self._write_lease()
 
     def child_started(self, child_pid: int) -> None:
         lease = self._require_lease()
@@ -199,9 +202,10 @@ class ExecutionController:
         lease.lease_expires_at = (
             now + timedelta(seconds=self.context.lease_timeout_seconds)
         ).isoformat()
-        _write_model_atomic(self.execution_path, lease)
+        self._write_lease()
 
     def read_stop_request(self) -> StopRequest | None:
+        self.path_guard.validate_artifact(self.stop_request_path)
         if not self.stop_request_path.exists():
             return None
         try:
@@ -220,7 +224,7 @@ class ExecutionController:
         lease = self._require_lease()
         lease.status = "stop_requested"
         lease.reason = _redact_optional_text(request.reason)
-        _write_model_atomic(self.execution_path, lease)
+        self._write_lease()
 
     def finish(
         self,
@@ -240,7 +244,7 @@ class ExecutionController:
         lease.returncode = returncode
         lease.finished_at = _now().isoformat()
         lease.last_heartbeat = lease.finished_at
-        _write_model_atomic(self.execution_path, lease)
+        self._write_lease()
 
     def record_termination_failure(
         self,
@@ -259,6 +263,18 @@ class ExecutionController:
         lease.lease_expires_at = (
             now + timedelta(seconds=self.context.lease_timeout_seconds)
         ).isoformat()
+        self._write_lease()
+
+    def persist_output(self, output_file: object) -> str:
+        return self.path_guard.persist_output(
+            output_file,
+            self.output_path,
+            _redact_process_output,
+        )
+
+    def _write_lease(self) -> None:
+        lease = self._require_lease()
+        self.path_guard.validate_artifact(self.execution_path)
         _write_model_atomic(self.execution_path, lease)
 
     def _require_lease(self) -> ExecutionLease:
@@ -431,7 +447,7 @@ def run_owned_process(
             status = "error"
         finally:
             try:
-                output = _persist_redacted_output(output_file, controller.output_path)
+                output = controller.persist_output(output_file)
             except OSError as exc:
                 if error is None:
                     error = f"runner 输出持久化失败：{exc}"
@@ -876,19 +892,6 @@ def _process_group_options() -> dict[str, object]:
     return _platform_process_group_options(windows=_is_windows_platform())
 
 
-def _persist_redacted_output(output_file: object, output_path: Path) -> str:
-    raw_output = _read_output_file(output_file)
-    output = _normalize_output_newlines(_redact_process_output(raw_output))
-    output_path.write_text(output, encoding="utf-8", newline="\n")
-    return output
-
-
-def _read_output_file(output_file: object) -> str:
-    output_file.flush()
-    output_file.seek(0)
-    return output_file.read().decode("utf-8", errors="replace")
-
-
 def _redact_process_output(output: str) -> str:
     if not output:
         return output
@@ -906,10 +909,6 @@ def _redact_optional_text(output: str | None) -> str | None:
     if output is None:
         return None
     return _redact_process_output(output)
-
-
-def _normalize_output_newlines(output: str) -> str:
-    return output.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _load_redact_text() -> Callable[[str], str] | None:
