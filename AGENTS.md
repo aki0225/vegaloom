@@ -30,7 +30,10 @@ ruff check src tests scripts/check_repository_hygiene.py
 git diff --check
 ```
 
-CI 在 Python 3.11 与 3.12 上跑同样集合。注意两个已知环境差异:测试断言 CLI 输出时须防 CI 注入的 ANSI 渲染(conftest 已有 autouse fixture 清理环境变量),POSIX 进程组探测与 Windows 路径不同——本地绿不等于 CI 绿。
+PR CI 在 Python 3.12 四个分片执行完整测试；Python 3.11 只做安装、编译和完整节点收集，
+全量执行保留在 main、release 与手工触发工作流。Windows 只重复 shell、junction/reparse、
+进程树和锁专项。注意两个已知环境差异:测试断言 CLI 输出时须防 CI 注入的 ANSI 渲染
+(conftest 已有 autouse fixture 清理环境变量),POSIX 进程组探测与 Windows 路径不同——本地绿不等于 CI 绿。
 
 ## 公开仓库路径与私密文件卫生
 

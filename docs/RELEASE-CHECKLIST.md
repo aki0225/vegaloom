@@ -127,9 +127,9 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 
 正式标签前必须确认 GitHub Actions 主线同一 commit 的任务全部成功：
 
-- 静态检查与节点收集。
-- Python 3.11 全量测试。
-- Python 3.12 分片。
+- 静态检查与分片文件覆盖。
+- Python 3.11 全量测试（main、release 或手工触发工作流）。
+- Python 3.12 四个完整测试分片。
 - Windows 专项与 wheel smoke。
 - POSIX 临时目录专项。
 - wheel/sdist 构建、安装和 package smoke。
