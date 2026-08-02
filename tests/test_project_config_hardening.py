@@ -206,6 +206,57 @@ def test_config_check_warns_when_project_config_is_not_tracked(tmp_path: Path) -
     assert issue.evidence == ".vega.yaml"
 
 
+def test_config_check_warns_when_vega_runs_are_not_ignored(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+
+    result = check_project_config(repo)
+
+    issue = next(
+        issue for issue in result.issues if issue.code == "vega_runs_not_ignored"
+    )
+    assert result.status == "passed"
+    assert issue.severity == "warning"
+    assert issue.evidence == "runs/"
+    assert str(repo) not in issue.model_dump_json()
+
+
+@pytest.mark.parametrize("ignore_path", [".gitignore", ".git/info/exclude"])
+def test_config_check_accepts_locally_ignored_vega_runs(
+    tmp_path: Path,
+    ignore_path: str,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath(ignore_path).write_text(
+        "runs/\n",
+        encoding="utf-8",
+    )
+
+    result = check_project_config(repo)
+
+    assert not any(
+        issue.code == "vega_runs_not_ignored" for issue in result.issues
+    )
+
+
+def test_config_check_warns_when_only_some_run_artifacts_are_ignored(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".gitignore").write_text(
+        "runs/*/state.json\n",
+        encoding="utf-8",
+    )
+
+    result = check_project_config(repo)
+
+    assert any(
+        issue.code == "vega_runs_not_ignored" for issue in result.issues
+    )
+
+
 def test_config_check_warns_when_pytest_src_import_path_is_unspecified(
     tmp_path: Path,
 ) -> None:

@@ -16,6 +16,11 @@ PYTEST_COMMAND_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_.-])pytest(?:\.exe)?(?=\s|$)",
     re.IGNORECASE,
 )
+RUNS_IGNORE_PROBES = (
+    "runs/vega-preflight-run/state.json",
+    "runs/vega-preflight-run/trace.jsonl",
+    "runs/vega-preflight-run/iterations/01/worker-output.txt",
+)
 
 
 class ProjectConfigIssue(BaseModel):
@@ -65,6 +70,18 @@ def _collect_repository_preflight(
         return []
 
     issues: list[ProjectConfigIssue] = []
+    if _are_ignored_paths(repo, RUNS_IGNORE_PROBES) is False:
+        issues.append(
+            ProjectConfigIssue(
+                code="vega_runs_not_ignored",
+                severity="warning",
+                message=(
+                    "当前仓库未忽略 Vega 的 runs/ 运行产物；在仓库目录中启动 loop 会产生 "
+                    "Git 状态噪声。请在 .gitignore 或 .git/info/exclude 中忽略 runs/。"
+                ),
+                evidence="runs/",
+            )
+        )
     if source_path is not None:
         config_name = Path(source_path).name
         if _is_tracked_path(repo, config_name) is False:
@@ -144,6 +161,24 @@ def _is_tracked_path(repo: Path, path: str) -> bool | None:
     if result.returncode == 0:
         return True
     return False if result.returncode == 1 else None
+
+
+def _are_ignored_paths(repo: Path, paths: tuple[str, ...]) -> bool | None:
+    try:
+        result = run_git_capture(
+            repo,
+            ["git", "check-ignore", "--no-index", "--", *paths],
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode not in {0, 1}:
+        return None
+    ignored = {
+        line.decode("utf-8", errors="replace")
+        for line in coerce_git_output_bytes(result.stdout).splitlines()
+        if line
+    }
+    return all(path in ignored for path in paths)
 
 
 def _looks_like_python_src_layout(repo: Path) -> bool:

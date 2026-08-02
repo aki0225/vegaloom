@@ -17,6 +17,10 @@ from vega.workspace_check import (
     evaluate_workspace,
     snapshot_workspace,
 )
+from vega.workspace_inventory import (
+    prepare_verification_temp_root,
+    workspace_ignored_path_exclusions,
+)
 
 
 def test_untracked_content_hashing_respects_file_budget(
@@ -146,6 +150,121 @@ def test_ignored_content_hashing_exposes_incomplete_budget(
     assert snapshot.ignored_content_complete is False
     assert snapshot.ignored_coverage_level == "metadata_bounded"
     assert len(snapshot.ignored_manifest_sha256) == 64
+
+
+def test_workspace_check_excludes_same_repo_vega_run_artifacts(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo_with_zero_new_file_budget(tmp_path)
+    run_dir = repo / "runs" / "run-001"
+    run_dir.mkdir(parents=True)
+    run_dir.joinpath("state.json").write_text("{}\n", encoding="utf-8")
+    exclusions = workspace_ignored_path_exclusions(repo, repo)
+    baseline = snapshot_workspace(repo, ignored_path_exclusions=exclusions)
+
+    repo.joinpath("README.md").write_text("# Demo\nfixed\n", encoding="utf-8")
+    run_dir.joinpath("state.json").write_text('{"status":"running"}\n', encoding="utf-8")
+    run_dir.joinpath("worker-output.txt").write_text("worker done\n", encoding="utf-8")
+    result = evaluate_workspace(repo, baseline=baseline)
+
+    assert baseline.untracked_files == frozenset()
+    assert result.status == "passed"
+    assert result.new_untracked_count == 0
+    assert result.new_untracked_files == []
+    assert result.baseline_untracked_changed is False
+    assert "runs/" not in result.raw_status
+
+
+def test_review_snapshot_ignores_owned_run_changes_but_keeps_other_untracked(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    run_dir = repo / "runs" / "run-001"
+    run_dir.mkdir(parents=True)
+    output = run_dir / "process-output.txt"
+    output.write_text("before\n", encoding="utf-8")
+    repo.joinpath("notes.txt").write_text("keep visible\n", encoding="utf-8")
+    exclusions = workspace_ignored_path_exclusions(repo, repo)
+    before = capture_review_workspace(
+        repo,
+        ignored_path_exclusions=exclusions,
+    )
+
+    output.write_text("after\n", encoding="utf-8")
+    after = capture_review_workspace(
+        repo,
+        ignored_path_exclusions=exclusions,
+    )
+    repo.joinpath("notes.txt").write_text("changed\n", encoding="utf-8")
+    changed = capture_review_workspace(
+        repo,
+        ignored_path_exclusions=exclusions,
+    )
+
+    assert before.fingerprint == after.fingerprint
+    assert changed.fingerprint != after.fingerprint
+    assert before.untracked_files == ("notes.txt",)
+    assert after.untracked_files == ("notes.txt",)
+
+
+@pytest.mark.parametrize("relative_path", ["notes.txt", "runs-other/output.txt"])
+def test_workspace_check_keeps_non_owned_untracked_paths_fail_closed(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
+    repo = _init_repo_with_zero_new_file_budget(tmp_path)
+    exclusions = workspace_ignored_path_exclusions(repo, repo)
+    baseline = snapshot_workspace(repo, ignored_path_exclusions=exclusions)
+    target = repo / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("unexpected\n", encoding="utf-8")
+
+    result = evaluate_workspace(repo, baseline=baseline)
+
+    assert result.status == "failed"
+    assert result.new_untracked_count == 1
+    assert result.new_untracked_files == [relative_path]
+
+
+def test_workspace_check_keeps_untracked_verification_temp_fail_closed(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo_with_zero_new_file_budget(tmp_path)
+    exclusions = workspace_ignored_path_exclusions(repo, repo)
+    baseline = snapshot_workspace(repo, ignored_path_exclusions=exclusions)
+    target = repo / ".tmp" / "vega-verification" / "payload.txt"
+    target.parent.mkdir(parents=True)
+    target.write_text("unexpected\n", encoding="utf-8")
+
+    result = evaluate_workspace(repo, baseline=baseline)
+
+    assert result.status == "failed"
+    assert result.new_untracked_count == 1
+    assert result.new_untracked_files == [
+        ".tmp/vega-verification/payload.txt"
+    ]
+
+
+def test_verification_temp_root_rejects_logical_path_resolution_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    relocated = repo / "relocated-verification"
+    relocated.mkdir(parents=True)
+    logical_root = repo / ".tmp" / "vega-verification"
+    original_resolve = Path.resolve
+
+    def redirected_resolve(path: Path, *args, **kwargs) -> Path:
+        if path == logical_root:
+            return relocated
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", redirected_resolve)
+
+    with pytest.raises(ValueError, match="不能经链接或 reparse point 改道"):
+        prepare_verification_temp_root(repo)
+    assert not logical_root.exists()
 
 
 def test_ignored_directory_is_folded_without_exhausting_metadata_budget(
@@ -610,6 +729,26 @@ def _init_repo(tmp_path: Path) -> Path:
         "commit",
         "-m",
         "init",
+    )
+    return repo
+
+
+def _init_repo_with_zero_new_file_budget(tmp_path: Path) -> Path:
+    repo = _init_repo(tmp_path)
+    repo.joinpath(".vega.yaml").write_text(
+        "version: 1\nbudget:\n  max_new_files: 0\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "--", ".vega.yaml")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "add Vega budget",
     )
     return repo
 

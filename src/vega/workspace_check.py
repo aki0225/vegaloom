@@ -9,12 +9,18 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .codex_workspace import filter_codex_runtime_ignored_paths
+from .codex_workspace import (
+    filter_codex_runtime_ignored_paths,
+    filter_codex_runtime_porcelain_v1_status,
+    filter_codex_runtime_short_status,
+    filter_codex_runtime_untracked_paths,
+)
 from .git_inventory import (
     build_git_control_manifest,
     read_core_ignorecase as _read_core_ignorecase,
     read_head_sha as _read_head_sha,
     read_ignored_paths,
+    read_short_status as _git_status,
 )
 from .git_read import run_git_bytes as _run_git_bytes
 from .project_config import load_project_config
@@ -24,6 +30,7 @@ from .workspace_inventory import (
     CurrentWorkspaceInventory,
     WorkspaceSnapshot,
     build_content_manifest,
+    ignored_coverage_level,
     safe_git_status as _safe_git_status,
     safe_path_for_report as _safe_path_for_report,
     untracked_paths as _untracked_paths,
@@ -162,7 +169,11 @@ def snapshot_workspace(
         *tracked_snapshot.staged_files,
         *tracked_snapshot.unstaged_files,
     ]
-    untracked_files = list(tracked_snapshot.untracked_files)
+    untracked_files = filter_codex_runtime_untracked_paths(
+        repo,
+        list(tracked_snapshot.untracked_files),
+        ignored_path_exclusions,
+    )
     try:
         ignored_files, ignored_capture_complete = _ignored_paths(
             repo,
@@ -222,6 +233,9 @@ def capture_review_workspace(
     staged_diff, unstaged_diff = collect_tracked_diff_parts(
         repo,
         ["--binary", "--full-index"],
+    )
+    status = filter_codex_runtime_porcelain_v1_status(
+        repo, status, ignored_path_exclusions
     )
     tracked_files, untracked_files = _parse_porcelain_v1_paths(status)
     ignored_files, ignored_capture_complete = _ignored_paths(repo, ignored_path_exclusions)
@@ -428,7 +442,11 @@ def _capture_current_workspace_inventory(
     ignored_path_exclusions: frozenset[str],
 ) -> CurrentWorkspaceInventory:
     head_sha = read_head_sha(repo)
-    raw_status = _git_status(repo)
+    raw_status = filter_codex_runtime_short_status(
+        repo,
+        _git_status(repo),
+        ignored_path_exclusions,
+    )
     ignored_files, ignored_capture_complete = _ignored_paths(
         repo,
         ignored_path_exclusions,
@@ -604,13 +622,6 @@ def render_workspace_check(result: WorkspaceCheckResult) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _git_status(repo_path: Path) -> str:
-    return _run_git_bytes(
-        repo_path,
-        ["git", "status", "--short", "--untracked-files=all"],
-    ).decode("utf-8", errors="replace")
-
-
 def collect_tracked_diff_parts(
     repo_path: Path,
     options: list[str],
@@ -773,17 +784,6 @@ def _ignored_manifest(
         result.metadata_complete,
         result.content_complete,
     )
-
-
-def ignored_coverage_level(
-    manifest_complete: object,
-    content_complete: object,
-) -> str:
-    if manifest_complete is not True:
-        return "incomplete"
-    if content_complete is True:
-        return "full_content"
-    return "metadata_bounded"
 
 
 def _git_control_manifest(repo_path: Path) -> tuple[str, bool]:

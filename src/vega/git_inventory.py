@@ -5,7 +5,12 @@ import stat
 from pathlib import Path
 from typing import Protocol
 
-from .git_read import coerce_git_output_bytes, format_git_error, run_git_capture
+from .git_read import (
+    coerce_git_output_bytes,
+    format_git_error,
+    run_git_bytes,
+    run_git_capture,
+)
 from .workspace_inventory import (
     bounded_file_hash,
     is_complete_content_hash,
@@ -21,6 +26,13 @@ class GitBytesReader(Protocol):
         *,
         allowed_returncodes: tuple[int, ...] = (0,),
     ) -> bytes: ...
+
+
+def read_short_status(repo_path: Path) -> str:
+    return run_git_bytes(
+        repo_path,
+        ["git", "status", "--short", "--untracked-files=all"],
+    ).decode("utf-8", errors="replace")
 
 
 def read_ignored_paths(repo_path: Path) -> tuple[list[str], bool]:
