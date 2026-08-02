@@ -162,7 +162,11 @@ def snapshot_workspace(
         *tracked_snapshot.staged_files,
         *tracked_snapshot.unstaged_files,
     ]
-    untracked_files = list(tracked_snapshot.untracked_files)
+    untracked_files = filter_codex_runtime_ignored_paths(
+        repo,
+        list(tracked_snapshot.untracked_files),
+        ignored_path_exclusions,
+    )
     try:
         ignored_files, ignored_capture_complete = _ignored_paths(
             repo,
@@ -224,6 +228,16 @@ def capture_review_workspace(
         ["--binary", "--full-index"],
     )
     tracked_files, untracked_files = _parse_porcelain_v1_paths(status)
+    visible_untracked_files = filter_codex_runtime_ignored_paths(
+        repo,
+        untracked_files,
+        ignored_path_exclusions,
+    )
+    status = _filter_porcelain_v1_untracked_records(
+        status,
+        excluded_paths=set(untracked_files) - set(visible_untracked_files),
+    )
+    untracked_files = visible_untracked_files
     ignored_files, ignored_capture_complete = _ignored_paths(repo, ignored_path_exclusions)
     index_flags = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
     unsafe_index_paths = _unsafe_index_paths(index_flags)
@@ -429,6 +443,16 @@ def _capture_current_workspace_inventory(
 ) -> CurrentWorkspaceInventory:
     head_sha = read_head_sha(repo)
     raw_status = _git_status(repo)
+    untracked_files = _untracked_paths(raw_status)
+    visible_untracked_files = filter_codex_runtime_ignored_paths(
+        repo,
+        untracked_files,
+        ignored_path_exclusions,
+    )
+    raw_status = _filter_short_untracked_status(
+        raw_status,
+        excluded_paths=set(untracked_files) - set(visible_untracked_files),
+    )
     ignored_files, ignored_capture_complete = _ignored_paths(
         repo,
         ignored_path_exclusions,
@@ -609,6 +633,42 @@ def _git_status(repo_path: Path) -> str:
         repo_path,
         ["git", "status", "--short", "--untracked-files=all"],
     ).decode("utf-8", errors="replace")
+
+
+def _filter_short_untracked_status(
+    status: str,
+    *,
+    excluded_paths: set[str],
+) -> str:
+    if not excluded_paths:
+        return status
+    return "\n".join(
+        line
+        for line in status.splitlines()
+        if not (
+            line.startswith("?? ")
+            and line[3:].strip() in excluded_paths
+        )
+    )
+
+
+def _filter_porcelain_v1_untracked_records(
+    status: bytes,
+    *,
+    excluded_paths: set[str],
+) -> bytes:
+    if not excluded_paths:
+        return status
+    records = status.split(b"\0")
+    filtered = [
+        record
+        for record in records
+        if not (
+            record.startswith(b"?? ")
+            and record[3:].decode("utf-8", errors="replace") in excluded_paths
+        )
+    ]
+    return b"\0".join(filtered)
 
 
 def collect_tracked_diff_parts(

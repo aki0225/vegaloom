@@ -201,16 +201,27 @@ def prepare_verification_temp_root(repo_path: Path) -> Path:
     """建立受控根目录，供 Assist 基线封存其父目录元数据。"""
 
     repo = repo_path.resolve(strict=True)
-    root = (repo / VERIFICATION_TEMP_ROOT).resolve()
-    if not root.is_relative_to(repo):
-        raise ValueError("verification 临时目录根路径逃出目标仓库")
+    logical_root = repo / VERIFICATION_TEMP_ROOT
+    _validate_verification_temp_root(
+        repo,
+        logical_root.resolve(strict=False),
+    )
     try:
-        root.mkdir(parents=True, exist_ok=True)
+        logical_root.mkdir(parents=True, exist_ok=True)
+        root = logical_root.resolve(strict=True)
     except OSError as exc:
         raise ValueError("无法创建 verification 临时目录根路径") from exc
+    _validate_verification_temp_root(repo, root)
     if not root.is_dir():
         raise ValueError("verification 临时目录根路径不是目录")
     return root
+
+
+def _validate_verification_temp_root(repo: Path, root: Path) -> None:
+    if not root.is_relative_to(repo):
+        raise ValueError("verification 临时目录根路径逃出目标仓库")
+    if root.relative_to(repo) != VERIFICATION_TEMP_ROOT:
+        raise ValueError("verification 临时目录根路径不能经链接或 reparse point 改道")
 
 
 def _fingerprint_entry(
