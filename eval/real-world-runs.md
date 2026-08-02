@@ -314,3 +314,36 @@ Worker 或 Reviewer 提供 Issue 评论、官方 PR、修复提交或补丁。Is
 `.agents/` 可以按严格条件视为工具残留，同时其中任何内容仍会触发 fail-closed。它也再次证明
 Windows 行尾策略必须在 checkout 前冻结。最终成功仍只是一个公开 Issue 单案例，不能外推为
 跨仓库成功率或未知任务泛化能力。
+
+## 2026-08-02 主机断电恢复 Dogfood：packaging #1232
+
+本条记录主线 `3d2b45a` 上的一次独立恢复验证，不属于 CRWP-V1，也不是无中断 fresh auto
+成功样本。任务冻结在 pypa/packaging 的准备提交
+`93c303e0e7e36f24aa45fc339ba78cbf1ca3e257`，其上游基线为
+`b34d12acb28c9ad3a6b0b3cc82f03a4b0b98c8c0`。任务要求修复 `Requirement` 相等对象可能产生
+不同哈希的问题；官方修复没有进入 Worker 或 Reviewer 输入，但 Issue 已明确期望行为，因此
+该案例不是盲目根因发现。
+
+- Run：`20260802-022549-926957-bug-loop`；Worker 与 Reviewer 均配置为
+  `gpt-5.5 / xhigh`，最多两轮。
+- 第 1 轮外部 Worker 运行期间宿主机关机。重启后原 owner/child PID 均已不存在，`recover`
+  生成 Recovery ID `42e2dc380946424f86050ef51b3faff9`，将该轮冻结为 `interrupted`；它不参与
+  成功、验证或 Reviewer 判定。
+- 中断前 Worker 已在 3 个允许文件中留下候选：`20` 行新增、`1` 行删除。恢复前登记和完成后
+  复核的 diff Git object ID 均为 `f3b9416c8a97d1e369c3c010fc0f2e0c7d15a0f3`；期间没有人工源码
+  修改、清理候选或启动新 Worker。
+- 用户明确要求继续后，`vega loop continue` 创建第 2 轮，只对保留现场重建验证、门禁和
+  Reviewer 证据。独立 hash/equality oracle、完整 `tests/test_requirements.py`
+  （`5311 passed`）、Ruff 和 `git diff --check` 全部通过。
+- pre-verification、post-verification 和 pre-review 三阶段 Scope Gate 均通过；Risk Gate 为
+  `low / self-check`。独立只读 Reviewer 返回 `approve` 且 findings 为 `0`。
+- Eval 全部通过，artifact integrity 为 valid，evidence freshness 为 fresh，Finish 为
+  `ready_to_commit`。登记过的 Worker、Reviewer 与控制进程均已退出，run artifacts 的高置信
+  凭证模式扫描为 `0`；目标副本没有 remote，Vega 没有自动 commit、push、release 或写入长期
+  memory。
+
+该案例证明单个真实 Python 包任务在宿主机关机后，可以保留 Worker 候选、冻结中断轮次，并在
+用户明确继续后重建可信验证和隔离审查证据。它不能证明无中断 auto 成功率、重复崩溃恢复、任意
+中断点的一致性或跨仓库泛化能力。复盘还暴露了一个状态展示缺陷：根状态已经终止时，旧的
+`running` execution 曾被误报为当前活动进程；配套修复只调整状态选择和提示，不改变恢复或成功
+语义。
