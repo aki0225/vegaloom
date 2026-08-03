@@ -20,12 +20,12 @@
 
 ## 当前进行中的工作
 
-### `0.1.4` 发布候选
+### `v0.1.4` 发布基线
 
-截至 2026-08-03，源码版本为 `0.1.4`，远端最新 Tag 为 `v0.1.3`。
+源码版本和当前稳定基线为 `v0.1.4`；实际发布状态以远端 Tag 与 GitHub Release 为准。
 
 - [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md)：详细变更。
-- [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md)：GitHub Release 候选文案。
+- [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md)：GitHub Release 文案。
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)：发布门禁。
 
 ### CRWP-V1
@@ -57,11 +57,12 @@
 
 | 版本 | 发布说明 | 发布摘要 |
 |---|---|---|
+| `v0.1.4` | [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md) | [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md) |
 | `v0.1.3` | [`RELEASE-NOTES-0.1.3.md`](RELEASE-NOTES-0.1.3.md) | [`RELEASE-SUMMARY-0.1.3.md`](RELEASE-SUMMARY-0.1.3.md) |
 | `v0.1.2` | [`RELEASE-NOTES-0.1.2.md`](RELEASE-NOTES-0.1.2.md) | [`RELEASE-SUMMARY-0.1.2.md`](RELEASE-SUMMARY-0.1.2.md) |
 | `v0.1.1` | [`RELEASE-NOTES-0.1.1.md`](RELEASE-NOTES-0.1.1.md) | 无单独摘要 |
 
-`v0.1.3` 和 `v0.1.1` 已有 GitHub Release；`v0.1.2` 只有 Tag 和仓库内发布文档。
+远端 Tag 与 GitHub Release 是发布状态的权威来源；上表只提供仓库内发布文档导航。
 
 ## 历史交接
 

@@ -9,7 +9,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Code-0.1.4-4fb8d8?style=for-the-badge" alt="0.1.4 发布候选">
+  <img src="https://img.shields.io/badge/Baseline-v0.1.4-4fb8d8?style=for-the-badge" alt="v0.1.4">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -179,7 +179,7 @@ Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会
 | 完整使用流程 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
-| v0.1.4 发布候选摘要 | [RELEASE-SUMMARY-0.1.4](docs/RELEASE-SUMMARY-0.1.4.md) |
+| v0.1.4 发布摘要 | [RELEASE-SUMMARY-0.1.4](docs/RELEASE-SUMMARY-0.1.4.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | Assurance 逐项验证记录 | [assurance-validation](eval/assurance-validation.md) |
@@ -194,8 +194,8 @@ Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal 和 adapters 是可选能力，不扩大核心 loop 的成功条件。
-- 当前代码版本和发布候选为 `0.1.4`，截至 2026-08-03 最新已发布 Tag 为 `v0.1.3`。
-  `0.1.4` 在 v0.1.3 基线上修复 execution 路径、Windows 验证命令预检和 verification
+- 当前稳定基线为 `v0.1.4`。它在 v0.1.3 基线上修复 execution 路径、Windows
+  验证命令预检和 verification
   临时目录复用风险，不扩大 v0.1 产品范围。
 
 ## 开发验证

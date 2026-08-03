@@ -1,9 +1,9 @@
 # Vega 后续演进路线
 
 > 更新时间：2026-08-03
-> 当前代码版本：`0.1.4` 发布候选
-> 最新已发布 Tag：`v0.1.3`
-> 当前顺序：先完成 `v0.1.4` 发布门禁并打 Tag，再完成 CRWP-V1，随后实施调查与计划协议、
+> 当前稳定基线：`v0.1.4`
+> 发布记录：以远端 Tag 与 GitHub Release 为准
+> 当前顺序：`v0.1.4` 发布后完成 CRWP-V1，随后实施调查与计划协议、
 > Finish 报告和真实使用验收。不启动 Stage 4 或新的 Runtime、Memory、LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
@@ -23,8 +23,7 @@
 ## 一、当前主线
 
 ```text
-0.1.4 发布候选
-  -> 完成发布门禁并创建 v0.1.4 Tag / GitHub Release
+v0.1.4 稳定基线
   -> 完成 CRWP-V1 剩余合同允许验证
   -> 固定调查、Plan 与人工确认协议
   -> 改进现有 Finish 第一屏
@@ -34,7 +33,7 @@
 已经完成并保留为历史依据的 Assurance 与维护路线：
 
 ```text
-v0.1.4 可信执行维护候选
+v0.1.4 可信执行维护
   -> Assurance Stage 0 维护完成
   -> Assurance Stage 1：Threat / Evidence 数据合同
   -> Assurance Stage 2：数据库 Migration 纵向实验

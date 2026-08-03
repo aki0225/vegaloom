@@ -1,6 +1,6 @@
 # Vega v0.1.4 发布摘要
 
-> 状态：v0.1.4 发布候选摘要；tag 与 GitHub Release 只在候选提交全部门禁通过后创建。
+> 版本：v0.1.4
 
 这份摘要用于 GitHub Release 文案。详细变更见
 [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md)，发布步骤见
@@ -32,5 +32,5 @@ Vega v0.1.4 是 v0.1.x 的可信执行维护版本：强化外部进程、验证
 
 ## 发布动作
 
-候选提交必须先通过 GitHub CI、真实 Codex JSONL smoke 与 wheel/sdist smoke。随后再人工创建
-annotated `v0.1.4` tag 和 GitHub Release；Vega 自身不会执行这些动作。
+本版本发布前要求同一提交通过 GitHub CI、真实 Codex JSONL smoke 与 wheel/sdist smoke，
+再由人工创建 annotated `v0.1.4` tag 和 GitHub Release；Vega 自身不会执行这些动作。

@@ -1,7 +1,7 @@
 # Vega 日常可信使用完成计划
 
 > 日期：2026-08-03
-> 状态：已确认，等待分阶段实施
+> 状态：Phase 0 发布基线已固定；实际发布状态以远端 Tag 与 GitHub Release 为准
 > 范围：`v0.1.4` 发布、CRWP-V1、调查与计划协议、Finish 报告、真实使用验收
 
 ## 一、完成标准
@@ -99,18 +99,18 @@ Finish 第一屏必须由现有结构化 artifact 确定性生成，不再调用
 - 明确人工必须检查的位置和剩余风险；
 - 最终保持 `needs_human`，不由 AI 自动升级为安全。
 
-## 三、Phase 0：优先发布 `v0.1.4`
+## 三、Phase 0：发布 `v0.1.4`
 
 ### 当前事实
 
-- `pyproject.toml` 和源码版本为 `0.1.4`。
-- 截至 2026-08-03，远端最新 Tag 为 `v0.1.3`。
+- `pyproject.toml` 和源码版本固定为 `0.1.4`。
 - `docs/RELEASE-NOTES-0.1.4.md` 与 `docs/RELEASE-SUMMARY-0.1.4.md` 已存在。
-- 2026-08-03 的两次候选分支真实 Codex Worker smoke 分别在 180 秒和 300 秒超时：
+- 2026-08-03 的两次早期候选分支真实 Codex Worker smoke 分别在 180 秒和 300 秒超时：
   前一次只得到部分 JSONL，后一次 `process-output.txt` 为空。两次都正确进入
   `needs_human / timed_out` 并终止 owned process，但不构成真实 JSONL 闭环通过。
-- 当前 `main` 尚无一份满足发布清单中 JSONL 验收条件的成功 smoke；Phase 0 仍阻断在该门禁。
-- 因此当前准确口径是“`0.1.4` 发布候选”，不是“`v0.1.4` 已发布”。
+- 后续候选提交上的 run `20260803-215834-817575-feature-loop` 已完成 Worker、Verification、
+  Reviewer 与 Finish 闭环，并验证 stdout/stderr 分流、固定安全进度、凭据扫描和进程清理。
+- 该成功现场不替代最终发布 commit 的 fresh smoke；Tag 前仍必须在最终 commit 上重新验证。
 
 ### 执行动作
 
@@ -121,7 +121,8 @@ Finish 第一屏必须由现有结构化 artifact 确定性生成，不再调用
 4. 全部门禁通过后，由人工创建 annotated `v0.1.4` Tag。
 5. 使用现有发布摘要创建 GitHub Release。
 
-任一门禁失败就停止发布，保留候选状态。本计划文档所在的 PR 不创建 Tag，也不执行发布。
+任一门禁失败就停止发布并保留现场；是否已经发布以远端 annotated Tag 和 GitHub Release
+记录为准，不能只依据源码版本或文档表述判断。
 
 ## 四、Phase 1：完成 CRWP-V1 剩余验证
 
