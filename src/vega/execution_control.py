@@ -445,22 +445,13 @@ def run_owned_process(
                 error = f"外部 runner 执行控制失败：{exc}"
             status = "error"
         finally:
-            try:
-                output_capture.finish(context.terminate_grace_seconds + 1.0)
-            except OSError as exc:
-                if error is None:
-                    error = f"runner 输出读取失败：{exc}"
-                if status == "success":
-                    status = "error"
-            try:
-                # reader 关闭失败也必须保留已读取的原始输出；若输出不完整，
-                # finish() 已将本次 execution 收紧为 error，不能把它伪装成成功。
-                output = controller.persist_output(output_file)
-            except OSError as exc:
-                if error is None:
-                    error = f"runner 输出持久化失败：{exc}"
-                if status == "success":
-                    status = "error"
+            output, output_error = output_capture.finish_and_persist(
+                context.terminate_grace_seconds + 1.0,
+                controller.persist_output,
+            )
+            if output_error is not None:
+                error = error or output_error
+                status = "error" if status == "success" else status
             returncode = process.returncode if process is not None else None
             try:
                 if termination_unconfirmed:

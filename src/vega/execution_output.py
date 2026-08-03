@@ -101,6 +101,25 @@ class ProcessOutputCapture:
             # dispatcher 保持 daemon，不能阻塞 timeout/stop 或进程返回。
             self._stop_dispatcher()
 
+    def finish_and_persist(
+        self,
+        timeout_seconds: float,
+        persist_output: Callable[[object], str],
+    ) -> tuple[str, str | None]:
+        """在 sink 冻结后保存完整或 partial 输出，并返回 fail-closed 错误。"""
+
+        errors: list[str] = []
+        try:
+            self.finish(timeout_seconds)
+        except OSError as exc:
+            errors.append(f"runner 输出读取失败：{exc}")
+        try:
+            output = persist_output(self.output_file)
+        except OSError as exc:
+            output = ""
+            errors.append(f"runner 输出持久化失败：{exc}")
+        return output, "；".join(errors) or None
+
     def _read_stream(self, stream: BinaryIO) -> None:
         pending = bytearray()
         oversized = False
@@ -109,33 +128,14 @@ class ProcessOutputCapture:
             if read_available is None:
                 read_available = stream.read
             while chunk := read_available(_READ_CHUNK_BYTES):
-                with self._write_lock:
-                    if self._accept_writes:
-                        self.output_file.write(chunk)
+                self._write_chunk(chunk)
                 if self._observer_closed.is_set():
                     pending.clear()
                     oversized = False
                     continue
-                start = 0
-                while True:
-                    newline = chunk.find(b"\n", start)
-                    end = len(chunk) if newline < 0 else newline
-                    part = chunk[start:end]
-                    if not oversized:
-                        if len(pending) + len(part) <= _MAX_OBSERVED_LINE_BYTES:
-                            pending.extend(part)
-                        else:
-                            pending.clear()
-                            oversized = True
-                    if newline < 0:
-                        break
-                    if not oversized:
-                        self._enqueue_line(pending.decode("utf-8", errors="replace"))
-                    pending.clear()
-                    oversized = False
-                    start = newline + 1
+                oversized = self._consume_chunk(chunk, pending, oversized)
             if not self._observer_closed.is_set() and pending and not oversized:
-                self._enqueue_line(pending.decode("utf-8", errors="replace"))
+                self._enqueue_pending_line(pending, oversized)
         except Exception as exc:  # noqa: BLE001 - reader 异常必须收紧执行结果
             self._reader_error = exc
         finally:
@@ -146,6 +146,51 @@ class ProcessOutputCapture:
                     self._reader_error = exc
             if self._stream is stream:
                 self._stream = None
+
+    def _write_chunk(self, chunk: bytes) -> None:
+        with self._write_lock:
+            if self._accept_writes:
+                self.output_file.write(chunk)
+
+    def _consume_chunk(
+        self,
+        chunk: bytes,
+        pending: bytearray,
+        oversized: bool,
+    ) -> bool:
+        start = 0
+        while True:
+            newline = chunk.find(b"\n", start)
+            end = len(chunk) if newline < 0 else newline
+            oversized = self._append_observed_part(
+                pending,
+                chunk[start:end],
+                oversized,
+            )
+            if newline < 0:
+                return oversized
+            self._enqueue_pending_line(pending, oversized)
+            pending.clear()
+            oversized = False
+            start = newline + 1
+
+    def _append_observed_part(
+        self,
+        pending: bytearray,
+        part: bytes,
+        oversized: bool,
+    ) -> bool:
+        if oversized:
+            return True
+        if len(pending) + len(part) > _MAX_OBSERVED_LINE_BYTES:
+            pending.clear()
+            return True
+        pending.extend(part)
+        return False
+
+    def _enqueue_pending_line(self, pending: bytearray, oversized: bool) -> None:
+        if not oversized:
+            self._enqueue_line(pending.decode("utf-8", errors="replace"))
 
     def _dispatch_lines(self) -> None:
         while not self._dispatch_stop.is_set():
