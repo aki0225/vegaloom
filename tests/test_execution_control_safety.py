@@ -1026,7 +1026,12 @@ def test_jsonl_redaction_replaces_invalid_lines_without_leaking_raw_text() -> No
     payloads = [json.loads(line) for line in redacted.splitlines()]
 
     assert payloads[0] == {"type": "vega.invalid_jsonl"}
-    assert payloads[1] == {"type": "vega.invalid_jsonl"}
+    # 不同 CPython 构建可能在 JSON 解析或递归脱敏阶段先触及递归上限；
+    # 两种 sentinel 都表示该物理行已被安全替换并会让 Runner fail-closed。
+    assert payloads[1] in (
+        {"type": "vega.invalid_jsonl"},
+        {"type": "vega.redaction_failed"},
+    )
     assert payloads[2] == {"type": "vega.oversized_jsonl"}
     assert payloads[3]["item"]["text"] == "Authorization: Bearer [REDACTED]"
     assert fake_secret not in redacted
