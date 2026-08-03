@@ -447,6 +447,14 @@ def run_owned_process(
         finally:
             try:
                 output_capture.finish(context.terminate_grace_seconds + 1.0)
+            except OSError as exc:
+                if error is None:
+                    error = f"runner 输出读取失败：{exc}"
+                if status == "success":
+                    status = "error"
+            try:
+                # reader 关闭失败也必须保留已读取的原始输出；若输出不完整，
+                # finish() 已将本次 execution 收紧为 error，不能把它伪装成成功。
                 output = controller.persist_output(output_file)
             except OSError as exc:
                 if error is None:

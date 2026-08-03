@@ -27,6 +27,7 @@ from vega.execution_control import (
     request_stop_for_run,
     run_owned_process,
 )
+from vega.execution_output import ProcessOutputCapture
 from vega.runner import CodexExecRunner
 
 
@@ -243,7 +244,7 @@ def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
             observer(json.dumps(payload))
         return OwnedProcessResult(
             status="success",
-            output="raw jsonl output",
+            output="\n".join(json.dumps(payload) for payload in payloads),
             error=None,
             returncode=0,
         )
@@ -315,6 +316,467 @@ def test_codex_exec_runner_rejects_success_without_final_message(
 
     assert result.status == "error"
     assert result.error == "codex exec JSONL 未包含最终 agent_message。"
+
+
+def test_codex_exec_runner_keeps_parsing_after_malformed_event_types(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    events: list[tuple[str, int]] = []
+    lines = [
+        json.dumps({"type": []}),
+        json.dumps({"type": "item.completed", "item": {"type": []}}),
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "command_execution", "status": []},
+            }
+        ),
+        json.dumps({"type": "turn.started"}),
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "first"},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "last"},
+            }
+        ),
+    ]
+
+    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+        del command, input_text, cwd, timeout_seconds
+        observer = context.output_line_observer
+        assert observer is not None
+        for line in lines:
+            observer(line)
+        return OwnedProcessResult("success", "\n".join(lines), None, 0)
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+
+    result = CodexExecRunner().run(
+        "test prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+        execution_context=RunnerExecutionContext(
+            execution_root=tmp_path,
+            execution_dir=tmp_path / "runs" / "malformed" / "executions" / "worker",
+            run_id="malformed",
+            step="worker",
+            progress_reporter=lambda step, elapsed: events.append((step, elapsed)),
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.output == "last"
+    assert ("worker.turn_started", 0) in events
+
+
+def test_codex_exec_runner_scans_mixed_jsonl_line_endings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    first = json.dumps(
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "first"}}
+    )
+    last = json.dumps(
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "last"}}
+    )
+    output = f"{first}\r\n\n{last}"
+
+    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+        del command, input_text, cwd, timeout_seconds
+        return OwnedProcessResult("success", output, None, 0)
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+
+    result = CodexExecRunner().run(
+        "test prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "success"
+    assert result.output == "last"
+
+
+@pytest.mark.parametrize("include_small_message", [False, True])
+def test_codex_exec_runner_fails_closed_when_final_jsonl_line_is_oversized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    include_small_message: bool,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    oversized_line = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": "x" * (4 * 1024 * 1024),
+            },
+        }
+    )
+    lines = (
+        [
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": "first"},
+                }
+            )
+        ]
+        if include_small_message
+        else []
+    )
+    lines.append(oversized_line)
+
+    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+        del command, input_text, cwd, timeout_seconds
+        observer = context.output_line_observer
+        assert observer is not None
+        for line in lines:
+            observer(line)
+        return OwnedProcessResult("success", "\n".join(lines), None, 0)
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+
+    result = CodexExecRunner().run(
+        "test prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "error"
+    assert result.output == ""
+    assert "超出终态扫描上限" in (result.error or "")
+
+
+def test_output_dispatcher_does_not_block_control_and_close_stops_queueing() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    observed: list[str] = []
+
+    def blocked_observer(line: str) -> None:
+        observed.append(line)
+        entered.set()
+        release.wait(10)
+
+    output = io.BytesIO()
+    capture = ProcessOutputCapture(output, blocked_observer)
+    capture.start(SimpleNamespace(stdout=io.BytesIO(b"line-1\nline-2\n")))
+    assert entered.wait(1)
+
+    started = time.monotonic()
+    assert capture.poll(max_lines=1, budget_seconds=1) == 0
+    assert time.monotonic() - started < 0.1
+
+    started = time.monotonic()
+    capture.finish(0.01)
+    assert time.monotonic() - started < 0.5
+    assert output.getvalue() == b"line-1\nline-2\n"
+    assert observed == ["line-1"]
+
+    release.set()
+
+    broken = ProcessOutputCapture(io.BytesIO(), lambda _: None)
+    broken._disable_observer()
+    broken._lines.put_nowait("queued-before-close")
+    broken._read_stream(io.BytesIO(b"new-1\nnew-2\nnew-3\n"))
+    assert broken._lines.qsize() == 1
+    broken.finish(0)
+    assert broken._lines.qsize() == 1
+
+
+def test_output_reader_natural_drain_finishes_before_forced_close() -> None:
+    class NaturalDrainStream:
+        def __init__(self, chunks: list[bytes]) -> None:
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.done_reading = threading.Event()
+            self.forced_close = False
+            self._chunks = iter(chunks)
+
+        def read1(self, _: int) -> bytes:
+            self.started.set()
+            self.release.wait(1)
+            try:
+                return next(self._chunks)
+            except StopIteration:
+                self.done_reading.set()
+                return b""
+
+        def close(self) -> None:
+            if not self.done_reading.is_set():
+                self.forced_close = True
+
+    chunks = [b"line-1\n", b"line-2\n", b"line-3\n"]
+    stream = NaturalDrainStream(chunks)
+    output = io.BytesIO()
+    capture = ProcessOutputCapture(output, lambda _: None)
+    capture.start(SimpleNamespace(stdout=stream))
+    assert stream.started.wait(1)
+    stream.release.set()
+
+    capture.finish(1)
+
+    assert not stream.forced_close
+    assert output.getvalue() == b"".join(chunks)
+
+
+def test_output_reader_freezes_partial_sink_after_unwakeable_shutdown() -> None:
+    class UnwakeableStream:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.closed = threading.Event()
+            self._sent = False
+
+        def read1(self, _: int) -> bytes:
+            self.started.set()
+            self.release.wait(10)
+            if self._sent:
+                return b""
+            self._sent = True
+            return b"late-output\n"
+
+        def close(self) -> None:
+            self.closed.set()
+
+    stream = UnwakeableStream()
+    output = io.BytesIO()
+    capture = ProcessOutputCapture(output, lambda _: None)
+    capture.start(SimpleNamespace(stdout=stream))
+    assert stream.started.wait(1)
+
+    with pytest.raises(OSError, match="输出读取线程关闭超时"):
+        capture.finish(0.01)
+    partial = output.getvalue()
+
+    stream.release.set()
+    assert capture._reader is not None
+    capture._reader.join(1)
+
+    assert stream.closed.is_set()
+    assert output.getvalue() == partial
+
+
+def test_output_reader_runtime_error_is_recorded_and_fails_closed() -> None:
+    class ErrorStream:
+        def read1(self, _: int) -> bytes:
+            raise RuntimeError("simulated reader failure")
+
+        def close(self) -> None:
+            return
+
+    capture = ProcessOutputCapture(io.BytesIO(), lambda _: None)
+    capture.start(SimpleNamespace(stdout=ErrorStream()))
+
+    with pytest.raises(OSError, match="输出读取失败"):
+        capture.finish(1)
+
+
+def test_output_reader_shutdown_closes_blocked_stream() -> None:
+    class BlockingStream:
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.closed = threading.Event()
+            self._released = threading.Event()
+
+        def read1(self, _: int) -> bytes:
+            self.started.set()
+            self._released.wait(10)
+            return b""
+
+        def close(self) -> None:
+            self.closed.set()
+            self._released.set()
+
+    stream = BlockingStream()
+    capture = ProcessOutputCapture(io.BytesIO(), lambda _: None)
+    capture.start(SimpleNamespace(stdout=stream))
+    assert stream.started.wait(1)
+
+    capture.finish(0.01)
+
+    assert stream.closed.is_set()
+    assert capture._reader is not None
+    assert not capture._reader.is_alive()
+
+
+def test_output_reader_drops_realtime_lines_without_blocking_when_queue_full() -> None:
+    output = io.BytesIO()
+    capture = ProcessOutputCapture(output, lambda _: None)
+    for index in range(capture._lines.maxsize):
+        capture._lines.put_nowait(f"queued-{index}")
+    payload = b"".join(f"line-{index}\n".encode() for index in range(400))
+
+    reader = threading.Thread(target=capture._read_stream, args=(io.BytesIO(payload),))
+    reader.start()
+    reader.join(1)
+
+    assert not reader.is_alive()
+    assert output.getvalue() == payload
+    assert capture._lines.qsize() == capture._lines.maxsize
+
+
+def test_high_frequency_slow_observer_does_not_delay_timeout_or_output_persistence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lines = "".join(f"noise-{index}\n" for index in range(600))
+
+    def slow_observer(_: str) -> None:
+        time.sleep(0.01)
+
+    class FakeProcess:
+        pid = 4242
+
+        def __init__(self) -> None:
+            self.stdout = io.BytesIO(lines.encode())
+            self.returncode: int | None = None
+            self.alive = True
+
+        def poll(self) -> int | None:
+            return None if self.alive else self.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            self.alive = False
+            self.returncode = 1
+            return self.returncode
+
+    process = FakeProcess()
+
+    def fake_terminate(*args: object, **kwargs: object) -> SimpleNamespace:
+        del args, kwargs
+        process.alive = False
+        process.returncode = -15
+        return SimpleNamespace(succeeded=True, detail="fake process stopped")
+
+    monkeypatch.setattr(execution_control.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(execution_control, "_create_windows_job_for_execution", lambda *_: None)
+    monkeypatch.setattr(
+        execution_control,
+        "_add_windows_job_creation_flag",
+        lambda options, _job: options,
+    )
+    monkeypatch.setattr(execution_control, "_activate_windows_job_process", lambda *_: None)
+    monkeypatch.setattr(execution_control, "_process_group_options", lambda: {})
+    monkeypatch.setattr(execution_control, "_get_process_creation_token", lambda _: 1)
+    monkeypatch.setattr(
+        execution_control,
+        "_owned_process_tree_is_active",
+        lambda current_process, *_args, **_kwargs: current_process.alive,
+    )
+    monkeypatch.setattr(execution_control, "_terminate_owned_process", fake_terminate)
+
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "slow-observer" / "executions" / "worker",
+        run_id="slow-observer",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        terminate_grace_seconds=0.2,
+        output_line_observer=slow_observer,
+    )
+    script = f"import sys,time; sys.stdout.write({lines!r}); sys.stdout.flush(); time.sleep(5)"
+
+    started = time.monotonic()
+    result = run_owned_process(
+        [sys.executable, "-c", script],
+        "",
+        tmp_path,
+        0.1,
+        context,
+    )
+    elapsed = time.monotonic() - started
+    persisted = context.execution_dir.joinpath("process-output.txt").read_text(encoding="utf-8")
+
+    assert result.status == "timed_out"
+    assert elapsed < 1
+    assert persisted == result.output
+    assert persisted.count("noise-") == 600
+
+
+def test_run_owned_process_persists_stable_partial_output_after_reader_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ErrorAfterDataStream:
+        def __init__(self) -> None:
+            self._returned_data = False
+
+        def read1(self, _: int) -> bytes:
+            if not self._returned_data:
+                self._returned_data = True
+                return b"partial-output\n"
+            raise RuntimeError("simulated reader failure")
+
+        def close(self) -> None:
+            return
+
+    class FinishedProcess:
+        pid = 4343
+        returncode = 0
+        stdout = ErrorAfterDataStream()
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return 0
+
+    process = FinishedProcess()
+    monkeypatch.setattr(execution_control.subprocess, "Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr(execution_control, "_create_windows_job_for_execution", lambda *_: None)
+    monkeypatch.setattr(
+        execution_control,
+        "_add_windows_job_creation_flag",
+        lambda options, _job: options,
+    )
+    monkeypatch.setattr(execution_control, "_activate_windows_job_process", lambda *_: None)
+    monkeypatch.setattr(execution_control, "_process_group_options", lambda: {})
+    monkeypatch.setattr(execution_control, "_get_process_creation_token", lambda _: 1)
+    monkeypatch.setattr(
+        execution_control,
+        "_owned_process_tree_is_active",
+        lambda *_args, **_kwargs: False,
+    )
+
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "partial-output" / "executions" / "worker",
+        run_id="partial-output",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        terminate_grace_seconds=0.1,
+        output_line_observer=lambda _: None,
+    )
+
+    result = run_owned_process(["fake-runner"], "", tmp_path, 5, context)
+    persisted = context.execution_dir.joinpath("process-output.txt").read_text(encoding="utf-8")
+
+    assert result.status == "error"
+    assert "输出读取失败" in (result.error or "")
+    assert persisted == "partial-output\n"
+    assert result.output == persisted
 
 
 def test_large_stdin_does_not_delay_owned_process_timeout(tmp_path: Path) -> None:
@@ -397,7 +859,7 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
         run_id="progress",
         step="worker",
         heartbeat_interval_seconds=0.01,
-        lease_timeout_seconds=0.5,
+        lease_timeout_seconds=2.0,
         progress_reporter=lambda step, elapsed: events.append((step, elapsed)),
     )
 
@@ -427,7 +889,7 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
         run_id="broken-progress",
         step="reviewer",
         heartbeat_interval_seconds=0.01,
-        lease_timeout_seconds=0.5,
+        lease_timeout_seconds=2.0,
         progress_reporter=broken_reporter,
     )
     broken_result = run_owned_process(
@@ -450,6 +912,7 @@ def test_owned_process_reports_bounded_progress_without_persisting_it(
 def test_owned_process_observes_complete_lines_before_child_exit(tmp_path: Path) -> None:
     fake_secret = "sk-stream-fake-secret-123456"
     first_line = threading.Event()
+    second_line = threading.Event()
     observed: list[str] = []
     result_holder: dict[str, OwnedProcessResult] = {}
 
@@ -457,6 +920,8 @@ def test_owned_process_observes_complete_lines_before_child_exit(tmp_path: Path)
         observed.append(line)
         if line == '{"type":"turn.started"}':
             first_line.set()
+        elif line == f"api_key={fake_secret}":
+            second_line.set()
 
     context = RunnerExecutionContext(
         execution_root=tmp_path,
@@ -489,6 +954,7 @@ def test_owned_process_observes_complete_lines_before_child_exit(tmp_path: Path)
     thread.start()
     assert first_line.wait(3)
     assert thread.is_alive()
+    assert second_line.wait(3)
     thread.join(5)
 
     assert not thread.is_alive()

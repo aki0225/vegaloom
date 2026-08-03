@@ -1,4 +1,4 @@
-# Vega v0.1.4 Release Summary
+# Vega v0.1.4 发布摘要
 
 > 状态：v0.1.4 发布候选摘要；tag 与 GitHub Release 只在候选提交全部门禁通过后创建。
 

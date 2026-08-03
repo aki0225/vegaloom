@@ -1343,7 +1343,13 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
         context.output_line_observer(
             json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}})
         )
-        return SimpleNamespace(status="success", output="ok", error=None)
+        return SimpleNamespace(
+            status="success",
+            output=json.dumps(
+                {"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}}
+            ),
+            error=None,
+        )
 
     monkeypatch.setattr(
         "vega.runner.shutil.which",
@@ -1411,7 +1417,13 @@ def test_codex_exec_runner_executes_raw_command_but_redacts_result_command(
         context.output_line_observer(
             json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}})
         )
-        return SimpleNamespace(status="success", output="ok", error=None)
+        return SimpleNamespace(
+            status="success",
+            output=json.dumps(
+                {"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}}
+            ),
+            error=None,
+        )
 
     monkeypatch.setattr(
         "vega.runner.shutil.which",

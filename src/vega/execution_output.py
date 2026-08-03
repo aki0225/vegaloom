@@ -11,10 +11,14 @@ ExecutionOutputLineObserver = Callable[[str], None]
 
 _READ_CHUNK_BYTES = 64 * 1024
 _MAX_OBSERVED_LINE_BYTES = 256 * 1024
+_MAX_QUEUED_LINES = 128
+_DISPATCH_POLL_SECONDS = 0.05
+_DISPATCH_JOIN_SECONDS = 0.05
+_READER_SHUTDOWN_SECONDS = 0.5
 
 
 class ProcessOutputCapture:
-    """持续排空外部进程输出，同时只把有界完整行交给可选观察器。"""
+    """持续排空外部进程输出，并异步投递有界实时提示。"""
 
     def __init__(
         self,
@@ -23,9 +27,17 @@ class ProcessOutputCapture:
     ) -> None:
         self.output_file = output_file
         self.observer = observer
-        self._lines: queue.SimpleQueue[str] = queue.SimpleQueue()
+        # 观察器只负责实时提示，不能反过来阻塞 PIPE reader；队列满时丢弃提示，
+        # 完整 stdout/stderr 仍继续写入 output_file，最终结果从完整输出独立提取。
+        self._lines: queue.Queue[str] = queue.Queue(maxsize=_MAX_QUEUED_LINES)
         self._reader: threading.Thread | None = None
+        self._dispatcher: threading.Thread | None = None
+        self._stream: BinaryIO | None = None
         self._reader_error: BaseException | None = None
+        self._write_lock = threading.Lock()
+        self._accept_writes = True
+        self._observer_closed = threading.Event()
+        self._dispatch_stop = threading.Event()
 
     @property
     def popen_stdout(self) -> int | BinaryIO:
@@ -34,53 +46,76 @@ class ProcessOutputCapture:
     def start(self, process: subprocess.Popen[bytes]) -> None:
         if self.observer is None:
             return
-        if process.stdout is None:
+        stream = process.stdout
+        if stream is None:
             raise OSError("实时输出观察要求外部进程提供 stdout PIPE")
+        self._stream = stream
         try:
+            dispatcher = threading.Thread(
+                target=self._dispatch_lines,
+                name="vega-output-dispatcher",
+                daemon=True,
+            )
+            dispatcher.start()
+            self._dispatcher = dispatcher
             reader = threading.Thread(
                 target=self._read_stream,
-                args=(process.stdout,),
+                args=(stream,),
                 name="vega-output-reader",
                 daemon=True,
             )
             reader.start()
+            self._reader = reader
         except RuntimeError as exc:
+            self._stop_dispatcher()
+            self._close_stream()
             raise OSError("runner 输出读取线程启动失败") from exc
-        self._reader = reader
 
-    def poll(self) -> None:
-        while True:
-            try:
-                line = self._lines.get_nowait()
-            except queue.Empty:
-                return
-            line = line.removesuffix("\r")
-            observer = self.observer
-            if observer is None:
-                continue
-            try:
-                observer(line)
-            except Exception:  # noqa: BLE001 - 可见性回调失败不能改变执行结果
-                self.observer = None
+    def poll(self, *args: object, **kwargs: object) -> int:
+        """保留控制循环调用点；实时提示已由独立 dispatcher 异步处理。"""
+
+        del args, kwargs
+        return 0
 
     def finish(self, timeout_seconds: float) -> None:
+        """关闭 reader/dispatcher，并在 bounded join 后报告不完整输出。"""
+
         reader = self._reader
-        if reader is None:
-            return
-        reader.join(max(0.1, timeout_seconds))
-        self.poll()
-        if reader.is_alive():
-            raise OSError("runner 输出读取线程未在限定时间内结束")
-        if self._reader_error is not None:
-            raise OSError("runner 输出读取失败") from self._reader_error
+        try:
+            if reader is not None:
+                reader.join(max(0.1, timeout_seconds))
+                if reader.is_alive():
+                    # 外部进程树已结束但继承的 PIPE 仍可能保持打开；先显式关闭，
+                    # 再给 reader 一个短的退出窗口，避免 reader 持有临时输出文件。
+                    self._close_stream()
+                    reader.join(_READER_SHUTDOWN_SECONDS)
+            if reader is not None and reader.is_alive():
+                raise OSError("runner 输出读取线程关闭超时，输出可能不完整")
+            if self._reader_error is not None:
+                raise OSError("runner 输出读取失败") from self._reader_error
+        finally:
+            # finish 返回或抛错后，reader 即使从阻塞 read 中苏醒也不能再写 sink；
+            # 这样 execution_control 才能安全读取稳定的 partial/full 快照。
+            self._freeze_output()
+            # 卡死 observer 不能被抢占；停止继续投递并只等待一个很短的窗口，
+            # dispatcher 保持 daemon，不能阻塞 timeout/stop 或进程返回。
+            self._stop_dispatcher()
 
     def _read_stream(self, stream: BinaryIO) -> None:
         pending = bytearray()
         oversized = False
-        read_available = getattr(stream, "read1", stream.read)
         try:
+            read_available = getattr(stream, "read1", None)
+            if read_available is None:
+                read_available = stream.read
             while chunk := read_available(_READ_CHUNK_BYTES):
-                self.output_file.write(chunk)
+                with self._write_lock:
+                    if self._accept_writes:
+                        self.output_file.write(chunk)
+                if self._observer_closed.is_set():
+                    pending.clear()
+                    oversized = False
+                    continue
                 start = 0
                 while True:
                     newline = chunk.find(b"\n", start)
@@ -95,16 +130,69 @@ class ProcessOutputCapture:
                     if newline < 0:
                         break
                     if not oversized:
-                        self._lines.put(pending.decode("utf-8", errors="replace"))
+                        self._enqueue_line(pending.decode("utf-8", errors="replace"))
                     pending.clear()
                     oversized = False
                     start = newline + 1
-            if pending and not oversized:
-                self._lines.put(pending.decode("utf-8", errors="replace"))
-        except (OSError, ValueError) as exc:
+            if not self._observer_closed.is_set() and pending and not oversized:
+                self._enqueue_line(pending.decode("utf-8", errors="replace"))
+        except Exception as exc:  # noqa: BLE001 - reader 异常必须收紧执行结果
             self._reader_error = exc
         finally:
             try:
                 stream.close()
-            except OSError:
-                pass
+            except Exception as exc:  # noqa: BLE001 - close 异常同样不能静默成功
+                if self._reader_error is None:
+                    self._reader_error = exc
+            if self._stream is stream:
+                self._stream = None
+
+    def _dispatch_lines(self) -> None:
+        while not self._dispatch_stop.is_set():
+            try:
+                line = self._lines.get(timeout=_DISPATCH_POLL_SECONDS)
+            except queue.Empty:
+                continue
+            if self._observer_closed.is_set():
+                continue
+            observer = self.observer
+            if observer is None:
+                continue
+            try:
+                observer(line.removesuffix("\r"))
+            except Exception:  # noqa: BLE001 - 可见性回调失败不能改变执行结果
+                self._disable_observer()
+
+    def _enqueue_line(self, line: str) -> None:
+        if self._observer_closed.is_set() or self.observer is None:
+            return
+        try:
+            self._lines.put_nowait(line)
+        except queue.Full:
+            # 实时提示可以丢弃，不能让高频输出反向阻塞外部进程的 PIPE。
+            return
+
+    def _disable_observer(self) -> None:
+        self.observer = None
+        self._observer_closed.set()
+
+    def _freeze_output(self) -> None:
+        with self._write_lock:
+            self._accept_writes = False
+
+    def _stop_dispatcher(self) -> None:
+        self._disable_observer()
+        self._dispatch_stop.set()
+        dispatcher = self._dispatcher
+        if dispatcher is not None and dispatcher is not threading.current_thread():
+            dispatcher.join(_DISPATCH_JOIN_SECONDS)
+
+    def _close_stream(self) -> None:
+        stream = self._stream
+        if stream is None:
+            return
+        try:
+            stream.close()
+        except Exception as exc:  # noqa: BLE001 - 强制关闭异常必须 fail-closed
+            if self._reader_error is None:
+                self._reader_error = exc
