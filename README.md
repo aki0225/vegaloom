@@ -9,7 +9,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Baseline-v0.1.4-4fb8d8?style=for-the-badge" alt="v0.1.4">
+  <img src="https://img.shields.io/badge/Code-0.1.4-4fb8d8?style=for-the-badge" alt="0.1.4 发布候选">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -172,23 +172,18 @@ Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会
 
 | 想了解 | 文档 |
 |---|---|
-| 完整使用闭环 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
+| 全部文档及状态 | [文档导航](docs/README.md) |
+| 下一阶段完整计划 | [日常可信使用完成计划](docs/DAILY-USAGE-COMPLETION-PLAN.md) |
+| 完整使用流程 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
-| v0.1.3 发布摘要 | [RELEASE-SUMMARY-0.1.3](docs/RELEASE-SUMMARY-0.1.3.md) |
-| v0.1.2 发布摘要 | [RELEASE-SUMMARY-0.1.2](docs/RELEASE-SUMMARY-0.1.2.md) |
+| v0.1.4 发布候选摘要 | [RELEASE-SUMMARY-0.1.4](docs/RELEASE-SUMMARY-0.1.4.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
-| Assurance 威胁模型与证据充分性候选合同 | [ASSURANCE-CONTRACT-CANDIDATE](docs/ASSURANCE-CONTRACT-CANDIDATE.md) |
 | Assurance 逐项验证记录 | [assurance-validation](eval/assurance-validation.md) |
-| 长任务 Goal 与 checkpoint | [LONG-RUNNING-GOALS](docs/LONG-RUNNING-GOALS.md) |
 | v0.1 范围与取舍 | [MVP-SCOPE](docs/MVP-SCOPE.md) |
 | 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |
 | 工作区与验证规范 | [WORKSPACE-HYGIENE](docs/WORKSPACE-HYGIENE.md) |
-| v0.1.4 可信执行维护 | [RELEASE-NOTES-0.1.4](docs/RELEASE-NOTES-0.1.4.md) |
-| v0.1.3 维护发布 | [RELEASE-NOTES-0.1.3](docs/RELEASE-NOTES-0.1.3.md) |
-| v0.1.1 安全维护更新与迁移 | [RELEASE-NOTES-0.1.1](docs/RELEASE-NOTES-0.1.1.md) |
-| v0.1.2 成功语义安全修复 | [RELEASE-NOTES-0.1.2](docs/RELEASE-NOTES-0.1.2.md) |
 
 ## 定位与边界
 
@@ -197,8 +192,9 @@ Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal 和 adapters 是可选能力，不扩大核心 loop 的成功条件。
-- 当前稳定基线为 `v0.1.4`。它在 v0.1.3 基线上修复 execution 路径、Windows 验证命令
-  预检和 verification 临时目录复用风险，不扩大 v0.1 产品范围。
+- 当前代码版本和发布候选为 `0.1.4`，截至 2026-08-03 最新已发布 Tag 为 `v0.1.3`。
+  `0.1.4` 在 v0.1.3 基线上修复 execution 路径、Windows 验证命令预检和 verification
+  临时目录复用风险，不扩大 v0.1 产品范围。
 
 ## 开发验证
 

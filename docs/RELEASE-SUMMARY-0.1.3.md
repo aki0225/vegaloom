@@ -1,6 +1,6 @@
 # Vega v0.1.3 Release Summary
 
-> 状态：v0.1.3 发布摘要；tag 与 GitHub Release 由人工确认后创建。
+> 状态：`v0.1.3` 已发布。下文“发布动作”保留当时的人工发布边界，不是当前待办。
 
 这份摘要用于 GitHub Release 文案、公开仓首页说明和面试展示。详细变更记录见
 [`RELEASE-NOTES-0.1.3.md`](RELEASE-NOTES-0.1.3.md)，发布前检查步骤见
