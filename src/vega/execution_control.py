@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .execution_feedback import ExecutionProgressReporter, ExecutionProgressTicker
 from .execution_output import (
     ExecutionOutputLineObserver,
-    ProcessOutputCapture,
+    ProcessOutputCapture, redact_diagnostic_output as _redact_diagnostic_output,
     redact_jsonl_output as _redact_jsonl_output,
     redact_optional_text as _redact_optional_text,
     redact_process_output as _redact_process_output,
@@ -287,7 +287,7 @@ class ExecutionController:
         return self.path_guard.persist_output(
             stderr_file,
             self.stderr_path,
-            _redact_process_output,
+            _redact_diagnostic_output,
         )
 
     def _write_lease(self) -> None:

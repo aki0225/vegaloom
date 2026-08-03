@@ -901,11 +901,17 @@ def test_owned_process_separates_and_redacts_stderr_for_jsonl_runner(tmp_path: P
             },
         }
     )
-    diagnostic = f"sqlx warning api_key={fake_secret}"
+    fake_path = tmp_path / "private-target"
+    diagnostic = (
+        "2026-08-03T00:00:00Z ERROR codex_core::tools::router: "
+        f'command="git status" path="{fake_path}" '
+        f'output="model text" api_key={fake_secret}'
+    )
     child_code = (
         "import sys,time; "
         f"print({jsonl_line!r}, flush=True); "
         f"print({diagnostic!r}, file=sys.stderr, flush=True); "
+        "print('fatal: raw command output', file=sys.stderr, flush=True); "
         "sys.stderr.write('x' * (256 * 1024)); "
         "sys.stderr.flush(); "
         "time.sleep(0.3)"
@@ -933,10 +939,17 @@ def test_owned_process_separates_and_redacts_stderr_for_jsonl_runner(tmp_path: P
     assert result.output == persisted_output
     assert persisted_payloads[0]["item"]["text"] == "ready api_key=[REDACTED]"
     assert fake_secret not in persisted_output
-    assert "sqlx warning" in persisted_stderr
-    assert persisted_stderr.count("x") >= 256 * 1024
+    assert (
+        "2026-08-03T00:00:00Z ERROR "
+        "codex_core::tools::router: [DIAGNOSTIC_REDACTED]"
+    ) in persisted_stderr
+    assert persisted_stderr.count("[DIAGNOSTIC_REDACTED]") == 3
     assert fake_secret not in persisted_stderr
-    assert "[REDACTED]" in persisted_stderr
+    assert str(fake_path) not in persisted_stderr
+    assert "git status" not in persisted_stderr
+    assert "model text" not in persisted_stderr
+    assert "raw command output" not in persisted_stderr
+    assert "x" * 1024 not in persisted_stderr
 
 
 def test_owned_process_keeps_default_stderr_merged_with_stdout(tmp_path: Path) -> None:

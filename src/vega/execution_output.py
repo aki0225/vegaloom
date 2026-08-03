@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -18,6 +19,14 @@ _MAX_QUEUED_LINES = 128
 _DISPATCH_POLL_SECONDS = 0.05
 _DISPATCH_JOIN_SECONDS = 0.05
 _REDACTION_UNAVAILABLE_OUTPUT = "[REDACTION_UNAVAILABLE]"
+_DIAGNOSTIC_REDACTED_OUTPUT = "[DIAGNOSTIC_REDACTED]"
+_DIAGNOSTIC_TRUNCATED_OUTPUT = "[DIAGNOSTIC_TRUNCATED]"
+_MAX_DIAGNOSTIC_LINES = 256
+_DIAGNOSTIC_HEADER_PATTERN = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)"
+    r"\s+(?P<level>TRACE|DEBUG|INFO|WARN|ERROR)"
+    r"\s+(?P<source>[A-Za-z0-9_.:-]{1,128}):(?:\s|$)"
+)
 
 
 class ProcessOutputCapture:
@@ -355,6 +364,31 @@ def redact_process_output(output: str) -> str:
         return redactor(output)
     except Exception:
         return _REDACTION_UNAVAILABLE_OUTPUT
+
+
+def redact_diagnostic_output(output: str) -> str:
+    """把 runner stderr 投影为无正文的有界诊断，避免路径或命令输出落盘。"""
+
+    if not output:
+        return output
+    redacted = redact_process_output(output)
+    if redacted == _REDACTION_UNAVAILABLE_OUTPUT:
+        return redacted
+
+    safe_lines: list[str] = []
+    for index, line in enumerate(redacted.splitlines()):
+        if index >= _MAX_DIAGNOSTIC_LINES:
+            safe_lines.append(_DIAGNOSTIC_TRUNCATED_OUTPUT)
+            break
+        match = _DIAGNOSTIC_HEADER_PATTERN.match(line)
+        if match is None:
+            safe_lines.append(_DIAGNOSTIC_REDACTED_OUTPUT)
+            continue
+        safe_lines.append(
+            f"{match.group('timestamp')} {match.group('level')} "
+            f"{match.group('source')}: {_DIAGNOSTIC_REDACTED_OUTPUT}"
+        )
+    return "\n".join(safe_lines) + ("\n" if safe_lines else "")
 
 
 def redact_jsonl_output(output: str) -> str:
