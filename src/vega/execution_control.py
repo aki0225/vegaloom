@@ -16,6 +16,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from .execution_feedback import ExecutionProgressReporter, ExecutionProgressTicker
+from .execution_output import ExecutionOutputLineObserver, ProcessOutputCapture
 from .execution_paths import ExecutionPathGuard
 from .execution_process import (
     ProcessProbe,
@@ -110,6 +111,7 @@ class RunnerExecutionContext:
     lease_timeout_seconds: float = 10.0
     terminate_grace_seconds: float = 3.0
     progress_reporter: ExecutionProgressReporter | None = None
+    output_line_observer: ExecutionOutputLineObserver | None = None
 
     def __post_init__(self) -> None:
         if self.heartbeat_interval_seconds <= 0:
@@ -294,8 +296,8 @@ def run_owned_process(
 ) -> OwnedProcessResult:
     """运行一个可停止、可超时、可恢复判断的外部进程。
 
-    stdout/stderr 直接落盘，避免长输出填满 PIPE 后阻塞。停止和超时只作用于本函数
-    启动并写入 execution.json 的 PID，不扫描或终止系统中的其他 Codex/Node 进程。
+    stdout/stderr 写入匿名临时文件；启用观察器时由专用线程持续排空 PIPE。停止和超时
+    只作用于本函数启动并写入 execution.json 的 PID，不扫描其他 Codex/Node 进程。
     """
     controller = ExecutionController(context)
     lease = controller.prepare(command, timeout_seconds)
@@ -312,10 +314,12 @@ def run_owned_process(
     if environment is not None:
         process_environment = os.environ.copy()
         process_environment.update(environment)
+    process_group_alive = None if _is_windows_platform() else _is_posix_process_group_alive
     with (
         tempfile.TemporaryFile("w+b") as output_file,
         tempfile.TemporaryFile("w+b") as input_file,
     ):
+        output_capture = ProcessOutputCapture(output_file, context.output_line_observer)
         try:
             input_file.write(input_text.encode("utf-8"))
             input_file.seek(0)
@@ -328,7 +332,7 @@ def run_owned_process(
                 command,
                 cwd=cwd,
                 stdin=input_file,
-                stdout=output_file,
+                stdout=output_capture.popen_stdout,
                 stderr=subprocess.STDOUT,
                 env=process_environment,
                 **process_options,
@@ -339,10 +343,8 @@ def run_owned_process(
                 controller.child_created,
             )
             controller.child_started(process.pid)
+            output_capture.start(process)
             progress.started()
-            process_group_alive = (
-                None if _is_windows_platform() else _is_posix_process_group_alive
-            )
             while _owned_process_tree_is_active(
                 process,
                 windows_job,
@@ -389,6 +391,7 @@ def run_owned_process(
                 if now >= next_heartbeat:
                     controller.heartbeat()
                     next_heartbeat = now + context.heartbeat_interval_seconds
+                output_capture.poll()
                 progress.tick(now)
                 time.sleep(min(0.1, context.heartbeat_interval_seconds))
 
@@ -401,9 +404,7 @@ def run_owned_process(
             if process is not None and _owned_process_tree_may_be_active(
                 process,
                 windows_job,
-                process_group_alive=(
-                    None if _is_windows_platform() else _is_posix_process_group_alive
-                ),
+                process_group_alive=process_group_alive,
             ):
                 termination = _terminate_owned_process(
                     process,
@@ -427,9 +428,7 @@ def run_owned_process(
             if process is not None and _owned_process_tree_may_be_active(
                 process,
                 windows_job,
-                process_group_alive=(
-                    None if _is_windows_platform() else _is_posix_process_group_alive
-                ),
+                process_group_alive=process_group_alive,
             ):
                 termination = _terminate_owned_process(
                     process,
@@ -446,13 +445,13 @@ def run_owned_process(
                 error = f"外部 runner 执行控制失败：{exc}"
             status = "error"
         finally:
-            try:
-                output = controller.persist_output(output_file)
-            except OSError as exc:
-                if error is None:
-                    error = f"runner 输出持久化失败：{exc}"
-                if status == "success":
-                    status = "error"
+            output, output_error = output_capture.finish_and_persist(
+                context.terminate_grace_seconds + 1.0,
+                controller.persist_output,
+            )
+            if output_error is not None:
+                error = error or output_error
+                status = "error" if status == "success" else status
             returncode = process.returncode if process is not None else None
             try:
                 if termination_unconfirmed:

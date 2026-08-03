@@ -445,7 +445,24 @@ RunnerExecutionContext
   -> stopped | timed_out | completed | failed
 ```
 
-`execution.json` 记录 run、step、iteration、owner PID、child PID、command、heartbeat、lease、deadline 和终态。stdout/stderr 直接写入 `process-output.txt`，避免外部进程长输出填满 PIPE。`vega stop --run <run> --reason "..."` 只为指定 run 最新的 active execution 写停止请求；runner 只终止自己记录的 PID，不枚举或 kill 用户的其他 Codex/Node 进程。每条 verification 命令也写入独立 execution 目录，并在墙钟 deadline 到达时终止对应 owned process tree，避免后代进程继续写入。
+`execution.json` 记录 run、step、iteration、owner PID、child PID、command、heartbeat、lease、
+deadline 和终态。默认 stdout/stderr 直接写入匿名临时文件；Codex worker/reviewer 使用
+`codex exec --json` 时，由专用 daemon 线程以 64 KiB 分块持续排空 PIPE，同时把不超过
+256 KiB 的完整 JSONL 行非阻塞地放入有界实时提示队列；队列满或观察器异常时只丢弃实时提示，
+不会阻塞 reader，也不会影响完整输出。独立 daemon dispatcher 异步调用观察器，慢或卡死的
+观察器不会拖延 timeout、stop 与 heartbeat；dispatcher 关闭只等待有限窗口，卡死回调作为
+daemon 残余风险保留。观察器只映射回合、命令、文件修改、计划与工具调用的事件名称和耗时，
+不输出原始命令、路径、命令输出、模型正文、推理内容或工具参数。runner 在完整 JSONL 输出
+上独立扫描最后一条合法 `item.completed` 且 `item.type == "agent_message"` 的非空字符串
+`text` 作为最终结果；缺少最终消息或终态扫描遇到超限行时 fail closed，不退回裸文本解析。
+reader 自然结束时 `process-output.txt` 是完整 artifact；关闭超时或读取异常时会冻结 sink，
+只保留稳定的已读 partial artifact，并把本次 execution 收紧为失败，避免把不完整输出当成
+成功。全部已读原始输出最终都会脱敏写入 `process-output.txt`，卡死 reader 不能再写入该文件。
+
+`vega stop --run <run> --reason "..."` 只为指定 run 最新的 active execution 写停止请求；
+runner 只终止自己记录的 PID，不枚举或 kill 用户的其他 Codex/Node 进程。每条 verification
+命令也写入独立 execution 目录，并在墙钟 deadline 到达时终止对应 owned process tree，
+避免后代进程继续写入。
 
 worker `stopped/timed_out` 后立即停止 verification/review，并把 loop 交给人工。reviewer `stopped/timed_out` 不会被解析成 approve，同样进入 `needs_human`。verification 的非零退出、stop 或 timeout 会保留 verification artifacts，并阻止后续结果被当作可交付成功。
 
