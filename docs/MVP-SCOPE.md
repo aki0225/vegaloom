@@ -113,7 +113,8 @@ v0.1 baseline 的最小验收定义。
   并与 state/trace/hash 绑定；已有 tracked diff、捕获不完整或 HEAD 漂移时不把任务交给 Worker
 - Assist 恢复边界：continue 在创建 iteration 前校验启动基线；artifact 缺失、篡改或旧 run
   没有基线时拒绝继续，要求清理现场后新建 loop
-- Worker/reviewer/verification execution lease：`execution.json`、`process-output.txt`、可选 `stop-request.json`
+- Worker/reviewer/verification execution lease：`execution.json`、`process-output.txt`、Codex
+  专用 `process-stderr.txt`、可选 `stop-request.json`
 - Stop/timeout report：中断 attempt 后进入 `needs_human`，不继续后续自动步骤
 - Runner error handoff：provider/网络/CLI 错误后写 `runner-error-report.md`，保留可能存在的部分改动并交还人工
 - Owned process 边界：worker、reviewer 和 verification 只终止 Vega 自己启动并记录 PID

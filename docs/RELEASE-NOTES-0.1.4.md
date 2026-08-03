@@ -1,6 +1,7 @@
-# Vega v0.1.4 发布说明
+# Vega v0.1.4 发布候选说明
 
-v0.1.4 是 v0.1.x 的可信执行维护版本，不增加新的默认 Runtime、Agent 角色或外部依赖。
+本文描述尚未发布的 v0.1.4 候选版本。它定位为 v0.1.x 的可信执行维护版本，不增加新的
+默认 Runtime、Agent 角色或外部依赖。
 
 ## 主要修复
 
@@ -17,6 +18,9 @@ v0.1.4 是 v0.1.x 的可信执行维护版本，不增加新的默认 Runtime、
 - Codex worker/reviewer 改用 JSONL 输出，在运行期间只显示回合、命令、文件修改、计划与工具
   调用的安全事件名称和耗时；原始命令、输出、模型正文和推理内容不会进入实时提示，缺少最终
   模型消息时保持 fail closed。
+- Codex JSONL stdout 与诊断 stderr 分离持久化；`process-output.txt` 保持逐行可解析，
+  敏感字段按 JSON 结构递归脱敏，`process-stderr.txt` 只保存脱敏诊断，避免 CLI warning
+  或文本替换污染终态证据。
 
 ## 不变边界
 
