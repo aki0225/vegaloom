@@ -1,11 +1,10 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-07-29
-> 稳定基线：`v0.1.4`
-> 当前状态：`M-001`、`M-002`、`M-003`、`M-004`、Assurance Stage 1、Stage 2 两个 SQLite 个案
-> 与 Stage 3 有界 DML/Backfill 个案均已进入 `main`。它们仍不属于 Runtime 或默认能力，
-> 也不能解释为生产数据库安全证明。当前 `Now` 是执行已预注册的 CRWP-V1 真实代码任务
-> 验证；不启动 Stage 4 或新的 Runtime/Memory/LangGraph 集成。
+> 更新时间：2026-08-03
+> 当前代码版本：`0.1.4` 发布候选
+> 最新已发布 Tag：`v0.1.3`
+> 当前顺序：先完成 `v0.1.4` 发布门禁并打 Tag，再完成 CRWP-V1，随后实施调查与计划协议、
+> Finish 报告和真实使用验收。不启动 Stage 4 或新的 Runtime、Memory、LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -17,12 +16,25 @@
 产品行为以 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 为准，详细 Assurance 合同以
 [`ASSURANCE-CONTRACT-CANDIDATE.md`](ASSURANCE-CONTRACT-CANDIDATE.md) 为准，历史验证证据
 以 [`../eval/assurance-validation.md`](../eval/assurance-validation.md) 为准。本文不复制这些
-文档的完整内容。
+文档的完整内容。当前执行计划见
+[`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)，文档状态见
+[`README.md`](README.md)。
 
 ## 一、当前主线
 
 ```text
-v0.1.4 可信执行维护
+0.1.4 发布候选
+  -> 完成发布门禁并创建 v0.1.4 Tag / GitHub Release
+  -> 完成 CRWP-V1 剩余合同允许验证
+  -> 固定调查、Plan 与人工确认协议
+  -> 改进现有 Finish 第一屏
+  -> 真实使用验收后停止扩张
+```
+
+已经完成并保留为历史依据的 Assurance 与维护路线：
+
+```text
+v0.1.4 可信执行维护候选
   -> Assurance Stage 0 维护完成
   -> Assurance Stage 1：Threat / Evidence 数据合同
   -> Assurance Stage 2：数据库 Migration 纵向实验

@@ -123,6 +123,26 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 - 验证失败、证据不足或 reviewer 打回时进入人工处理状态。
 - Vega 不自动 commit、push、release 或写长期 memory。
 
+### v0.1.4 Codex JSONL 验收
+
+涉及 Codex 实时进度和终态解析的发布候选，还必须在最终候选提交上使用 fresh 小型目标仓库
+完成一次真实 auto loop。不得复用较早提交、超时 run 或人工清理后的现场作为通过证据。
+
+通过条件：
+
+- Worker 和 Reviewer execution 都在各自 timeout 内正常退出，`execution.json`、根 state 和
+  Finish 对终态的记录一致，且没有 owned process 残留。
+- 两个 `process-output.txt` 都非空；输出可按行解析为 JSONL，并存在非空的最终
+  `item.completed / agent_message`。
+- 终态前至少观察到一个固定安全进度事件。stderr 不包含原始命令、文件路径、命令输出、
+  模型正文、推理、工具参数或凭据。
+- 目标仓库只保留任务允许的变更，Workspace、Scope、Verification、Risk、Reviewer 和 Finish
+  均通过，最终 `Finish=ready_to_commit`。
+- run artifacts 的高置信凭据扫描无匹配。
+
+如果 Codex CLI 没有及时输出 JSONL、进程超时、终态消息缺失或证据不一致，本次 smoke 必须
+记为未通过并保留现场；不得仅凭单元测试、CI 或安全终止行为创建 Tag。
+
 ## 六、CI 与标签门禁
 
 正式标签前必须确认 GitHub Actions 主线同一 commit 的任务全部成功：

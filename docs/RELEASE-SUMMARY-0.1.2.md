@@ -1,6 +1,7 @@
 # Vega v0.1.2 Release Summary
 
-> 状态：发布草稿，尚未创建 tag 或 GitHub Release。
+> 状态：`v0.1.2` Tag 已存在，但没有单独的 GitHub Release。下文“发布前”和“发布动作”
+> 保留当时的检查口径，不是当前待办。
 
 这份摘要用于 GitHub Release 文案、公开仓首页说明和面试展示。详细变更记录见
 [`RELEASE-NOTES-0.1.2.md`](RELEASE-NOTES-0.1.2.md)，发布前检查步骤见
