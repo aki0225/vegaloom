@@ -117,9 +117,11 @@ continue。
 vega do feature --repo . --text "新增批量导入用户功能"
 ```
 
-运行期间，Vega 会在 stderr 显示 worker/reviewer 当前回合、命令、文件修改、计划或工具调用的
-安全事件名称和已用时间。实时提示不包含原始命令、文件路径、命令输出、模型正文、推理内容或
-工具参数；完整原始输出仍先脱敏，再写入 run artifacts。
+当 Codex CLI 持续输出可解析 JSONL 时，Vega 会在 stderr 显示 worker/reviewer 当前回合、
+命令、文件修改、计划或工具调用的安全事件名称和已用时间。实时提示不包含原始命令、文件路径、
+命令输出、模型正文、推理内容或工具参数；完整原始输出仍先脱敏，再写入 run artifacts。
+如果外部 CLI 没有及时输出或执行超时，Vega 不会伪造进度，而是按 timeout 与 fail-closed
+规则保留现场并交还人工。
 
 查看运行状态并生成交付结论：
 

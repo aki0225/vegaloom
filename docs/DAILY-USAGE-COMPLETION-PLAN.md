@@ -106,12 +106,17 @@ Finish 第一屏必须由现有结构化 artifact 确定性生成，不再调用
 - `pyproject.toml` 和源码版本为 `0.1.4`。
 - 截至 2026-08-03，远端最新 Tag 为 `v0.1.3`。
 - `docs/RELEASE-NOTES-0.1.4.md` 与 `docs/RELEASE-SUMMARY-0.1.4.md` 已存在。
+- 2026-08-03 的两次候选分支真实 Codex Worker smoke 分别在 180 秒和 300 秒超时：
+  前一次只得到部分 JSONL，后一次 `process-output.txt` 为空。两次都正确进入
+  `needs_human / timed_out` 并终止 owned process，但不构成真实 JSONL 闭环通过。
+- 当前 `main` 尚无一份满足发布清单中 JSONL 验收条件的成功 smoke；Phase 0 仍阻断在该门禁。
 - 因此当前准确口径是“`0.1.4` 发布候选”，不是“`v0.1.4` 已发布”。
 
 ### 执行动作
 
 1. 从干净 `main` 执行 `docs/RELEASE-CHECKLIST.md`。
-2. 确认 GitHub CI、真实 Codex JSONL smoke、wheel/sdist 构建与源码树外安装 smoke。
+2. 按 `docs/RELEASE-CHECKLIST.md` 的固定条件，在最终候选提交上重新执行真实 Codex JSONL
+   smoke，并确认 GitHub CI、wheel/sdist 构建与源码树外安装 smoke。
 3. 对最终候选提交做路径、凭据、BOM 和临时产物检查。
 4. 全部门禁通过后，由人工创建 annotated `v0.1.4` Tag。
 5. 使用现有发布摘要创建 GitHub Release。
