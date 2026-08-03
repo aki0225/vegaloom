@@ -6,7 +6,7 @@ import signal
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,7 +16,13 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from .execution_feedback import ExecutionProgressReporter, ExecutionProgressTicker
-from .execution_output import ExecutionOutputLineObserver, ProcessOutputCapture
+from .execution_output import (
+    ExecutionOutputLineObserver,
+    ProcessOutputCapture,
+    redact_jsonl_output as _redact_jsonl_output,
+    redact_optional_text as _redact_optional_text,
+    redact_process_output as _redact_process_output,
+)
 from .execution_paths import ExecutionPathGuard
 from .execution_process import (
     ProcessProbe,
@@ -59,9 +65,6 @@ ExecutionStatus = Literal[
 ]
 ACTIVE_EXECUTION_STATUSES = {"starting", "running", "stop_requested"}
 TERMINAL_EXECUTION_STATUSES = {"stopped", "timed_out", "completed", "failed"}
-_REDACTION_UNAVAILABLE_OUTPUT = "[REDACTION_UNAVAILABLE]"
-
-
 class ExecutionLease(BaseModel):
     """Vega 对单个外部进程的所有权和存活记录。"""
 
@@ -112,6 +115,7 @@ class RunnerExecutionContext:
     terminate_grace_seconds: float = 3.0
     progress_reporter: ExecutionProgressReporter | None = None
     output_line_observer: ExecutionOutputLineObserver | None = None
+    capture_stderr_separately: bool = False
 
     def __post_init__(self) -> None:
         if self.heartbeat_interval_seconds <= 0:
@@ -153,6 +157,7 @@ class ExecutionController:
         self.execution_path = context.execution_dir / "execution.json"
         self.stop_request_path = context.execution_dir / "stop-request.json"
         self.output_path = context.execution_dir / "process-output.txt"
+        self.stderr_path = context.execution_dir / "process-stderr.txt"
         self.lease: ExecutionLease | None = None
 
     def prepare(self, command: list[str] | str, timeout_seconds: int) -> ExecutionLease:
@@ -271,6 +276,17 @@ class ExecutionController:
         return self.path_guard.persist_output(
             output_file,
             self.output_path,
+            (
+                _redact_jsonl_output
+                if self.context.capture_stderr_separately
+                else _redact_process_output
+            ),
+        )
+
+    def persist_stderr(self, stderr_file: object) -> str:
+        return self.path_guard.persist_output(
+            stderr_file,
+            self.stderr_path,
             _redact_process_output,
         )
 
@@ -296,8 +312,9 @@ def run_owned_process(
 ) -> OwnedProcessResult:
     """运行一个可停止、可超时、可恢复判断的外部进程。
 
-    stdout/stderr 写入匿名临时文件；启用观察器时由专用线程持续排空 PIPE。停止和超时
-    只作用于本函数启动并写入 execution.json 的 PID，不扫描其他 Codex/Node 进程。
+    默认把 stdout/stderr 合并写入匿名临时文件；需要纯 stdout 协议时可把 stderr 单独
+    写入匿名临时文件。启用观察器时由专用线程持续排空 stdout PIPE。停止和超时只作用于
+    本函数启动并写入 execution.json 的 PID，不扫描其他 Codex/Node 进程。
     """
     controller = ExecutionController(context)
     lease = controller.prepare(command, timeout_seconds)
@@ -317,9 +334,15 @@ def run_owned_process(
     process_group_alive = None if _is_windows_platform() else _is_posix_process_group_alive
     with (
         tempfile.TemporaryFile("w+b") as output_file,
+        tempfile.TemporaryFile("w+b") as stderr_file,
         tempfile.TemporaryFile("w+b") as input_file,
     ):
-        output_capture = ProcessOutputCapture(output_file, context.output_line_observer)
+        output_capture = ProcessOutputCapture(
+            output_file,
+            context.output_line_observer,
+            stderr_file,
+            separate_stderr=context.capture_stderr_separately,
+        )
         try:
             input_file.write(input_text.encode("utf-8"))
             input_file.seek(0)
@@ -333,7 +356,7 @@ def run_owned_process(
                 cwd=cwd,
                 stdin=input_file,
                 stdout=output_capture.popen_stdout,
-                stderr=subprocess.STDOUT,
+                stderr=output_capture.popen_stderr,
                 env=process_environment,
                 **process_options,
             )
@@ -448,9 +471,10 @@ def run_owned_process(
             output, output_error = output_capture.finish_and_persist(
                 context.terminate_grace_seconds + 1.0,
                 controller.persist_output,
+                controller.persist_stderr,
             )
             if output_error is not None:
-                error = error or output_error
+                error = f"{error}；{output_error}" if error else output_error
                 status = "error" if status == "success" else status
             returncode = process.returncode if process is not None else None
             try:
@@ -889,33 +913,6 @@ def _create_windows_job_for_execution(
 
 def _process_group_options() -> dict[str, object]:
     return _platform_process_group_options(windows=_is_windows_platform())
-
-
-def _redact_process_output(output: str) -> str:
-    if not output:
-        return output
-    redactor = _load_redact_text()
-    if redactor is None:
-        return _REDACTION_UNAVAILABLE_OUTPUT
-    try:
-        return redactor(output)
-    except Exception:
-        # 脱敏边界必须 fail-closed，不能因 redaction 集成异常回退到原始输出。
-        return _REDACTION_UNAVAILABLE_OUTPUT
-
-
-def _redact_optional_text(output: str | None) -> str | None:
-    if output is None:
-        return None
-    return _redact_process_output(output)
-
-
-def _load_redact_text() -> Callable[[str], str] | None:
-    try:
-        from .redaction import redact_text
-    except (ImportError, NameError):
-        return None
-    return redact_text
 
 
 def _terminate_owned_process(

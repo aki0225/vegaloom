@@ -446,8 +446,9 @@ RunnerExecutionContext
 ```
 
 `execution.json` 记录 run、step、iteration、owner PID、child PID、command、heartbeat、lease、
-deadline 和终态。默认 stdout/stderr 直接写入匿名临时文件；Codex worker/reviewer 使用
-`codex exec --json` 时，由专用 daemon 线程以 64 KiB 分块持续排空 PIPE，同时把不超过
+deadline 和终态。普通外部命令默认把 stdout/stderr 合并写入匿名临时文件；Codex
+worker/reviewer 使用 `codex exec --json` 时，stdout 与 stderr 分离：专用 daemon 线程以
+64 KiB 分块持续排空 stdout PIPE，同时把不超过
 256 KiB 的完整 JSONL 行非阻塞地放入有界实时提示队列；队列满或观察器异常时只丢弃实时提示，
 不会阻塞 reader，也不会影响完整输出。独立 daemon dispatcher 异步调用观察器，慢或卡死的
 观察器不会拖延 timeout、stop 与 heartbeat；dispatcher 关闭只等待有限窗口，卡死回调作为
@@ -455,9 +456,13 @@ daemon 残余风险保留。观察器只映射回合、命令、文件修改、�
 不输出原始命令、路径、命令输出、模型正文、推理内容或工具参数。runner 在完整 JSONL 输出
 上独立扫描最后一条合法 `item.completed` 且 `item.type == "agent_message"` 的非空字符串
 `text` 作为最终结果；缺少最终消息或终态扫描遇到超限行时 fail closed，不退回裸文本解析。
-reader 自然结束时 `process-output.txt` 是完整 artifact；关闭超时或读取异常时会冻结 sink，
+reader 自然结束时 `process-output.txt` 是 stdout 经过结构化脱敏后的 JSONL artifact；
+写盘前先限制物理行长度，再逐行解析 JSON、递归脱敏字符串字段并重新序列化；无效或超限
+JSON 行替换为不含原文的安全非终态事件并使 runner fail closed，避免文本替换破坏 JSON
+结构。Codex 诊断 stderr 由独立 reader 持续排空，
+脱敏后写入 `process-stderr.txt`；stdout 或 stderr 关闭超时、读取异常时都会冻结 sink，
 只保留稳定的已读 partial artifact，并把本次 execution 收紧为失败，避免把不完整输出当成
-成功。全部已读原始输出最终都会脱敏写入 `process-output.txt`，卡死 reader 不能再写入该文件。
+成功。全部已读输出最终都会脱敏写入对应 artifact，卡死 reader 不能再写入对应 sink。
 
 `vega stop --run <run> --reason "..."` 只为指定 run 最新的 active execution 写停止请求；
 runner 只终止自己记录的 PID，不枚举或 kill 用户的其他 Codex/Node 进程。每条 verification

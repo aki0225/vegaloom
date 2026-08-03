@@ -9,12 +9,18 @@ from typing import Literal, Protocol
 from uuid import uuid4
 
 from .execution_control import RunnerExecutionContext, run_owned_process
+from .execution_output import MAX_JSONL_LINE_CHARS
 from .project_config import CodexExecOptions
 from .redaction import redact_text
 
 
 RunnerStatus = Literal["success", "error", "timed_out", "stopped", "skipped"]
-_MAX_FINAL_JSONL_LINE_CHARS = 4 * 1024 * 1024
+_JSONL_SANITIZATION_FAILURE_TYPES = {
+    "vega.invalid_jsonl",
+    "vega.oversized_jsonl",
+    "vega.redaction_failed",
+    "vega.redaction_unavailable",
+}
 
 
 @dataclass
@@ -36,6 +42,7 @@ class RunnerResult:
 class _FinalMessageScan:
     message: str | None
     complete: bool
+    sanitization_failed: bool = False
 
 
 class Runner(Protocol):
@@ -158,35 +165,53 @@ def _extract_final_agent_message(output: str) -> _FinalMessageScan:
 
     final_message: str | None = None
     complete = True
+    sanitization_failed = False
     start = 0
     output_length = len(output)
     while start < output_length:
         newline = output.find("\n", start)
-        line_end = output_length if newline < 0 else newline + 1
+        line_end = output_length if newline < 0 else newline
         line_length = line_end - start
         # 先检查长度再切片，避免异常巨型单行产生不受控的临时副本。
-        if line_length > _MAX_FINAL_JSONL_LINE_CHARS:
+        if line_length > MAX_JSONL_LINE_CHARS:
             complete = False
             if newline < 0:
                 break
             start = newline + 1
             continue
-        line = output[start:line_end]
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            pass
-        else:
-            if isinstance(event, dict) and event.get("type") == "item.completed":
-                item = event.get("item")
-                if isinstance(item, dict) and item.get("type") == "agent_message":
-                    text = item.get("text")
-                    if isinstance(text, str) and text.strip():
-                        final_message = text
+        message, line_sanitization_failed = _scan_jsonl_agent_message(output[start:line_end])
+        if line_sanitization_failed:
+            complete = False
+            sanitization_failed = True
+        elif message is not None:
+            final_message = message
         if newline < 0:
             break
         start = newline + 1
-    return _FinalMessageScan(message=final_message, complete=complete)
+    return _FinalMessageScan(
+        message=final_message,
+        complete=complete,
+        sanitization_failed=sanitization_failed,
+    )
+
+
+def _scan_jsonl_agent_message(line: str) -> tuple[str | None, bool]:
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None, False
+    if not isinstance(event, dict):
+        return None, False
+    event_type = event.get("type")
+    if isinstance(event_type, str) and event_type in _JSONL_SANITIZATION_FAILURE_TYPES:
+        return None, True
+    if event_type != "item.completed":
+        return None, False
+    item = event.get("item")
+    if not isinstance(item, dict) or item.get("type") != "agent_message":
+        return None, False
+    text = item.get("text")
+    return (text, False) if isinstance(text, str) and text.strip() else (None, False)
 
 
 class NoneRunner:
@@ -283,7 +308,11 @@ class CodexExecRunner:
             step="codex-exec",
         )
         progress = _CodexJsonlProgress(context)
-        context = replace(context, output_line_observer=progress.observe)
+        context = replace(
+            context,
+            output_line_observer=progress.observe,
+            capture_stderr_separately=True,
+        )
         result = run_owned_process(
             command,
             prompt,
@@ -300,7 +329,9 @@ class CodexExecRunner:
         ):
             status = "error"
             error = (
-                "codex exec JSONL 包含超出终态扫描上限的行，无法确认最终 agent_message。"
+                "codex exec JSONL 包含无效或无法安全脱敏的行，无法确认最终 agent_message。"
+                if final_scan.sanitization_failed
+                else "codex exec JSONL 包含超出终态扫描上限的行，无法确认最终 agent_message。"
                 if not final_scan.complete
                 else "codex exec JSONL 未包含最终 agent_message。"
             )

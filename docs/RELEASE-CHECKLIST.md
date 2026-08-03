@@ -134,8 +134,9 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
   Finish 对终态的记录一致，且没有 owned process 残留。
 - 两个 `process-output.txt` 都非空；输出可按行解析为 JSONL，并存在非空的最终
   `item.completed / agent_message`。
-- 终态前至少观察到一个固定安全进度事件。stderr 不包含原始命令、文件路径、命令输出、
-  模型正文、推理、工具参数或凭据。
+- Codex 的 `process-stderr.txt` 与 CLI stderr 只包含脱敏诊断或固定安全进度，不得混入
+  JSONL stdout，也不得包含原始命令、文件路径、命令输出、模型正文、推理、工具参数或凭据。
+- 终态前至少观察到一个固定安全进度事件。
 - 目标仓库只保留任务允许的变更，Workspace、Scope、Verification、Risk、Reviewer 和 Finish
   均通过，最终 `Finish=ready_to_commit`。
 - run artifacts 的高置信凭据扫描无匹配。

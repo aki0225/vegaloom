@@ -27,7 +27,11 @@ from vega.execution_control import (
     request_stop_for_run,
     run_owned_process,
 )
-from vega.execution_output import ProcessOutputCapture
+from vega.execution_output import (
+    MAX_JSONL_LINE_CHARS,
+    ProcessOutputCapture,
+    redact_jsonl_output,
+)
 from vega.runner import CodexExecRunner
 
 
@@ -96,7 +100,7 @@ def test_execution_prepare_rejects_linked_descendant_before_launch(tmp_path: Pat
     assert not outside.joinpath("worker").exists()
 
 
-@pytest.mark.parametrize("operation", ["heartbeat", "output"])
+@pytest.mark.parametrize("operation", ["heartbeat", "output", "stderr"])
 def test_execution_revalidates_directory_before_later_writes(
     tmp_path: Path,
     operation: str,
@@ -121,8 +125,10 @@ def test_execution_revalidates_directory_before_later_writes(
     with pytest.raises(OSError, match="符号链接、junction 或 reparse point"):
         if operation == "heartbeat":
             controller.heartbeat()
-        else:
+        elif operation == "output":
             controller.persist_output(io.BytesIO(b"must stay inside the trusted root"))
+        else:
+            controller.persist_stderr(io.BytesIO(b"must stay inside the trusted root"))
 
     assert preserved.joinpath("execution.json").is_file()
     assert list(outside.iterdir()) == []
@@ -193,6 +199,7 @@ def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
     def fake_run_owned_process(command, input_text, cwd, timeout_seconds, stream_context):
         del input_text, cwd, timeout_seconds
         captured_command.extend(command)
+        assert stream_context.capture_stderr_separately is True
         observer = stream_context.output_line_observer
         assert observer is not None
         observer("not-json")
@@ -589,7 +596,7 @@ def test_output_reader_runtime_error_is_recorded_and_fails_closed() -> None:
         capture.finish(1)
 
 
-def test_output_reader_shutdown_closes_blocked_stream() -> None:
+def test_dual_output_reader_shutdown_is_bounded_without_cross_thread_close() -> None:
     class BlockingStream:
         def __init__(self) -> None:
             self.started = threading.Event()
@@ -605,16 +612,35 @@ def test_output_reader_shutdown_closes_blocked_stream() -> None:
             self.closed.set()
             self._released.set()
 
-    stream = BlockingStream()
-    capture = ProcessOutputCapture(io.BytesIO(), lambda _: None)
-    capture.start(SimpleNamespace(stdout=stream))
-    assert stream.started.wait(1)
+    stdout_stream = BlockingStream()
+    stderr_stream = BlockingStream()
+    capture = ProcessOutputCapture(
+        io.BytesIO(),
+        lambda _: None,
+        io.BytesIO(),
+        separate_stderr=True,
+    )
+    capture.start(SimpleNamespace(stdout=stdout_stream, stderr=stderr_stream))
+    assert stdout_stream.started.wait(1)
+    assert stderr_stream.started.wait(1)
 
-    capture.finish(0.01)
+    started = time.monotonic()
+    with pytest.raises(OSError, match="runner 输出读取线程关闭超时.*runner stderr"):
+        capture.finish(0.1)
+    assert time.monotonic() - started < 0.3
+    assert not stdout_stream.closed.is_set()
+    assert not stderr_stream.closed.is_set()
 
-    assert stream.closed.is_set()
+    stdout_stream._released.set()
+    stderr_stream._released.set()
     assert capture._reader is not None
+    assert capture._stderr_reader is not None
+    capture._reader.join(1)
+    capture._stderr_reader.join(1)
+    assert stdout_stream.closed.is_set()
+    assert stderr_stream.closed.is_set()
     assert not capture._reader.is_alive()
+    assert not capture._stderr_reader.is_alive()
 
 
 def test_output_reader_drops_realtime_lines_without_blocking_when_queue_full() -> None:
@@ -845,6 +871,209 @@ def test_owned_process_redacts_output_before_persisting_and_returning(tmp_path: 
     assert fake_secret not in persisted_output
     assert fake_secret not in execution_payload
     assert "prompt should only go to stdin" not in execution_payload
+
+
+def test_owned_process_separates_and_redacts_stderr_for_jsonl_runner(tmp_path: Path) -> None:
+    observed_ready = threading.Event()
+    observed: list[str] = []
+
+    def observe(line: str) -> None:
+        observed.append(line)
+        observed_ready.set()
+
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "separate-stderr" / "executions" / "worker",
+        run_id="separate-stderr",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        output_line_observer=observe,
+        capture_stderr_separately=True,
+    )
+    fake_secret = "sk-stderr-fake-secret-123456"
+    jsonl_line = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": f"ready api_key={fake_secret}",
+            },
+        }
+    )
+    diagnostic = f"sqlx warning api_key={fake_secret}"
+    child_code = (
+        "import sys,time; "
+        f"print({jsonl_line!r}, flush=True); "
+        f"print({diagnostic!r}, file=sys.stderr, flush=True); "
+        "sys.stderr.write('x' * (256 * 1024)); "
+        "sys.stderr.flush(); "
+        "time.sleep(0.3)"
+    )
+
+    result = run_owned_process(
+        [sys.executable, "-c", child_code],
+        "",
+        tmp_path,
+        5,
+        context,
+    )
+
+    persisted_output = context.execution_dir.joinpath("process-output.txt").read_text(
+        encoding="utf-8"
+    )
+    persisted_stderr = context.execution_dir.joinpath("process-stderr.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert result.status == "success"
+    assert observed_ready.is_set()
+    assert observed == [jsonl_line]
+    persisted_payloads = [json.loads(line) for line in persisted_output.splitlines()]
+    assert result.output == persisted_output
+    assert persisted_payloads[0]["item"]["text"] == "ready api_key=[REDACTED]"
+    assert fake_secret not in persisted_output
+    assert "sqlx warning" in persisted_stderr
+    assert persisted_stderr.count("x") >= 256 * 1024
+    assert fake_secret not in persisted_stderr
+    assert "[REDACTED]" in persisted_stderr
+
+
+def test_owned_process_keeps_default_stderr_merged_with_stdout(tmp_path: Path) -> None:
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "merged-stderr" / "executions" / "verification",
+        run_id="merged-stderr",
+        step="verification",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+    )
+    child_code = (
+        "import sys; "
+        "print('stdout-line', flush=True); "
+        "print('stderr-line', file=sys.stderr, flush=True)"
+    )
+
+    result = run_owned_process(
+        [sys.executable, "-c", child_code],
+        "",
+        tmp_path,
+        5,
+        context,
+    )
+
+    persisted_output = context.execution_dir.joinpath("process-output.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert result.status == "success"
+    assert result.output == persisted_output
+    assert "stdout-line" in persisted_output
+    assert "stderr-line" in persisted_output
+    assert not context.execution_dir.joinpath("process-stderr.txt").exists()
+
+
+def test_owned_process_keeps_exit_error_when_stderr_persistence_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "stderr-persist-failure" / "executions" / "worker",
+        run_id="stderr-persist-failure",
+        step="worker",
+        heartbeat_interval_seconds=0.05,
+        lease_timeout_seconds=0.5,
+        capture_stderr_separately=True,
+    )
+
+    def fail_stderr_persistence(self, stderr_file):
+        del self, stderr_file
+        raise RuntimeError("simulated stderr persistence failure")
+
+    monkeypatch.setattr(ExecutionController, "persist_stderr", fail_stderr_persistence)
+
+    result = run_owned_process(
+        [sys.executable, "-c", "import sys; sys.exit(3)"],
+        "",
+        tmp_path,
+        5,
+        context,
+    )
+
+    assert result.status == "error"
+    assert "外部 runner 退出码：3" in (result.error or "")
+    assert "runner stderr 持久化失败" in (result.error or "")
+
+
+def test_jsonl_redaction_replaces_invalid_lines_without_leaking_raw_text() -> None:
+    fake_secret = "sk-jsonl-invalid-secret-123456"
+    valid_line = json.dumps(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": f"Authorization: Bearer {fake_secret}",
+            },
+        }
+    )
+
+    deeply_nested_json = "[" * 5000 + "0" + "]" * 5000
+    oversized_json = "x" * (MAX_JSONL_LINE_CHARS + 1)
+    redacted = redact_jsonl_output(
+        f"not-json {fake_secret}\n{deeply_nested_json}\n{oversized_json}\n{valid_line}\n"
+    )
+    payloads = [json.loads(line) for line in redacted.splitlines()]
+
+    assert payloads[0] == {"type": "vega.invalid_jsonl"}
+    # 不同 CPython 构建可能在 JSON 解析或递归脱敏阶段先触及递归上限；
+    # 两种 sentinel 都表示该物理行已被安全替换并会让 Runner fail-closed。
+    assert payloads[1] in (
+        {"type": "vega.invalid_jsonl"},
+        {"type": "vega.redaction_failed"},
+    )
+    assert payloads[2] == {"type": "vega.oversized_jsonl"}
+    assert payloads[3]["item"]["text"] == "Authorization: Bearer [REDACTED]"
+    assert fake_secret not in redacted
+
+
+def test_codex_exec_runner_fails_closed_on_jsonl_sanitization_sentinel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lines = [
+        json.dumps({"type": "vega.invalid_jsonl"}),
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": "must not pass"},
+            }
+        ),
+    ]
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr(
+        "vega.runner.run_owned_process",
+        lambda *args, **kwargs: OwnedProcessResult(
+            status="success",
+            output="\n".join(lines),
+            error=None,
+            returncode=0,
+        ),
+    )
+
+    result = CodexExecRunner().run(
+        "test prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "error"
+    assert result.output == ""
+    assert "包含无效或无法安全脱敏的行" in (result.error or "")
 
 
 def test_owned_process_reports_bounded_progress_without_persisting_it(
