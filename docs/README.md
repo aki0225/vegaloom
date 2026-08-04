@@ -13,7 +13,8 @@
 | 先了解怎么使用 | [`../README.md`](../README.md) | 当前入口 |
 | 查看日常完整流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | 当前使用说明 |
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
-| 查看下一阶段执行顺序 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 2 当前入口 |
+| 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
+| 查看下一阶段执行顺序 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 3 当前入口 |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
 | 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
@@ -21,10 +22,11 @@
 
 ## 当前进行中的工作
 
-### 调查与 Plan-first 协议
+### Finish 第一屏改进
 
-`v0.1.4` 发布和 CRWP-V1 合同允许验证都已完成。当前唯一的下一步是只读核对 Codex、
-Claude Code 与命令行入口，固定调查、Plan 和修改前人工确认协议。当前状态与停止条件见：
+`v0.1.4` 发布、CRWP-V1 合同允许验证和 Plan-first 协议都已完成。当前唯一的下一步是只调整
+现有 `finish-summary.json` 与 `finish-report.md` 的第一屏信息顺序，不增加模型、状态或第二套
+裁决逻辑。当前状态与停止条件见：
 
 - [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：当前执行计划。
 - [`ROADMAP.md`](ROADMAP.md)：唯一下一步和冻结方向。
@@ -34,6 +36,8 @@ Claude Code 与命令行入口，固定调查、Plan 和修改前人工确认协
 - `v0.1.4` annotated Tag 与 GitHub Release 已发布；精确 Tag smoke 已登记在
   [`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
 - CRWP-V1 三个 Case 都有合同允许的终态，不再选择性重跑。
+- [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md)：Codex、Claude Code 与 `vega do`
+  共用的调查、固定 Plan 和修改前人工确认协议。
 
 - [`CORE-REAL-WORLD-PILOT-V1-HANDOFF.md`](CORE-REAL-WORLD-PILOT-V1-HANDOFF.md)：
   最终状态与本机证据接力。

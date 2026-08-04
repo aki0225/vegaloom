@@ -3,8 +3,8 @@
 > 更新时间：2026-08-04
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
-> 当前顺序：先调查现有宿主入口，固定 Plan 与人工确认协议；随后改进 Finish 报告并完成
-> 真实使用验收。不启动 Stage 4 或新的 Runtime、Memory、LangGraph 集成。
+> 当前顺序：Plan-first 与人工确认协议已完成；当前只改进 Finish 报告，随后完成真实使用
+> 验收。不启动 Stage 4 或新的 Runtime、Memory、LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -25,18 +25,18 @@
 ```text
 v0.1.4 发布（完成）
   -> CRWP-V1 合同允许终态（完成）
-  -> 调查现有入口并固定 Plan 与人工确认协议（当前）
-  -> 改进现有 Finish 第一屏
+  -> 调查现有入口并固定 Plan 与人工确认协议（完成）
+  -> 改进现有 Finish 第一屏（当前）
   -> 真实使用验收后停止扩张
 ```
 
-当前唯一的下一步是 Phase 2：
+当前唯一的下一步是 Phase 3：
 
-1. 只读核对 Codex Skill、Claude Code assist 说明、`vega do` 和现有 Plan 入口；
-2. 明确“默认先调查，范围足够明确时才可直接执行”的使用协议；
-3. 固定事实、假设、修改范围、验证、高风险和未决问题分离的 Plan 模板；
-4. 先把协议交给人工确认，再使用一个短生命周期分支实现；
-5. 不在本阶段新增 Planner Agent、Runtime 路由、命令、状态、schema 或 Finish 改动。
+1. 只调整现有 `finish-summary.json` 与 `finish-report.md`；
+2. 第一屏按裁决、实际变更、确定性 Gate、验证、Reviewer、证据上限和下一步排序；
+3. 继续从现有结构化 artifact 确定性生成，不新增模型调用；
+4. 不新增命令、状态、schema 或第二套裁决逻辑；
+5. 使用独立短生命周期分支，不与真实使用验收混在同一个 PR。
 
 CRWP-V1 已完成合同允许的全部处理：
 
@@ -47,6 +47,13 @@ CRWP-V1 已完成合同允许的全部处理：
 这些结果不计算成功率，也不选择性重跑。详细证据见
 [`CORE-REAL-WORLD-PILOT-V1-HANDOFF.md`](CORE-REAL-WORLD-PILOT-V1-HANDOFF.md) 和
 [`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
+
+Phase 2 已完成：
+
+- [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) 固定了事实/假设分离的 Plan 模板；
+- 生成的 Codex `$vega-loop` Skill 会在模糊任务下先只读调查并等待修改前确认；
+- Claude Code 复用同一协议，但不新增原生 adapter 或自动 Runner；
+- `vega do` 继续只表示调用者已经确认边界的小任务，Runtime 行为没有改变。
 
 已经完成并保留为历史依据的 Assurance 与维护路线：
 
@@ -306,6 +313,12 @@ token 成本、人工接管和恢复体验验证。
 主线停止继续扩建研究能力。唯一下一步改为调查现有 Codex、Claude Code 与命令行入口，固定
 Plan-first 和修改前人工确认协议；协议确认前不修改 Runtime，Finish 报告作为下一阶段单独
 实施。
+
+### 2026-08-04：完成 Plan-first 协议，进入 Finish 第一屏改进
+
+Phase 2 只增加权威协议文档、生成的 Codex Skill 约定、Claude Code 等价说明和窄测试。
+它没有增加 Planner Agent、Runtime 路由、命令、状态、schema 或 Claude Code 原生 Runner。
+当前唯一下一步改为 Phase 3，只重排现有 Finish 输出并保持确定性裁决。
 
 ## 七、更新规则
 

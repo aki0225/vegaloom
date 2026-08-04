@@ -14,7 +14,7 @@ class AdapterInitResult:
 CODEX_SKILLS: dict[str, str] = {
     "vega-loop": """---
 name: "vega-loop"
-description: "当用户要求用 Vega/loop 做 bug 修复或需求开发时使用。生成 brief，指导主会话实现，完成后运行 reflect、gate、隔离 review，并根据 verdict 继续修复或交付。"
+description: "当用户要求用 Vega/loop 做 bug 修复或需求开发时使用。模糊任务先只读调查、提交固定 Plan 并等待人工确认；确认后再生成 brief，指导主会话实现并完成验证、隔离 review 与 finish。"
 ---
 
 # Vega Loop Skill
@@ -35,27 +35,57 @@ description: "当用户要求用 Vega/loop 做 bug 修复或需求开发时使�
 - 遇到高风险 gate 结果时，先回报用户，不要继续 auto。
 - 不要把 Worker 的完整聊天记录或中间推理交给 Reviewer。
 
+## 修改前协议
+
+1. 先判断任务边界是否已经明确。只有同时具备明确行为、修改范围、验证方式，且用户明确要求
+   直接执行时，才可以跳过重复调查。
+2. 其余任务先只读调查。可以读取项目规则、代码、配置、历史和测试，也可以运行不会修改
+   工作区的查询命令；不得修改文件，不得启动 Worker，不得先运行 `vega loop`。
+3. 调查后使用以下固定结构输出 Plan：
+
+```markdown
+## User Goal
+## Non-goals
+## Observed Facts
+## Hypotheses
+## Proposed Scope
+## Verification
+## Risk Areas
+## Unresolved Decisions
+```
+
+4. `Observed Facts` 只写已经由文件、代码或命令确认的事实并注明来源；未验证的根因只能放在
+   `Hypotheses`。
+5. `Proposed Scope` 必须写清允许读取和修改的范围，不能覆盖 `AGENTS.md`、`.vega.yaml`
+   或用户明确约束。
+6. 把 Plan 交给用户确认。只有用户明确批准，或用户一开始已经给出精确范围、验收标准并明确
+   要求直接执行，才能进入修改。
+7. `vega plan` 面向大目标的 scope/phase 规划，不替代这里的日常调查与修改前确认。
+
 ## 推荐流程
 
-1. 判断任务类型：
+1. 先完成“修改前协议”，不要把任务描述直接当成已经确认的根因或修改范围。
+2. 获得批准后判断任务类型：
    - bug：`vega loop bug --repo . --text "<用户需求>" --mode assist`
    - feature：`vega loop feature --repo . --text "<用户需求>" --mode assist`
-   - 边界清晰的小任务也可用日常入口：`vega do feature --repo . --text "<用户需求>"`
-2. 先运行 `vega status --run <loop_run_id>`，确认状态是 `waiting_for_worker`，并确认
+   - 已满足直接执行条件的小任务可用：`vega do feature --repo . --text "<用户需求>"`
+3. 运行 `vega status --run <loop_run_id>`，确认状态是 `waiting_for_worker`，并确认
    `workspace-baseline.json`、`worker-prompt.md` 和 `project-context.md` 都已生成。
-3. 如果状态是 `workspace_baseline_dirty`、`workspace_baseline_unavailable` 或
+4. 如果状态是 `workspace_baseline_dirty`、`workspace_baseline_unavailable` 或
    `workspace_head_changed`，不要执行 Worker，也不要 `loop continue`；先清理或稳定仓库，
    再创建新的 loop。
-4. 当前主会话按 `worker-prompt.md` 完成最小必要修改；也可以调用宿主原生子代理，但只把
+5. 当前主会话按 `worker-prompt.md` 完成最小必要修改；也可以调用宿主原生子代理，但只把
    代码与工作区结果交给 Vega，不把子代理完整聊天传给 Reviewer。
-5. 继续 loop；默认会自动执行 project profile 识别出的验证命令：
+6. 继续 loop；默认会自动执行 project profile 识别出的验证命令：
    - `vega loop continue --repo . --run <loop_run_id>`
    - 如果已有外部测试日志，可显式传入：`vega loop continue --repo . --run <loop_run_id> --test-log test.log`
-6. 查看输出：
+7. 查看输出：
    - 如果有 `fix-prompt.md`，按它继续修复后再次 `loop continue`。
    - 如果有 `final-report.md`，用它整理交付结论。
    - 如果 gate/reviewer 要求人工判断，先向用户说明风险。
-7. 用户明确批准继续或交付时，记录 decision：
+8. 无论前一步是否已经生成 `final-report.md`，都运行 `vega finish --run <loop_run_id>`，
+   从现有证据生成最终交付结论。
+9. 用户明确批准继续或交付时，记录 decision：
    - `vega decision approve --run <run_id> --type finish --reason "<原因>"`
 
 ## 状态查询

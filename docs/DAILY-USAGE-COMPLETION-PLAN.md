@@ -1,7 +1,7 @@
 # Vega 日常可信使用完成计划
 
 > 日期：2026-08-04
-> 状态：Phase 0 与 Phase 1 已完成；当前进入 Phase 2 的调查与 Plan-first 协议
+> 状态：Phase 0、Phase 1 与 Phase 2 已完成；当前进入 Phase 3 的 Finish 第一屏改进
 > 范围：`v0.1.4` 发布、CRWP-V1、调查与计划协议、Finish 报告、真实使用验收
 
 ## 一、完成标准
@@ -136,10 +136,10 @@ CRWP-V1 用来回答真实任务上的缺陷发现、成本和人工接管问题
 
 Phase 1 已结束。禁止选择性重跑、延长 timeout、改换模型或修改 Runtime 来追求成功样本。
 
-## 五、Phase 2：完成调查与计划协议（current）
+## 五、Phase 2：完成调查与计划协议（completed）
 
-本阶段先调查现有入口并提交协议方案，人工确认后才实现。当前不修改 Runtime，也不把
-Finish 报告改动提前混入本阶段。
+本阶段只调查现有入口并固定宿主协议，没有修改 Runtime，也没有把 Finish 报告改动提前
+混入本阶段。
 
 ### 宿主会话入口
 
@@ -166,7 +166,18 @@ Claude Code 可以作为外部 Worker，但不能使用同一会话代替独立 
 - 一份固定 Plan 模板；
 - 不新增默认命令、状态或 schema。
 
-## 六、Phase 3：改进现有 Finish 报告
+### 完成证据
+
+- [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) 固定直接执行条件、只读调查边界、
+  Plan 模板、人工确认和 Codex/Claude Code 使用方式。
+- `vega adapters init codex` 生成的 `$vega-loop` Skill 已按同一协议更新。
+- `vega do`、`vega loop`、`vega plan` 的 Runtime 与命令语义没有改变。
+- Claude Code 继续作为外部 Worker 使用 `assist`，同一会话不能替代独立 Reviewer。
+
+Phase 2 已结束。后续不再扩展 Planner、adapter target 或宿主路由；真实效果在 Phase 4 按
+预定场景验收。
+
+## 六、Phase 3：改进现有 Finish 报告（current）
 
 只调整：
 
@@ -240,7 +251,7 @@ One writes, one reviews — worker 与 reviewer 上下文隔离的 AI 编码工�
 
 1. `v0.1.4` Tag 与 GitHub Release 已发布；**已完成**。
 2. CRWP-V1 三个 Case 都有合同允许的终态；**已完成**。
-3. Codex、Claude Code 和 `vega do` 都能进入同一可信判断链；
+3. Codex、Claude Code 和 `vega do` 已有同一协议；真实验收留到 Phase 4；
 4. Finish 能清楚展示结论、重要变更、验证、高风险和剩余问题；
 5. 成功、Reviewer 打回、验证失败、高风险和恢复场景均有可复核记录。
 
@@ -253,8 +264,8 @@ Assurance Stage。
 ```text
 发布 v0.1.4（完成）
   -> CRWP-V1 合同允许终态（完成）
-  -> 调查现有入口并固定 Plan-first 与人工确认协议（当前）
-  -> 改进 Finish 第一屏
+  -> 调查现有入口并固定 Plan-first 与人工确认协议（完成）
+  -> 改进 Finish 第一屏（当前）
   -> 完成真实使用验收
   -> 停止扩张，进入日常使用观察
 ```

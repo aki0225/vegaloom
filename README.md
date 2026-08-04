@@ -91,6 +91,10 @@ vega --version
 
 推荐由当前主会话或人工负责实现，Vega 负责收集证据、执行验证并启动隔离审查：
 
+如果用户只描述了现象、根因和修改范围尚不明确，先按
+[Plan-first 与修改前确认协议](docs/PLAN-FIRST-PROTOCOL.md)做只读调查、提交固定 Plan 并等待
+确认。只有边界和验收已经明确，且用户要求直接执行时，才跳过重复调查。
+
 ```powershell
 vega config check --repo .
 vega loop bug --repo . --text "修复导出按钮无响应" --mode assist
@@ -156,9 +160,17 @@ vega adapters init codex --repo .
 ```
 
 在该仓库的新 Codex 任务中可通过 `$vega-loop` 或 `$vega-review` 显式调用。Skill 只提供
-Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会自行启动自动 worker。
+Vega 工作流说明；`$vega-loop` 会在模糊任务下先要求只读调查、固定 Plan 和修改前人工确认。
+Skill 不安装 hook、不修改 Codex 全局配置，也不会自行启动自动 worker。
 初始化默认不覆盖已有文件；`--force` 只覆盖新的 `.agents/skills` 目标，不删除或改写历史
 `.codex/skills` 文件。是否将生成的仓库级 Skill 纳入版本控制，由目标项目自行决定。
+
+## Claude Code 接入
+
+Claude Code 主会话复用同一份
+[Plan-first 与修改前确认协议](docs/PLAN-FIRST-PROTOCOL.md#7-claude-code-使用方式)，并在批准后
+使用 `assist` 进入 Vega 判断链。Claude Code 可以实现 `worker-prompt.md`，但同一会话不能
+替代独立 Reviewer。本阶段不增加 Claude Code 原生 adapter 或自动 Runner。
 
 ## 关键行为
 
@@ -177,6 +189,7 @@ Vega 工作流说明，不安装 hook、不修改 Codex 全局配置，也不会
 |---|---|
 | 全部文档及状态 | [文档导航](docs/README.md) |
 | 下一阶段完整计划 | [日常可信使用完成计划](docs/DAILY-USAGE-COMPLETION-PLAN.md) |
+| 调查、Plan 与修改前人工确认 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 完整使用流程 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
