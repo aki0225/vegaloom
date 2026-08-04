@@ -1,0 +1,57 @@
+{
+  "control_files": {
+    "case_01_oracle": {
+      "blob_oid": "0e401fe99616487a3d7edac9da98e93de586fab1",
+      "path": "scripts/pilot/crwp-v1/crwp-v1-01-timeout-oracle.py",
+      "sha256": "a1a9152a9d96f0ac935f6c26baccba7ce4632453b388ba570ceb62731ae65b5f",
+      "size": 12203
+    },
+    "case_01_task": {
+      "blob_oid": "1721dd633290cfb48efccd3332ed504f65bdfc22",
+      "path": "scripts/pilot/crwp-v1/tasks/crwp-v1-01-task.md",
+      "sha256": "25400d4a907ee90153cf9f69f659a44a06dc197fff7c67789b1b6f971033401c",
+      "size": 1904
+    },
+    "case_02_blocked_terms": {
+      "blob_oid": "c70a0c420ce40b972229f16e95254eb5e5a0c260",
+      "path": "scripts/pilot/crwp-v1/crwp-v1-02-blocked-terms.txt",
+      "sha256": "3c6cb6f708588702865b15cab2fa0dc0bb7a0044401e4cd7fe154a6cf40d05d8",
+      "size": 183
+    },
+    "case_02_oracle": {
+      "blob_oid": "1d7bc78aaee14d8c06def8de934383cce4a59868",
+      "path": "scripts/pilot/crwp-v1/crwp-v1-02-sqlite-autoincrement-oracle.cjs",
+      "sha256": "f784abc3518e12991f3f0b93628773adda1d68c9add4fe2a75d9e93b318e93d0",
+      "size": 7212
+    },
+    "case_02_task": {
+      "blob_oid": "eebcb8be987c811854fdcd12327781315b9c0ba0",
+      "path": "scripts/pilot/crwp-v1/tasks/crwp-v1-02-task.md",
+      "sha256": "803c3a516e833d41a8cb8c3009595fa66d2386776204ff8d14fea18dc2c22ad6",
+      "size": 2117
+    },
+    "control_tests": {
+      "blob_oid": "a8425269bac67b2ec8dc2681ab64e0b33c353d85",
+      "path": "tests/test_crwp_v1_control.py",
+      "sha256": "04a6327a9415cbdfeb1ac90223885d16ffca914ed0bc8ccf989d2d9a5245578e",
+      "size": 50305
+    },
+    "controller": {
+      "blob_oid": "0b793250ec5473e44a5fda69f9a1a260ac63da6c",
+      "path": "scripts/pilot/crwp-v1/run_crwp_case.py",
+      "sha256": "71ccfdcb5e2b0f040c67687cfc63acb58466988e36ef3b66b09ba438110ae6c6",
+      "size": 82101
+    },
+    "native_driver_helper": {
+      "blob_oid": "e01f2c350de7280da99eb71ce6bf0e11326abeaf",
+      "path": "scripts/pilot/crwp-v1/ignore-native-drivers.cjs",
+      "sha256": "2e6a0f95133df1ba2a928d2f99be5068ee13bad75e2bba01b10213b284020bde",
+      "size": 547
+    }
+  },
+  "pilot_id": "CRWP-V1",
+  "runtime_commit": "77192aaec3be4baffe90657bbd7d2d343c45062a",
+  "runtime_src_tree": "0e7bb1658d5803aa270a98a6416c325b731a1163",
+  "runtime_tree": "348d9bc37dead6d8f9020ebbff56ef568bfac023",
+  "schema_version": 1
+}
