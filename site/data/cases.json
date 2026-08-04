@@ -1,159 +1,207 @@
 {
-  "schema_version": 1,
-  "generated_from": "eval/real-world-runs.md",
+  "schema_version": 2,
+  "generated_from": [
+    "examples/evidence/real-world-pycodestyle-1187",
+    "examples/evidence/real-world-click-2939"
+  ],
   "evidence_through": "2026-08-04",
   "cases": [
     {
-      "id": "anyio-1231",
-      "kind": "标准路径",
-      "title": "AnyIO #1231",
-      "subtitle": "边界明确的小范围修复",
-      "issue_url": "https://github.com/agronholm/anyio/issues/1231",
-      "source_record": "eval/real-world-runs.md",
-      "source_heading": "2026-08-01 独立 fresh auto Dogfood：AnyIO #1231",
-      "status": "ready_to_commit",
-      "status_label": "可以人工检查后提交",
-      "summary": "一轮完成小范围补丁，验证、范围门禁和独立审查均有可核对结果。",
-      "changed_files": 3,
-      "diff_summary": "+23 / -1",
-      "change_summary": "只修改 Trio 后端、任务组回归测试和版本记录，共 3 个预注册文件。",
-      "gate_summary": "Workspace、三阶段 Scope 与 Risk Gate 全部通过。",
-      "verification_summary": "5 条命令全部通过；相关测试 24 passed，完整任务组测试 496 passed、10 skipped、4 xfailed。",
-      "reviewer_summary": "Reviewer 返回 approve，findings 为 0。",
-      "evidence_limit": "这是 Issue 已明确期望行为的单案例，不证明未知缺陷发现能力、模型未见过上游修复或跨仓库成功率。",
-      "next_step": "人工检查 3 个文件的 Diff，再决定是否提交。",
-      "timeline": [
+      "id": "pycodestyle-1187-rejection",
+      "kind": "Reviewer 阻断",
+      "title": "pycodestyle #1187",
+      "subtitle": "768 项测试通过，仍发现语义回归",
+      "issue_url": "https://github.com/PyCQA/pycodestyle/issues/1187",
+      "status": "request_changes",
+      "status_label": "测试全绿，但不能交付",
+      "summary": "初始补丁修复了反向内建类型比较，却删除了原有歧义场景豁免。固定测试全部通过，隔离 Reviewer 仍识别出新的 E721 误报。",
+      "diff": {
+        "file": "pycodestyle.py",
+        "summary": "1 个文件 · 删除 3 行保护逻辑",
+        "excerpt": "-        inst = match.group(1)\n-        if inst and inst.isidentifier() and inst not in SINGLETONS:\n-            return  # Allow comparison for types which are not obvious"
+      },
+      "verification": {
+        "headline": "768 passed, 5 skipped",
+        "checks": [
+          "初始定向 oracle 能识别反向内建类型比较。",
+          "三阶段 Scope Gate 只检测到 pycodestyle.py。",
+          "固定测试没有覆盖普通小写变量的歧义比较。"
+        ]
+      },
+      "review": {
+        "verdict": "request_changes",
+        "severity": "major",
+        "title": "反向匹配变成无条件报错，破坏原有合法歧义比较",
+        "evidence": "expected == type(obj) 与 value != type(other) 会误报 E721。",
+        "recommendation": "只对可解释的明显类型表达式报告 E721，同时保留普通小写变量的歧义比较。"
+      },
+      "gates": {
+        "scope": "pre-verification、post-verification、pre-review 均通过；变更仅涉及 pycodestyle.py。",
+        "risk": "success · low · self-check",
+        "finish": "needs_human · 保留候选现场 · 未自动提交"
+      },
+      "source_links": [
         {
-          "label": "Baseline",
-          "result": "冻结真实仓库修订与允许路径"
+          "kind": "diff",
+          "label": "实际 Diff",
+          "path": "examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/diff.patch"
         },
         {
-          "label": "Worker",
-          "result": "3 个文件，+23 / -1"
+          "kind": "verification",
+          "label": "验证摘要",
+          "path": "examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/verification-summary.md"
         },
         {
-          "label": "Gates",
-          "result": "范围、工作区与风险检查通过"
+          "kind": "review",
+          "label": "Reviewer 结论",
+          "path": "examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/review-verdict.json"
         },
         {
-          "label": "Verify",
-          "result": "5 条验证命令通过"
+          "kind": "gate",
+          "label": "Gate 结果",
+          "path": "examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/gate-result.json"
         },
         {
-          "label": "Review",
-          "result": "approve，0 findings"
-        },
-        {
-          "label": "Finish",
-          "result": "ready_to_commit"
+          "kind": "finish",
+          "label": "最终报告",
+          "path": "examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/final-report.md"
         }
       ],
       "limitations": [
-        "Issue 正文和任务合同已经明确期望行为。",
-        "单次运行不构成跨仓库成功率统计。",
-        "无法证明模型训练数据未包含上游修复。"
+        "公开包是脱敏摘要，不包含 Worker 或 Reviewer 的完整会话。",
+        "该案例证明 Reviewer 阻止了已知语义回归，不构成通用缺陷发现率。"
       ]
     },
     {
-      "id": "packaging-1232",
-      "kind": "恢复路径",
-      "title": "packaging #1232",
-      "subtitle": "宿主机关机后保留候选并恢复",
-      "issue_url": "https://github.com/pypa/packaging/issues/1232",
-      "source_record": "eval/real-world-runs.md",
-      "source_heading": "2026-08-02 主机断电恢复 Dogfood：packaging #1232",
+      "id": "pycodestyle-1187-success",
+      "kind": "修正后通过",
+      "title": "pycodestyle #1187",
+      "subtitle": "补齐正反行为合同后的新候选",
+      "issue_url": "https://github.com/PyCQA/pycodestyle/issues/1187",
       "status": "ready_to_commit",
-      "status_label": "恢复证据完整，可人工检查",
-      "summary": "Worker 执行期间宿主机关机；原候选保持不变，用户确认继续后重新建立验证和审查证据。",
-      "changed_files": 3,
-      "diff_summary": "+20 / -1",
-      "change_summary": "中断前已在 3 个允许文件留下候选；恢复前后 Diff 对象保持一致。",
-      "gate_summary": "恢复后的三阶段 Scope 与 Risk Gate 全部通过。",
-      "verification_summary": "独立 hash/equality oracle、5311 项完整测试、Ruff 和 git diff --check 全部通过。",
-      "reviewer_summary": "Reviewer 返回 approve，findings 为 0。",
-      "evidence_limit": "这是单次宿主机中断恢复，不证明重复崩溃、任意中断点的一致性，也不代表无中断任务的总体成功率。",
-      "next_step": "人工确认恢复链路和 3 个文件的 Diff，再决定是否提交。",
-      "timeline": [
+      "status_label": "证据完整，可人工检查",
+      "summary": "新的隔离候选保留普通小写变量豁免，只对明确的内建类型或类型命名报告 E721；正反行为、静态检查、范围门禁和独立评审均通过。",
+      "diff": {
+        "file": "pycodestyle.py",
+        "summary": "1 个文件 · 明确类型识别边界",
+        "excerpt": "-        inst = match.group(1)\n+        compared = match.group(1)\n+        inst = match.group(2)\n         if inst and inst.isidentifier() and inst not in SINGLETONS:\n-            return  # Allow comparison for types which are not obvious\n+            if not compared:\n+                return  # Allow comparison for types which are not obvious\n+            if (\n+                    compared not in BUILTIN_TYPE_NAMES and\n+                    not compared.lstrip('_')[:1].isupper()):\n+                return  # Allow comparison for types which are not obvious"
+      },
+      "verification": {
+        "headline": "768 passed, 5 skipped",
+        "checks": [
+          "8 个正反行为断言全部通过。",
+          "compileall、pycodestyle 自检与 git diff --check 通过。",
+          "Scope Gate 始终只检测到 pycodestyle.py。"
+        ]
+      },
+      "review": {
+        "verdict": "approve",
+        "severity": "none",
+        "title": "明确行为合同得到满足",
+        "evidence": "变更满足明确的行为契约，修改范围仅限 pycodestyle.py，完整测试与定向回归验证均通过。",
+        "recommendation": "人工检查最终 Diff 后再决定是否提交。"
+      },
+      "gates": {
+        "scope": "pre-verification、post-verification、pre-review 均通过；变更仅涉及 pycodestyle.py。",
+        "risk": "success · low · self-check",
+        "finish": "ready_to_commit · 未自动提交"
+      },
+      "source_links": [
         {
-          "label": "Baseline",
-          "result": "冻结任务、路径与初始现场"
+          "kind": "diff",
+          "label": "实际 Diff",
+          "path": "examples/evidence/real-world-pycodestyle-1187/success/diff.patch"
         },
         {
-          "label": "Worker",
-          "result": "宿主机关机，候选保留"
+          "kind": "verification",
+          "label": "验证摘要",
+          "path": "examples/evidence/real-world-pycodestyle-1187/success/verification-summary.md"
         },
         {
-          "label": "Recover",
-          "result": "旧轮次冻结为 interrupted"
+          "kind": "review",
+          "label": "Reviewer 结论",
+          "path": "examples/evidence/real-world-pycodestyle-1187/success/review-verdict.json"
         },
         {
-          "label": "Verify",
-          "result": "5311 passed 与静态检查通过"
+          "kind": "gate",
+          "label": "Gate 结果",
+          "path": "examples/evidence/real-world-pycodestyle-1187/success/gate-result.json"
         },
         {
-          "label": "Review",
-          "result": "approve，0 findings"
-        },
-        {
-          "label": "Finish",
-          "result": "ready_to_commit"
+          "kind": "finish",
+          "label": "最终报告",
+          "path": "examples/evidence/real-world-pycodestyle-1187/success/final-report.md"
         }
       ],
       "limitations": [
-        "Issue 已明确期望行为，不是盲目根因发现。",
-        "只验证一次宿主机关机后的恢复。",
-        "不证明重复崩溃或任意中断点都可一致恢复。"
+        "这是新的隔离候选，不是对原拒绝现场的自动覆盖或静默续跑。",
+        "公开 Git 历史不能独立证明 follow-up 行为合同的预注册顺序。"
       ]
     },
     {
-      "id": "crwp-v1-02",
-      "kind": "停止路径",
-      "title": "CRWP-V1-02",
-      "subtitle": "900 秒到达后停止后续流程",
-      "issue_url": "https://github.com/sequelize/sequelize/issues/18265",
-      "source_record": "eval/real-world-runs.md",
-      "source_heading": "2026-08-04 执行结果：CRWP-V1-02 Sequelize #18265",
-      "status": "needs_human",
-      "status_label": "证据不足，交还人工",
-      "summary": "Worker 到达冻结的 900 秒 timeout；Vega 终止受控进程，未继续验证或启动 Reviewer。",
-      "changed_files": 0,
-      "diff_summary": "0 个文件修改",
-      "change_summary": "目标仓库保持 clean，没有文件被 Worker 修改。",
-      "gate_summary": "Workspace、Scope 与 Risk Gate 均未启动。",
-      "verification_summary": "Verification 未启动，没有测试结果可用于证明修复。",
-      "reviewer_summary": "Reviewer 未启动，不能给出 approve 或缺陷结论。",
-      "evidence_limit": "这里只能证明 Vega 在 timeout 后停止并保留现场；不能解释为 Worker 已经修复或无法修复目标缺陷，也不能与其他 Case 合并计算成功率。",
-      "next_step": "人工查看保留现场，决定是否调整任务合同或改为人工处理。",
-      "timeline": [
+      "id": "click-2939-success",
+      "kind": "标准闭环",
+      "title": "Click #2939",
+      "subtitle": "真实 Diff、独立 oracle 与完整测试",
+      "issue_url": "https://github.com/pallets/click/issues/2939",
+      "status": "ready_to_commit",
+      "status_label": "证据完整，可人工检查",
+      "summary": "Worker 将 stdin 文件迭代与 prompt EOF 的语义分离；独立 oracle、完整测试、三阶段范围门禁和只读 Reviewer 共同约束最终结论。",
+      "diff": {
+        "file": "src/click/testing.py",
+        "summary": "2 个预注册文件 · 修复 EOF 语义",
+        "excerpt": "+        def input_readline() -> str:\n+            line = text_input.readline()\n+\n+            if line == \"\":\n+                raise EOFError()"
+      },
+      "verification": {
+        "headline": "688 passed, 72 skipped, 1 xfailed",
+        "checks": [
+          "基线独立 oracle 在 Click 8.2.1 上稳定失败。",
+          "修复后 stdin 链式迭代正常结束且不输出 Aborted!。",
+          "prompt EOF 仍保持既有中止语义，git diff --check 通过。"
+        ]
+      },
+      "review": {
+        "verdict": "approve",
+        "severity": "none",
+        "title": "stdin 迭代与 prompt EOF 语义已分离",
+        "evidence": "stdin 链式文件迭代零状态完成且不输出 Aborted!；tests/test_chain.py 覆盖输出、异常和退出码；diff 仅涉及两条允许路径；未见新增依赖、联网、凭据或破坏性操作风险",
+        "recommendation": "人工复核两个允许文件的 Diff 后再决定是否提交。"
+      },
+      "gates": {
+        "scope": "pre-verification、post-verification、pre-review 均通过；变更仅涉及 src/click/testing.py, tests/test_chain.py。",
+        "risk": "success · low · self-check",
+        "finish": "ready_to_commit · 未自动提交"
+      },
+      "source_links": [
         {
-          "label": "Baseline",
-          "result": "控制基线与负向扫描通过"
+          "kind": "diff",
+          "label": "实际 Diff",
+          "path": "examples/evidence/real-world-click-2939/success/diff.patch"
         },
         {
-          "label": "Worker",
-          "result": "900 秒 timeout"
+          "kind": "verification",
+          "label": "验证摘要",
+          "path": "examples/evidence/real-world-click-2939/success/verification-summary.md"
         },
         {
-          "label": "Stop",
-          "result": "受控进程已确认终止"
+          "kind": "review",
+          "label": "Reviewer 结论",
+          "path": "examples/evidence/real-world-click-2939/success/review-verdict.json"
         },
         {
-          "label": "Verify",
-          "result": "未启动"
+          "kind": "gate",
+          "label": "Gate 结果",
+          "path": "examples/evidence/real-world-click-2939/success/gate-result.json"
         },
         {
-          "label": "Review",
-          "result": "未启动"
-        },
-        {
-          "label": "Finish",
-          "result": "needs_human"
+          "kind": "finish",
+          "label": "最终报告",
+          "path": "examples/evidence/real-world-click-2939/success/final-report.md"
         }
       ],
       "limitations": [
-        "输出读取线程关闭超时，不能宣称保存了外部进程全部输出。",
-        "没有文件修改，也没有验证或 Reviewer 结果。",
-        "按预注册不选择性重跑、延长 timeout 或更换结果。"
+        "公开包不包含原始运行目录、完整模型输出或 prompt 全文。",
+        "单案例不能外推为任意仓库或任意任务的成功率。"
       ]
     }
   ]

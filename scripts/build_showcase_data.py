@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SOURCE_RECORD = Path("eval/real-world-runs.md")
+EVIDENCE_ROOT = Path("examples/evidence")
 DEFAULT_OUTPUT = Path("site/data/cases.json")
 
 _ALLOWED_STATUS = {"ready_to_commit", "request_changes", "needs_human"}
@@ -30,170 +31,326 @@ _UNSAFE_MODEL_CONTENT = (
     re.compile(r"原始提示词"),
 )
 
+_SOURCE_CHECKS = {
+    "pycodestyle-1187-rejection": (
+        (
+            "examples/evidence/real-world-pycodestyle-1187/"
+            "reviewer-rejection/verification-summary.md",
+            "`768 passed, 5 skipped`",
+        ),
+        (
+            "examples/evidence/real-world-pycodestyle-1187/"
+            "reviewer-rejection/verification-summary.md",
+            "固定测试通过不代表行为合同完整",
+        ),
+        (
+            "examples/evidence/real-world-pycodestyle-1187/"
+            "reviewer-rejection/final-report.md",
+            "隔离 reviewer 返回 `request_changes`",
+        ),
+    ),
+    "pycodestyle-1187-success": (
+        (
+            "examples/evidence/real-world-pycodestyle-1187/"
+            "success/verification-summary.md",
+            "`768 passed, 5 skipped`",
+        ),
+        (
+            "examples/evidence/real-world-pycodestyle-1187/"
+            "success/verification-summary.md",
+            "8 个正反断言全部通过",
+        ),
+        (
+            "examples/evidence/real-world-pycodestyle-1187/success/final-report.md",
+            "Finish 状态：`ready_to_commit`",
+        ),
+    ),
+    "click-2939-success": (
+        (
+            "examples/evidence/real-world-click-2939/"
+            "success/verification-summary.md",
+            "`688 passed, 72 skipped, 1 xfailed`",
+        ),
+        (
+            "examples/evidence/real-world-click-2939/"
+            "success/verification-summary.md",
+            "独立 oracle",
+        ),
+        (
+            "examples/evidence/real-world-click-2939/success/final-report.md",
+            "Finish 状态：`ready_to_commit`",
+        ),
+    ),
+}
+
+
+def _read_json(relative_path: str) -> dict[str, Any]:
+    return json.loads((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
+
+
+def _source_links(base_path: str) -> list[dict[str, str]]:
+    labels = (
+        ("diff", "实际 Diff", "diff.patch"),
+        ("verification", "验证摘要", "verification-summary.md"),
+        ("review", "Reviewer 结论", "review-verdict.json"),
+        ("gate", "Gate 结果", "gate-result.json"),
+        ("finish", "最终报告", "final-report.md"),
+    )
+    return [
+        {
+            "kind": kind,
+            "label": label,
+            "path": f"{base_path}/{filename}",
+        }
+        for kind, label, filename in labels
+    ]
+
+
+def _scope_summary(gate: dict[str, Any]) -> str:
+    scope_gate = gate["scope_gate"]
+    stages = ("pre_verification", "post_verification", "pre_review")
+    changed_files = sorted(
+        {
+            path
+            for stage in stages
+            for path in scope_gate[stage]["changed_files"]
+        }
+    )
+    if any(scope_gate[stage]["status"] != "success" for stage in stages):
+        return "至少一个 Scope Gate 未通过。"
+    return (
+        "pre-verification、post-verification、pre-review 均通过；"
+        f"变更仅涉及 {', '.join(changed_files)}。"
+    )
+
+
+def _risk_summary(gate: dict[str, Any]) -> str:
+    risk_gate = gate["risk_gate"]
+    return (
+        f"{risk_gate['status']} · {risk_gate['risk']} · "
+        f"{risk_gate['recommendation']}"
+    )
+
 
 def build_payload() -> dict[str, Any]:
-    """返回人工核准的公开案例；这里不从 Markdown 猜测事实。"""
+    """从已提交的脱敏证据包生成展示数据。"""
+    rejection_base = (
+        "examples/evidence/real-world-pycodestyle-1187/reviewer-rejection"
+    )
+    success_base = "examples/evidence/real-world-pycodestyle-1187/success"
+    click_base = "examples/evidence/real-world-click-2939/success"
+
+    rejection_review = _read_json(f"{rejection_base}/review-verdict.json")
+    rejection_gate = _read_json(f"{rejection_base}/gate-result.json")
+    rejection_finding = rejection_review["findings"][0]
+
+    success_review = _read_json(f"{success_base}/review-verdict.json")
+    success_gate = _read_json(f"{success_base}/gate-result.json")
+
+    click_review = _read_json(f"{click_base}/review-verdict.json")
+    click_gate = _read_json(f"{click_base}/gate-result.json")
+
     cases = [
         {
-            "id": "anyio-1231",
-            "kind": "标准路径",
-            "title": "AnyIO #1231",
-            "subtitle": "边界明确的小范围修复",
-            "issue_url": "https://github.com/agronholm/anyio/issues/1231",
-            "source_record": SOURCE_RECORD.as_posix(),
-            "source_heading": "2026-08-01 独立 fresh auto Dogfood：AnyIO #1231",
-            "status": "ready_to_commit",
-            "status_label": "可以人工检查后提交",
-            "summary": "一轮完成小范围补丁，验证、范围门禁和独立审查均有可核对结果。",
-            "changed_files": 3,
-            "diff_summary": "+23 / -1",
-            "change_summary": (
-                "只修改 Trio 后端、任务组回归测试和版本记录，共 3 个预注册文件。"
+            "id": "pycodestyle-1187-rejection",
+            "kind": "Reviewer 阻断",
+            "title": "pycodestyle #1187",
+            "subtitle": "768 项测试通过，仍发现语义回归",
+            "issue_url": "https://github.com/PyCQA/pycodestyle/issues/1187",
+            "status": "request_changes",
+            "status_label": "测试全绿，但不能交付",
+            "summary": (
+                "初始补丁修复了反向内建类型比较，却删除了原有歧义场景豁免。"
+                "固定测试全部通过，隔离 Reviewer 仍识别出新的 E721 误报。"
             ),
-            "gate_summary": "Workspace、三阶段 Scope 与 Risk Gate 全部通过。",
-            "verification_summary": (
-                "5 条命令全部通过；相关测试 24 passed，完整任务组测试 "
-                "496 passed、10 skipped、4 xfailed。"
-            ),
-            "reviewer_summary": "Reviewer 返回 approve，findings 为 0。",
-            "evidence_limit": (
-                "这是 Issue 已明确期望行为的单案例，不证明未知缺陷发现能力、"
-                "模型未见过上游修复或跨仓库成功率。"
-            ),
-            "next_step": "人工检查 3 个文件的 Diff，再决定是否提交。",
-            "timeline": [
-                {"label": "Baseline", "result": "冻结真实仓库修订与允许路径"},
-                {"label": "Worker", "result": "3 个文件，+23 / -1"},
-                {"label": "Gates", "result": "范围、工作区与风险检查通过"},
-                {"label": "Verify", "result": "5 条验证命令通过"},
-                {"label": "Review", "result": "approve，0 findings"},
-                {"label": "Finish", "result": "ready_to_commit"},
-            ],
+            "diff": {
+                "file": "pycodestyle.py",
+                "summary": "1 个文件 · 删除 3 行保护逻辑",
+                "excerpt": (
+                    "-        inst = match.group(1)\n"
+                    "-        if inst and inst.isidentifier() and inst not in SINGLETONS:\n"
+                    "-            return  # Allow comparison for types which are not obvious"
+                ),
+            },
+            "verification": {
+                "headline": "768 passed, 5 skipped",
+                "checks": [
+                    "初始定向 oracle 能识别反向内建类型比较。",
+                    "三阶段 Scope Gate 只检测到 pycodestyle.py。",
+                    "固定测试没有覆盖普通小写变量的歧义比较。",
+                ],
+            },
+            "review": {
+                "verdict": rejection_review["verdict"],
+                "severity": rejection_finding["severity"],
+                "title": rejection_finding["title"],
+                "evidence": rejection_finding["evidence"],
+                "recommendation": rejection_finding["recommendation"],
+            },
+            "gates": {
+                "scope": _scope_summary(rejection_gate),
+                "risk": _risk_summary(rejection_gate),
+                "finish": "needs_human · 保留候选现场 · 未自动提交",
+            },
+            "source_links": _source_links(rejection_base),
             "limitations": [
-                "Issue 正文和任务合同已经明确期望行为。",
-                "单次运行不构成跨仓库成功率统计。",
-                "无法证明模型训练数据未包含上游修复。",
+                "公开包是脱敏摘要，不包含 Worker 或 Reviewer 的完整会话。",
+                "该案例证明 Reviewer 阻止了已知语义回归，不构成通用缺陷发现率。",
             ],
         },
         {
-            "id": "packaging-1232",
-            "kind": "恢复路径",
-            "title": "packaging #1232",
-            "subtitle": "宿主机关机后保留候选并恢复",
-            "issue_url": "https://github.com/pypa/packaging/issues/1232",
-            "source_record": SOURCE_RECORD.as_posix(),
-            "source_heading": "2026-08-02 主机断电恢复 Dogfood：packaging #1232",
+            "id": "pycodestyle-1187-success",
+            "kind": "修正后通过",
+            "title": "pycodestyle #1187",
+            "subtitle": "补齐正反行为合同后的新候选",
+            "issue_url": "https://github.com/PyCQA/pycodestyle/issues/1187",
             "status": "ready_to_commit",
-            "status_label": "恢复证据完整，可人工检查",
+            "status_label": "证据完整，可人工检查",
             "summary": (
-                "Worker 执行期间宿主机关机；原候选保持不变，用户确认继续后重新建立验证和审查证据。"
+                "新的隔离候选保留普通小写变量豁免，只对明确的内建类型或类型命名报告 E721；"
+                "正反行为、静态检查、范围门禁和独立评审均通过。"
             ),
-            "changed_files": 3,
-            "diff_summary": "+20 / -1",
-            "change_summary": (
-                "中断前已在 3 个允许文件留下候选；恢复前后 Diff 对象保持一致。"
-            ),
-            "gate_summary": "恢复后的三阶段 Scope 与 Risk Gate 全部通过。",
-            "verification_summary": (
-                "独立 hash/equality oracle、5311 项完整测试、Ruff 和 "
-                "git diff --check 全部通过。"
-            ),
-            "reviewer_summary": "Reviewer 返回 approve，findings 为 0。",
-            "evidence_limit": (
-                "这是单次宿主机中断恢复，不证明重复崩溃、任意中断点的一致性，"
-                "也不代表无中断任务的总体成功率。"
-            ),
-            "next_step": "人工确认恢复链路和 3 个文件的 Diff，再决定是否提交。",
-            "timeline": [
-                {"label": "Baseline", "result": "冻结任务、路径与初始现场"},
-                {"label": "Worker", "result": "宿主机关机，候选保留"},
-                {"label": "Recover", "result": "旧轮次冻结为 interrupted"},
-                {"label": "Verify", "result": "5311 passed 与静态检查通过"},
-                {"label": "Review", "result": "approve，0 findings"},
-                {"label": "Finish", "result": "ready_to_commit"},
-            ],
+            "diff": {
+                "file": "pycodestyle.py",
+                "summary": "1 个文件 · 明确类型识别边界",
+                "excerpt": (
+                    "-        inst = match.group(1)\n"
+                    "+        compared = match.group(1)\n"
+                    "+        inst = match.group(2)\n"
+                    "         if inst and inst.isidentifier() and inst not in SINGLETONS:\n"
+                    "-            return  # Allow comparison for types which are not obvious\n"
+                    "+            if not compared:\n"
+                    "+                return  # Allow comparison for types which are not obvious\n"
+                    "+            if (\n"
+                    "+                    compared not in BUILTIN_TYPE_NAMES and\n"
+                    "+                    not compared.lstrip('_')[:1].isupper()):\n"
+                    "+                return  # Allow comparison for types which are not obvious"
+                ),
+            },
+            "verification": {
+                "headline": "768 passed, 5 skipped",
+                "checks": [
+                    "8 个正反行为断言全部通过。",
+                    "compileall、pycodestyle 自检与 git diff --check 通过。",
+                    "Scope Gate 始终只检测到 pycodestyle.py。",
+                ],
+            },
+            "review": {
+                "verdict": success_review["verdict"],
+                "severity": "none",
+                "title": "明确行为合同得到满足",
+                "evidence": success_review["summary"],
+                "recommendation": "人工检查最终 Diff 后再决定是否提交。",
+            },
+            "gates": {
+                "scope": _scope_summary(success_gate),
+                "risk": _risk_summary(success_gate),
+                "finish": "ready_to_commit · 未自动提交",
+            },
+            "source_links": _source_links(success_base),
             "limitations": [
-                "Issue 已明确期望行为，不是盲目根因发现。",
-                "只验证一次宿主机关机后的恢复。",
-                "不证明重复崩溃或任意中断点都可一致恢复。",
+                "这是新的隔离候选，不是对原拒绝现场的自动覆盖或静默续跑。",
+                "公开 Git 历史不能独立证明 follow-up 行为合同的预注册顺序。",
             ],
         },
         {
-            "id": "crwp-v1-02",
-            "kind": "停止路径",
-            "title": "CRWP-V1-02",
-            "subtitle": "900 秒到达后停止后续流程",
-            "issue_url": "https://github.com/sequelize/sequelize/issues/18265",
-            "source_record": SOURCE_RECORD.as_posix(),
-            "source_heading": "2026-08-04 执行结果：CRWP-V1-02 Sequelize #18265",
-            "status": "needs_human",
-            "status_label": "证据不足，交还人工",
+            "id": "click-2939-success",
+            "kind": "标准闭环",
+            "title": "Click #2939",
+            "subtitle": "真实 Diff、独立 oracle 与完整测试",
+            "issue_url": "https://github.com/pallets/click/issues/2939",
+            "status": "ready_to_commit",
+            "status_label": "证据完整，可人工检查",
             "summary": (
-                "Worker 到达冻结的 900 秒 timeout；Vega 终止受控进程，未继续验证或启动 Reviewer。"
+                "Worker 将 stdin 文件迭代与 prompt EOF 的语义分离；独立 oracle、完整测试、"
+                "三阶段范围门禁和只读 Reviewer 共同约束最终结论。"
             ),
-            "changed_files": 0,
-            "diff_summary": "0 个文件修改",
-            "change_summary": "目标仓库保持 clean，没有文件被 Worker 修改。",
-            "gate_summary": "Workspace、Scope 与 Risk Gate 均未启动。",
-            "verification_summary": "Verification 未启动，没有测试结果可用于证明修复。",
-            "reviewer_summary": "Reviewer 未启动，不能给出 approve 或缺陷结论。",
-            "evidence_limit": (
-                "这里只能证明 Vega 在 timeout 后停止并保留现场；不能解释为 Worker "
-                "已经修复或无法修复目标缺陷，也不能与其他 Case 合并计算成功率。"
-            ),
-            "next_step": "人工查看保留现场，决定是否调整任务合同或改为人工处理。",
-            "timeline": [
-                {"label": "Baseline", "result": "控制基线与负向扫描通过"},
-                {"label": "Worker", "result": "900 秒 timeout"},
-                {"label": "Stop", "result": "受控进程已确认终止"},
-                {"label": "Verify", "result": "未启动"},
-                {"label": "Review", "result": "未启动"},
-                {"label": "Finish", "result": "needs_human"},
-            ],
+            "diff": {
+                "file": "src/click/testing.py",
+                "summary": "2 个预注册文件 · 修复 EOF 语义",
+                "excerpt": (
+                    "+        def input_readline() -> str:\n"
+                    "+            line = text_input.readline()\n"
+                    "+\n"
+                    '+            if line == "":\n'
+                    "+                raise EOFError()"
+                ),
+            },
+            "verification": {
+                "headline": "688 passed, 72 skipped, 1 xfailed",
+                "checks": [
+                    "基线独立 oracle 在 Click 8.2.1 上稳定失败。",
+                    "修复后 stdin 链式迭代正常结束且不输出 Aborted!。",
+                    "prompt EOF 仍保持既有中止语义，git diff --check 通过。",
+                ],
+            },
+            "review": {
+                "verdict": click_review["verdict"],
+                "severity": "none",
+                "title": "stdin 迭代与 prompt EOF 语义已分离",
+                "evidence": "；".join(click_review["checked_items"]),
+                "recommendation": "人工复核两个允许文件的 Diff 后再决定是否提交。",
+            },
+            "gates": {
+                "scope": _scope_summary(click_gate),
+                "risk": _risk_summary(click_gate),
+                "finish": "ready_to_commit · 未自动提交",
+            },
+            "source_links": _source_links(click_base),
             "limitations": [
-                "输出读取线程关闭超时，不能宣称保存了外部进程全部输出。",
-                "没有文件修改，也没有验证或 Reviewer 结果。",
-                "按预注册不选择性重跑、延长 timeout 或更换结果。",
+                "公开包不包含原始运行目录、完整模型输出或 prompt 全文。",
+                "单案例不能外推为任意仓库或任意任务的成功率。",
             ],
         },
     ]
+
     return {
-        "schema_version": 1,
-        "generated_from": SOURCE_RECORD.as_posix(),
+        "schema_version": 2,
+        "generated_from": [
+            "examples/evidence/real-world-pycodestyle-1187",
+            "examples/evidence/real-world-click-2939",
+        ],
         "evidence_through": "2026-08-04",
         "cases": cases,
     }
 
 
-_SOURCE_CHECKS = {
-    "anyio-1231": (
-        "共 `23` 行新增、`1` 行删除",
-        "（`24 passed, 486 deselected`）",
-        "Finish 为 `ready_to_commit`",
-    ),
-    "packaging-1232": (
-        "第 1 轮外部 Worker 运行期间宿主机关机",
-        "（`5311 passed`）",
-        "Finish 为\n  `ready_to_commit`",
-    ),
-    "crwp-v1-02": (
-        "`900` 秒 timeout",
-        "Worker 没有修改文件",
-        "Finish 为 `needs_human`",
-    ),
-}
+def _validate_source_path(relative_path: str) -> Path:
+    if Path(relative_path).is_absolute():
+        raise ValueError("公开证据路径必须是仓库相对路径")
+    resolved = (REPO_ROOT / relative_path).resolve()
+    evidence_root = (REPO_ROOT / EVIDENCE_ROOT).resolve()
+    if not resolved.is_relative_to(evidence_root):
+        raise ValueError(f"公开证据路径逃逸 examples/evidence：{relative_path}")
+    if not resolved.is_file():
+        raise ValueError(f"公开证据文件不存在：{relative_path}")
+    return resolved
 
 
-def validate_payload(payload: dict[str, Any], source_text: str) -> None:
-    if payload.get("schema_version") != 1:
-        raise ValueError("展示案例 schema_version 必须为 1")
-    if payload.get("generated_from") != SOURCE_RECORD.as_posix():
-        raise ValueError("展示案例必须明确指向公开证据记录")
+def _iter_strings(value: Any) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_strings(item)
+
+
+def validate_payload(payload: dict[str, Any]) -> None:
+    if payload.get("schema_version") != 2:
+        raise ValueError("展示案例 schema_version 必须为 2")
 
     cases = payload.get("cases")
     if not isinstance(cases, list) or len(cases) != 3:
-        raise ValueError("展示站 V1 必须恰好包含 3 个主案例")
+        raise ValueError("展示站 V1.1 必须恰好包含 3 个主案例")
 
+    expected_status = {
+        "pycodestyle-1187-rejection": "request_changes",
+        "pycodestyle-1187-success": "ready_to_commit",
+        "click-2939-success": "ready_to_commit",
+    }
     seen_ids: set[str] = set()
     required_fields = {
         "id",
@@ -201,20 +358,14 @@ def validate_payload(payload: dict[str, Any], source_text: str) -> None:
         "title",
         "subtitle",
         "issue_url",
-        "source_record",
-        "source_heading",
         "status",
         "status_label",
         "summary",
-        "changed_files",
-        "diff_summary",
-        "change_summary",
-        "gate_summary",
-        "verification_summary",
-        "reviewer_summary",
-        "evidence_limit",
-        "next_step",
-        "timeline",
+        "diff",
+        "verification",
+        "review",
+        "gates",
+        "source_links",
         "limitations",
     }
 
@@ -229,35 +380,67 @@ def validate_payload(payload: dict[str, Any], source_text: str) -> None:
         if case_id in seen_ids:
             raise ValueError(f"案例 id 重复：{case_id}")
         seen_ids.add(case_id)
-
+        if case_id not in expected_status:
+            raise ValueError(f"未知展示案例：{case_id}")
         if case["status"] not in _ALLOWED_STATUS:
             raise ValueError(f"未知 Finish 状态：{case['status']}")
-        if case["source_record"] != SOURCE_RECORD.as_posix():
-            raise ValueError(f"{case_id} 的来源不在公开证据记录中")
-        if case["source_heading"] not in source_text:
-            raise ValueError(f"{case_id} 的来源标题不存在")
+        if case["status"] != expected_status[case_id]:
+            raise ValueError(f"{case_id} 的真实终态被改写")
+
         if not isinstance(case["limitations"], list) or not case["limitations"]:
             raise ValueError(f"{case_id} 必须披露证据限制")
-        if not isinstance(case["timeline"], list) or len(case["timeline"]) < 6:
-            raise ValueError(f"{case_id} 必须包含完整阶段时间线")
+        if not isinstance(case["source_links"], list) or len(case["source_links"]) < 4:
+            raise ValueError(f"{case_id} 必须链接可复核的证据文件")
 
-        for expected in _SOURCE_CHECKS[case_id]:
+        source_paths: dict[str, Path] = {}
+        for source in case["source_links"]:
+            kind = source.get("kind")
+            path = source.get("path")
+            if not isinstance(kind, str) or not isinstance(path, str):
+                raise ValueError(f"{case_id} 的证据链接格式无效")
+            if kind in source_paths:
+                raise ValueError(f"{case_id} 的证据类型重复：{kind}")
+            source_paths[kind] = _validate_source_path(path)
+
+        diff_source = source_paths.get("diff")
+        if diff_source is None:
+            raise ValueError(f"{case_id} 缺少 Diff 证据")
+        excerpt = case["diff"].get("excerpt")
+        if not isinstance(excerpt, str) or excerpt not in diff_source.read_text(
+            encoding="utf-8"
+        ):
+            raise ValueError(f"{case_id} 的 Diff 摘录与证据文件不一致")
+
+        review_source = source_paths.get("review")
+        if review_source is None:
+            raise ValueError(f"{case_id} 缺少 Reviewer 证据")
+        review_payload = json.loads(review_source.read_text(encoding="utf-8"))
+        if case["review"].get("verdict") != review_payload.get("verdict"):
+            raise ValueError(f"{case_id} 的 Reviewer verdict 与证据文件不一致")
+
+        for source_path, expected in _SOURCE_CHECKS[case_id]:
+            source_text = _validate_source_path(source_path).read_text(encoding="utf-8")
             if expected not in source_text:
                 raise ValueError(f"{case_id} 的来源证据缺失：{expected!r}")
 
-    stopped = next(case for case in cases if case["id"] == "crwp-v1-02")
-    if stopped["changed_files"] != 0 or stopped["status"] != "needs_human":
-        raise ValueError("CRWP-V1-02 必须保留 0 文件修改和 needs_human 事实")
-    if "未启动" not in stopped["verification_summary"]:
-        raise ValueError("CRWP-V1-02 不得伪造验证结果")
-    if "未启动" not in stopped["reviewer_summary"]:
-        raise ValueError("CRWP-V1-02 不得伪造 Reviewer 结果")
+    if seen_ids != set(expected_status):
+        raise ValueError("展示案例集合与人工核准清单不一致")
+
+    rejection = next(
+        case for case in cases if case["id"] == "pycodestyle-1187-rejection"
+    )
+    if rejection["review"]["severity"] != "major":
+        raise ValueError("Reviewer 阻断案例必须保留 major finding")
+    if "needs_human" not in rejection["gates"]["finish"]:
+        raise ValueError("Reviewer 阻断案例必须保留 needs_human 终态")
+
+    for text in _iter_strings(payload):
+        for pattern in (*_PATH_PATTERNS, *_SECRET_PATTERNS, *_UNSAFE_MODEL_CONTENT):
+            match = pattern.search(text)
+            if match:
+                raise ValueError(f"公开案例包含禁止内容：{match.group(0)!r}")
 
     serialized = json.dumps(payload, ensure_ascii=False)
-    for pattern in (*_PATH_PATTERNS, *_SECRET_PATTERNS, *_UNSAFE_MODEL_CONTENT):
-        match = pattern.search(serialized)
-        if match:
-            raise ValueError(f"公开案例包含禁止内容：{match.group(0)!r}")
     if re.search(r"(?i)success[_ -]?rate|成功率\s*[:=]\s*\d", serialized):
         raise ValueError("展示案例不得生成总体成功率")
 
@@ -284,14 +467,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    source_path = REPO_ROOT / SOURCE_RECORD
     output_path = args.output
     if not output_path.is_absolute():
         output_path = REPO_ROOT / output_path
 
-    source_text = source_path.read_text(encoding="utf-8")
     payload = build_payload()
-    validate_payload(payload, source_text)
+    validate_payload(payload)
     expected = render_payload(payload)
 
     if args.check:
@@ -300,9 +481,9 @@ def main() -> int:
             return 1
         actual = output_path.read_text(encoding="utf-8")
         if actual != expected:
-            print("展示案例与人工核准清单不一致，请重新运行生成命令")
+            print("展示案例与脱敏证据包及人工核准清单不一致，请重新运行生成命令")
             return 1
-        print("展示案例数据与公开证据及人工核准清单一致")
+        print("展示案例数据与脱敏证据包及人工核准清单一致")
         return 0
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -19,6 +19,23 @@
       content="https://aki0225.github.io/vegaloom/assets/og-image.png"
     >
     <title>Vega — AI 写的代码，得看证据</title>
+    <script>
+      (() => {
+        const storageKey = "vega-showcase-theme";
+        let storedTheme = null;
+        try {
+          storedTheme = window.localStorage.getItem(storageKey);
+        } catch {
+          storedTheme = null;
+        }
+        const theme = storedTheme === "light" || storedTheme === "dark"
+          ? storedTheme
+          : window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css">
     <script src="app.js" defer></script>
@@ -33,6 +50,18 @@
       </a>
 
       <nav class="header-links" aria-label="站点链接">
+        <button
+          class="theme-toggle"
+          type="button"
+          aria-label="切换到黑夜模式"
+          aria-pressed="false"
+          data-theme-toggle
+        >
+          <span class="theme-toggle__track" aria-hidden="true">
+            <span class="theme-toggle__thumb"></span>
+          </span>
+          <span data-theme-label>黑夜</span>
+        </button>
         <a href="#cases">运行记录</a>
         <a
           href="https://github.com/aki0225/vegaloom"
@@ -76,41 +105,41 @@
           <div class="case-grid" role="tablist" aria-label="选择真实运行案例">
             <button
               class="case-card is-active"
-              id="tab-anyio-1231"
+              id="tab-pycodestyle-1187-rejection"
               type="button"
               role="tab"
               aria-selected="true"
               aria-controls="finish-panel"
-              data-case-id="anyio-1231"
+              data-case-id="pycodestyle-1187-rejection"
             >
-              <strong>AnyIO #1231</strong>
-              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+              <strong>pycodestyle #1187</strong>
+              <small><i class="status-mark status-mark--changes" aria-hidden="true"></i> request_changes</small>
             </button>
             <button
               class="case-card"
-              id="tab-packaging-1232"
+              id="tab-pycodestyle-1187-success"
               type="button"
               role="tab"
               aria-selected="false"
               aria-controls="finish-panel"
               tabindex="-1"
-              data-case-id="packaging-1232"
+              data-case-id="pycodestyle-1187-success"
             >
-              <strong>packaging #1232</strong>
+              <strong>修正候选</strong>
               <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
             </button>
             <button
               class="case-card"
-              id="tab-crwp-v1-02"
+              id="tab-click-2939-success"
               type="button"
               role="tab"
               aria-selected="false"
               aria-controls="finish-panel"
               tabindex="-1"
-              data-case-id="crwp-v1-02"
+              data-case-id="click-2939-success"
             >
-              <strong>CRWP-V1-02</strong>
-              <small><i class="status-mark status-mark--human" aria-hidden="true"></i> needs_human</small>
+              <strong>Click #2939</strong>
+              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
             </button>
           </div>
 
@@ -118,68 +147,145 @@
             class="finish-panel"
             id="finish-panel"
             role="tabpanel"
-            aria-labelledby="tab-anyio-1231"
+            aria-labelledby="tab-pycodestyle-1187-rejection"
             aria-live="polite"
-            data-status="ready_to_commit"
+            data-status="request_changes"
           >
             <div class="finish-panel__heading">
-              <h3 data-case-field="status">ready_to_commit</h3>
+              <div>
+                <p class="case-kind" data-case-field="kind">Reviewer 阻断</p>
+                <h3 data-case-field="status">request_changes</h3>
+              </div>
               <span class="decision-stamp" data-case-field="status_label">
-                可以人工检查后提交
+                测试全绿，但不能交付
               </span>
             </div>
 
-            <dl class="finish-facts finish-facts--primary">
+            <p class="case-summary" data-case-field="summary">
+              初始补丁修复了反向内建类型比较，却删除了原有歧义场景豁免。
+              固定测试全部通过，隔离 Reviewer 仍识别出新的 E721 误报。
+            </p>
+
+            <div class="evidence-board">
+              <section class="evidence-block evidence-block--diff" aria-labelledby="diff-title">
+                <header class="evidence-block__header">
+                  <div>
+                    <span class="evidence-label" id="diff-title">Actual Diff</span>
+                    <code data-case-field="diff_file">pycodestyle.py</code>
+                  </div>
+                  <strong data-case-field="diff_summary">
+                    1 个文件 · 删除 3 行保护逻辑
+                  </strong>
+                </header>
+                <pre class="diff-view"><code data-diff-code><span class="diff-line diff-line--removed">-        inst = match.group(1)</span>
+<span class="diff-line diff-line--removed">-        if inst and inst.isidentifier() and inst not in SINGLETONS:</span>
+<span class="diff-line diff-line--removed">-            return  # Allow comparison for types which are not obvious</span></code></pre>
+              </section>
+
+              <div class="evidence-stack">
+                <section class="evidence-block evidence-block--verification" aria-labelledby="verification-title">
+                  <header class="evidence-block__header">
+                    <span class="evidence-label" id="verification-title">
+                      Deterministic Verification
+                    </span>
+                    <strong data-case-field="verification_headline">
+                      768 passed, 5 skipped
+                    </strong>
+                  </header>
+                  <ul class="evidence-list" data-verification-list>
+                    <li>初始定向 oracle 能识别反向内建类型比较。</li>
+                    <li>三阶段 Scope Gate 只检测到 pycodestyle.py。</li>
+                    <li>固定测试没有覆盖普通小写变量的歧义比较。</li>
+                  </ul>
+                </section>
+
+                <section class="evidence-block evidence-block--review" aria-labelledby="review-title">
+                  <header class="evidence-block__header">
+                    <span class="evidence-label" id="review-title">Independent Reviewer</span>
+                    <span class="review-verdict">
+                      <strong data-case-field="review_verdict">request_changes</strong>
+                      <small data-case-field="review_severity">major finding</small>
+                    </span>
+                  </header>
+                  <h4 data-case-field="review_title">
+                    反向匹配变成无条件报错，破坏原有合法歧义比较
+                  </h4>
+                  <dl class="review-finding">
+                    <div>
+                      <dt>Evidence</dt>
+                      <dd data-case-field="review_evidence">
+                        expected == type(obj) 与 value != type(other) 会误报 E721。
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Required change</dt>
+                      <dd data-case-field="review_recommendation">
+                        只对可解释的明显类型表达式报告 E721，同时保留普通小写变量的歧义比较。
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+              </div>
+            </div>
+
+            <dl class="gate-strip">
               <div>
-                <dt>验证</dt>
-                <dd data-case-field="verification_summary">
-                  5 条命令全部通过；相关测试 24 passed，完整任务组测试
-                  496 passed、10 skipped、4 xfailed。
+                <dt>Scope Gate</dt>
+                <dd data-case-field="gate_scope">
+                  pre-verification、post-verification、pre-review 均通过；
+                  变更仅涉及 pycodestyle.py。
                 </dd>
               </div>
               <div>
-                <dt>独立评审</dt>
-                <dd data-case-field="reviewer_summary">
-                  Reviewer 返回 approve，findings 为 0。
+                <dt>Risk Gate</dt>
+                <dd data-case-field="gate_risk">success · low · self-check</dd>
+              </div>
+              <div>
+                <dt>Finish</dt>
+                <dd data-case-field="gate_finish">
+                  needs_human · 保留候选现场 · 未自动提交
                 </dd>
               </div>
             </dl>
 
-            <details class="case-details">
-              <summary>证据边界</summary>
-              <dl class="finish-facts finish-facts--secondary">
-                <div>
-                  <dt>实际变更</dt>
-                  <dd data-case-field="change_summary">
-                    只修改 Trio 后端、任务组回归测试和版本记录，共 3 个预注册文件。
-                  </dd>
-                </div>
-                <div>
-                  <dt>确定性 Gate</dt>
-                  <dd data-case-field="gate_summary">
-                    Workspace、三阶段 Scope 与 Risk Gate 全部通过。
-                  </dd>
-                </div>
-              </dl>
-              <p class="evidence-limit" data-case-field="evidence_limit">
-                这是 Issue 已明确期望行为的单案例，不证明未知缺陷发现能力、
-                模型未见过上游修复或跨仓库成功率。
-              </p>
-            </details>
-
-            <a
-              class="source-link"
-              href="https://github.com/aki0225/vegaloom/blob/main/eval/real-world-runs.md"
-              target="_blank"
-              rel="noreferrer"
-              data-case-source
-            >原始记录 <span aria-hidden="true">↗</span></a>
+            <div class="evidence-footer">
+              <details class="case-details">
+                <summary>证据边界</summary>
+                <ul data-limitations-list>
+                  <li>公开包是脱敏摘要，不包含 Worker 或 Reviewer 的完整会话。</li>
+                  <li>该案例证明 Reviewer 阻止了已知语义回归，不构成通用缺陷发现率。</li>
+                </ul>
+              </details>
+              <nav class="source-links" aria-label="当前案例证据文件" data-source-links>
+                <a
+                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/diff.patch"
+                  target="_blank"
+                  rel="noreferrer"
+                >实际 Diff ↗</a>
+                <a
+                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/verification-summary.md"
+                  target="_blank"
+                  rel="noreferrer"
+                >验证摘要 ↗</a>
+                <a
+                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/review-verdict.json"
+                  target="_blank"
+                  rel="noreferrer"
+                >Reviewer 结论 ↗</a>
+                <a
+                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/gate-result.json"
+                  target="_blank"
+                  rel="noreferrer"
+                >Gate 结果 ↗</a>
+              </nav>
+            </div>
           </article>
         </div>
 
         <noscript>
           <p class="noscript-note">
-            页面未启用 JavaScript，因此当前只显示 AnyIO 案例。三个案例的完整记录可从上方证据链接查看。
+            页面未启用 JavaScript，因此当前只显示 pycodestyle Reviewer 阻断案例。
+            三个案例的完整证据可从上方文件链接查看。
           </p>
         </noscript>
       </section>
