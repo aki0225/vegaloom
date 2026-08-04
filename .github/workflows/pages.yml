@@ -1,0 +1,77 @@
+name: 发布 Vega 展示站
+
+"on":
+  # V1 本地验收通过前不自动部署；确认后从 Actions 页面手工触发。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  build:
+    name: 核对并打包静态站点
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: 配置 Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装开发依赖
+        run: python -m pip install -e ".[dev]"
+
+      - name: 核对案例数据与定向测试
+        run: |
+          python -m compileall -q scripts/build_showcase_data.py
+          python scripts/build_showcase_data.py --check
+          python -m pytest -q tests/test_showcase_data.py
+          ruff check scripts/build_showcase_data.py tests/test_showcase_data.py
+
+      - name: 检查公开仓库卫生
+        run: |
+          python scripts/check_repository_hygiene.py --base-ref HEAD^
+          git show --check --format= HEAD
+
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+        with:
+          enablement: "false"
+
+      - name: 上传静态站点
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: site
+
+  deploy:
+    name: 部署 GitHub Pages
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署静态站点
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

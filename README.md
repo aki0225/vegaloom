@@ -13,6 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
+**[在线展示](https://aki0225.github.io/vegaloom/)** ·
 **[核心设计](#核心设计)** ·
 **[核心能力](#核心能力)** ·
 **[安装](#安装)** ·

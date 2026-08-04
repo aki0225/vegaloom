@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Vega 让 AI 代码修改经过真实 Diff、项目验证和独立评审；证据不足时停止并交还人工。"
+    >
+    <meta name="theme-color" content="#f3ecdf">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Vega — AI 写的代码，得看证据">
+    <meta
+      property="og:description"
+      content="Worker 留下真实 Diff，项目验证实际运行，Reviewer 从新会话审查。"
+    >
+    <meta
+      property="og:image"
+      content="https://aki0225.github.io/vegaloom/assets/og-image.png"
+    >
+    <title>Vega — AI 写的代码，得看证据</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到正文</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="返回 Vega 展示站顶部">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <strong>Vega</strong>
+      </a>
+
+      <nav class="header-links" aria-label="站点链接">
+        <a href="#cases">运行记录</a>
+        <a
+          href="https://github.com/aki0225/vegaloom"
+          target="_blank"
+          rel="noreferrer"
+        >GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+
+    <main id="main-content">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="kicker">One writes, one reviews.</p>
+          <p class="hero-brand">Vega</p>
+          <h1 id="hero-title">AI 写的代码，<br>得看证据。</h1>
+          <p class="hero-lead">
+            真实 Diff。项目验证。独立 Reviewer。证据不足就停。
+          </p>
+          <div class="hero-actions">
+            <a class="button button--primary" href="#cases">查看真实运行</a>
+            <a class="button button--secondary" href="#quick-start">开始使用</a>
+          </div>
+        </div>
+
+        <figure class="hero-visual">
+          <img
+            src="assets/vega-flow.svg?v=20260804"
+            alt="Vega 关系图：Worker 留下 Diff、测试和规则证据，Reviewer 从新会话审查，最终由人决定是否提交"
+            width="760"
+            height="560"
+          >
+        </figure>
+      </section>
+
+      <section class="section section--cases" id="cases" aria-labelledby="cases-title">
+        <header class="section-heading">
+          <h2 id="cases-title">真实运行</h2>
+        </header>
+
+        <div class="case-layout">
+          <div class="case-grid" role="tablist" aria-label="选择真实运行案例">
+            <button
+              class="case-card is-active"
+              id="tab-anyio-1231"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="finish-panel"
+              data-case-id="anyio-1231"
+            >
+              <strong>AnyIO #1231</strong>
+              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+            </button>
+            <button
+              class="case-card"
+              id="tab-packaging-1232"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="finish-panel"
+              tabindex="-1"
+              data-case-id="packaging-1232"
+            >
+              <strong>packaging #1232</strong>
+              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+            </button>
+            <button
+              class="case-card"
+              id="tab-crwp-v1-02"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="finish-panel"
+              tabindex="-1"
+              data-case-id="crwp-v1-02"
+            >
+              <strong>CRWP-V1-02</strong>
+              <small><i class="status-mark status-mark--human" aria-hidden="true"></i> needs_human</small>
+            </button>
+          </div>
+
+          <article
+            class="finish-panel"
+            id="finish-panel"
+            role="tabpanel"
+            aria-labelledby="tab-anyio-1231"
+            aria-live="polite"
+            data-status="ready_to_commit"
+          >
+            <div class="finish-panel__heading">
+              <h3 data-case-field="status">ready_to_commit</h3>
+              <span class="decision-stamp" data-case-field="status_label">
+                可以人工检查后提交
+              </span>
+            </div>
+
+            <dl class="finish-facts finish-facts--primary">
+              <div>
+                <dt>验证</dt>
+                <dd data-case-field="verification_summary">
+                  5 条命令全部通过；相关测试 24 passed，完整任务组测试
+                  496 passed、10 skipped、4 xfailed。
+                </dd>
+              </div>
+              <div>
+                <dt>独立评审</dt>
+                <dd data-case-field="reviewer_summary">
+                  Reviewer 返回 approve，findings 为 0。
+                </dd>
+              </div>
+            </dl>
+
+            <details class="case-details">
+              <summary>证据边界</summary>
+              <dl class="finish-facts finish-facts--secondary">
+                <div>
+                  <dt>实际变更</dt>
+                  <dd data-case-field="change_summary">
+                    只修改 Trio 后端、任务组回归测试和版本记录，共 3 个预注册文件。
+                  </dd>
+                </div>
+                <div>
+                  <dt>确定性 Gate</dt>
+                  <dd data-case-field="gate_summary">
+                    Workspace、三阶段 Scope 与 Risk Gate 全部通过。
+                  </dd>
+                </div>
+              </dl>
+              <p class="evidence-limit" data-case-field="evidence_limit">
+                这是 Issue 已明确期望行为的单案例，不证明未知缺陷发现能力、
+                模型未见过上游修复或跨仓库成功率。
+              </p>
+            </details>
+
+            <a
+              class="source-link"
+              href="https://github.com/aki0225/vegaloom/blob/main/eval/real-world-runs.md"
+              target="_blank"
+              rel="noreferrer"
+              data-case-source
+            >原始记录 <span aria-hidden="true">↗</span></a>
+          </article>
+        </div>
+
+        <noscript>
+          <p class="noscript-note">
+            页面未启用 JavaScript，因此当前只显示 AnyIO 案例。三个案例的完整记录可从上方证据链接查看。
+          </p>
+        </noscript>
+      </section>
+
+      <aside class="boundary-strip" aria-label="Vega 产品边界">
+        <span>会话隔离 ≠ OS 沙箱</span>
+        <span>不自动 commit / push</span>
+        <span>验证失败不可被 <code>approve</code> 覆盖</span>
+      </aside>
+
+      <section class="section section--quickstart" id="quick-start" aria-labelledby="quickstart-title">
+        <div class="quickstart">
+          <div class="quickstart-copy">
+            <h2 id="quickstart-title">试一次</h2>
+          </div>
+
+          <div class="terminal" aria-label="Vega 快速开始命令">
+            <div class="terminal-bar">
+              <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+              <b>PowerShell</b>
+              <button type="button" data-copy-quickstart>复制命令</button>
+            </div>
+            <pre><code data-quickstart-code>python -m pip install -e ".[dev]"
+vega config check --repo .
+vega loop bug --repo . --text "修复一个边界明确的缺陷" --mode assist</code></pre>
+            <p class="copy-status" role="status" aria-live="polite" data-copy-status></p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand brand--footer" href="#top">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <strong>Vega</strong>
+      </a>
+      <nav aria-label="页脚链接">
+        <a href="https://github.com/aki0225/vegaloom">GitHub</a>
+        <a href="https://github.com/aki0225/vegaloom/blob/main/README.md">使用文档</a>
+        <a href="https://github.com/aki0225/vegaloom/blob/main/LICENSE">MIT License</a>
+      </nav>
+    </footer>
+  </body>
+</html>

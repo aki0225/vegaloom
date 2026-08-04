@@ -1,0 +1,107 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="760"
+  height="560"
+  viewBox="0 0 760 560"
+  role="img"
+  aria-labelledby="title desc"
+>
+  <title id="title">Vega 写入、证据、审查与人工决定关系图</title>
+  <desc id="desc">
+    Worker 留下真实 Diff、测试和规则证据，Reviewer 从新会话审查，
+    最终由人决定是否提交。
+  </desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#cabaa7" stroke-width="0.7" opacity="0.42"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#332d28"/>
+    </marker>
+  </defs>
+
+  <rect x="1" y="1" width="758" height="558" rx="6" fill="#faf5eb" stroke="#9e8c76"/>
+  <rect x="16" y="16" width="728" height="528" fill="url(#grid)"/>
+  <text x="42" y="58" fill="#72695f" font-family="Cascadia Code, monospace" font-size="13" font-weight="700">
+    VEGA / EVIDENCE LOOP
+  </text>
+  <path d="M42 72H718" fill="none" stroke="#9e8c76"/>
+
+  <g transform="translate(54 120) rotate(-1 100 70)">
+    <rect x="7" y="8" width="200" height="140" fill="#d86f31" opacity="0.18"/>
+    <rect width="200" height="140" fill="#fffaf0" stroke="#332d28" stroke-width="1.5"/>
+    <circle cx="28" cy="28" r="11" fill="#d86f31"/>
+    <text x="49" y="33" fill="#b34c21" font-family="Cascadia Code, monospace" font-size="13" font-weight="700">
+      WORKER
+    </text>
+    <text x="24" y="80" fill="#201c18" font-family="Songti SC, serif" font-size="27" font-weight="700">
+      写代码
+    </text>
+    <text x="24" y="111" fill="#72695f" font-family="Microsoft YaHei, sans-serif" font-size="12">
+      留下真实修改
+    </text>
+  </g>
+
+  <path d="M275 190H330" fill="none" stroke="#332d28" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+
+  <g transform="translate(350 102)">
+    <text x="0" y="18" fill="#72695f" font-family="Cascadia Code, monospace" font-size="12" font-weight="700">
+      EVIDENCE
+    </text>
+    <g transform="translate(0 36)">
+      <rect width="180" height="45" fill="#5279a8" opacity="0.16"/>
+      <rect width="180" height="45" fill="#fffaf0" stroke="#5279a8"/>
+      <text x="18" y="28" fill="#315b8a" font-family="Cascadia Code, monospace" font-size="13" font-weight="700">
+        DIFF
+      </text>
+    </g>
+    <g transform="translate(0 91)">
+      <rect width="180" height="45" fill="#2f8d86" opacity="0.16"/>
+      <rect width="180" height="45" fill="#fffaf0" stroke="#2f8d86"/>
+      <text x="18" y="28" fill="#246e68" font-family="Cascadia Code, monospace" font-size="13" font-weight="700">
+        TESTS
+      </text>
+    </g>
+    <g transform="translate(0 146)">
+      <rect width="180" height="45" fill="#c89a2f" opacity="0.16"/>
+      <rect width="180" height="45" fill="#fffaf0" stroke="#c89a2f"/>
+      <text x="18" y="28" fill="#8c6a14" font-family="Cascadia Code, monospace" font-size="13" font-weight="700">
+        RULES
+      </text>
+    </g>
+  </g>
+
+  <path d="M550 190H603" fill="none" stroke="#332d28" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+
+  <g transform="translate(618 120) rotate(1 45 70)">
+    <rect x="7" y="8" width="96" height="140" fill="#a65679" opacity="0.17"/>
+    <rect width="96" height="140" fill="#fffaf0" stroke="#332d28" stroke-width="1.5"/>
+    <circle cx="25" cy="28" r="11" fill="#a65679"/>
+    <text x="48" y="33" fill="#87415f" font-family="Cascadia Code, monospace" font-size="11" font-weight="700">
+      REVIEW
+    </text>
+    <text x="20" y="80" fill="#201c18" font-family="Songti SC, serif" font-size="24" font-weight="700">
+      审查
+    </text>
+    <text x="20" y="111" fill="#72695f" font-family="Microsoft YaHei, sans-serif" font-size="11">
+      新会话
+    </text>
+  </g>
+
+  <path d="M666 281V340" fill="none" stroke="#332d28" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+
+  <g transform="translate(126 360)">
+    <text x="0" y="18" fill="#72695f" font-family="Cascadia Code, monospace" font-size="12" font-weight="700">
+      FINISH
+    </text>
+    <text x="0" y="66" fill="#201c18" font-family="Songti SC, serif" font-size="34" font-weight="700">
+      人看证据，再决定。
+    </text>
+    <path d="M0 92H500" fill="none" stroke="#9e8c76"/>
+    <g transform="translate(0 112)" font-family="Cascadia Code, monospace" font-size="12" font-weight="700">
+      <text fill="#3f7f55">ready_to_commit</text>
+      <text x="180" fill="#ae4437">request_changes</text>
+      <text x="375" fill="#b66d24">needs_human</text>
+    </g>
+  </g>
+</svg>
