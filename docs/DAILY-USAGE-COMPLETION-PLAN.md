@@ -1,7 +1,7 @@
 # Vega 日常可信使用完成计划
 
-> 日期：2026-08-03
-> 状态：Phase 0 发布基线已固定；实际发布状态以远端 Tag 与 GitHub Release 为准
+> 日期：2026-08-04
+> 状态：Phase 0 与 Phase 1 已完成；当前进入 Phase 2 的调查与 Plan-first 协议
 > 范围：`v0.1.4` 发布、CRWP-V1、调查与计划协议、Finish 报告、真实使用验收
 
 ## 一、完成标准
@@ -99,46 +99,47 @@ Finish 第一屏必须由现有结构化 artifact 确定性生成，不再调用
 - 明确人工必须检查的位置和剩余风险；
 - 最终保持 `needs_human`，不由 AI 自动升级为安全。
 
-## 三、Phase 0：发布 `v0.1.4`
+## 三、Phase 0：发布 `v0.1.4`（completed）
 
-### 当前事实
+### 完成证据
 
-- `pyproject.toml` 和源码版本固定为 `0.1.4`。
-- `docs/RELEASE-NOTES-0.1.4.md` 与 `docs/RELEASE-SUMMARY-0.1.4.md` 已存在。
+- annotated Tag `v0.1.4` 已发布，指向
+  `289a1ad0431e0aaa2e74768c517058e62a33fdbf`；GitHub Release 已发布。
+- 发布说明和发布摘要分别保存在 `docs/RELEASE-NOTES-0.1.4.md` 与
+  `docs/RELEASE-SUMMARY-0.1.4.md`。
 - 2026-08-03 的两次早期候选分支真实 Codex Worker smoke 分别在 180 秒和 300 秒超时：
   前一次只得到部分 JSONL，后一次 `process-output.txt` 为空。两次都正确进入
   `needs_human / timed_out` 并终止 owned process，但不构成真实 JSONL 闭环通过。
 - 后续候选提交上的 run `20260803-215834-817575-feature-loop` 已完成 Worker、Verification、
   Reviewer 与 Finish 闭环，并验证 stdout/stderr 分流、固定安全进度、凭据扫描和进程清理。
-- 该成功现场不替代最终发布 commit 的 fresh smoke；Tag 前仍必须在最终 commit 上重新验证。
+- 精确 Tag 上的 fresh run `20260804-093946-135999-feature-loop` 已完成 Worker、
+  Verification、Reviewer 与 Finish：只修改 `README.md`，验证为 `1 passed`，Reviewer
+  `approve`、findings 为 `0`，Finish 为 `ready_to_commit`，完整性和新鲜度均通过。
+- 该运行还确认 Worker/Reviewer JSONL 全部可解析、stderr 为空、安全进度不含目标路径和
+  Codex 命令、凭据扫描为 `0`，登记进程均已退出。
 
-### 执行动作
+Phase 0 已结束。后续不得移动、重建或覆盖 `v0.1.4` Tag，也不为补充新功能改写该 Release。
 
-1. 从干净 `main` 执行 `docs/RELEASE-CHECKLIST.md`。
-2. 按 `docs/RELEASE-CHECKLIST.md` 的固定条件，在最终候选提交上重新执行真实 Codex JSONL
-   smoke，并确认 GitHub CI、wheel/sdist 构建与源码树外安装 smoke。
-3. 对最终候选提交做路径、凭据、BOM 和临时产物检查。
-4. 全部门禁通过后，由人工创建 annotated `v0.1.4` Tag。
-5. 使用现有发布摘要创建 GitHub Release。
-
-任一门禁失败就停止发布并保留现场；是否已经发布以远端 annotated Tag 和 GitHub Release
-记录为准，不能只依据源码版本或文档表述判断。
-
-## 四、Phase 1：完成 CRWP-V1 剩余验证
+## 四、Phase 1：完成 CRWP-V1 剩余验证（completed）
 
 CRWP-V1 用来回答真实任务上的缺陷发现、成本和人工接管问题，不为得到成功样本而修改 Runtime。
 
-固定处理：
+最终结果：
 
-1. Case 01 保留现有 `workspace_check_failed` 结果，不清理后重跑。
-2. Case 02 按预注册执行最终负向输入扫描，再启动正式 Worker。
-3. Case 03 保持 `eligibility-changed-before-run`，不启动 Worker。
-4. 具体状态只更新 `docs/CORE-REAL-WORLD-PILOT-V1-HANDOFF.md`。
-5. 新的运行结果只追加到 `eval/real-world-runs.md`，不得改写历史记录。
+1. Case 01 保留 `needs_human / workspace_check_failed`，不清理后重跑。
+2. Case 02 完成最终负向输入扫描并执行唯一正式 Worker，结果为
+   `needs_human / timed_out`；Worker 未修改文件，Verification 和 Reviewer 未启动。
+3. Case 03 保持 `eligibility-changed-before-run`，没有启动 Worker。
+4. 三个 Case 都有合同允许的终态，不合并计算成功率，也不把 timeout 解释成模型修复失败。
+5. 详细状态见 `docs/CORE-REAL-WORLD-PILOT-V1-HANDOFF.md`，运行结果只追加在
+   `eval/real-world-runs.md`。
 
-本阶段不增加 Runtime、命令、状态、artifact 或成功条件。
+Phase 1 已结束。禁止选择性重跑、延长 timeout、改换模型或修改 Runtime 来追求成功样本。
 
-## 五、Phase 2：完成调查与计划协议
+## 五、Phase 2：完成调查与计划协议（current）
+
+本阶段先调查现有入口并提交协议方案，人工确认后才实现。当前不修改 Runtime，也不把
+Finish 报告改动提前混入本阶段。
 
 ### 宿主会话入口
 
@@ -237,8 +238,8 @@ One writes, one reviews — worker 与 reviewer 上下文隔离的 AI 编码工�
 
 以下条件满足后停止新增产品能力，转入真实日常使用：
 
-1. `v0.1.4` Tag 与 GitHub Release 已发布；
-2. CRWP-V1 三个 Case 都有合同允许的终态；
+1. `v0.1.4` Tag 与 GitHub Release 已发布；**已完成**。
+2. CRWP-V1 三个 Case 都有合同允许的终态；**已完成**。
 3. Codex、Claude Code 和 `vega do` 都能进入同一可信判断链；
 4. Finish 能清楚展示结论、重要变更、验证、高风险和剩余问题；
 5. 成功、Reviewer 打回、验证失败、高风险和恢复场景均有可复核记录。
@@ -250,10 +251,9 @@ Assurance Stage。
 ## 十、当前执行顺序
 
 ```text
-本计划与文档导航
-  -> 发布 v0.1.4
-  -> 完成 CRWP-V1
-  -> 固定调查与 Plan-first 协议
+发布 v0.1.4（完成）
+  -> CRWP-V1 合同允许终态（完成）
+  -> 调查现有入口并固定 Plan-first 与人工确认协议（当前）
   -> 改进 Finish 第一屏
   -> 完成真实使用验收
   -> 停止扩张，进入日常使用观察

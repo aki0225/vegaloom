@@ -384,3 +384,57 @@ Windows 行尾策略必须在 checkout 前冻结。最终成功仍只是一个�
 该案例证明当前主线能在一个冻结的真实 Go 库任务上生成范围内补丁，并通过确定性验证、门禁、
 隔离 Reviewer 与 Finish；同时证明协议命令必须按宿主 shell 预检，prompt 约束不能替代 OS 级
 边界。它仍只是单案例，不能外推为总体成功率、跨仓库泛化能力或生产安全证明。
+
+## 2026-08-04 `v0.1.4` 精确 Tag 发布 Smoke
+
+本条只验证已经发布的 annotated Tag `v0.1.4` 所指向的精确提交
+`289a1ad0431e0aaa2e74768c517058e62a33fdbf`，不修改或重建 Tag、Release，也不把候选提交上的
+历史 smoke 代替最终发布提交。
+
+- Run：`20260804-093946-135999-feature-loop`；任务只允许修改 `README.md`，实际新增
+  `1` 行、删除 `0` 行，目标仓库 HEAD 未变化且没有 remote。
+- Worker JSONL 共 `20` 行，Reviewer JSONL 共 `4` 行，全部可解析，两个角色各有一条最终
+  `agent_message`；两个 `process-stderr.txt` 都为空。
+- 终端共显示 `25` 条固定安全进度，不包含目标路径或 Codex 执行命令。
+- `python -m pytest -q` 正常退出并报告 `1 passed`；Reviewer 返回 `approve`，findings 为
+  `0`。
+- Finish 为 `ready_to_commit`；artifact integrity 为 valid，evidence freshness 为 fresh。
+- `54` 个 run 文件的高置信凭据模式扫描为 `0`，登记的 `4` 个进程均已退出。
+- 本机审计摘要保存在该 Tag worktree 的 `.tmp/v014-smoke-audit.json`，不进入 Git。
+
+该 smoke 证明发布 Tag 对应的代码能完成这一个受控 JSONL 写审流程，并验证 stdout/stderr
+分流、安全进度、确定性验证、隔离 Reviewer 和 Finish。它不能证明任意任务成功率、模型泛化
+能力或操作系统级隔离。
+
+## 2026-08-04 执行结果：CRWP-V1-02 Sequelize #18265
+
+本条追加 CRWP-V1 Case 02 的唯一正式运行结果，不修改此前的预注册、Amendment、Case 01
+失败记录或 Case 03 资格变化记录。
+
+- 正式登记提交为 `f748a2f5712e85e96b26110d91e3963dcd18df1f`，冻结 Runtime 提交为
+  `77192aaec3be4baffe90657bbd7d2d343c45062a`；控制 manifest SHA-256 为
+  `9f24c2f352f12c64f5920131a3ba1ba67686209f2cb38dd74df77f75b44a7902`。
+- fresh baseline 最终为 `accepted=true`；两次 oracle 输出一致，SHA-256 都是
+  `0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b`。
+- 正式调用前扫描 `945` 个 tracked 文件、`9,657,058` bytes，冻结负向词表命中为 `0`；
+  最终 Worker prompt 再次扫描后命中仍为 `0`。
+- Run：`20260804-130626-039900-bug-loop`。`gpt-5.4 / medium` Worker 达到冻结的
+  `900` 秒 timeout，Vega 确认终止 owned process，最终状态为
+  `needs_human / timed_out`。
+- 已记录的 Worker stdout 含 `49` 行可解析 JSONL，没有最终 `agent_message`；最后可见事件
+  仍在调查并设计 SQLite `CREATE TABLE` 解析方案。execution 同时注明输出读取线程关闭超时，
+  因此不能宣称该文件覆盖了外部进程的全部输出。
+- Worker 没有修改文件；目标仓库保持 clean、remote 为空。Workspace Gate、Verification、
+  Reflect、Risk Gate 和 Reviewer 均未启动。
+- Finish 为 `needs_human`；artifact integrity 为 valid，evidence freshness 为 false，
+  唯一原因是 `trusted_review_missing`。
+- `process-output.txt`、`process-stderr.txt`、`supervisor-summary.json` 和
+  `control-summary.json` 的 SHA-256 分别为
+  `503e596f9e00dec67477ce8f0eb2089c1d8b7d65cbea30f1e63b40837717fe45`、
+  `bcc6ea5f8090892e132b2b292fe46f88b7b6de10130472c4b0e383c12c2d3ff2`、
+  `226c25e037c75c1bf1f21728419ea101cdff157b21d1b5f4dfbc07c5e882e5` 和
+  `2a4ae64f8187b04cecb20ea31890e359d7fe328e0d5b5db5185e21c45c0658f1`。
+
+本结果只证明 Vega 在冻结 timeout 到达后停止后续验证与审查、保留现场并交还人工。它不能
+解释为 Worker 已修复或未能修复目标缺陷，也不能与 Case 01、Case 03 合并计算成功率。按预注册
+禁止选择性重跑、延长 timeout 或更换结果；CRWP-V1 三个 Case 至此都已有合同允许的终态。

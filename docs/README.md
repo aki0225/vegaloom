@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-03
+> 更新时间：2026-08-04
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -12,7 +12,7 @@
 | 先了解怎么使用 | [`../README.md`](../README.md) | 当前入口 |
 | 查看日常完整流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | 当前使用说明 |
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
-| 查看下一阶段执行顺序 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | 已确认、待实施 |
+| 查看下一阶段执行顺序 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 2 当前入口 |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
 | 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
@@ -20,24 +20,31 @@
 
 ## 当前进行中的工作
 
-### `v0.1.4` 发布基线
+### 调查与 Plan-first 协议
 
-源码版本和当前稳定基线为 `v0.1.4`；实际发布状态以远端 Tag 与 GitHub Release 为准。
+`v0.1.4` 发布和 CRWP-V1 合同允许验证都已完成。当前唯一的下一步是只读核对 Codex、
+Claude Code 与命令行入口，固定调查、Plan 和修改前人工确认协议。当前状态与停止条件见：
 
-- [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md)：详细变更。
-- [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md)：GitHub Release 文案。
-- [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)：发布门禁。
+- [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：当前执行计划。
+- [`ROADMAP.md`](ROADMAP.md)：唯一下一步和冻结方向。
 
-### CRWP-V1
+### 已完成的当前阶段
+
+- `v0.1.4` annotated Tag 与 GitHub Release 已发布；精确 Tag smoke 已登记在
+  [`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
+- CRWP-V1 三个 Case 都有合同允许的终态，不再选择性重跑。
 
 - [`CORE-REAL-WORLD-PILOT-V1-HANDOFF.md`](CORE-REAL-WORLD-PILOT-V1-HANDOFF.md)：
-  当前状态与下一步，以它为准。
+  最终状态与本机证据接力。
 - [`CORE-REAL-WORLD-PILOT-V1-PREREGISTRATION.md`](CORE-REAL-WORLD-PILOT-V1-PREREGISTRATION.md)：
   冻结的预注册合同，不反映运行后的最新状态。
 - [`CORE-REAL-WORLD-PILOT-V1-RUN-REGISTRATION.md`](CORE-REAL-WORLD-PILOT-V1-RUN-REGISTRATION.md)：
   运行前控制登记，不替代 Handoff。
 - [`../eval/real-world-runs.md`](../eval/real-world-runs.md)：
   真实运行证据，只允许追加。
+- [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md)：v0.1.4 详细变更。
+- [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md)：GitHub Release 文案。
+- [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)：发布门禁记录。
 
 ## 冻结实验与研究记录
 

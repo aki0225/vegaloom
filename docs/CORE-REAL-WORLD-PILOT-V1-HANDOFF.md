@@ -1,10 +1,102 @@
 # Core Real-World Pilot v1 接力说明
 
-> 日期：2026-07-30
+> 日期：2026-08-04
 >
 > 分支：`main`
 >
 > 远端续做入口：`origin/main`
+
+## 2026-08-04 接力
+
+### 当前结论
+
+CRWP-V1 已取得预注册合同允许的全部终态，不再运行或修改 Runtime：
+
+| Case | 终态 | 说明 |
+|---|---|---|
+| `CRWP-V1-01` | `needs_human / workspace_check_failed` | Worker 产生未登记缓存且候选超过 diff 预算，保留现场，不重跑。 |
+| `CRWP-V1-02` | `needs_human / timed_out` | Worker 达到冻结的 `900s` timeout，未修改文件，后续验证与 Reviewer 未启动。 |
+| `CRWP-V1-03` | `eligibility-changed-before-run` | 冻结后出现关联 PR，按资格合同停止，不启动 Worker。 |
+
+这些结果不合并计算成功率，也不把 timeout 解释成模型修复失败或成功。后续禁止为得到更好
+结果而选择性重跑、延长 timeout、更换模型或改写历史记录。新的公开运行记录已经只追加到
+[`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
+
+`v0.1.4` 的 annotated Tag 与 GitHub Release 已发布。精确 Tag
+`v0.1.4@289a1ad0431e0aaa2e74768c517058e62a33fdbf` 的 fresh JSONL smoke 已完成，
+因此发布阶段与 CRWP-V1 阶段都可以标记为完成。当前唯一产品动作改为调查现有宿主会话入口，
+固定 Plan-first 与人工确认协议；暂不修改 Finish、Runtime 或成功条件。
+
+### `v0.1.4` 精确 Tag smoke
+
+- Run：`20260804-093946-135999-feature-loop`。
+- Worker JSONL `20` 行、Reviewer JSONL `4` 行，全部可解析，两个角色各有一条最终
+  `agent_message`；两个 stderr 文件为空。
+- 终端共 `25` 条固定安全进度，不包含目标路径或 Codex 命令。
+- 目标只修改 `README.md`，新增 `1` 行；`python -m pytest -q` 报告 `1 passed`。
+- Reviewer 返回 `approve`、findings 为 `0`；Finish 为 `ready_to_commit`。
+- artifact integrity 为 valid，evidence freshness 为 fresh；`54` 个 run 文件的高置信
+  凭据模式扫描为 `0`，登记的 `4` 个进程均已退出。
+- 本机审计摘要位于 Tag worktree 的 `.tmp/v014-smoke-audit.json`，继续保持 ignored，
+  不进入 Git。
+
+### Case 02 正式运行
+
+正式控制登记由以下两个主线提交固定：
+
+- `77192aa`：重新冻结 Case 02 控制合同；
+- `f748a2f`：登记 Case 02 运行时和控制 manifest。
+
+控制 manifest SHA-256：
+
+```text
+9f24c2f352f12c64f5920131a3ba1ba67686209f2cb38dd74df77f75b44a7902
+```
+
+正式运行前：
+
+- 资格证据只允许 `active_case_ids == ["CRWP-V1-02"]`；
+- fresh baseline 为 `accepted=true`；
+- 两次 oracle 输出一致，SHA-256 为
+  `0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b`；
+- `945` 个 tracked 文件、`9,657,058` bytes 的调用前扫描命中 `0` 个冻结负向词；
+- 最终 Worker prompt 再次扫描后命中仍为 `0`。
+
+正式 Run 为 `20260804-130626-039900-bug-loop`：
+
+- Worker 使用 `gpt-5.4 / medium`，达到冻结的 `900s` timeout；
+- termination 已确认，未达到 `1800s` 总墙钟停止线；
+- 已记录 stdout 为 `49` 行可解析 JSONL，没有最终 `agent_message`；最后可见事件仍在调查和
+  设计 SQLite `CREATE TABLE` 解析方案；
+- execution 记录同时注明输出读取线程关闭超时，因此不能把现有文件描述为外部进程全部输出；
+- Worker 未修改任何文件，目标 Git 保持 clean、remote 为空；
+- Workspace Gate、Verification、Reflect、Risk Gate 和 Reviewer 均未启动；
+- Finish 为 `needs_human`，artifact integrity 为 valid，evidence freshness 为 false，
+  原因是 `trusted_review_missing`；
+- 目标相关进程均已退出。
+
+正式现场继续保存在
+`.local-validation/crwp-v1/formal-runs/20260804-130323-crwp-v1-02/` 和
+`runs/20260804-130626-039900-bug-loop/`，不得删除、修改或提交其中的本机产物。
+
+### 验证边界
+
+- 新增控制测试：`44 passed`。
+- compileall、Ruff、仓库卫生、架构增长和 `git diff --check` 均通过。
+- 远端 CI `#202`（workflow run `30878642623`）全部成功，覆盖 Python 3.11、Python 3.12
+  四个分片、Windows、POSIX 和 wheel。
+- 本机不能声称完整 `python -m pytest` 通过：直接运行超过 `60` 分钟后被停止；四分片并行
+  因资源竞争触发 `58s` timeout；后续串行 Git-heavy 测试仍触发同一单测上限。残留进程已
+  精确停止，这些不完整运行不作为通过证据。
+
+### 下一步
+
+1. 先只读核对 Codex Skill、Claude Code assist 说明和现有 Plan 入口。
+2. 形成固定的调查、事实/假设分离、Plan 与人工确认协议。
+3. 先把协议和最小模板交给人工审查；本阶段不新增 Planner Agent、命令、状态或 schema。
+4. 协议确认后再使用短生命周期分支实现，不与 Finish 报告改动混在同一个 PR。
+
+下方 2026-07-30 及更早章节只作为历史接力记录保留，其中“下一步”已经被本节替代。
 
 ## 2026-07-30 接力
 

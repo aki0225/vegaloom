@@ -1,10 +1,10 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-03
+> 更新时间：2026-08-04
 > 当前稳定基线：`v0.1.4`
-> 发布记录：以远端 Tag 与 GitHub Release 为准
-> 当前顺序：`v0.1.4` 发布后完成 CRWP-V1，随后实施调查与计划协议、
-> Finish 报告和真实使用验收。不启动 Stage 4 或新的 Runtime、Memory、LangGraph 集成。
+> 发布记录：annotated Tag 与 GitHub Release 已发布
+> 当前顺序：先调查现有宿主入口，固定 Plan 与人工确认协议；随后改进 Finish 报告并完成
+> 真实使用验收。不启动 Stage 4 或新的 Runtime、Memory、LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -23,12 +23,30 @@
 ## 一、当前主线
 
 ```text
-v0.1.4 稳定基线
-  -> 完成 CRWP-V1 剩余合同允许验证
-  -> 固定调查、Plan 与人工确认协议
+v0.1.4 发布（完成）
+  -> CRWP-V1 合同允许终态（完成）
+  -> 调查现有入口并固定 Plan 与人工确认协议（当前）
   -> 改进现有 Finish 第一屏
   -> 真实使用验收后停止扩张
 ```
+
+当前唯一的下一步是 Phase 2：
+
+1. 只读核对 Codex Skill、Claude Code assist 说明、`vega do` 和现有 Plan 入口；
+2. 明确“默认先调查，范围足够明确时才可直接执行”的使用协议；
+3. 固定事实、假设、修改范围、验证、高风险和未决问题分离的 Plan 模板；
+4. 先把协议交给人工确认，再使用一个短生命周期分支实现；
+5. 不在本阶段新增 Planner Agent、Runtime 路由、命令、状态、schema 或 Finish 改动。
+
+CRWP-V1 已完成合同允许的全部处理：
+
+- Case 01：`needs_human / workspace_check_failed`；
+- Case 02：`needs_human / timed_out`，Worker 未修改文件，Verification 与 Reviewer 未启动；
+- Case 03：`eligibility-changed-before-run`。
+
+这些结果不计算成功率，也不选择性重跑。详细证据见
+[`CORE-REAL-WORLD-PILOT-V1-HANDOFF.md`](CORE-REAL-WORLD-PILOT-V1-HANDOFF.md) 和
+[`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
 
 已经完成并保留为历史依据的 Assurance 与维护路线：
 
@@ -191,17 +209,19 @@ Stage 3 当前停止条件：
 
 ### Stage 4：并发与外部副作用
 
-状态：`planned`
+状态：`frozen` / `not-scheduled`
 
-覆盖锁、事务、异步任务、消息、重试、重复投递、取消和 liveness。验证必须使用受控
-交错和故障注入，不能只依赖随机 sleep。
+该方向只作为未来研究题保留，不属于当前主线。若未来重新启动，覆盖锁、事务、异步任务、
+消息、重试、重复投递、取消和 liveness；验证必须重新预注册并使用受控交错和故障注入，
+不能只依赖随机 sleep。
 
 ### Stage 5：扩展与生产 Handoff
 
-状态：`planned`
+状态：`frozen` / `not-scheduled`
 
-扩展到权限、兼容性、性能、配置、供应链、可观测性，以及受信 CI/CD evidence、canary、
-监控、停止和 rollback 要求。Vega 仍不自动部署，只生成和校验交付要求。
+该方向同样不在当前计划中。只有真实日常使用反复证明现有 Finish 和人工接管不足时，才重新
+评估权限、兼容性、性能、配置、供应链、可观测性，以及受信 CI/CD evidence、canary、
+监控、停止和 rollback 要求。Vega 仍不自动部署。
 
 ## 四、实验方向
 
@@ -277,6 +297,15 @@ Stage 3 证据冻结后，真实 dogfood 与独立审查复现了目标仓库读
 process 管理缺口，因此新增一次有界主线维护。它只收紧已有默认路径，不新增 Stage 或
 实验能力。M-004 完成后停止横向基础设施扩张，下一步改为真实代码任务的成功率、耗时、
 token 成本、人工接管和恢复体验验证。
+
+### 2026-08-04：完成发布与 CRWP-V1，进入日常入口协议
+
+`v0.1.4` annotated Tag、GitHub Release 和精确 Tag smoke 已完成。CRWP-V1 三个 Case 均已
+取得合同允许的终态，其中 Case 02 为 `needs_human / timed_out`，不为得到成功样本而重跑。
+
+主线停止继续扩建研究能力。唯一下一步改为调查现有 Codex、Claude Code 与命令行入口，固定
+Plan-first 和修改前人工确认协议；协议确认前不修改 Runtime，Finish 报告作为下一阶段单独
+实施。
 
 ## 七、更新规则
 
