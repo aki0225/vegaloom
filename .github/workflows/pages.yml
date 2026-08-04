@@ -45,8 +45,10 @@ jobs:
           ruff check scripts/build_showcase_data.py tests/test_showcase_data.py
 
       - name: 检查公开仓库卫生
+        shell: bash
         run: |
-          python scripts/check_repository_hygiene.py --base-ref HEAD^
+          base_sha="$(git rev-parse HEAD^)"
+          python scripts/check_repository_hygiene.py --base-ref "$base_sha"
           git show --check --format= HEAD
 
       - name: 配置 GitHub Pages
