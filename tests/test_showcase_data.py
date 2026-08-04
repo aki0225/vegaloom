@@ -5,13 +5,13 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 from scripts.build_showcase_data import build_payload, render_payload, validate_payload
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = REPO_ROOT / "site/data/cases.json"
-SOURCE_PATH = REPO_ROOT / "eval/real-world-runs.md"
 SUBPROCESS_ENV = {
     **os.environ,
     "PYTHONIOENCODING": "utf-8",
@@ -21,6 +21,17 @@ SUBPROCESS_ENV = {
 
 def load_cases() -> dict[str, object]:
     return json.loads(DATA_PATH.read_text(encoding="utf-8"))
+
+
+def iter_strings(value: object) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from iter_strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from iter_strings(item)
 
 
 def test_committed_showcase_data_matches_generator() -> None:
@@ -59,32 +70,48 @@ def test_generator_is_deterministic(tmp_path: Path) -> None:
     assert output_path.read_text(encoding="utf-8") == DATA_PATH.read_text(encoding="utf-8")
 
 
-def test_three_cases_keep_their_real_finish_outcomes() -> None:
+def test_three_cases_keep_their_real_evidence_outcomes() -> None:
     payload = load_cases()
     cases = {case["id"]: case for case in payload["cases"]}
 
-    assert set(cases) == {"anyio-1231", "packaging-1232", "crwp-v1-02"}
-    assert cases["anyio-1231"]["status"] == "ready_to_commit"
-    assert cases["packaging-1232"]["status"] == "ready_to_commit"
-    assert cases["crwp-v1-02"]["status"] == "needs_human"
-    assert cases["crwp-v1-02"]["changed_files"] == 0
-    assert "未启动" in cases["crwp-v1-02"]["verification_summary"]
-    assert "未启动" in cases["crwp-v1-02"]["reviewer_summary"]
+    assert set(cases) == {
+        "pycodestyle-1187-rejection",
+        "pycodestyle-1187-success",
+        "click-2939-success",
+    }
+    rejected = cases["pycodestyle-1187-rejection"]
+    assert rejected["status"] == "request_changes"
+    assert rejected["review"]["verdict"] == "request_changes"
+    assert rejected["review"]["severity"] == "major"
+    assert "768 passed" in rejected["verification"]["headline"]
+    assert "needs_human" in rejected["gates"]["finish"]
+
+    assert cases["pycodestyle-1187-success"]["status"] == "ready_to_commit"
+    assert cases["click-2939-success"]["status"] == "ready_to_commit"
 
 
-def test_every_case_has_source_and_limitations() -> None:
+def test_every_case_links_real_evidence_and_diff_excerpt() -> None:
     payload = load_cases()
-    source_text = SOURCE_PATH.read_text(encoding="utf-8")
 
     for case in payload["cases"]:
-        assert case["source_record"] == "eval/real-world-runs.md"
-        assert case["source_heading"] in source_text
         assert case["limitations"]
-        assert len(case["timeline"]) >= 6
+        assert len(case["source_links"]) >= 4
+
+        sources = {item["kind"]: item["path"] for item in case["source_links"]}
+        diff_path = REPO_ROOT / sources["diff"]
+        assert diff_path.is_file()
+        assert case["diff"]["excerpt"] in diff_path.read_text(encoding="utf-8")
+
+        for relative_path in sources.values():
+            source_path = (REPO_ROOT / relative_path).resolve()
+            assert source_path.is_file()
+            assert source_path.is_relative_to(
+                (REPO_ROOT / "examples/evidence").resolve()
+            )
 
 
 def test_public_data_contains_no_local_path_or_obvious_secret() -> None:
-    text = DATA_PATH.read_text(encoding="utf-8")
+    payload = load_cases()
     forbidden = (
         r"(?<![A-Za-z0-9])[A-Za-z]:[\\/]",
         r"\\\\[^\\\s]+\\[^\\\s]+",
@@ -94,20 +121,24 @@ def test_public_data_contains_no_local_path_or_obvious_secret() -> None:
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
     )
 
-    for pattern in forbidden:
-        assert re.search(pattern, text, re.IGNORECASE) is None
+    for text in iter_strings(payload):
+        for pattern in forbidden:
+            assert re.search(pattern, text, re.IGNORECASE) is None
 
 
 def test_payload_validator_rejects_fabricated_success() -> None:
     payload = build_payload()
-    stopped = next(case for case in payload["cases"] if case["id"] == "crwp-v1-02")
-    stopped["status"] = "ready_to_commit"
+    rejected = next(
+        case
+        for case in payload["cases"]
+        if case["id"] == "pycodestyle-1187-rejection"
+    )
+    rejected["status"] = "ready_to_commit"
 
-    source_text = SOURCE_PATH.read_text(encoding="utf-8")
     try:
-        validate_payload(payload, source_text)
+        validate_payload(payload)
     except ValueError as exc:
-        assert "CRWP-V1-02" in str(exc)
+        assert "pycodestyle-1187-rejection" in str(exc)
     else:
         raise AssertionError("伪造的成功状态必须被拒绝")
 
