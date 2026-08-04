@@ -52,6 +52,11 @@ runner:
 
 ## Assist：主会话实现，Vega 负责证据与隔离审查
 
+如果用户只描述 bug 现象或修改范围仍不明确，先按
+[`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md)进行只读调查、区分事实与假设，并把固定
+Plan 交给用户确认。批准前不修改文件，也不启动 `vega loop`。边界、验收和风险已经明确且
+用户要求直接执行时，才省略重复调查。
+
 日常使用推荐先以干净的 tracked 工作区启动 assist：
 
 ```powershell

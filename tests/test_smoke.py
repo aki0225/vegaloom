@@ -65,6 +65,7 @@ def test_project_skeleton_exists() -> None:
     assert PROJECT_ROOT.joinpath("docs", "PRODUCT-CONTRACT.md").exists()
     assert PROJECT_ROOT.joinpath("docs", "MVP-SCOPE.md").exists()
     assert PROJECT_ROOT.joinpath("docs", "ARCHITECTURE.md").exists()
+    assert PROJECT_ROOT.joinpath("docs", "PLAN-FIRST-PROTOCOL.md").exists()
     assert PROJECT_ROOT.joinpath("loops", "engineering-change.loop.yaml").exists()
     assert PROJECT_ROOT.joinpath("examples", "tasks", "check-atg-mcp-docs.md").exists()
 
@@ -3245,6 +3246,30 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert "不要执行 Worker，也不要 `loop continue`" in loop_skill_text
     assert "宿主原生子代理" in loop_skill_text
     assert "不把子代理完整聊天传给 Reviewer" in loop_skill_text
+    required_plan_sections = [
+        "## User Goal",
+        "## Non-goals",
+        "## Observed Facts",
+        "## Hypotheses",
+        "## Proposed Scope",
+        "## Verification",
+        "## Risk Areas",
+        "## Unresolved Decisions",
+    ]
+    protocol_text = PROJECT_ROOT.joinpath("docs", "PLAN-FIRST-PROTOCOL.md").read_text(
+        encoding="utf-8"
+    )
+    for section in required_plan_sections:
+        assert section in loop_skill_text
+        assert section in protocol_text
+    assert loop_skill_text.index("其余任务先只读调查") < loop_skill_text.index(
+        "用户明确批准"
+    )
+    assert loop_skill_text.index("用户明确批准") < loop_skill_text.index(
+        "vega loop bug"
+    )
+    assert "同一会话不能同时充当独立 Reviewer" in protocol_text
+    assert "本阶段不增加 `vega adapters init claude`" in protocol_text
     assert "vega gate" in review_skill.read_text(encoding="utf-8")
 
     second = CliRunner().invoke(app, ["adapters", "init", "codex", "--repo", str(repo_dir)])
