@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .decision import DecisionStore
+from .finish_presentation import build_finish_first_screen, render_finish_report
 from .finish_policy import decide_finish_status
 from .loop_evidence import (
     EvidenceFreshness,
@@ -88,6 +89,38 @@ def build_finish_summary(
         evidence_fresh=evidence_freshness.fresh,
         artifact_integrity_valid=artifact_integrity.valid,
     )
+    commit_checklist = _commit_checklist(
+        state,
+        latest_verdict,
+        test_summaries,
+        latest_verification_has_failed,
+        verification_passed=verification_passed,
+        evidence_fresh=evidence_freshness.fresh,
+        artifact_integrity_valid=artifact_integrity.valid,
+    )
+    handoff_notes = _handoff_notes(
+        state,
+        latest_verdict,
+        final_report,
+        latest_verification_has_failed,
+        has_historical_verification_failures=has_verification_failures,
+        verification_passed=verification_passed,
+        evidence_fresh=evidence_freshness.fresh,
+        artifact_integrity_valid=artifact_integrity.valid,
+    )
+    first_screen = build_finish_first_screen(
+        state,
+        finish_status,
+        latest_verdict,
+        verification_results,
+        risk_gate_results,
+        artifact_integrity,
+        evidence_freshness,
+        handoff_notes,
+        latest_verification_failed=latest_verification_has_failed,
+        verification_passed=verification_passed,
+        has_verification_failures=has_verification_failures,
+    )
     return redact_value({
         "run_id": state.run_id,
         "run_dir": str(run_dir.resolve()),
@@ -97,6 +130,7 @@ def build_finish_summary(
         "loop_status": state.status,
         "finish_status": finish_status,
         "created_at": datetime.now(UTC).isoformat(),
+        "first_screen": first_screen,
         "iterations": [item.model_dump() for item in state.iterations],
         "latest_verdict": latest_verdict.model_dump() if latest_verdict else None,
         "review_verdicts": [item.model_dump() for item in verdicts],
@@ -112,137 +146,9 @@ def build_finish_summary(
         "memory_proposals": [proposal.model_dump() for proposal in proposals],
         "decisions": [decision.model_dump() for decision in decisions],
         "key_artifacts": _key_artifacts(run_dir),
-        "commit_checklist": _commit_checklist(
-            state,
-            latest_verdict,
-            test_summaries,
-            latest_verification_has_failed,
-            verification_passed=verification_passed,
-            evidence_fresh=evidence_freshness.fresh,
-            artifact_integrity_valid=artifact_integrity.valid,
-        ),
-        "handoff_notes": _handoff_notes(
-            state,
-            latest_verdict,
-            final_report,
-            latest_verification_has_failed,
-            has_historical_verification_failures=has_verification_failures,
-            verification_passed=verification_passed,
-            evidence_fresh=evidence_freshness.fresh,
-            artifact_integrity_valid=artifact_integrity.valid,
-        ),
+        "commit_checklist": commit_checklist,
+        "handoff_notes": handoff_notes,
     })
-
-
-def render_finish_report(summary: dict[str, Any]) -> str:
-    latest = summary.get("latest_verdict") or {}
-    lines = [
-        "# Finish Report",
-        "",
-        f"- run：`{summary['run_id']}`",
-        f"- 仓库：`{summary['repo_path']}`",
-        f"- 任务类型：`{summary['task_mode']}`",
-        f"- 自动化模式：`{summary['automation_mode']}`",
-        f"- loop 状态：`{summary['loop_status']}`",
-        f"- finish 状态：`{summary['finish_status']}`",
-        f"- 最新 reviewer verdict：`{latest.get('verdict', '无')}`",
-        "",
-        "## 结论",
-        "",
-    ]
-    lines.extend(f"- {item}" for item in summary["handoff_notes"])
-    freshness = summary.get("evidence_freshness") or {}
-    lines.extend(
-        [
-            "",
-            "## 证据新鲜度",
-            "",
-            f"- 状态：`{'fresh' if freshness.get('fresh') else 'stale'}`",
-            f"- trusted fingerprint：`{freshness.get('trusted_workspace_fingerprint') or 'missing'}`",
-            f"- current fingerprint：`{freshness.get('current_workspace_fingerprint') or 'missing'}`",
-        ]
-    )
-    if freshness.get("issues"):
-        lines.append(f"- issues：`{', '.join(freshness['issues'])}`")
-    integrity = summary.get("artifact_integrity") or {}
-    lines.extend(
-        [
-            "",
-            "## Artifact 完整性",
-            "",
-            f"- 状态：`{'valid' if integrity.get('valid') else 'invalid'}`",
-            f"- 可信 reviewer verdict 数：`{integrity.get('review_verdict_count', 0)}`",
-            f"- 可信 verification result 数：`{integrity.get('verification_result_count', 0)}`",
-            f"- 可信 risk gate result 数：`{integrity.get('risk_gate_result_count', 0)}`",
-        ]
-    )
-    if integrity.get("issues"):
-        lines.append(f"- issues：`{', '.join(integrity['issues'])}`")
-    lines.extend(["", "## Commit 前 Checklist", ""])
-    lines.extend(f"- {item}" for item in summary["commit_checklist"])
-    lines.extend(["", "## 迭代记录", ""])
-    if summary["iterations"]:
-        for item in summary["iterations"]:
-            interruption = (
-                f"，interrupted_step=`{item.get('interrupted_step')}`"
-                if item.get("lifecycle") == "interrupted"
-                else ""
-            )
-            lines.append(
-                f"- 第 {item['iteration']} 轮：lifecycle=`{item.get('lifecycle', 'completed')}`，"
-                f"worker=`{item['worker_status']}`，"
-                f"verification=`{item.get('verification_status', 'skipped')}`，"
-                f"verdict=`{item.get('verdict') or '无'}`，"
-                f"findings={item.get('findings_count', 0)}{interruption}"
-            )
-    else:
-        lines.append("- 尚未产生迭代记录。")
-    lines.extend(["", "## 验证门禁", ""])
-    if summary.get("verification_results"):
-        if summary.get("latest_verification_failed"):
-            lines.append("- 结果：最新 iteration 验证失败，不能进入 ready_to_commit。")
-        elif summary.get("verification_passed"):
-            history_note = (
-                "；历史 iteration 曾失败，已由最新受信通过取代"
-                if summary.get("has_verification_failures")
-                else ""
-            )
-            lines.append(f"- 结果：最新 iteration 验证通过{history_note}。")
-        else:
-            lines.append("- 结果：最新 iteration 缺少受信验证通过证据。")
-        for item in summary["verification_results"]:
-            lines.append(
-                f"- `{item.get('path')}`：commands={item.get('command_count', 0)}，"
-                f"failed={item.get('failed_count', 0)}"
-            )
-    else:
-        lines.append("- 未发现自动验证结果；提交前建议补充最小验证。")
-    if summary["memory_proposals"]:
-        lines.extend(["", "## 可选 Memory Proposal", ""])
-        for proposal in summary["memory_proposals"]:
-            lines.append(f"- `{proposal['id']}`：{proposal['title']}")
-    lines.extend(["", "## 人工决策", ""])
-    if summary["decisions"]:
-        for decision in summary["decisions"]:
-            lines.append(
-                f"- `{decision['type']}` / `{decision['decision']}`：{decision['reason']} "
-                f"（actor: {decision['actor']}）"
-            )
-    else:
-        lines.append("- 暂无人工 decision 记录。")
-    lines.extend(["", "## 关键产物", ""])
-    lines.extend(f"- `{item}`" for item in summary["key_artifacts"])
-    lines.extend(
-        [
-            "",
-            "## 明确边界",
-            "",
-            "- Finish 不会自动 commit、push、release。",
-            "- Finish 不会自动接受 memory proposal。",
-            "- 是否提交、是否显式生成并接受经验候选，仍由用户人工决定。",
-        ]
-    )
-    return redact_text("\n".join(lines).rstrip() + "\n")
 
 
 def _commit_checklist(

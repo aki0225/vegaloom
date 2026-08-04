@@ -3,8 +3,8 @@
 > 更新时间：2026-08-04
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
-> 当前顺序：Plan-first 与人工确认协议已完成；当前只改进 Finish 报告，随后完成真实使用
-> 验收。不启动 Stage 4 或新的 Runtime、Memory、LangGraph 集成。
+> 当前顺序：Finish 第一屏改进已完成；下一步只做真实使用验收。不启动 Stage 4 或新的
+> Runtime、Memory、LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -26,17 +26,22 @@
 v0.1.4 发布（完成）
   -> CRWP-V1 合同允许终态（完成）
   -> 调查现有入口并固定 Plan 与人工确认协议（完成）
-  -> 改进现有 Finish 第一屏（当前）
-  -> 真实使用验收后停止扩张
+  -> 改进现有 Finish 第一屏（完成）
+  -> 真实使用验收（下一步）
+  -> 停止扩张，进入日常使用观察
 ```
 
-当前唯一的下一步是 Phase 3：
+Phase 3 已完成：
 
-1. 只调整现有 `finish-summary.json` 与 `finish-report.md`；
-2. 第一屏按裁决、实际变更、确定性 Gate、验证、Reviewer、证据上限和下一步排序；
-3. 继续从现有结构化 artifact 确定性生成，不新增模型调用；
-4. 不新增命令、状态、schema 或第二套裁决逻辑；
-5. 使用独立短生命周期分支，不与真实使用验收混在同一个 PR。
+1. `finish-summary.json` 增加兼容性的 `first_screen` 派生视图；
+2. `finish-report.md` 第一屏按裁决、实际变更、确定性 Gate、验证、Reviewer、证据上限和
+   下一步排序；
+3. 继续从现有结构化 artifact 确定性生成，没有新增模型调用、状态、命令或第二套裁决；
+4. Reviewer 缺少有效行号时明确显示缺失，不补造位置。
+
+当前唯一的下一步是 Phase 4：使用 Codex assist、Claude Code assist、`vega do`、
+Reviewer 打回和 fail-closed 五类真实场景验证 Finish 是否足以让未参与执行的人判断变更、
+风险、验证、人工检查位置和能否提交。若信息不足，只做最小重排，不新增报告 Runtime。
 
 CRWP-V1 已完成合同允许的全部处理：
 
@@ -319,6 +324,15 @@ Plan-first 和修改前人工确认协议；协议确认前不修改 Runtime，F
 Phase 2 只增加权威协议文档、生成的 Codex Skill 约定、Claude Code 等价说明和窄测试。
 它没有增加 Planner Agent、Runtime 路由、命令、状态、schema 或 Claude Code 原生 Runner。
 当前唯一下一步改为 Phase 3，只重排现有 Finish 输出并保持确定性裁决。
+
+### 2026-08-04：完成 Finish 第一屏，进入真实使用验收
+
+Phase 3 只增加 `first_screen` 派生视图和确定性 Markdown 展示，原 Finish 字段与裁决语义
+保持不变。展示按七段固定顺序呈现运行身份、实际变更、Gate、验证、Reviewer、证据上限和
+下一步；无效 Reviewer 行号不会被补造。
+
+当前唯一下一步改为 Phase 4 真实使用验收。只有真实使用证明第一屏仍缺关键信息时，才做
+最小信息重排；不新增命令、模型调用、状态或新的报告 Runtime。
 
 ## 七、更新规则
 

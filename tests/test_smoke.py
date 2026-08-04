@@ -26,6 +26,7 @@ from vega.execution_control import (
     request_stop_for_run,
     run_owned_process,
 )
+from vega.finish_presentation import render_finish_report
 from vega.finish_runtime import FinishRuntime
 from vega.experimental.goal_runtime import GoalRuntime
 from vega.experimental.inspection.llm_client import LLMClient
@@ -3300,11 +3301,137 @@ def test_finish_cli_summarizes_successful_loop(tmp_path, monkeypatch) -> None:
     summary = json.loads(run_dir.joinpath("finish-summary.json").read_text(encoding="utf-8"))
     assert summary["finish_status"] == "ready_to_commit"
     assert summary["latest_verdict"]["verdict"] == "approve"
-    assert "commit 前 checklist" in run_dir.joinpath("finish-report.md").read_text(encoding="utf-8").lower()
+    first_screen = summary["first_screen"]
+    assert first_screen["decision"]["status"] == "ready_to_commit"
+    assert first_screen["decision"]["run_id"] == run_dir.name
+    assert Path(first_screen["decision"]["repo_path"]) == repo_dir.resolve()
+    assert first_screen["decision"]["task_mode"] == "bug"
+    assert first_screen["decision"]["automation_mode"] == "auto"
+    assert first_screen["actual_changes"]["changed_files"] == ["README.md"]
+    assert first_screen["actual_changes"]["changed_files_source"] == "trusted_risk_gate"
+    assert first_screen["gates"]["workspace"] == "skipped"
+    assert first_screen["gates"]["scope"] == {
+        "pre_verification": "skipped",
+        "post_verification": "skipped",
+        "pre_review": "skipped",
+    }
+    assert first_screen["gates"]["artifact_integrity"]["status"] == "valid"
+    assert first_screen["gates"]["evidence_freshness"]["status"] == "fresh"
+    assert first_screen["verification"]["checks"]
+    assert {
+        item["status"] for item in first_screen["verification"]["checks"]
+    } == {"passed"}
+    assert first_screen["review"]["verdict"] == "approve"
+
+    report_text = run_dir.joinpath("finish-report.md").read_text(encoding="utf-8")
+    expected_sections = [
+        "## 当前裁决",
+        "## 实际变更",
+        "## 确定性 Gate",
+        "## 验证结果",
+        "## Reviewer 意见",
+        "## 证据上限",
+        "## 下一步",
+    ]
+    assert [report_text.index(section) for section in expected_sections] == sorted(
+        report_text.index(section) for section in expected_sections
+    )
+    assert "ready_to_commit 只表示满足人工提交前检查" in report_text
+    assert "commit 前 checklist" in report_text.lower()
 
     json_result = CliRunner().invoke(app, ["finish", "--run", run_dir.name, "--json"])
     assert json_result.exit_code == 0, json_result.output
     assert json.loads(json_result.output)["finish_status"] == "ready_to_commit"
+
+
+def test_finish_report_preserves_missing_reviewer_line_and_verification_statuses() -> None:
+    summary = {
+        "first_screen": {
+            "decision": {
+                "status": "needs_human",
+                "loop_status": "needs_human",
+                "loop_step": "review",
+                "reasons": ["Reviewer 要求人工处理。"],
+            },
+            "actual_changes": {
+                "changed_file_count": 1,
+                "changed_files": ["README.md"],
+                "changed_files_source": "trusted_risk_gate",
+                "workspace_new_files_count": 0,
+                "budget_findings": [],
+                "high_risk_findings": [],
+                "required_reviews": [],
+            },
+            "gates": {},
+            "verification": {
+                "trusted_passed": False,
+                "latest_failed": True,
+                "historical_failures": False,
+                "checks": [
+                    {
+                        "iteration": 1,
+                        "command": "python -m compileall src",
+                        "status": "passed",
+                        "returncode": 0,
+                        "duration_seconds": 0.5,
+                    },
+                    {
+                        "iteration": 1,
+                        "command": "python -m pytest",
+                        "status": "failed",
+                        "returncode": 1,
+                        "duration_seconds": 2.0,
+                    },
+                    {
+                        "iteration": 1,
+                        "command": "ruff check src tests",
+                        "status": "timed_out",
+                        "returncode": None,
+                        "duration_seconds": 60.0,
+                    },
+                    {
+                        "iteration": 1,
+                        "command": "git diff --check",
+                        "status": "skipped",
+                        "returncode": None,
+                        "duration_seconds": None,
+                    },
+                ],
+            },
+            "review": {
+                "verdict": "request_changes",
+                "summary": "需要补充验证。",
+                "findings": [
+                    {
+                        "severity": "major",
+                        "file": "README.md",
+                        "line": 0,
+                        "title": "缺少验证说明",
+                        "evidence": "未看到验证结果。",
+                        "recommendation": "补充验证。",
+                    }
+                ],
+                "risk_disclosures": [],
+                "checked_items": ["验证证据"],
+            },
+            "evidence_limits": ["Reviewer 未提供关键行；Finish 未补造行号。"],
+            "next_steps": ["补充验证后重新运行 finish。"],
+        },
+        "commit_checklist": [],
+        "iterations": [],
+        "memory_proposals": [],
+        "decisions": [],
+        "key_artifacts": [],
+    }
+
+    report_text = render_finish_report(summary)
+
+    assert "`README.md:0`" not in report_text
+    assert "`README.md`（Reviewer 未提供行号）" in report_text
+    assert "needs_human" in report_text
+    assert "基本可以" not in report_text
+    for status in ["PASSED", "FAILED", "TIMED_OUT", "SKIPPED"]:
+        assert f"`{status}`" in report_text
 
 
 def test_decision_cli_records_run_decisions_and_status_shows_them(tmp_path, monkeypatch) -> None:
