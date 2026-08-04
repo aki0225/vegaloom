@@ -19,24 +19,7 @@
     }
   }
 
-  function renderTimeline(items) {
-    const timeline = document.querySelector("[data-case-timeline]");
-    if (!timeline || !Array.isArray(items)) {
-      return;
-    }
-
-    timeline.replaceChildren(
-      ...items.map((item) => {
-        const entry = document.createElement("span");
-        const label = document.createElement("b");
-        label.textContent = item.label;
-        entry.append(label, document.createTextNode(` ${item.result}`));
-        return entry;
-      }),
-    );
-  }
-
-  function selectCase(caseData, button, caseIndex) {
+  function selectCase(caseData, button) {
     if (!finishPanel) {
       return;
     }
@@ -46,21 +29,14 @@
       setText("kind", caseData.kind);
       setText("status", caseData.status);
       setText("status_label", caseData.status_label);
-      setText("summary", caseData.summary);
       setText("change_summary", caseData.change_summary);
       setText("gate_summary", caseData.gate_summary);
       setText("verification_summary", caseData.verification_summary);
       setText("reviewer_summary", caseData.reviewer_summary);
       setText("evidence_limit", caseData.evidence_limit);
-      setText("next_step", caseData.next_step);
-      renderTimeline(caseData.timeline);
 
       finishPanel.dataset.status = caseData.status;
       finishPanel.setAttribute("aria-labelledby", button.id);
-      const runLabel = finishPanel.querySelector(".finish-panel__topline span:first-child");
-      if (runLabel) {
-        runLabel.textContent = `RUN / ${String(caseIndex + 1).padStart(2, "0")}`;
-      }
 
       caseButtons.forEach((candidate) => {
         const active = candidate === button;
@@ -79,7 +55,7 @@
       button.addEventListener("click", () => {
         const caseData = casesById.get(button.dataset.caseId);
         if (caseData) {
-          selectCase(caseData, button, cases.indexOf(caseData));
+          selectCase(caseData, button);
         }
       });
 
@@ -133,45 +109,6 @@
     }
   }
 
-  function bindStageTracking() {
-    const stageLinks = new Map(
-      Array.from(document.querySelectorAll("[data-stage-link]")).map((link) => [
-        link.dataset.stageLink,
-        link,
-      ]),
-    );
-    const stageSections = Array.from(document.querySelectorAll("[data-stage]"));
-    if (!stageLinks.size || !stageSections.length || !("IntersectionObserver" in window)) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
-        if (!visible) {
-          return;
-        }
-
-        stageLinks.forEach((link, stage) => {
-          const active = stage === visible.target.dataset.stage;
-          link.classList.toggle("is-active", active);
-          if (active) {
-            link.setAttribute("aria-current", "step");
-          } else {
-            link.removeAttribute("aria-current");
-          }
-        });
-      },
-      {
-        rootMargin: "-22% 0px -62% 0px",
-        threshold: [0, 0.2, 0.45],
-      },
-    );
-    stageSections.forEach((section) => observer.observe(section));
-  }
-
   async function copyText(text) {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
@@ -212,6 +149,5 @@
   }
 
   loadCases();
-  bindStageTracking();
   bindCopyButton();
 })();

@@ -2,9 +2,9 @@
 
 > 日期：2026-08-04
 >
-> 状态：`implementation-authorized`；实施范围与首屏文案已确认
+> 状态：`deployment-approved`；本地展示实现与视觉验收已完成，准备通过 PR 和 Pages workflow 部署
 >
-> 当前权限：已授权实现本地预览；用户验收前不启用 GitHub Pages、不合并实现分支、不部署网站
+> 当前权限：已获用户授权提交、合并并部署 GitHub Pages；仍须先通过 PR CI
 
 ## 一、目标
 
@@ -87,30 +87,23 @@ Vega 展示站应保留编辑型长页的质感，但首屏和关键结论必须
 One writes, one reviews.
 ```
 
-### 首屏开场（已确认）
+### 首屏开场（2026-08-04 编辑减法后）
 
 ```text
-“我已经改好了，测试也过了。”
+Vega
 
-AI 这么说，你真敢直接合进主线吗？
-
-我们也不敢。
+AI 写的代码，得看证据。
 ```
 
-### 首屏说明（已确认）
+### 首屏说明
 
 ```text
-所以我们写了 Vega。
-
-Worker 写完后，Reviewer 从一个全新的会话开始，只看任务、真实 Diff、测试结果和项目规则，
-不接着 Worker 的对话往下说。
-
-项目自己的测试必须真的跑通；改了什么、风险在哪里，也得说清楚。
-证据不足，Vega 就停下来，保留现场，交给你接管。
+Worker 留下真实 Diff，项目验证实际运行，Reviewer 从一个全新会话审查。
+证据不足，Vega 就停在人工可以接管的位置。
 ```
 
-这段文案直接描述实际发生的流程，不使用“一个负责改、另一个负责审”这类抽象角色句式；
-同时不把会话隔离写成物理或系统级安全隔离，也不把测试通过描述为自动合入授权。
+首屏只保留产品名、核心承诺、一行证据链和两个行动入口。边界统一放到页面后部的短条中，
+不在首屏重复解释。
 
 ### 全页故事
 
@@ -132,64 +125,22 @@ needs_human
 
 ## 六、页面信息结构
 
-V1 使用一张单页长页面，不先建设多级文档站。
+V1 使用一张单页页面，不建设多级文档站。主体只有三个阅读块：Hero、真实案例和 Quick
+Start。产品边界压缩为案例与 Quick Start 之间的一行短条；顶部导航与 Footer 只承担跳转。
 
-### 1. 顶部导航
+### 1. 顶部导航（辅助）
 
-- 左侧：`Vega · One writes, one reviews`
-- 中间：六个彩色阶段圆点，显示当前位置
-- 右侧：GitHub、Quick Start
-- 暗色模式不作为 V1 验收条件
+- 左侧：`Vega`
+- 右侧：运行记录、GitHub
 
-### 2. Hero
+### 2. Hero（主体 1）
 
-- 左侧：主标题、说明和两个主要按钮
-- 右侧：手绘技术草图风格的 Worker / Reviewer 双路径
-- 按钮：
-  - `查看真实运行`
-  - `快速开始`
-  - GitHub 使用次级文本链接
+- 产品名 `Vega` 是首屏最强文字；
+- 一句核心承诺和一行证据链；
+- `查看真实运行` 与 `开始使用` 两个行动入口；
+- 右侧只画 Worker、Evidence、Reviewer 与人工决定的关系，不再复述六个检查点。
 
-### 3. 一个 Bug 的两种处理方式
-
-#### 直接让 AI 写
-
-- AI 声称“已经修复并验证”；
-- 人工面对完整 Diff，不知道重点；
-- 测试、范围、风险和 Reviewer 输入边界不明确。
-
-#### 使用 Vega
-
-```text
-固定工作区
-  -> Worker 修改
-  -> 检查真实 Diff
-  -> 执行项目验证
-  -> 独立 Reviewer
-  -> Finish 给出结论
-```
-
-本节只解释机制差异，不贬低普通 AI 编码工具，也不宣称 Vega 能替代人工审查。
-
-### 4. 六个检查点
-
-| 序号 | 名称 | 中文标题 | 回答的问题 | 当前 Vega 证据 |
-|---|---|---|---|---|
-| 01 | Baseline | 先固定现场 | 哪些改动属于本次任务？ | HEAD、策略和工作区基线 |
-| 02 | Worker | 只负责修改 | Worker 实际做了什么？ | execution、输出、真实 Diff |
-| 03 | Gates | 检查范围与风险 | 是否越界、污染或命中高风险？ | Workspace、Scope、Risk Gate |
-| 04 | Verify | 跑项目自己的验证 | 哪些命令实际通过？ | 结构化 verification result |
-| 05 | Review | 换一个会话审查 | Reviewer 发现了什么？ | 只读 review pack 与 verdict |
-| 06 | Finish | 给人明确结论 | 可以提交还是必须人工处理？ | 完整性、新鲜度和最终状态 |
-
-每个检查点只展示：
-
-- 一句核心问题；
-- 一张简洁 SVG 图；
-- 一个真实 artifact 字段；
-- 一个失败时的明确结果。
-
-### 5. 真实案例
+### 3. 真实案例与 Finish 面板（主体 2）
 
 #### 主案例 A：AnyIO #1231
 
@@ -239,59 +190,46 @@ Finish：needs_human
 
 #### 次级案例
 
-- Node SemVer：Codex 个人上下文关闭、Windows 行尾和安全工具残留；
-- Testify：Go 项目、shell 预检和仓库外缓存边界。
+Node SemVer 与 Testify 继续保留在追加式证据记录中，不再占用展示站主叙事空间。
 
-次级案例只显示技术栈与一句结论，不进入首页完整回放。
+#### Finish 交互面板
 
-### 6. Finish 交互面板
-
-页面使用一个固定 Finish 面板，点击主案例后切换内容：
+页面使用一个固定 Finish 面板，点击主案例后切换内容。默认只显示：
 
 ```text
 当前裁决
-实际变更
-确定性 Gate
 验证结果
-Reviewer 意见
-证据上限
-下一步
+Reviewer
 ```
 
+实际变更、确定性 Gate 和证据边界放入“完整证据与边界”折叠区，原始记录保留单独链接。
 数据必须来自人工核准的脱敏清单。前端不读取原始 run 目录，也不自行推断 Reviewer 未提供的
 行号或结论。
 
-### 7. 边界说明
+### 4. 边界说明（辅助）
 
-单独列出：
+使用一条三项短条，不再建立独立章节或重复产品定位：
 
-- Vega 是外围 Harness，不替代编码模型；
 - Reviewer 会话隔离不是操作系统级安全沙箱；
-- Vega 不自动 commit、push 或 release；
-- `approve` 不能覆盖验证失败；
-- 高风险修改最终仍需人工确认；
-- 真实案例不能解释为总体成功率。
+- Vega 不自动 commit 或 push；
+- `approve` 不能覆盖验证失败。
 
-### 8. Quick Start
+### 5. Quick Start（主体 3）
 
-只展示最短可运行路径：
+只展示标题和首次启动路径；继续运行与 Finish 命令留在 README：
 
 ```powershell
 python -m pip install -e ".[dev]"
 vega config check --repo .
 vega loop bug --repo . --text "修复一个边界明确的缺陷" --mode assist
-vega loop continue --repo . --run <run_id>
-vega finish --run <run_id>
 ```
 
 详细安装和边界继续链接到仓库 README，不在展示站复制完整文档。
 
-### 9. Footer
+### 6. Footer（辅助）
 
-- GitHub 仓库；
-- `v0.1.4` Release；
-- 产品契约；
-- 真实运行记录；
+- GitHub；
+- 使用文档；
 - MIT License。
 
 ## 七、视觉系统
@@ -339,7 +277,6 @@ V1 不依赖 Google Fonts。后续若自带字体，必须核对许可并控制�
 ### 动效
 
 - 首屏只做一次轻量流程出现动画；
-- 滚动到阶段时更新顶部彩色圆点；
 - Finish 案例切换使用短暂淡入；
 - 尊重 `prefers-reduced-motion`；
 - 不模拟 AI 打字或伪造实时运行。
@@ -355,7 +292,6 @@ site/
   app.js
   assets/
     vega-flow.svg
-    outcome-map.svg
     og-image.png
   data/
     cases.json
@@ -425,9 +361,10 @@ git diff --check
 
 ### Step 1：内容和视觉骨架
 
+状态：本地完成。
+
 - 建立 `site/`；
-- 完成 Hero、两种处理方式、六个检查点和 Footer；
-- 使用占位案例数据；
+- 完成 Hero、真实案例、边界短条、Quick Start 和 Footer；
 - 完成桌面和移动端基础布局；
 - 不启用 Pages。
 
@@ -438,6 +375,8 @@ git diff --check
 - 不出现未实现能力。
 
 ### Step 2：真实案例与 Finish 面板
+
+状态：本地完成。
 
 - 建立案例白名单和 schema；
 - 接入 AnyIO、packaging、CRWP-V1-02；
@@ -451,6 +390,9 @@ git diff --check
 - 凭据和路径扫描为 `0`。
 
 ### Step 3：质量检查
+
+状态：浏览器验收与静态检查已完成；pytest 命令在当前机器未形成可信终态，等待 PR CI
+提供正式结果。
 
 - 桌面宽屏、普通笔记本和移动端截图检查；
 - 键盘导航、焦点状态、替代文字和颜色对比检查；
@@ -468,13 +410,16 @@ git diff --check
 
 ### Step 4：部署
 
+状态：已获授权，等待 PR CI 与合并。
+
 - 新增 `pages.yml`；
 - 首次部署到 GitHub Pages；
 - 检查项目子路径下的资源引用；
 - 检查 Open Graph、页面标题、描述和 favicon；
 - 更新 README 与 `docs/README.md` 的展示站入口。
 
-只有页面验收通过后才启用 Pages，不先发布半成品。
+页面已完成验收。部署仍必须使用已核对的 `site/` artifact，并在合并后手工触发现有 Pages
+workflow。
 
 ## 十一、分支与 PR
 
@@ -532,7 +477,7 @@ git diff --check
 以下条件满足后，展示站 V1 立即停止新增内容：
 
 1. 单页公开可访问；
-2. 六个检查点表达清楚；
+2. Worker、证据、Reviewer 与人工决定的关系表达清楚；
 3. 三个主案例可以切换查看；
 4. Finish 面板能区分事实、Reviewer 意见和证据上限；
 5. Quick Start 和 GitHub 入口可用；
@@ -559,5 +504,5 @@ V1 发布后进入实际展示观察，不立即增加：
 4. 使用原生 HTML/CSS/JavaScript，不引入前端框架；
 5. V1 只使用默认 GitHub Pages 地址，自定义域名和完整英文版以后再决定。
 
-当前已获准创建唯一实现分支并完成本地预览。用户验收前不启用 Pages、不合并实现分支，也不把
-网站实现与 Vega Runtime、Plan-first 或 Finish 产品逻辑修改混在一起。
+当前已获准在唯一实现分支完成页面、通过 PR 合并并部署 Pages。网站实现仍不得与 Vega
+Runtime、Plan-first 或 Finish 产品逻辑修改混在一起。

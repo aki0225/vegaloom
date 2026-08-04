@@ -9,6 +9,7 @@
 
 | 目的 | 文档 | 状态 |
 |---|---|---|
+| 快速了解产品与真实运行 | [Vega 在线展示](https://aki0225.github.io/vegaloom/) | GitHub Pages |
 | 先了解怎么使用 | [`../README.md`](../README.md) | 当前入口 |
 | 查看日常完整流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | 当前使用说明 |
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
