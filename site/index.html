@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Vega 把 AI 代码修改、项目验证和独立评审分开，用真实 Diff、测试结果与项目规则决定任务能否结束。"
+    >
+    <meta name="theme-color" content="#f3ecdf">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Vega — AI 说改好了，你真敢直接合吗？">
+    <meta
+      property="og:description"
+      content="一个写，一个审；测试必须真的跑通，证据不足就停下来交还人工。"
+    >
+    <meta
+      property="og:image"
+      content="https://aki0225.github.io/vegaloom/assets/og-image.png"
+    >
+    <title>Vega — AI 写的代码，得看证据</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到正文</a>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="返回 Vega 展示站顶部">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <span>
+          <strong>Vega</strong>
+          <small>One writes, one reviews.</small>
+        </span>
+      </a>
+
+      <nav class="stage-dots" aria-label="六个检查点">
+        <a href="#baseline" data-stage-link="baseline">
+          <span class="stage-dot stage-dot--baseline" aria-hidden="true"></span>
+          <span>现场</span>
+        </a>
+        <a href="#worker" data-stage-link="worker">
+          <span class="stage-dot stage-dot--worker" aria-hidden="true"></span>
+          <span>修改</span>
+        </a>
+        <a href="#gates" data-stage-link="gates">
+          <span class="stage-dot stage-dot--gates" aria-hidden="true"></span>
+          <span>门禁</span>
+        </a>
+        <a href="#verify" data-stage-link="verify">
+          <span class="stage-dot stage-dot--verify" aria-hidden="true"></span>
+          <span>验证</span>
+        </a>
+        <a href="#review" data-stage-link="review">
+          <span class="stage-dot stage-dot--review" aria-hidden="true"></span>
+          <span>评审</span>
+        </a>
+        <a href="#finish" data-stage-link="finish">
+          <span class="stage-dot stage-dot--finish" aria-hidden="true"></span>
+          <span>结论</span>
+        </a>
+      </nav>
+
+      <nav class="header-links" aria-label="站点链接">
+        <a href="#quick-start">快速开始</a>
+        <a
+          href="https://github.com/aki0225/vegaloom"
+          target="_blank"
+          rel="noreferrer"
+        >GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+
+    <main id="main-content">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="kicker">One writes, one reviews.</p>
+          <blockquote>“我已经改好了，测试也过了。”</blockquote>
+          <h1 id="hero-title">AI 这么说，<br>你真敢直接合进主线吗？</h1>
+          <p class="hero-answer">我们也不敢。</p>
+          <p class="hero-intro">所以我们写了 Vega。</p>
+          <p>
+            Worker 写完后，Reviewer 从一个全新的会话开始，只看任务、真实 Diff、
+            测试结果和项目规则，不接着 Worker 的对话往下说。
+          </p>
+          <p>
+            项目自己的测试必须真的跑通；改了什么、风险在哪里，也得说清楚。
+            证据不足，Vega 就停下来，保留现场，交给你接管。
+          </p>
+          <div class="hero-actions">
+            <a class="button button--primary" href="#cases">查看真实运行</a>
+            <a class="button button--secondary" href="#quick-start">快速开始</a>
+          </div>
+          <p class="hero-note">
+            Vega 不替你合并代码。它先把该看的证据摆在桌面上。
+          </p>
+        </div>
+
+        <figure class="hero-visual">
+          <img
+            src="assets/vega-flow.svg?v=20260804"
+            alt="Vega 流程草图：Worker 留下真实 Diff，项目验证运行后，Reviewer 从新会话查看证据，最终交给 Finish 判断"
+            width="760"
+            height="650"
+          >
+          <figcaption>
+            写与审不共用完整对话；两边都绕不过真实 Diff 和项目验证。
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="section section--comparison" aria-labelledby="comparison-title">
+        <header class="section-heading">
+          <p class="section-number">01 / 真实问题</p>
+          <h2 id="comparison-title">同一个 Bug，两种交付方式</h2>
+          <p>
+            差别不在于“用了几个 Agent”，而在于最后留下了什么，失败时又会不会硬着头皮往下跑。
+          </p>
+        </header>
+
+        <div class="comparison-grid">
+          <article class="comparison-path comparison-path--plain">
+            <p class="comparison-label">只听模型汇报</p>
+            <h3>一句“改好了”，后面全靠人追</h3>
+            <ol>
+              <li><span>01</span>模型修改代码，并口头说明已经完成。</li>
+              <li><span>02</span>测试跑没跑、跑的是不是当前 Diff，需要重新确认。</li>
+              <li><span>03</span>几百行 Diff 摊在面前，风险位置没有单独指出。</li>
+              <li><span>04</span>进程超时或中断后，现场是否可信并不清楚。</li>
+            </ol>
+          </article>
+
+          <article class="comparison-path comparison-path--vega">
+            <p class="comparison-label">经过 Vega</p>
+            <h3>每一步都留下下一步能核对的东西</h3>
+            <ol>
+              <li><span>01</span>先固定工作区和允许范围，旧改动不会混进本轮。</li>
+              <li><span>02</span>Worker 的真实 Diff 经过范围、污染与风险检查。</li>
+              <li><span>03</span>项目自己的验证命令实际运行，并记录结果。</li>
+              <li><span>04</span>Reviewer 从新会话读取证据，Finish 再给出明确结论。</li>
+            </ol>
+          </article>
+        </div>
+
+        <div class="comparison-strip" aria-label="Vega 的三个可能结论">
+          <span><strong>ready_to_commit</strong> 证据完整，等你检查</span>
+          <span><strong>request_changes</strong> 找到问题，继续修改</span>
+          <span><strong>needs_human</strong> 证据不足，停下来</span>
+        </div>
+      </section>
+
+      <section class="section section--checkpoints" aria-labelledby="checkpoints-title">
+        <header class="section-heading">
+          <p class="section-number">02 / 六个检查点</p>
+          <h2 id="checkpoints-title">从“开始改”到“能不能交付”</h2>
+          <p>
+            六个检查点只回答六个具体问题。任何一项缺证据，都不会被一句
+            <code>approve</code> 覆盖。
+          </p>
+        </header>
+
+        <ol class="checkpoint-grid">
+          <li class="checkpoint-card checkpoint-card--baseline" id="baseline" data-stage="baseline">
+            <div class="checkpoint-index">01</div>
+            <div>
+              <p class="checkpoint-name">Baseline</p>
+              <h3>先固定现场</h3>
+              <p>哪些改动属于这次任务？</p>
+              <dl>
+                <div><dt>留下</dt><dd>HEAD、工作区指纹、项目策略</dd></div>
+                <div><dt>失败时</dt><dd>基线不完整，任务不启动</dd></div>
+              </dl>
+            </div>
+          </li>
+
+          <li class="checkpoint-card checkpoint-card--worker" id="worker" data-stage="worker">
+            <div class="checkpoint-index">02</div>
+            <div>
+              <p class="checkpoint-name">Worker</p>
+              <h3>看真实修改</h3>
+              <p>代码到底动了什么？</p>
+              <dl>
+                <div><dt>留下</dt><dd>执行状态、真实 Diff、退出结果</dd></div>
+                <div><dt>失败时</dt><dd>保留候选，不伪造完成</dd></div>
+              </dl>
+            </div>
+          </li>
+
+          <li class="checkpoint-card checkpoint-card--gates" id="gates" data-stage="gates">
+            <div class="checkpoint-index">03</div>
+            <div>
+              <p class="checkpoint-name">Gates</p>
+              <h3>检查范围与风险</h3>
+              <p>有没有越界、污染或碰到高风险代码？</p>
+              <dl>
+                <div><dt>留下</dt><dd>Workspace、Scope、Risk 结果</dd></div>
+                <div><dt>失败时</dt><dd>停止验证和后续审查</dd></div>
+              </dl>
+            </div>
+          </li>
+
+          <li class="checkpoint-card checkpoint-card--verify" id="verify" data-stage="verify">
+            <div class="checkpoint-index">04</div>
+            <div>
+              <p class="checkpoint-name">Verify</p>
+              <h3>跑项目自己的验证</h3>
+              <p>哪些命令真的通过了？</p>
+              <dl>
+                <div><dt>留下</dt><dd>命令、退出码、验证摘要</dd></div>
+                <div><dt>失败时</dt><dd>Reviewer 不能把错误说成成功</dd></div>
+              </dl>
+            </div>
+          </li>
+
+          <li class="checkpoint-card checkpoint-card--review" id="review" data-stage="review">
+            <div class="checkpoint-index">05</div>
+            <div>
+              <p class="checkpoint-name">Review</p>
+              <h3>换一个会话看证据</h3>
+              <p>Reviewer 找到了什么？</p>
+              <dl>
+                <div><dt>读取</dt><dd>任务、Diff、测试、规则与风险</dd></div>
+                <div><dt>不读取</dt><dd>Worker 的完整历史对话</dd></div>
+              </dl>
+            </div>
+          </li>
+
+          <li class="checkpoint-card checkpoint-card--finish" id="finish" data-stage="finish">
+            <div class="checkpoint-index">06</div>
+            <div>
+              <p class="checkpoint-name">Finish</p>
+              <h3>把结论说清楚</h3>
+              <p>可以检查后提交，还是必须人工处理？</p>
+              <dl>
+                <div><dt>核对</dt><dd>完整性、新鲜度与最终状态</dd></div>
+                <div><dt>输出</dt><dd>证据事实、意见、上限和下一步</dd></div>
+              </dl>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="section section--cases" id="cases" aria-labelledby="cases-title">
+        <header class="section-heading">
+          <p class="section-number">03 / 真实运行</p>
+          <h2 id="cases-title">成功、中断和超时，都原样保留</h2>
+          <p>
+            以下数字来自公开的追加式运行记录。它们是三个可复核案例，不是成功率统计。
+          </p>
+        </header>
+
+        <div class="case-layout">
+          <div class="case-grid" role="tablist" aria-label="选择真实运行案例">
+            <button
+              class="case-card is-active"
+              id="tab-anyio-1231"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="finish-panel"
+              data-case-id="anyio-1231"
+            >
+              <span class="case-kind">标准路径</span>
+              <strong>AnyIO #1231</strong>
+              <span>3 个文件 · +23 / -1</span>
+              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+            </button>
+            <button
+              class="case-card"
+              id="tab-packaging-1232"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="finish-panel"
+              tabindex="-1"
+              data-case-id="packaging-1232"
+            >
+              <span class="case-kind">恢复路径</span>
+              <strong>packaging #1232</strong>
+              <span>主机关机 · 5311 passed</span>
+              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+            </button>
+            <button
+              class="case-card"
+              id="tab-crwp-v1-02"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="finish-panel"
+              tabindex="-1"
+              data-case-id="crwp-v1-02"
+            >
+              <span class="case-kind">停止路径</span>
+              <strong>CRWP-V1-02</strong>
+              <span>900 秒 timeout · 0 个文件</span>
+              <small><i class="status-mark status-mark--human" aria-hidden="true"></i> needs_human</small>
+            </button>
+          </div>
+
+          <article
+            class="finish-panel"
+            id="finish-panel"
+            role="tabpanel"
+            aria-labelledby="tab-anyio-1231"
+            aria-live="polite"
+            data-status="ready_to_commit"
+          >
+            <div class="finish-panel__topline">
+              <span>RUN / 01</span>
+              <span data-case-field="kind">标准路径</span>
+            </div>
+            <div class="finish-panel__heading">
+              <div>
+                <p>当前裁决</p>
+                <h3 data-case-field="status">ready_to_commit</h3>
+              </div>
+              <span class="decision-stamp" data-case-field="status_label">
+                可以人工检查后提交
+              </span>
+            </div>
+
+            <p class="finish-summary" data-case-field="summary">
+              一轮完成小范围补丁，验证、范围门禁和独立审查均有可核对结果。
+            </p>
+
+            <dl class="finish-facts">
+              <div>
+                <dt>实际变更</dt>
+                <dd data-case-field="change_summary">
+                  只修改 Trio 后端、任务组回归测试和版本记录，共 3 个预注册文件。
+                </dd>
+              </div>
+              <div>
+                <dt>确定性 Gate</dt>
+                <dd data-case-field="gate_summary">
+                  Workspace、三阶段 Scope 与 Risk Gate 全部通过。
+                </dd>
+              </div>
+              <div>
+                <dt>验证结果</dt>
+                <dd data-case-field="verification_summary">
+                  5 条命令全部通过；相关测试 24 passed，完整任务组测试
+                  496 passed、10 skipped、4 xfailed。
+                </dd>
+              </div>
+              <div>
+                <dt>Reviewer 意见</dt>
+                <dd data-case-field="reviewer_summary">
+                  Reviewer 返回 approve，findings 为 0。
+                </dd>
+              </div>
+            </dl>
+
+            <div class="finish-timeline" data-case-timeline aria-label="案例阶段记录">
+              <span><b>Baseline</b> 冻结真实仓库修订与允许路径</span>
+              <span><b>Worker</b> 3 个文件，+23 / -1</span>
+              <span><b>Gates</b> 范围、工作区与风险检查通过</span>
+              <span><b>Verify</b> 5 条验证命令通过</span>
+              <span><b>Review</b> approve，0 findings</span>
+              <span><b>Finish</b> ready_to_commit</span>
+            </div>
+
+            <div class="evidence-limit">
+              <p>证据上限</p>
+              <p data-case-field="evidence_limit">
+                这是 Issue 已明确期望行为的单案例，不证明未知缺陷发现能力、
+                模型未见过上游修复或跨仓库成功率。
+              </p>
+            </div>
+
+            <div class="finish-next">
+              <span>下一步</span>
+              <strong data-case-field="next_step">
+                人工检查 3 个文件的 Diff，再决定是否提交。
+              </strong>
+            </div>
+
+            <a
+              class="source-link"
+              href="https://github.com/aki0225/vegaloom/blob/main/eval/real-world-runs.md"
+              target="_blank"
+              rel="noreferrer"
+              data-case-source
+            >查看追加式原始记录 <span aria-hidden="true">↗</span></a>
+          </article>
+        </div>
+
+        <noscript>
+          <p class="noscript-note">
+            页面未启用 JavaScript，因此当前只显示 AnyIO 案例。三个案例的完整记录可从上方证据链接查看。
+          </p>
+        </noscript>
+
+        <div class="secondary-cases">
+          <p>同一证据链也跑过：</p>
+          <span><b>Node SemVer</b> Windows 行尾与工具残留边界</span>
+          <span><b>Testify</b> Go shell 预检与仓库外缓存边界</span>
+        </div>
+      </section>
+
+      <section class="section section--outcomes" aria-labelledby="outcomes-title">
+        <header class="section-heading">
+          <p class="section-number">04 / 三种结局</p>
+          <h2 id="outcomes-title">停止，也是一种可信结果</h2>
+          <p>
+            Vega 不把所有运行都挤成绿色。结论必须和当时真正拥有的证据相符。
+          </p>
+        </header>
+
+        <figure class="outcome-figure">
+          <img
+            src="assets/outcome-map.svg"
+            alt="Vega 的三种结局：证据完整时 ready_to_commit，Reviewer 找到问题时 request_changes，证据不足时 needs_human"
+            width="1120"
+            height="520"
+          >
+          <figcaption>
+            <code>ready_to_commit</code> 仍然不是自动合并许可；最终提交动作始终由人决定。
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="section section--boundary" aria-labelledby="boundary-title">
+        <div class="boundary-note">
+          <div>
+            <p class="section-number">05 / Design Boundary</p>
+            <h2 id="boundary-title">Vega 刻意不做什么</h2>
+          </div>
+          <ul>
+            <li><strong>不替代编码工具。</strong>它是外围 Harness，不是新的通用 Agent 框架。</li>
+            <li><strong>不宣传系统级隔离。</strong>新 Reviewer 会话不等于容器或操作系统安全沙箱。</li>
+            <li><strong>不自动提交。</strong>Vega 不执行 commit、push 或 release。</li>
+            <li><strong>不让意见盖过失败。</strong><code>approve</code> 不能覆盖验证失败。</li>
+            <li><strong>不替人确认高风险。</strong>支付、数据库、并发等修改仍要人工检查。</li>
+            <li><strong>不从案例推导成功率。</strong>公开运行只说明对应现场发生了什么。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section section--quickstart" id="quick-start" aria-labelledby="quickstart-title">
+        <div class="quickstart">
+          <div class="quickstart-copy">
+            <p class="section-number">06 / Quick Start</p>
+            <h2 id="quickstart-title">先在一个边界明确的小任务上试</h2>
+            <p>
+              当前主会话修改代码，Vega 固定现场、跑验证、启动独立 Reviewer，再生成 Finish 结论。
+            </p>
+            <p class="quickstart-tip">
+              如果你还不知道 Bug 在哪里，先由主会话调查并确认计划，不要让
+              <code>vega do</code> 猜范围。
+            </p>
+          </div>
+
+          <div class="terminal" aria-label="Vega 快速开始命令">
+            <div class="terminal-bar">
+              <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+              <b>PowerShell</b>
+              <button type="button" data-copy-quickstart>复制命令</button>
+            </div>
+            <pre><code data-quickstart-code>python -m pip install -e ".[dev]"
+vega config check --repo .
+vega loop bug --repo . --text "修复一个边界明确的缺陷" --mode assist
+vega loop continue --repo . --run &lt;run_id&gt;
+vega finish --run &lt;run_id&gt;</code></pre>
+            <p class="copy-status" role="status" aria-live="polite" data-copy-status></p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div>
+        <a class="brand brand--footer" href="#top">
+          <span class="brand-mark" aria-hidden="true">V</span>
+          <span><strong>Vega</strong><small>AI 编码的验证与独立评审 Harness</small></span>
+        </a>
+        <p>先看真实 Diff，再看测试和评审；证据不够，就停下来。</p>
+      </div>
+      <nav aria-label="页脚链接">
+        <a href="https://github.com/aki0225/vegaloom">GitHub 仓库</a>
+        <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.1.4">v0.1.4 Release</a>
+        <a href="https://github.com/aki0225/vegaloom/blob/main/docs/PRODUCT-CONTRACT.md">产品契约</a>
+        <a href="https://github.com/aki0225/vegaloom/blob/main/eval/real-world-runs.md">真实运行记录</a>
+        <a href="https://github.com/aki0225/vegaloom/blob/main/LICENSE">MIT License</a>
+      </nav>
+      <p class="footer-meta">© 2026 Vega · 页面不加载第三方脚本或统计服务</p>
+    </footer>
+  </body>
+</html>
