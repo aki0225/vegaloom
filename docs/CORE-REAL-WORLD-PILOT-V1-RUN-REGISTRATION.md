@@ -911,3 +911,79 @@ python scripts/pilot/crwp-v1/run_crwp_case.py `
 
 上述条件同时满足后，才先启动 Case 01。Case 01 的真实结果必须形成终态并追加
 `eval/real-world-runs.md`，之后才能判断是否进入 Case 02。
+
+## 十五、2026-08-04 Amendment 5：Case 02 单项重新冻结
+
+Case 01 已于 2026-07-30 形成正式终态。其后 Dormice 出现新的关联 PR，该变化不回溯改写
+Case 01 的既有结果，但 2026-07-31 同时覆盖 Case 01/02 的资格摘要不再用于启动 Case 02。
+本 Amendment 只重新冻结 `CRWP-V1-02`，不重跑 Case 01，也不增加产品 Runtime、状态或
+artifact。
+
+### 15.1 新资格合同
+
+2026-08-04 的资格与 Provider 证据明确包含：
+
+```text
+active_case_ids == ["CRWP-V1-02"]
+```
+
+控制器要求该字段与当前 Case 精确相等，不能把 Case 02 的资格证据用于其他 Case，也不能沿用
+同时包含多个 Case 的旧摘要。冻结文件为：
+
+```text
+.local-validation/crwp-v1/preflight-20260804/qualification/summary.json
+SHA-256: 876495381e3c4f6f449debbe0a1692d0cac6214c0ac44b0a40f1c3d4260c09c7
+
+.local-validation/crwp-v1/preflight-20260804/qualification/manifest.json
+SHA-256: be9b00ad4c6269f7430ab73692043aa1c6749461cd291a7665dff3f447a0ea06
+```
+
+证据生成时 Sequelize Issue `#18265` 与受控 PR `#18274` 的状态、base、head、diff 字节数和
+diff SHA-256 均与预注册值一致。Codex CLI `0.146.0` 的
+`gpt-5.4 / medium` 与 `gpt-5.4 / high` 探测均精确返回 `READY`。资格证据仍只有 24 小时
+有效期，正式 Worker 启动前由控制器再次校验。
+
+### 15.2 新基线合同
+
+fresh prepared target 保持：
+
+```text
+HEAD: 18431b84c44eaa14736a2f4f6e9d92fe812a923e
+parent: f0cea95e38b4f2c9096267371ab305d08f7b8497
+tree: 67f271bb1fbd2506fc556ecab4ea319b827b234f
+```
+
+第一次控制尝试保留在 `baseline-after-native-v2/`。它在启动第一条命令前因
+`RunnerExecutionContext` 新增必填 `execution_root` 参数而失败，不计入有效基线，也不覆盖。
+只补充当前 Runtime 所需的 `execution_root` 后，使用全新目录从第一条命令重新运行：
+
+```text
+.local-validation/crwp-v1/preflight-20260804/case-02/baseline-after-native-v3/
+summary.json SHA-256:
+229df0aa22bcef2b2b91ceacf18bbe6e43d3c64f044230ac901eb7f10834f59a
+```
+
+结果为 `accepted=true`：build、`41 passing`、ESLint 与 `git diff --check` 均按冻结预期
+通过；oracle 两次均以 `1` 退出，完整输出字节一致，SHA-256 仍为
+`0ee06abd2c7451e416e7514f49ada0f7ff1017a14c6a94dde27d6db35464626b`。
+六次执行均无未确认终止，目标 Git clean、remote 为空，相关残余进程为 `0`。
+
+prepared target 的 `945` 个 tracked 文件、共 `9,657,058` 字节按四项冻结负向词表执行
+原始字节扫描，命中数为 `0`。该前置扫描不能替代正式控制器对每次 Worker/Reviewer 最终
+prompt 的调用前扫描。
+
+### 15.3 Case 02 专用登记提交
+
+旧的 `crwp-v1-control-manifest.json` 保留为上一轮登记历史，不修改、不复用。本轮控制器改用：
+
+```text
+scripts/pilot/crwp-v1/crwp-v1-case02-control-manifest.json
+```
+
+提交顺序保持两提交冻结：
+
+1. Runtime 提交 A 包含控制器、控制测试和本 Amendment；
+2. 登记提交 B 必须是 A 的单父直接子提交，且只能新增上述 Case 02 manifest；
+3. 正式运行必须精确 checkout 到 B，控制器逐项校验 A/B、`src` tree、控制文件、资格、
+   baseline、目标配置和 SQLite native 哈希；
+4. B 上完整门禁通过后，才允许启动 Case 02 Worker。

@@ -53,7 +53,7 @@ QUALIFICATION_MAX_AGE_SECONDS = 24 * 60 * 60
 LAUNCH_NONCE_ENV = "CRWP_V1_SUPERVISOR_NONCE"
 FORMAL_EVIDENCE_ROOT = Path(".local-validation/crwp-v1/formal-runs")
 CONTROL_MANIFEST_PATH = Path(
-    "scripts/pilot/crwp-v1/crwp-v1-control-manifest.json"
+    "scripts/pilot/crwp-v1/crwp-v1-case02-control-manifest.json"
 )
 CONTROL_FILE_PATHS = {
     "controller": "scripts/pilot/crwp-v1/run_crwp_case.py",
@@ -71,12 +71,12 @@ CONTROL_FILE_PATHS = {
 }
 QUALIFICATION_CONTRACTS = {
     "summary": {
-        "path": ".local-validation/crwp-v1/preflight-20260731/qualification/summary.json",
-        "sha256": "224e11f37faa21fe52ce31d2bcab80ca4aef863552ee186d389a9b4729d93223",
+        "path": ".local-validation/crwp-v1/preflight-20260804/qualification/summary.json",
+        "sha256": "876495381e3c4f6f449debbe0a1692d0cac6214c0ac44b0a40f1c3d4260c09c7",
     },
     "manifest": {
-        "path": ".local-validation/crwp-v1/preflight-20260731/qualification/manifest.json",
-        "sha256": "974cf9961204a41319631fee0c2d11f1c25bac58734f17bacc419f9baba0c7e0",
+        "path": ".local-validation/crwp-v1/preflight-20260804/qualification/manifest.json",
+        "sha256": "be9b00ad4c6269f7430ab73692043aa1c6749461cd291a7665dff3f447a0ea06",
     },
 }
 CASE_CONTRACTS: dict[str, dict[str, str | None]] = {
@@ -107,8 +107,8 @@ CASE_CONTRACTS: dict[str, dict[str, str | None]] = {
         "task_sha256": "803c3a516e833d41a8cb8c3009595fa66d2386776204ff8d14fea18dc2c22ad6",
         "blocked_path": "scripts/pilot/crwp-v1/crwp-v1-02-blocked-terms.txt",
         "blocked_sha256": "3c6cb6f708588702865b15cab2fa0dc0bb7a0044401e4cd7fe154a6cf40d05d8",
-        "baseline_path": ".local-validation/crwp-v1/preflight-20260731/case-02/baseline-after-native-v2/summary.json",
-        "baseline_sha256": "ed84e7fba9bb949df4d4b4115d2ce0a0bce8d26b3531a402557195e8163e5057",
+        "baseline_path": ".local-validation/crwp-v1/preflight-20260804/case-02/baseline-after-native-v3/summary.json",
+        "baseline_sha256": "229df0aa22bcef2b2b91ceacf18bbe6e43d3c64f044230ac901eb7f10834f59a",
         "oracle_path": "scripts/pilot/crwp-v1/crwp-v1-02-sqlite-autoincrement-oracle.cjs",
         "oracle_sha256": "f784abc3518e12991f3f0b93628773adda1d68c9add4fe2a75d9e93b318e93d0",
         "native_helper_path": "scripts/pilot/crwp-v1/ignore-native-drivers.cjs",
@@ -505,6 +505,8 @@ def _assert_registered_preflight(
     )
     if qualification_payload.get("overall_preflight_component_passed") is not True:
         raise ValueError("资格与 Provider 证据未形成通过终态")
+    if qualification_payload.get("active_case_ids") != [case_id]:
+        raise ValueError("资格与 Provider 证据未精确限定当前 Case")
     try:
         generated_at = datetime.fromisoformat(
             qualification_payload["generated_at_utc"]

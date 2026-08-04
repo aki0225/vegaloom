@@ -160,6 +160,117 @@ def _git(repo: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
+def _write_registered_preflight_fixture(
+    module,
+    workspace: Path,
+    monkeypatch,
+    *,
+    active_case_ids: object,
+) -> dict[str, str | None]:
+    qualification_dir = workspace / "qualification"
+    qualification_dir.mkdir(parents=True)
+    summary_path = qualification_dir / "summary.json"
+    manifest_path = qualification_dir / "manifest.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "active_case_ids": active_case_ids,
+                "generated_at_utc": datetime.now(UTC).isoformat(),
+                "overall_preflight_component_passed": True,
+            }
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    manifest_path.write_text(
+        '{"entries":[]}\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    baseline_path = workspace / "baseline.json"
+    baseline_path.write_text(
+        json.dumps(
+            {
+                "case_id": "CRWP-V1-02",
+                "final": {"accepted": True},
+                "runs": [{"matched_expectation": True}],
+            }
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    monkeypatch.setattr(
+        module,
+        "QUALIFICATION_CONTRACTS",
+        {
+            "summary": {
+                "path": "qualification/summary.json",
+                "sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest(),
+            },
+            "manifest": {
+                "path": "qualification/manifest.json",
+                "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            },
+        },
+    )
+    return {
+        "baseline_path": "baseline.json",
+        "baseline_sha256": hashlib.sha256(
+            baseline_path.read_bytes()
+        ).hexdigest(),
+    }
+
+
+def test_registered_preflight_accepts_case_scoped_qualification(
+    tmp_path,
+    monkeypatch,
+):
+    module = _load_control_module()
+    contract = _write_registered_preflight_fixture(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_case_ids=["CRWP-V1-02"],
+    )
+
+    result = module._assert_registered_preflight(
+        "CRWP-V1-02",
+        tmp_path,
+        contract,
+    )
+
+    assert result["baseline"]["path"] == "baseline.json"
+
+
+@pytest.mark.parametrize(
+    "active_case_ids",
+    [
+        None,
+        ["CRWP-V1-01"],
+        ["CRWP-V1-01", "CRWP-V1-02"],
+    ],
+)
+def test_registered_preflight_rejects_other_case_qualification(
+    tmp_path,
+    monkeypatch,
+    active_case_ids,
+):
+    module = _load_control_module()
+    contract = _write_registered_preflight_fixture(
+        module,
+        tmp_path,
+        monkeypatch,
+        active_case_ids=active_case_ids,
+    )
+
+    with pytest.raises(ValueError, match="未精确限定当前 Case"):
+        module._assert_registered_preflight(
+            "CRWP-V1-02",
+            tmp_path,
+            contract,
+        )
+
+
 def _build_runtime_freeze_fixture(
     module,
     repo: Path,
