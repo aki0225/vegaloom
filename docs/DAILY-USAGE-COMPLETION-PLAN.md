@@ -1,7 +1,7 @@
 # Vega 日常可信使用完成计划
 
 > 日期：2026-08-04
-> 状态：Phase 0、Phase 1 与 Phase 2 已完成；当前进入 Phase 3 的 Finish 第一屏改进
+> 状态：Phase 0 至 Phase 3 已完成；下一步是 Phase 4 真实使用验收
 > 范围：`v0.1.4` 发布、CRWP-V1、调查与计划协议、Finish 报告、真实使用验收
 
 ## 一、完成标准
@@ -177,7 +177,7 @@ Claude Code 可以作为外部 Worker，但不能使用同一会话代替独立 
 Phase 2 已结束。后续不再扩展 Planner、adapter target 或宿主路由；真实效果在 Phase 4 按
 预定场景验收。
 
-## 六、Phase 3：改进现有 Finish 报告（current）
+## 六、Phase 3：改进现有 Finish 报告（completed）
 
 只调整：
 
@@ -199,7 +199,16 @@ Finish 第一屏按以下顺序展示：
 Reviewer 没有提供关键行时，Finish 不自行生成行号。报告不得隐藏失败，也不得用“基本可以”
 弱化 `needs_human`。
 
-## 七、Phase 4：真实使用验收
+实施结果：
+
+- `finish-summary.json` 新增兼容性的 `first_screen` 派生视图，原字段继续保留；
+- `finish-report.md` 第一屏按上述七段固定顺序展示；
+- Run、仓库、任务类型和自动化模式仍在第一屏可见，没有因重排丢失运行身份；
+- 验证命令明确区分通过、失败、超时和跳过；
+- Reviewer 未提供有效行号时明确显示“未提供行号”，不补造 `:0`；
+- 展示逻辑位于纯派生模块，没有新增模型调用、状态、命令或裁决路径。
+
+## 七、Phase 4：真实使用验收（next）
 
 至少覆盖以下场景：
 
@@ -252,7 +261,7 @@ One writes, one reviews — worker 与 reviewer 上下文隔离的 AI 编码工�
 1. `v0.1.4` Tag 与 GitHub Release 已发布；**已完成**。
 2. CRWP-V1 三个 Case 都有合同允许的终态；**已完成**。
 3. Codex、Claude Code 和 `vega do` 已有同一协议；真实验收留到 Phase 4；
-4. Finish 能清楚展示结论、重要变更、验证、高风险和剩余问题；
+4. Finish 能清楚展示结论、重要变更、验证、高风险和剩余问题；**已完成**。
 5. 成功、Reviewer 打回、验证失败、高风险和恢复场景均有可复核记录。
 
 观察期内只修复真实使用暴露的缺陷，不继续建设 Planner Agent、Multi-Worker、A2A、Web UI、
@@ -265,7 +274,7 @@ Assurance Stage。
 发布 v0.1.4（完成）
   -> CRWP-V1 合同允许终态（完成）
   -> 调查现有入口并固定 Plan-first 与人工确认协议（完成）
-  -> 改进 Finish 第一屏（当前）
-  -> 完成真实使用验收
+  -> 改进 Finish 第一屏（完成）
+  -> 完成真实使用验收（下一步）
   -> 停止扩张，进入日常使用观察
 ```

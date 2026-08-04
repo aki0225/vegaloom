@@ -504,6 +504,11 @@ finish-summary.json
 
 Finish 的作用是把“能不能交付、提交前还要检查什么、哪些经验需要人工沉淀”整理清楚。它不会自动 commit、push、release，也不会自动接受 memory。
 
+`finish-summary.json.first_screen` 是从同一次可信证据快照派生的兼容性展示视图，原有摘要字段
+继续保留。`finish-report.md` 第一屏固定按当前裁决、实际变更、确定性 Gate、验证结果、
+Reviewer 意见、证据上限和下一步排序；它不重新运行验证、不调用模型，也不产生新的裁决。
+Reviewer 未提供有效行号时，Finish 明确显示缺失，不自行推断位置。
+
 Finish 会重新读取当前 `.vega.yaml/.vega.yml`，核对启动时文件摘要、scope 摘要和
 `project-policy-snapshot.json` 的根状态绑定。升级前缺少三阶段 scope 证据的旧 run 只允许
 复盘，不会被提升为 `ready_to_commit`。

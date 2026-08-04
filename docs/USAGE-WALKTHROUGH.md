@@ -220,6 +220,19 @@ status = success
 vega finish --run <loop_run>
 ```
 
+`finish-report.md` 第一屏按固定顺序展示：
+
+1. 当前裁决与运行身份；
+2. 实际变更、预算和高风险命中；
+3. workspace、scope、verification、risk、完整性和新鲜度 Gate；
+4. 每条验证命令的通过、失败、超时或跳过状态；
+5. Reviewer verdict、finding、有效关键行和建议；
+6. 当前证据没有证明什么；
+7. 可以提交，还是需要修复、重跑或人工检查。
+
+这些内容只整理现有结构化 artifact。Finish 不重新运行验证，不调用模型，也不会在 Reviewer
+未提供行号时补造位置。
+
 记录人工决策：
 
 ```powershell
