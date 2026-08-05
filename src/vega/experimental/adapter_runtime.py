@@ -83,9 +83,18 @@ description: "当用户要求用 Vega/loop 做 bug 修复或需求开发时使�
    - 如果有 `fix-prompt.md`，按它继续修复后再次 `loop continue`。
    - 如果有 `final-report.md`，用它整理交付结论。
    - 如果 gate/reviewer 要求人工判断，先向用户说明风险。
-8. 无论前一步是否已经生成 `final-report.md`，都运行 `vega finish --run <loop_run_id>`，
-   从现有证据生成最终交付结论。
-9. 用户明确批准继续或交付时，记录 decision：
+8. 无论前一步是否已经生成 `final-report.md`，都运行
+   `vega finish --run <loop_run_id> --json`，从现有证据生成最终交付结论。
+9. 把 Finish 结果带回主会话时，必须同时展示完整变更事实和 Reviewer 重点：
+   - 先列出 `first_screen.actual_changes.changed_files` 的全部路径，不得让模型筛掉任何文件。
+   - 展示 Reviewer 文件覆盖率、重点文件、其他已变更项；未被 Reviewer 标记为重点不代表
+     文件不重要。
+   - 优先使用宿主的 Changes / Diff 视图展示代码。需要终端 Diff 时，分别运行
+     `git diff --cached --no-ext-diff --unified=3` 和
+     `git diff --no-ext-diff --unified=3`，不能用其中一条代替完整 staged/unstaged 事实。
+   - 小 Diff 直接展示全部代码块；大 Diff 可以分批展示，但必须列出全部文件，并明确说明
+     已展示与尚未展示的范围，不得静默省略。新增未跟踪文件需要单独打开或展示其完整内容。
+10. 用户明确批准继续或交付时，记录 decision：
    - `vega decision approve --run <run_id> --type finish --reason "<原因>"`
 
 ## 状态查询

@@ -487,6 +487,7 @@ def _review_json(verdict: str) -> str:
             "verdict": verdict,
             "summary": "review complete",
             "findings": [],
+            "reviewed_files": ["README.md"],
             "checked_items": ["scope", "tests"],
         }
     )

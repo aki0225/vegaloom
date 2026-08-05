@@ -6,6 +6,10 @@ from .loop_evidence import EvidenceFreshness
 from .loop_integrity import LoopArtifactIntegrity
 from .models import GateResult, LoopAutomationState, ReviewVerdict
 from .redaction import redact_text
+from .risk_review_reporting import (
+    build_finish_review_section,
+    render_finish_review_section,
+)
 
 
 _BUDGET_REASON_CODES = {
@@ -38,6 +42,11 @@ def build_finish_first_screen(
         len(changed_files) if changed_files_source != "unavailable" else None
     )
     reasons = list(gate.reasons) if gate else []
+    review = build_finish_review_section(
+        latest_verdict,
+        changed_files,
+        changed_files_source=changed_files_source,
+    )
     return {
         "decision": {
             "run_id": state.run_id,
@@ -99,7 +108,7 @@ def build_finish_first_screen(
             "historical_failures": has_verification_failures,
             "checks": _verification_checks(verification_results),
         },
-        "review": latest_verdict.model_dump() if latest_verdict else _empty_review(),
+        "review": review,
         "evidence_limits": _evidence_limits(
             finish_status,
             latest_verdict,
@@ -127,7 +136,7 @@ def render_finish_report(summary: dict[str, Any]) -> str:
     lines.extend(_render_changes(first_screen.get("actual_changes") or {}))
     lines.extend(_render_gates(first_screen.get("gates") or {}))
     lines.extend(_render_verification(first_screen.get("verification") or {}))
-    lines.extend(_render_review(first_screen.get("review") or {}))
+    lines.extend(render_finish_review_section(first_screen.get("review") or {}))
     lines.extend(_render_bullets("证据上限", first_screen.get("evidence_limits") or []))
     lines.extend(_render_bullets("下一步", first_screen.get("next_steps") or []))
     lines.extend(_render_details(summary))
@@ -180,16 +189,6 @@ def _verification_checks(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     }
                 )
     return checks
-
-
-def _empty_review() -> dict[str, Any]:
-    return {
-        "verdict": None,
-        "summary": "",
-        "findings": [],
-        "risk_disclosures": [],
-        "checked_items": [],
-    }
 
 
 def _evidence_limits(
@@ -245,7 +244,7 @@ def _next_steps(
 ) -> list[str]:
     if finish_status == "ready_to_commit":
         return [
-            "人工检查最终 `git diff`、验证命令和高风险位置。",
+            "人工检查完整 staged/unstaged diff、验证命令和高风险位置，不只查看 Reviewer 重点。",
             "确认无误后由用户自行 commit；Vega 不会自动 commit、push 或 release。",
         ]
     if finish_status == "needs_fix":
@@ -389,55 +388,6 @@ def _render_verification(verification: dict[str, Any]) -> list[str]:
         if details:
             lines.append(f"  - {', '.join(details)}")
     return lines
-
-
-def _render_review(review: dict[str, Any]) -> list[str]:
-    lines = [
-        "",
-        "## Reviewer 意见",
-        "",
-        f"- Verdict：`{review.get('verdict') or '无'}`",
-        f"- Summary：{review.get('summary') or '未提供'}",
-    ]
-    findings = review.get("findings") or []
-    if not findings:
-        lines.append("- Findings：无。")
-    else:
-        lines.append("- Findings：")
-        for finding in findings:
-            lines.extend(
-                [
-                    f"  - `{finding.get('severity', 'minor')}` "
-                    f"{_review_location(finding.get('file'), finding.get('line'))}："
-                    f"{finding.get('title', '未命名 finding')}",
-                    f"    - 证据：{finding.get('evidence') or '未提供'}",
-                    f"    - 建议：{finding.get('recommendation') or '未提供'}",
-                ]
-            )
-    for disclosure in review.get("risk_disclosures") or []:
-        locations = "、".join(
-            _review_location(item.get("file"), item.get("line"))
-            for item in disclosure.get("locations") or []
-        )
-        lines.extend(
-            [
-                f"- 高风险 `{disclosure.get('risk_id')}` / "
-                f"`{disclosure.get('assessment')}`：{locations or '未提供位置'}",
-                f"  - 修改：{disclosure.get('change_summary') or '未提供'}",
-                f"  - 证据：{disclosure.get('evidence') or '未提供'}",
-                f"  - 剩余风险：{disclosure.get('residual_risk') or '未提供'}",
-            ]
-        )
-    return lines
-
-
-def _review_location(file: Any, line: Any) -> str:
-    path = str(file or "").strip()
-    if path and isinstance(line, int) and line > 0:
-        return f"`{path}:{line}`"
-    if path:
-        return f"`{path}`（Reviewer 未提供行号）"
-    return "未提供文件或行号"
 
 
 def _render_bullets(title: str, items: list[str]) -> list[str]:

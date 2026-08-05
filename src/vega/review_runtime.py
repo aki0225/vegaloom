@@ -32,6 +32,10 @@ from .prompt_metrics import (
     write_prompt_metrics,
 )
 from .redaction import redact_text, redact_value
+from .review_coverage import (
+    review_file_coverage_issues_for_verdict,
+    run_review_file_coverage_eval,
+)
 from .review_evidence import review_evidence_issues as _review_evidence_issues
 from .review_runner_contract import (
     review_result_diagnostic,
@@ -51,7 +55,10 @@ from .risk_review_reporting import (
 )
 from .risk_review_runtime import (
     build_required_review_failure_reasons,
+    enforce_complete_review_evidence as _enforce_complete_review_evidence,
+    enforce_review_file_coverage as _enforce_review_file_coverage,
     enforce_required_risk_review,
+    needs_human_verdict as _needs_human_verdict,
     redact_review_verdict as _redact_review_verdict,
     render_required_review_pack_lines,
     render_required_review_prompt_rules,
@@ -371,6 +378,11 @@ class ReviewRuntime:
             verdict,
             [*inputs["truncated_sections"], *pre_review_evidence_issues],
         )
+        verdict, _ = _enforce_review_file_coverage(
+            verdict,
+            inputs["changed_files"],
+            trusted=review_result_is_trusted(result),
+        )
         verdict = _enforce_unchanged_review_workspace(
             verdict,
             inputs,
@@ -389,6 +401,10 @@ class ReviewRuntime:
             verdict,
             risk_gate_result,
             evidence_failures=required_review_failures,
+        )
+        review_coverage_issues = review_file_coverage_issues_for_verdict(
+            inputs["changed_files"],
+            verdict,
         )
         run_dir.joinpath("review-verdict.json").write_text(
             _redacted_model_json(verdict),
@@ -410,6 +426,8 @@ class ReviewRuntime:
             findings=len(verdict.findings),
             risk_disclosures=len(verdict.risk_disclosures),
             risk_disclosure_issues=risk_disclosure_issues,
+            reviewed_files=len(verdict.reviewed_files),
+            review_coverage_issues=review_coverage_issues,
         )
         trace.write(
             "review_workspace_checked",
@@ -719,6 +737,14 @@ def render_review_pack(inputs: dict[str, Any]) -> str:
             ),
             *risk_gate_note,
             "",
+            "## 完整变更文件清单",
+            "",
+            *(
+                [f"- `{path}`" for path in inputs["changed_files"]]
+                if inputs["changed_files"]
+                else ["- 未获得可信变更文件清单。"]
+            ),
+            "",
             *required_review_lines,
             "## 原始需求 / Agent Brief",
             "",
@@ -762,6 +788,7 @@ def render_review_prompt(inputs: dict[str, Any]) -> str:
             "- 只读审查，只使用已存在的文件、diff、测试摘要、日志和项目上下文；不要自行运行验证命令或补造证据。",
             "- 不要运行测试、构建、安装依赖、格式化、代码生成或其他可能写入文件/缓存的命令，也不要修改、提交、推送、发布、删除或执行破坏性操作。",
             "- 重点找真实 bug、遗漏测试、需求不满足、项目规则违反和安全风险。",
+            "- 必须逐项检查 Review Pack 的完整变更文件清单；`reviewed_files` 必须精确列出全部变更文件，不得省略，也不得加入清单外路径。",
             "- 如果证据不足，不要强行 approve，返回 needs_human。",
             *render_required_review_prompt_rules(required_reviews),
             "- 最终只能输出一个 JSON 对象，不要包 Markdown 代码块。",
@@ -968,6 +995,15 @@ def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
         )
     else:
         results.append("PASS: review 证据与当前工作区属于同一快照")
+    changed_files = _string_list(context.get("changed_files"))
+    results.extend(
+        run_review_file_coverage_eval(
+            run_dir,
+            artifacts,
+            changed_files,
+            prompt_text,
+        )
+    )
     risk_gate = context.get("risk_gate")
     if risk_gate is not None:
         if not isinstance(risk_gate, dict):
@@ -1107,6 +1143,7 @@ def _enforce_unchanged_review_workspace(
                     recommendation=recommendation,
                 )
             ],
+            reviewed_files=verdict.reviewed_files,
             checked_items=[*verdict.checked_items, "reviewer 执行前后工作区快照"],
         )
     )
@@ -1290,44 +1327,6 @@ def _iter_json_object_candidates(text: str) -> list[str]:
     if not candidates:
         raise ValueError("json object not found")
     return candidates
-
-
-def _needs_human_verdict(summary: str) -> ReviewVerdict:
-    return ReviewVerdict(
-        verdict="needs_human",
-        summary=summary,
-        findings=[
-            ReviewFinding(
-                severity="major",
-                title="需要人工处理 reviewer 输出",
-                evidence=summary,
-                recommendation="检查 review-runner-output.txt，必要时手动审查或重新运行 reviewer。",
-            )
-        ],
-        checked_items=["runner-output-parse"],
-    )
-
-
-def _enforce_complete_review_evidence(
-    verdict: ReviewVerdict,
-    truncated_sections: list[str],
-) -> ReviewVerdict:
-    if verdict.verdict != "approve" or not truncated_sections:
-        return verdict
-    evidence = "、".join(truncated_sections)
-    return ReviewVerdict(
-        verdict="needs_human",
-        summary="reviewer 输入存在截断证据，不能把部分审查视为完整通过。",
-        findings=[
-            ReviewFinding(
-                severity="major",
-                title="Review 证据不完整",
-                evidence=f"以下 sections 已截断：{evidence}",
-                recommendation="缩小任务或 diff，或由人工检查完整证据后再决定是否通过。",
-            )
-        ],
-        checked_items=[*verdict.checked_items, "上下文完整性"],
-    )
 
 
 def _new_run_id(suffix: str) -> str:

@@ -20,9 +20,10 @@ from vega.workspace_check import ReviewWorkspaceSnapshot
 
 
 class RecordingRunner:
-    def __init__(self) -> None:
+    def __init__(self, reviewed_files: list[str] | None = None) -> None:
         self.prompts: list[str] = []
         self.execution_contexts: list[object] = []
+        self.reviewed_files = ["README.md"] if reviewed_files is None else reviewed_files
 
     def run(
         self,
@@ -42,6 +43,7 @@ class RecordingRunner:
                     "verdict": "approve",
                     "summary": "证据完整。",
                     "findings": [],
+                    "reviewed_files": self.reviewed_files,
                     "checked_items": ["完整性"],
                 },
                 ensure_ascii=False,
@@ -90,7 +92,31 @@ def test_review_evidence_binds_all_reviewer_inputs(tmp_path: Path) -> None:
     review_run = ReviewRuntime(tmp_path, runner=runner).run(repo, reflect_run.name)
 
     assert len(runner.prompts) == 1
+    assert "完整变更文件清单" in runner.prompts[0]
+    assert '"reviewed_files"' in runner.prompts[0]
     assert _read_json(review_run / "state.json")["status"] == "success"
+
+
+def test_review_missing_changed_file_coverage_cannot_approve(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_repo(repo)
+    brief_run = _make_brief_run(tmp_path)
+    reflect_run = ReflectRuntime(tmp_path).run(repo, source_run=brief_run.name)
+    runner = RecordingRunner(reviewed_files=[])
+
+    review_run = ReviewRuntime(tmp_path, runner=runner).run(repo, reflect_run.name)
+
+    verdict = _read_json(review_run / "review-verdict.json")
+    state = _read_json(review_run / "state.json")
+    eval_text = (review_run / "eval.md").read_text(encoding="utf-8")
+    findings = (review_run / "review-findings.md").read_text(encoding="utf-8")
+    assert verdict["verdict"] == "needs_human"
+    assert verdict["reviewed_files"] == []
+    assert state["status"] != "success"
+    assert "reviewed_files_missing:README.md" in eval_text
+    assert "Reviewer 未覆盖全部变更文件" in findings
 
 
 def test_standalone_review_propagates_progress_reporter(tmp_path: Path) -> None:

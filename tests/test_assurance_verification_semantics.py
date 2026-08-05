@@ -62,6 +62,7 @@ class ApprovingReviewer:
                     "verdict": "approve",
                     "summary": "assurance regression approve",
                     "findings": [],
+                    "reviewed_files": ["README.md"],
                     "checked_items": ["scope", "diff", "tests"],
                 },
                 ensure_ascii=False,
@@ -105,6 +106,7 @@ class SequencedReviewer:
                             }
                         ]
                     ),
+                    "reviewed_files": ["README.md"],
                     "checked_items": ["scope", "diff", "tests"],
                 },
                 ensure_ascii=False,

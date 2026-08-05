@@ -88,6 +88,11 @@ Vega 发布 Python distribution 是为了安装 CLI 和本地资源，不把内�
 项目规则、风险门禁和可选 accepted memory。这里承诺的是角色、会话和输入边界隔离，
 不是容器、独立文件系统或操作系统级安全隔离。
 
+Reviewer 输出必须通过 `reviewed_files` 声明对可信变更文件清单的完整覆盖；漏报或加入清单外
+路径时，Vega 将结论降为 `needs_human`。Finish 始终单独展示完整变更事实、Reviewer 重点文件
+和其他已变更项，模型不能通过“认为不重要”静默隐藏文件。该门禁只证明文件路径声明完整，
+不证明 Reviewer 已理解每一行或每个 diff hunk，人工仍应检查完整 staged/unstaged Diff。
+
 Vega 只承诺控制面合同：编译输入、封存基线、读取真实工作区、运行验证、生成 Reviewer
 证据并裁决状态。Worker 可以是当前主会话、宿主原生子代理或显式 `auto` runner；Vega
 不要求也不实现通用 Multi-Worker 调度器，并且不把 Worker 的口头结论当作完成证据。

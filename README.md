@@ -133,6 +133,21 @@ vega do feature --repo . --text "新增批量导入用户功能"
 ```powershell
 vega status --run <run_id>
 vega finish --run <run_id>
+vega finish --run <run_id> --json
+```
+
+`finish-summary.json.first_screen.actual_changes.changed_files` 保留本轮可信 Git 证据中的完整
+变更文件清单；`review.coverage`、`priority_files` 和 `other_changed_files` 分别展示 Reviewer
+声明的文件覆盖、带 finding/风险位置的重点文件，以及其余实际变更。Reviewer 的重点排序只用于
+帮助人工导航，不能过滤或替代完整变更事实。
+
+在 Codex 等宿主中优先使用 Changes / Diff 视图查看代码。需要终端复核时，应分别检查 staged
+与 unstaged Diff；新增未跟踪文件还需从 `git status --short` 中识别并单独打开：
+
+```powershell
+git diff --cached --no-ext-diff --unified=3
+git diff --no-ext-diff --unified=3
+git status --short
 ```
 
 只需要只读检查和报告时，可以使用兼容的 Inspection Loop：

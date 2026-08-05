@@ -14,6 +14,10 @@ from .review_contract import (
     ReviewRiskDisclosure,
     ReviewVerdict,
 )
+from .review_coverage import (
+    build_review_file_coverage,
+    review_file_coverage_issues,
+)
 from .risk_review import (
     build_insufficient_evidence_disclosures,
     validate_required_risk_disclosures,
@@ -300,6 +304,78 @@ def redact_review_verdict(verdict: ReviewVerdict) -> ReviewVerdict:
     return ReviewVerdict.model_validate(redact_value(verdict.model_dump(mode="json")))
 
 
+def needs_human_verdict(summary: str) -> ReviewVerdict:
+    return ReviewVerdict(
+        verdict="needs_human",
+        summary=summary,
+        findings=[
+            ReviewFinding(
+                severity="major",
+                title="需要人工处理 reviewer 输出",
+                evidence=summary,
+                recommendation="检查 review-runner-output.txt，必要时手动审查或重新运行 reviewer。",
+            )
+        ],
+        checked_items=["runner-output-parse"],
+    )
+
+
+def enforce_complete_review_evidence(
+    verdict: ReviewVerdict,
+    truncated_sections: list[str],
+) -> ReviewVerdict:
+    if verdict.verdict != "approve" or not truncated_sections:
+        return verdict
+    evidence = "、".join(truncated_sections)
+    return ReviewVerdict(
+        verdict="needs_human",
+        summary="reviewer 输入存在截断证据，不能把部分审查视为完整通过。",
+        findings=[
+            ReviewFinding(
+                severity="major",
+                title="Review 证据不完整",
+                evidence=f"以下 sections 已截断：{evidence}",
+                recommendation="缩小任务或 diff，或由人工检查完整证据后再决定是否通过。",
+            )
+        ],
+        reviewed_files=verdict.reviewed_files,
+        checked_items=[*verdict.checked_items, "上下文完整性"],
+    )
+
+
+def enforce_review_file_coverage(
+    verdict: ReviewVerdict,
+    changed_files: list[str],
+    *,
+    trusted: bool,
+) -> tuple[ReviewVerdict, list[str]]:
+    if not trusted or "runner-output-parse" in verdict.checked_items:
+        return verdict, []
+    coverage = build_review_file_coverage(changed_files, verdict.reviewed_files)
+    issues = review_file_coverage_issues(coverage)
+    if not issues:
+        return verdict, []
+    normalized = ReviewVerdict(
+        verdict="needs_human",
+        summary="Reviewer 未声明覆盖全部变更文件，现有结论不能作为完整独立审查。",
+        findings=[
+            *verdict.findings,
+            ReviewFinding(
+                severity="major",
+                title="Reviewer 未覆盖全部变更文件",
+                evidence="；".join(issues),
+                recommendation="人工检查缺失或未知路径，并重新取得覆盖完整变更清单的 Reviewer verdict。",
+            ),
+        ],
+        risk_disclosures=verdict.risk_disclosures,
+        reviewed_files=coverage["reviewed_files"],
+        checked_items=list(
+            dict.fromkeys([*verdict.checked_items, "完整变更文件覆盖"])
+        ),
+    )
+    return redact_review_verdict(normalized), issues
+
+
 def _enforce_empty_risk_disclosures(
     verdict: ReviewVerdict,
 ) -> tuple[ReviewVerdict, list[str]]:
@@ -323,6 +399,7 @@ def _enforce_empty_risk_disclosures(
             ),
         ],
         risk_disclosures=[],
+        reviewed_files=verdict.reviewed_files,
         checked_items=list(
             dict.fromkeys([*verdict.checked_items, "风险披露范围"])
         ),
@@ -337,6 +414,7 @@ def _force_human_verdict(verdict: ReviewVerdict) -> ReviewVerdict:
             summary=verdict.summary,
             findings=verdict.findings,
             risk_disclosures=verdict.risk_disclosures,
+            reviewed_files=verdict.reviewed_files,
             checked_items=list(
                 dict.fromkeys([*verdict.checked_items, "必须披露的高风险变更"])
             ),
@@ -370,6 +448,7 @@ def _build_insufficient_verdict(
             required_reviews,
             evidence=evidence,
         ),
+        reviewed_files=verdict.reviewed_files if preserve_runner_output else [],
         checked_items=list(
             dict.fromkeys([*checked_items, "必须披露的高风险变更"])
         ),
