@@ -196,9 +196,12 @@ def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
         progress_reporter=lambda step, elapsed: events.append((step, elapsed)),
     )
 
-    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, stream_context):
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, stream_context, **kwargs
+    ):
         del input_text, cwd, timeout_seconds
         captured_command.extend(command)
+        assert kwargs["environment"] == {"PYTHONDONTWRITEBYTECODE": "1"}
         assert stream_context.capture_stderr_separately is True
         observer = stream_context.output_line_observer
         assert observer is not None
@@ -303,8 +306,11 @@ def test_codex_exec_runner_rejects_success_without_final_message(
     repo = tmp_path / "repo"
     repo.mkdir()
 
-    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, context, **kwargs
+    ):
         del command, input_text, cwd, timeout_seconds
+        assert kwargs["environment"] == {"PYTHONDONTWRITEBYTECODE": "1"}
         observer = context.output_line_observer
         assert observer is not None
         for line in lines:
@@ -356,8 +362,11 @@ def test_codex_exec_runner_keeps_parsing_after_malformed_event_types(
         ),
     ]
 
-    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, context, **kwargs
+    ):
         del command, input_text, cwd, timeout_seconds
+        assert kwargs["environment"] == {"PYTHONDONTWRITEBYTECODE": "1"}
         observer = context.output_line_observer
         assert observer is not None
         for line in lines:
@@ -400,8 +409,11 @@ def test_codex_exec_runner_scans_mixed_jsonl_line_endings(
     )
     output = f"{first}\r\n\n{last}"
 
-    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
-        del command, input_text, cwd, timeout_seconds
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, context, **kwargs
+    ):
+        del command, input_text, cwd, timeout_seconds, context
+        assert kwargs["environment"] == {"PYTHONDONTWRITEBYTECODE": "1"}
         return OwnedProcessResult("success", output, None, 0)
 
     monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
@@ -449,8 +461,11 @@ def test_codex_exec_runner_fails_closed_when_final_jsonl_line_is_oversized(
     )
     lines.append(oversized_line)
 
-    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, context, **kwargs
+    ):
         del command, input_text, cwd, timeout_seconds
+        assert kwargs["environment"] == {"PYTHONDONTWRITEBYTECODE": "1"}
         observer = context.output_line_observer
         assert observer is not None
         for line in lines:

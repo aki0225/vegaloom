@@ -34,6 +34,9 @@ def build_finish_first_screen(
     iteration = state.iterations[-1] if state.iterations else None
     gate = risk_gate_results[-1] if risk_gate_results else None
     changed_files, changed_files_source = _changed_files(gate, iteration)
+    changed_file_count = (
+        len(changed_files) if changed_files_source != "unavailable" else None
+    )
     reasons = list(gate.reasons) if gate else []
     return {
         "decision": {
@@ -47,7 +50,7 @@ def build_finish_first_screen(
             "reasons": handoff_notes,
         },
         "actual_changes": {
-            "changed_file_count": len(changed_files),
+            "changed_file_count": changed_file_count,
             "changed_files": changed_files,
             "changed_files_source": changed_files_source,
             "scope_profile": gate.scope_profile if gate else None,
@@ -107,6 +110,7 @@ def build_finish_first_screen(
         ),
         "next_steps": _next_steps(
             finish_status,
+            latest_verdict,
             gate,
             artifact_integrity,
             evidence_freshness,
@@ -207,7 +211,10 @@ def _evidence_limits(
     if not integrity.valid:
         limits.append("Artifact 完整性无效，未绑定或损坏的证据不能作为结论。")
     if not freshness.fresh:
-        limits.append("Reviewer 通过后的工作区证据已过期，现有审查结论不能继续沿用。")
+        if verdict is None:
+            limits.append("尚未生成可采用的 Reviewer 快照，无法确认独立审查已经完成。")
+        else:
+            limits.append("Reviewer 结论对应的工作区证据已过期，现有结论不能继续沿用。")
     if not verification_passed:
         limits.append("缺少最新受信验证通过证据，不能把 Reviewer 意见解释为验证成功。")
     if verdict is None:
@@ -229,6 +236,7 @@ def _review_has_missing_lines(verdict: ReviewVerdict) -> bool:
 
 def _next_steps(
     finish_status: str,
+    verdict: ReviewVerdict | None,
     gate: GateResult | None,
     integrity: LoopArtifactIntegrity,
     freshness: EvidenceFreshness,
@@ -251,7 +259,10 @@ def _next_steps(
     if not integrity.valid:
         steps.append("检查完整性 issues，重新生成缺失或失效的证据链。")
     if not freshness.fresh:
-        steps.append("工作区稳定后重新执行 reflect、独立 review 和 finish。")
+        if verdict is None:
+            steps.append("工作区稳定后执行 reflect、独立 review 和 finish。")
+        else:
+            steps.append("工作区稳定后重新执行 reflect、独立 review 和 finish。")
     if latest_verification_failed:
         steps.append("修复失败或超时的验证命令，再重新执行验证。")
     elif not verification_passed:
@@ -281,11 +292,15 @@ def _render_decision(decision: dict[str, Any]) -> list[str]:
 
 
 def _render_changes(changes: dict[str, Any]) -> list[str]:
+    changed_file_count = changes.get("changed_file_count")
+    changed_file_count_text = (
+        str(changed_file_count) if type(changed_file_count) is int else "未知"
+    )
     lines = [
         "",
         "## 实际变更",
         "",
-        f"- 文件数：`{changes.get('changed_file_count', 0)}`；"
+        f"- 文件数：`{changed_file_count_text}`；"
         f"来源：`{changes.get('changed_files_source', 'unavailable')}`；"
         f"新增未跟踪：`{changes.get('workspace_new_files_count', 0)}`",
         f"- Scope：`{changes.get('scope_profile') or '未记录'}`；"

@@ -176,10 +176,15 @@ def _commit_checklist(
     else:
         checklist.append("最新 iteration 缺少受信的结构化验证通过证据；不能自动进入提交。")
     if artifact_integrity_valid:
-        checklist.append("迭代 artifact 已与 state 和可信 child review run 完成一致性校验。")
+        if latest_verdict is None:
+            checklist.append("现有迭代 artifact 已与 state 完成一致性校验；尚无可信 review 产物。")
+        else:
+            checklist.append("迭代 artifact 已与 state 和可信 child review run 完成一致性校验。")
     else:
         checklist.append("迭代 artifact 缺失、损坏或未绑定；修复证据链前不能进入提交。")
-    if evidence_fresh:
+    if latest_verdict is None:
+        checklist.append("尚未获得可信 reviewer 结论；完成独立审查前不能进入提交。")
+    elif evidence_fresh:
         checklist.append("当前仓库快照与通过 reviewer 时的可信指纹一致。")
     else:
         checklist.append("review 后仓库快照已变化；必须重新 reflect/review。")
@@ -212,11 +217,14 @@ def _handoff_notes(
     if not artifact_integrity_valid:
         notes.append("迭代 artifact 完整性校验失败，未采用未绑定或损坏的 verdict/verification。")
     if not evidence_fresh:
-        notes.append("review 后工作区发生变化或可信快照缺失，现有 approve 已失效。")
+        if latest_verdict is None:
+            notes.append("尚未产生可采用的 reviewer 快照，不能确认独立审查已经完成。")
+        else:
+            notes.append("reviewer 结论对应的工作区快照已变化，现有结论已失效。")
     if latest_verification_failed:
-        notes.append("自动验证存在失败，不能仅凭 reviewer approve 进入 ready_to_commit。")
+        notes.append("自动验证存在失败，不能进入 ready_to_commit。")
     elif not verification_passed:
-        notes.append("自动验证结论未知，不能仅凭 reviewer approve 进入 ready_to_commit。")
+        notes.append("自动验证结论未知，不能进入 ready_to_commit。")
     elif has_historical_verification_failures:
         notes.append("历史 iteration 曾验证失败，最新 iteration 已取得受信通过。")
     if latest_verdict:
