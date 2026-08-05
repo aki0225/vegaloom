@@ -438,3 +438,42 @@ Windows 行尾策略必须在 checkout 前冻结。最终成功仍只是一个�
 本结果只证明 Vega 在冻结 timeout 到达后停止后续验证与审查、保留现场并交还人工。它不能
 解释为 Worker 已修复或未能修复目标缺陷，也不能与 Case 01、Case 03 合并计算成功率。按预注册
 禁止选择性重跑、延长 timeout 或更换结果；CRWP-V1 三个 Case 至此都已有合同允许的终态。
+
+## 2026-08-05 Phase 4 Codex assist：未公开 Java 结算项目
+
+本条是日常使用 Phase 4 的第一条真实记录。目标是一个无 remote 的隔离副本；公开内容不包含
+仓库名称、业务文件名、源码 diff、业务数据、本机绝对路径或原始 `runs/`。本条记录的是实际
+控制链和裁决，不是可独立重建完整 Finish/Eval 的证据包。
+
+- 执行前由主会话完成只读调查和计划确认。首次 assist Run
+  `20260805-101755-725252-bug-loop` 的执行文本仍保留调查阶段的“不要修改”要求，人工明确
+  reject，没有让歧义任务进入实现。
+- 第二次 Run `20260805-101926-723431-bug-loop` 在主会话修改代码并执行自检后，两轮都被
+  Workspace Gate 停止：新增未跟踪文件为 `0`，但 ignored 构建目录相对启动基线发生变化，
+  Verification、Reflect 和 Reviewer 均未启动。该现场暴露了真实使用矛盾：Worker Prompt
+  允许选择性自检并建议把产物放进仓库 `.tmp/`，Workspace Gate 却会拒绝除 Harness 专用目录
+  外的 ignored 变化；Maven 等常见工具默认写入项目构建目录。
+- 后续审查先指出高风险分支缺少直接回归；补测试后，固定验证又暴露夹具无法生成目标业务行。
+  这些中间结果均保持 `needs_human`，没有被最终通过样本覆盖或改写。
+- 最终 Run `20260805-103942-170225-bug-loop` 使用 assist 模式，外部主会话完成修改，
+  `worker_status=skipped`。实际只修改 `3` 个 tracked 文件，其中 `1` 个生产实现、`2` 个测试，
+  共新增 `238` 行、删除 `8` 行，没有新增依赖或越界文件。
+- 两条固定 Maven 验证分别耗时约 `22.95` 秒和 `23.99` 秒，均正常退出；验证覆盖普通范围逐行
+  累加、单行实际数量、负向证据不重复计数、不同商品独立归属、高风险分支保留既有去重口径，
+  以及明细、合计和月汇总传递。
+- pre-verification、post-verification 和 pre-review 三阶段 Scope Gate 全部通过。
+  Risk Gate 为 `high / human-review`，命中“退款与结算”命名高风险。隔离 Reviewer 正常完成，
+  findings 为 `0`，风险披露为 `no_obvious_issue`；最终仍固定为 `needs_human`，等待人工检查真实
+  重复记录是否代表独立有效数量，以及高风险分支在实际输入链路中的判定。
+- 该运行最初还发现一个 Vega 缺陷：高风险必审会把 Reviewer verdict 固定为 `needs_human`，
+  旧 Finish 因只接受 `approve` 的受审工作区指纹，错误显示验证结论未知。PR `#44` 修复后，
+  使用合并提交 `a8493aa` 重新生成同一 Finish，结果为 `verification_passed=true`、
+  artifact integrity valid、evidence freshness fresh，同时保持
+  `finish_status=needs_human`。
+- 目标副本没有 remote，Vega 没有自动 commit、push、release、删除业务文件或写入长期
+  memory。
+
+本案例同时覆盖 Codex assist、Reviewer 发现阻塞问题、Workspace Gate fail-closed 和命名高风险
+人工确认。它只有定向测试，没有完整真实数据验收或全量项目回归，不能证明结算口径安全、生产
+可用性、任意任务成功率或跨仓库泛化能力。Claude Code assist 与边界清晰任务的 `vega do`
+仍需独立验证；ignored 自检产物问题也应以单独的小改动处理，不放宽现有 Gate。

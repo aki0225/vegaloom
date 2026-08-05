@@ -1,7 +1,7 @@
 # Vega 日常可信使用完成计划
 
-> 日期：2026-08-04
-> 状态：Phase 0 至 Phase 3 已完成；下一步是 Phase 4 真实使用验收
+> 日期：2026-08-05
+> 状态：Phase 0 至 Phase 3 已完成；Phase 4 真实使用验收进行中
 > 范围：`v0.1.4` 发布、CRWP-V1、调查与计划协议、Finish 报告、真实使用验收
 
 ## 一、完成标准
@@ -208,7 +208,7 @@ Reviewer 没有提供关键行时，Finish 不自行生成行号。报告不得�
 - Reviewer 未提供有效行号时明确显示“未提供行号”，不补造 `:0`；
 - 展示逻辑位于纯派生模块，没有新增模型调用、状态、命令或裁决路径。
 
-## 七、Phase 4：真实使用验收（next）
+## 七、Phase 4：真实使用验收（进行中）
 
 至少覆盖以下场景：
 
@@ -227,6 +227,22 @@ Reviewer 没有提供关键行时，Finish 不自行生成行号。报告不得�
 - 当前能不能提交。
 
 如果这些问题不能从 Finish 中可靠回答，再做最小信息重排；不新增新的报告 Runtime。
+
+### 2026-08-05 第一条真实记录
+
+已完成一条未公开 Java 结算项目的 Codex assist 验收，公开摘要追加在
+[`../eval/real-world-runs.md`](../eval/real-world-runs.md)：
+
+- 调查阶段文本仍含“不要修改”时，人工拒绝进入执行并重新生成明确 brief；
+- 主会话自检产生 ignored 构建目录后，Workspace Gate 停止后续验证与审查；
+- Reviewer 在第一轮指出高风险分支缺少直接回归，补测试后又暴露夹具无法覆盖目标路径；
+- 最终两条固定验证通过，三阶段 Scope Gate 通过，Reviewer findings 为 `0`；
+- 退款与结算命中命名高风险，最终保持 `needs_human`，没有升级为可自动提交；
+- 真实运行发现并推动修复 Finish 丢失验证通过事实的问题，合并主线后重新生成结果为
+  `verification_passed=true`、artifact integrity valid、evidence freshness fresh。
+
+该链路已经覆盖 Codex assist、Reviewer 发现阻塞问题和高风险 fail-closed。尚未完成的入口是
+Claude Code assist 与边界清晰任务的 `vega do`。
 
 ### 对外表述
 
@@ -275,6 +291,6 @@ Assurance Stage。
   -> CRWP-V1 合同允许终态（完成）
   -> 调查现有入口并固定 Plan-first 与人工确认协议（完成）
   -> 改进 Finish 第一屏（完成）
-  -> 完成真实使用验收（下一步）
+  -> 完成真实使用验收（进行中）
   -> 停止扩张，进入日常使用观察
 ```
