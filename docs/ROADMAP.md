@@ -1,10 +1,10 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-04
+> 更新时间：2026-08-05
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
-> 当前顺序：Finish 第一屏改进已完成；下一步只做真实使用验收。不启动 Stage 4 或新的
-> Runtime、Memory、LangGraph 集成。
+> 当前顺序：Phase 4 真实使用验收已完成；进入日常使用观察。不启动 Stage 4 或新的 Runtime、
+> Memory、LangGraph 集成。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -27,8 +27,8 @@ v0.1.4 发布（完成）
   -> CRWP-V1 合同允许终态（完成）
   -> 调查现有入口并固定 Plan 与人工确认协议（完成）
   -> 改进现有 Finish 第一屏（完成）
-  -> 真实使用验收（下一步）
-  -> 停止扩张，进入日常使用观察
+  -> 真实使用验收（完成）
+  -> 停止扩张，进入日常使用观察（当前）
 ```
 
 Phase 3 已完成：
@@ -39,9 +39,17 @@ Phase 3 已完成：
 3. 继续从现有结构化 artifact 确定性生成，没有新增模型调用、状态、命令或第二套裁决；
 4. Reviewer 缺少有效行号时明确显示缺失，不补造位置。
 
-当前唯一的下一步是 Phase 4：使用 Codex assist、Claude Code assist、`vega do`、
-Reviewer 打回和 fail-closed 五类真实场景验证 Finish 是否足以让未参与执行的人判断变更、
-风险、验证、人工检查位置和能否提交。若信息不足，只做最小重排，不新增报告 Runtime。
+Phase 4 已完成：
+
+1. Codex assist 在未公开结算任务上覆盖调查、计划确认、Reviewer 打回和高风险
+   `needs_human`；
+2. `vega do` 在 Echo Vault 登录页任务上完成 fresh auto 验收；
+3. Claude Code assist 在 Echo Vault 历史会话任务上完成调查、计划、修改、验证、独立审查和
+   Finish；
+4. 未参与执行的新会话只读 Finish 后，能够判断实际变更、验证、风险和提交前人工检查要求。
+
+当前阶段只做真实日常使用观察。已发现的测试名称缺失、空 Scope 展示和 Workspace 汇总不一致
+先作为观察项保留；只有它们重复造成误判时才做最小修正，不新增报告 Runtime。
 
 CRWP-V1 已完成合同允许的全部处理：
 
@@ -333,6 +341,15 @@ Phase 3 只增加 `first_screen` 派生视图和确定性 Markdown 展示，原 
 
 当前唯一下一步改为 Phase 4 真实使用验收。只有真实使用证明第一屏仍缺关键信息时，才做
 最小信息重排；不新增命令、模型调用、状态或新的报告 Runtime。
+
+### 2026-08-05：完成 Phase 4，进入日常使用观察
+
+Codex assist、Claude Code assist、`vega do`、Reviewer 打回和 fail-closed 五类场景均已有
+真实记录。未参与执行的新会话能够从 Finish 判断变更、验证、风险和人工检查要求，同时指出
+测试用例名称缺失、空 Scope 展示和 Workspace 汇总不一致等信息问题。
+
+主线停止新增产品能力。后续只处理日常使用中能够复现、确实影响可信判断或恢复体验的问题；
+不因为单次展示不完美而扩建新的报告 Runtime、Planner、Multi-Worker 或基础设施。
 
 ## 七、更新规则
 

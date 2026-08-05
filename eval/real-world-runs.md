@@ -514,3 +514,38 @@ Windows 行尾策略必须在 checkout 前冻结。最终成功仍只是一个�
 Reviewer Python bytecode 后，同一边界清晰任务可以通过确定性验证、范围与风险门禁、隔离审查
 和 Finish。它仍只是一个已明确验收标准的低风险前端案例，不能证明模糊任务调查、Claude Code
 assist、高风险修改、任意仓库成功率或生产安全。
+
+## 2026-08-05 Claude Code assist：Echo Vault 历史会话重新打开
+
+本条验证用户只报告界面现象、不知道缺陷位置时，Claude Code 能否先调查并形成计划，再把外部
+修改交给 Vega 的 assist 判断链。目标冻结在缺陷父提交 `b64e192`，隔离实验基线为
+`608bd71`；目标副本没有 remote，也不包含后续正确修复。
+
+- 用户现象是“历史页能看到以前的会话，但找不到重新打开并继续聊天的入口”。Claude Code
+  先进行只读调查，正确定位到历史页缺少设置当前会话并跳转聊天页的操作。
+- Claude Code 的初始计划使用了目标项目不存在的 npm、type-check 和 lint 命令，并倾向让标题
+  区域承担隐式点击。主会话据实际脚本改为 pnpm 测试、构建和 `git diff --check`，同时要求使用
+  明确的“打开”按钮；人工确认计划后才进入修改。
+- 第一版候选超出预设差异预算，并包含依赖 CSS class 的脆弱断言。主会话要求缩减后，正式候选
+  只修改 `frontend/src/ui/pages/HistoryPage.tsx`，并新增
+  `frontend/src/ui/pages/HistoryPage.test.tsx`，共新增 `129` 行，没有新增依赖或越界文件。
+- Run `20260805-172130-495761-bug-loop` 的第一次 `continue` 检测到新增测试仍是未跟踪文件，
+  Workspace Gate 在 Verification 和 Reviewer 前停止。人工核对后只把该测试加入 Git index，
+  没有 commit，也没有修改候选内容；第二次 `continue` 才继续执行。
+- 第二轮三阶段 Scope Gate 全部通过。前端完整测试报告 `12 files / 72 tests passed`；TypeScript
+  构建、Vite 构建和 `git diff --check` 通过。Risk Gate 为 `low / self-check`。
+- 独立只读 Codex Reviewer 返回 `approve`，findings 为 `0`。Finish 为
+  `ready_to_commit`，artifact integrity valid，evidence freshness fresh；Vega 没有自动
+  commit、push、release 或写入长期 memory。
+- 人工最终 Diff 复核确认，认证后的应用布局启动时已经加载全局会话列表，聊天页会根据
+  `activeId` 读取历史消息并继续发送；因此本候选没有同步历史页局部列表到全局列表，不阻塞本次
+  “重新打开并继续聊天”的目标。该判断仍是代码级复核，不是浏览器端到端验证。
+- 一个未参与执行、只读取 `finish-report.md` 的全新 Claude Code 会话，能够识别两个变更文件、
+  两条已通过验证、低风险评级，以及“仍需人工检查、尚未提交”的状态。它也指出第一屏没有列出
+  测试用例名称，`Scope：未记录` 容易误解，且第一屏的 `Workspace：skipped` 与第二轮
+  `workspace-check.md` 的 `passed` 展示不一致。
+
+本案例证明 Claude Code 可以作为外部调查与修改会话，最终复用 Vega 的 Workspace、Scope、
+Verification、Risk、独立 Reviewer 和 Finish 判断链。证据只覆盖一个低风险前端任务；导航
+测试使用 mock，不等同于真实浏览器与后端端到端验证，也不能外推为任意任务成功率、跨仓库
+泛化能力或生产安全。Finish 暴露的展示问题先作为观察项保留，不在本次验收中顺势扩建 Runtime。

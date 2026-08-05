@@ -1,7 +1,7 @@
 # Vega 日常可信使用完成计划
 
 > 日期：2026-08-05
-> 状态：Phase 0 至 Phase 3 已完成；Phase 4 真实使用验收进行中
+> 状态：Phase 0 至 Phase 4 已完成；进入真实日常使用观察
 > 范围：`v0.1.4` 发布、CRWP-V1、调查与计划协议、Finish 报告、真实使用验收
 
 ## 一、完成标准
@@ -208,7 +208,7 @@ Reviewer 没有提供关键行时，Finish 不自行生成行号。报告不得�
 - Reviewer 未提供有效行号时明确显示“未提供行号”，不补造 `:0`；
 - 展示逻辑位于纯派生模块，没有新增模型调用、状态、命令或裁决路径。
 
-## 七、Phase 4：真实使用验收（进行中）
+## 七、Phase 4：真实使用验收（completed）
 
 至少覆盖以下场景：
 
@@ -228,21 +228,33 @@ Reviewer 没有提供关键行时，Finish 不自行生成行号。报告不得�
 
 如果这些问题不能从 Finish 中可靠回答，再做最小信息重排；不新增新的报告 Runtime。
 
-### 2026-08-05 第一条真实记录
+### 完成证据
 
-已完成一条未公开 Java 结算项目的 Codex assist 验收，公开摘要追加在
-[`../eval/real-world-runs.md`](../eval/real-world-runs.md)：
+Phase 4 的五类场景均已在 [`../eval/real-world-runs.md`](../eval/real-world-runs.md) 留下真实
+记录：
 
-- 调查阶段文本仍含“不要修改”时，人工拒绝进入执行并重新生成明确 brief；
-- 主会话自检产生 ignored 构建目录后，Workspace Gate 停止后续验证与审查；
-- Reviewer 在第一轮指出高风险分支缺少直接回归，补测试后又暴露夹具无法覆盖目标路径；
-- 最终两条固定验证通过，三阶段 Scope Gate 通过，Reviewer findings 为 `0`；
-- 退款与结算命中命名高风险，最终保持 `needs_human`，没有升级为可自动提交；
-- 真实运行发现并推动修复 Finish 丢失验证通过事实的问题，合并主线后重新生成结果为
-  `verification_passed=true`、artifact integrity valid、evidence freshness fresh。
+1. **Codex assist、Reviewer 打回和高风险 fail-closed**
+   - 未公开 Java 结算任务先由主会话调查和确认计划；
+   - 歧义执行文本被人工拒绝，ignored 构建目录变化被 Workspace Gate 阻止；
+   - Reviewer 指出的回归缺口和测试夹具问题都在通过前得到处理；
+   - 最终验证和审查通过，但结算风险仍固定为 `needs_human`。
+2. **边界清晰任务的 `vega do`**
+   - Echo Vault 登录页语言切换通过 fresh auto Run；
+   - 前端测试、构建、三阶段 Scope Gate、Workspace Gate、Risk Gate 和独立 Reviewer 均通过；
+   - Finish 为 `ready_to_commit`，同时保留首次 Python bytecode 污染触发的失败记录。
+3. **Claude Code assist**
+   - 用户只提供历史会话无法重新打开的界面现象；
+   - Claude Code 先只读调查，主会话修正错误命令、交互方案和差异预算，人工确认后再修改；
+   - 首次 `continue` 因新增测试未跟踪而 fail-closed，第二轮完整前端测试报告
+     `12 files / 72 tests passed`，构建和 `git diff --check` 通过；
+   - 独立 Codex Reviewer 返回 `approve`，Finish 为 `ready_to_commit`。
+4. **未参与执行的人只读 Finish**
+   - 全新 Claude Code 会话能从第一屏识别实际变更、验证结果、风险评级和提交前人工检查要求；
+   - 同时识别出测试用例名称缺失、`Scope：未记录` 和 Workspace 状态展示不一致等证据上限。
 
-该链路已经覆盖 Codex assist、Reviewer 发现阻塞问题和高风险 fail-closed。尚未完成的入口是
-Claude Code assist 与边界清晰任务的 `vega do`。
+Phase 4 已达到预定覆盖标准。当前结果证明三种入口能够进入同一判断链，也证明失败、高风险和
+证据不足不会被隐藏；它不构成成功率、跨仓库泛化能力或生产安全证明。Finish 的展示观察项先
+保留，只有日常使用中重复造成误判时才做最小修正，不新增新的报告 Runtime。
 
 ### 对外表述
 
@@ -276,9 +288,9 @@ One writes, one reviews — worker 与 reviewer 上下文隔离的 AI 编码工�
 
 1. `v0.1.4` Tag 与 GitHub Release 已发布；**已完成**。
 2. CRWP-V1 三个 Case 都有合同允许的终态；**已完成**。
-3. Codex、Claude Code 和 `vega do` 已有同一协议；真实验收留到 Phase 4；
+3. Codex、Claude Code 和 `vega do` 已有同一协议并完成真实验收；**已完成**。
 4. Finish 能清楚展示结论、重要变更、验证、高风险和剩余问题；**已完成**。
-5. 成功、Reviewer 打回、验证失败、高风险和恢复场景均有可复核记录。
+5. 成功、Reviewer 打回、验证失败、高风险和恢复场景均有可复核记录；**已完成**。
 
 观察期内只修复真实使用暴露的缺陷，不继续建设 Planner Agent、Multi-Worker、A2A、Web UI、
 数据库、向量 Memory、Portable Evidence Bundle、Claude Code 原生自动 Runner 或新的
@@ -291,6 +303,48 @@ Assurance Stage。
   -> CRWP-V1 合同允许终态（完成）
   -> 调查现有入口并固定 Plan-first 与人工确认协议（完成）
   -> 改进 Finish 第一屏（完成）
-  -> 完成真实使用验收（进行中）
-  -> 停止扩张，进入日常使用观察
+  -> 完成真实使用验收（完成）
+  -> 停止扩张，进入日常使用观察（当前）
 ```
+
+## 十一、2026-08-05 交接
+
+### 本轮已经完成
+
+- Claude Code assist 的 Echo Vault 历史会话案例已经完成调查、人工确认、外部修改、Vega
+  验证、独立 Reviewer 和 Finish。
+- 正式 Run 为 `20260805-172130-495761-bug-loop`。第一次 `continue` 因新增测试未跟踪而
+  fail-closed；第二轮报告 `12 files / 72 tests passed`，构建和 `git diff --check` 通过，
+  Reviewer 为 `approve`，Finish 为 `ready_to_commit`。
+- 公开脱敏摘要已经追加到 [`../eval/real-world-runs.md`](../eval/real-world-runs.md)，历史记录
+  没有改写。
+- Phase 4 五类场景已经全部覆盖，本文、文档导航和 Roadmap 已切换到日常使用观察状态。
+
+### 从另一台电脑恢复
+
+```powershell
+git switch main
+git pull --ff-only origin main
+git status --short --branch
+```
+
+拉取后按以下顺序阅读：
+
+1. 本文的“Phase 4：真实使用验收”和本交接；
+2. [`../eval/real-world-runs.md`](../eval/real-world-runs.md) 文件末尾的 Claude Code assist
+   记录；
+3. [`ROADMAP.md`](ROADMAP.md) 的当前主线；
+4. [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) 的下一次真实任务使用协议。
+
+Claude Code 原始会话、正式 `runs/` 和隔离目标仓库只保留在执行机器，不进入公开 Git；另一台
+电脑不需要这些本机 artifact 才能继续主线。不要把缺失的本机 `runs/` 误判为远端提交不完整。
+
+### 下一步
+
+1. 优先把 Vega 用于下一项真实日常任务，不新增 Planner、Multi-Worker 或新的报告 Runtime。
+2. 只读确认 Finish 的 `Scope：未记录`、Workspace 汇总不一致和测试名称缺失是否会在其他 Run
+   重复出现。
+3. 只有问题能够稳定复现并影响人工判断时，才从最新 `main` 建立一个短生命周期分支做最小修复；
+   同一修复持续使用原分支，不为每次调整重复建分支。
+4. 不重跑本次 Claude Code 案例，不移动 `v0.1.4` Tag，不把单案例结果解释为总体成功率或生产
+   安全证明。

@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-04
+> 更新时间：2026-08-05
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -14,22 +14,26 @@
 | 查看日常完整流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | 当前使用说明 |
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
-| 查看下一阶段执行顺序 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 当前入口 |
+| 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
 | 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
 | 查看工作区规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 当前规范 |
 
-## 当前进行中的工作
+## 当前工作
 
-### 真实使用验收
+### 真实日常使用观察
 
-`v0.1.4` 发布、CRWP-V1 合同允许验证、Plan-first 协议和 Finish 第一屏改进都已完成。
-当前唯一的下一步是使用 Codex assist、Claude Code assist、`vega do`、Reviewer 打回和
-fail-closed 场景验证日常闭环，不再增加新的 Runtime 或基础设施。当前状态与停止条件见：
+`v0.1.4` 发布、CRWP-V1 合同允许验证、Plan-first 协议、Finish 第一屏改进和 Phase 4 真实
+使用验收都已完成。Codex assist、Claude Code assist、`vega do`、Reviewer 打回和 fail-closed
+场景均已有记录。
 
-- [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：当前执行计划。
-- [`ROADMAP.md`](ROADMAP.md)：唯一下一步和冻结方向。
+当前不再增加新的 Runtime 或基础设施，只在真实日常使用中记录问题并修复影响判断可信度的
+实际缺陷。Finish 第一屏尚有测试名称缺失、空 Scope 展示和 Workspace 汇总不一致等观察项；
+只有这些问题重复造成误判时才做最小修正。当前状态与停止条件见：
+
+- [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：已完成阶段与验收记录。
+- [`ROADMAP.md`](ROADMAP.md)：当前观察期和冻结方向。
 
 ### 已完成的当前阶段
 
@@ -40,6 +44,8 @@ fail-closed 场景验证日常闭环，不再增加新的 Runtime 或基础设�
   共用的调查、固定 Plan 和修改前人工确认协议。
 - Finish 第一屏：从既有结构化 artifact 确定性展示裁决、变更、Gate、验证、Reviewer、
   证据上限和下一步，不新增模型调用或第二套裁决。
+- Phase 4：Codex assist、Claude Code assist、`vega do`、Reviewer 打回和 fail-closed 五类
+  真实场景均已验收，公开摘要追加在 [`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
 
 - [`CORE-REAL-WORLD-PILOT-V1-HANDOFF.md`](CORE-REAL-WORLD-PILOT-V1-HANDOFF.md)：
   最终状态与本机证据接力。
