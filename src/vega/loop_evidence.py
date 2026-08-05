@@ -741,8 +741,8 @@ def _validate_iteration_review(
         iteration.verdict,
         issues,
         prefix,
+        risk_gate_result,
     )
-
     for local_name, child_path, issue_name in (
         ("review-state.json", child_state_path, "review_state_hash_mismatch"),
         ("review-context.json", child_context_path, "review_context_hash_mismatch"),

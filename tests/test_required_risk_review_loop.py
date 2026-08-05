@@ -197,6 +197,20 @@ def test_auto_named_required_review_runs_reviewer_once_and_stays_human(
     assert finish["latest_verdict"]["verdict"] == "needs_human"
     assert finish["artifact_integrity"]["valid"] is True
     assert finish["evidence_freshness"]["fresh"] is True
+    assert finish["verification_passed"] is True
+    assert finish["first_screen"]["verification"]["trusted_passed"] is True
+    assert not any(
+        "自动验证结论未知" in note
+        for note in finish["handoff_notes"]
+    )
+    assert (
+        "人工逐项检查高风险命中、Reviewer 关键位置和剩余风险。"
+        in finish["first_screen"]["next_steps"]
+    )
+    assert (
+        "补充并运行至少一条受信的项目验证命令。"
+        not in finish["first_screen"]["next_steps"]
+    )
     assert not any(
         "工作区发生变化" in note or "快照缺失" in note
         for note in finish["handoff_notes"]
