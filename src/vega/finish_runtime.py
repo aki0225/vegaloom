@@ -217,10 +217,12 @@ def _handoff_notes(
     if not artifact_integrity_valid:
         notes.append("迭代 artifact 完整性校验失败，未采用未绑定或损坏的 verdict/verification。")
     if not evidence_fresh:
-        if latest_verdict is None:
-            notes.append("尚未产生可采用的 reviewer 快照，不能确认独立审查已经完成。")
-        else:
-            notes.append("reviewer 结论对应的工作区快照已变化，现有结论已失效。")
+        freshness_note = (
+            "尚未产生可采用的 reviewer 快照，不能确认独立审查已经完成。"
+            if latest_verdict is None
+            else "reviewer 结论对应的工作区快照已变化，现有结论已失效。"
+        )
+        notes.append(freshness_note)
     if latest_verification_failed:
         notes.append("自动验证存在失败，不能进入 ready_to_commit。")
     elif not verification_passed:

@@ -259,10 +259,8 @@ def _next_steps(
     if not integrity.valid:
         steps.append("检查完整性 issues，重新生成缺失或失效的证据链。")
     if not freshness.fresh:
-        if verdict is None:
-            steps.append("工作区稳定后执行 reflect、独立 review 和 finish。")
-        else:
-            steps.append("工作区稳定后重新执行 reflect、独立 review 和 finish。")
+        review_action = "执行" if verdict is None else "重新执行"
+        steps.append(f"工作区稳定后{review_action} reflect、独立 review 和 finish。")
     if latest_verification_failed:
         steps.append("修复失败或超时的验证命令，再重新执行验证。")
     elif not verification_passed:
