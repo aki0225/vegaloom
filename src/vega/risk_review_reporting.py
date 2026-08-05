@@ -153,6 +153,38 @@ def verdict_schema_example(
     }
 
 
+def verdict_output_schema(
+    required_reviews: list[RequiredReviewHit],
+) -> dict[str, Any]:
+    """生成 Codex structured output 使用的严格 Reviewer schema。"""
+    schema = ReviewVerdict.model_json_schema()
+    _require_all_output_fields(schema)
+    disclosures = schema["properties"]["risk_disclosures"]
+    if required_reviews:
+        required_count = len(required_reviews)
+        disclosures["minItems"] = required_count
+        disclosures["maxItems"] = required_count
+    else:
+        disclosures["maxItems"] = 0
+    return schema
+
+
+def _require_all_output_fields(value: object) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _require_all_output_fields(item)
+        return
+    if not isinstance(value, dict):
+        return
+    value.pop("default", None)
+    properties = value.get("properties")
+    if isinstance(properties, dict):
+        value["required"] = list(properties)
+        value["additionalProperties"] = False
+    for item in value.values():
+        _require_all_output_fields(item)
+
+
 def render_final_review_details(verdict: ReviewVerdict) -> list[str]:
     lines = render_final_risk_disclosure_lines(verdict.risk_disclosures)
     if verdict.findings:

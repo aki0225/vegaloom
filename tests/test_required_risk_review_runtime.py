@@ -9,7 +9,10 @@ import pytest
 import vega.review_runtime as review_runtime_module
 from vega.execution_control import RunnerExecutionContext
 from vega.reflect_runtime import ReflectRuntime
+from vega.review_contract import RequiredReviewHit
 from vega.review_runtime import ReviewPackRuntime, ReviewRuntime
+from vega.risk_review_reporting import verdict_output_schema
+from vega.risk_review_runtime import render_required_review_prompt_rules
 from vega.runner import RunnerResult
 
 
@@ -45,6 +48,41 @@ class StaticReviewer:
             command=["static-reviewer"],
             termination_unconfirmed=self.termination_unconfirmed,
         )
+
+
+def test_low_risk_prompt_reserves_disclosures_for_gate_ids() -> None:
+    prompt_rules = "\n".join(render_required_review_prompt_rules([]))
+    output_schema = verdict_output_schema([])
+
+    assert "risk_disclosures` 必须返回空列表" in prompt_rules
+    assert "即 JSON 空数组 `[]`" in prompt_rules
+    assert "即使 Risk Gate 总体等级为 medium/high" in prompt_rules
+    assert "不得在 `risk_disclosures` 中放入字符串、对象或一般风险说明" in prompt_rules
+    assert "普通风险、验证缺口和项目规则问题写入 `summary` 或 `findings`" in prompt_rules
+    assert set(output_schema["required"]) == set(output_schema["properties"])
+    assert output_schema["properties"]["risk_disclosures"]["maxItems"] == 0
+
+
+def test_required_risk_schema_requires_exact_disclosure_count() -> None:
+    required_reviews = [
+        RequiredReviewHit(
+            id="payment",
+            label="支付与资金",
+            matched_files=["src/payments/charge.py"],
+        ),
+        RequiredReviewHit(
+            id="database",
+            label="数据库与迁移",
+            matched_files=["db/migrations/024_add_status.sql"],
+        ),
+    ]
+
+    disclosures = verdict_output_schema(required_reviews)["properties"][
+        "risk_disclosures"
+    ]
+
+    assert disclosures["minItems"] == 2
+    assert disclosures["maxItems"] == 2
 
 
 def test_complete_required_risk_reviews_are_reported_and_kept_for_human(

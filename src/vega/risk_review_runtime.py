@@ -129,7 +129,21 @@ def render_required_review_prompt_rules(
     required_reviews: Sequence[RequiredReviewHit],
 ) -> list[str]:
     if not required_reviews:
-        return ["- Review Pack 未列出必审风险 ID 时，`risk_disclosures` 必须返回空列表。"]
+        return [
+            (
+                "- Review Pack 未列出必审风险 ID 时，`risk_disclosures` "
+                "必须返回空列表，即 JSON 空数组 `[]`。"
+            ),
+            (
+                "- 即使 Risk Gate 总体等级为 medium/high，也不得在 "
+                "`risk_disclosures` 中放入字符串、对象或一般风险说明；"
+                "该字段只绑定 Review Pack 明确列出的必审风险 ID。"
+            ),
+            (
+                "- 普通风险、验证缺口和项目规则问题写入 `summary` 或 "
+                "`findings`，不要写入 `risk_disclosures`。"
+            ),
+        ]
     return [
         "- Review Pack 列出必须披露的高风险 ID 时，`risk_disclosures` 必须逐个且只出现一次。",
         "- 每项 disclosure 的 locations 必须覆盖全部命中文件并给出大于 0 的关键行号；`assessment=insufficient_evidence` 时可使用 line=0 表示只能定位到文件级。",
