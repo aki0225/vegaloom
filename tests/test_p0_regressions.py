@@ -997,6 +997,27 @@ def test_auto_worker_cannot_mutate_existing_ignored_content_before_verification(
     assert "启动基线中的已有路径" in fix_prompt
     assert "普通 ignored 目录不是豁免区" in fix_prompt
 
+    FinishRuntime(workspace).run(run_dir.name)
+    finish_summary = _read_json(run_dir / "finish-summary.json")
+    finish_report = (run_dir / "finish-report.md").read_text(encoding="utf-8")
+
+    assert finish_summary["first_screen"]["actual_changes"]["changed_file_count"] is None
+    assert (
+        finish_summary["first_screen"]["actual_changes"]["changed_files_source"]
+        == "unavailable"
+    )
+    assert any(
+        "尚未产生可采用的 reviewer 快照" in note
+        for note in finish_summary["handoff_notes"]
+    )
+    assert not any("approve" in note for note in finish_summary["handoff_notes"])
+    assert not any("review 后" in note for note in finish_summary["commit_checklist"])
+    assert any(
+        "尚未生成可采用的 Reviewer 快照" in limit
+        for limit in finish_summary["first_screen"]["evidence_limits"]
+    )
+    assert "文件数：`未知`" in finish_report
+
 
 @pytest.mark.parametrize("target", ["exclude", "config"])
 def test_auto_worker_cannot_mutate_git_control_files(

@@ -477,3 +477,40 @@ Windows 行尾策略必须在 checkout 前冻结。最终成功仍只是一个�
 人工确认。它只有定向测试，没有完整真实数据验收或全量项目回归，不能证明结算口径安全、生产
 可用性、任意任务成功率或跨仓库泛化能力。Claude Code assist 与边界清晰任务的 `vega do`
 仍需独立验证；ignored 自检产物问题也应以单独的小改动处理，不放宽现有 Gate。
+
+## 2026-08-05 独立 fresh auto Dogfood：Echo Vault 登录页语言切换
+
+本条验证边界清晰的小型前端任务能否直接通过 `vega do` 完成。目标冻结在 Echo Vault 提交
+`29bd2a5aaa4397e5ac23fbd080a1c984e3a658d8`，任务要求登录页标题和字段文案随既有中英文状态
+切换，并补充回归测试。目标副本没有 remote，正式运行没有接收历史正确补丁。
+
+- 首次 Run `20260805-124844-791095-bug-loop` 中，Worker 正常退出并只留下预期的 3 个
+  tracked 文件修改，但其执行的 Trellis Python 上下文命令在
+  `.trellis/scripts/common/__pycache__/` 写入 ignored `.pyc`。Workspace Gate 检测到
+  `baseline_ignored_changed=true`，在 Verification、Reflect 和 Reviewer 前停止，终态为
+  `needs_human / workspace_check_failed`。
+- 该失败同时暴露 Finish 的展示缺陷：没有 Reviewer 时仍使用“review 后工作区变化”和
+  “现有 approve 已失效”等措辞，并把未获得可信变更列表显示为 `0` 个文件。失败现场保持原样，
+  没有清理缓存后继续，也没有把未执行的验证或审查写成通过。
+- 修复后的 Codex Worker/Reviewer 进程固定继承 `PYTHONDONTWRITEBYTECODE=1`；Finish 区分
+  “尚无可信 Review”和“已有 Review 但快照过期”，无法获得可信变更列表时文件数写为
+  `null`，Markdown 显示“未知”。本次重跑所用 Runtime 改动随后由 Vega 提交
+  `7d49f6a` 固化，并补充回归测试。
+- fresh Run `20260805-150612-164026-bug-loop` 使用相同目标提交和任务重新开始。Worker 实际
+  执行 `get_context.py` 的默认、`phase` 和 `packages` 三种模式，结束后目标内 `.pyc` 数量
+  仍为 `0`；Workspace Gate 通过且 `baseline_ignored_changed=false`。
+- Worker 只修改 `frontend/src/ui/i18n.tsx`、
+  `frontend/src/ui/pages/LoginPage.test.tsx` 和
+  `frontend/src/ui/pages/LoginPage.tsx`，共新增 `17` 行、删除 `9` 行，没有新增文件、
+  依赖或越界路径。
+- `pnpm --dir frontend test -- LoginPage.test.tsx` 正常退出，实际报告
+  `14 files / 135 tests passed`；`pnpm --dir frontend build` 通过。三阶段 Scope Gate、
+  Workspace Gate 和 Risk Gate 全部通过，Risk 为 `low / self-check`。
+- 隔离只读 Reviewer 返回 `approve` 且 findings 为 `0`。Finish 为
+  `ready_to_commit`，artifact integrity valid，evidence freshness fresh，可信变更文件数为
+  `3`。目标副本仍无 remote，Vega 没有自动 commit、push、release 或写入长期 memory。
+
+这组配对运行证明 Python 自检缓存会被现有 Workspace Gate 如实拦截，也证明禁用 Worker/
+Reviewer Python bytecode 后，同一边界清晰任务可以通过确定性验证、范围与风险门禁、隔离审查
+和 Finish。它仍只是一个已明确验收标准的低风险前端案例，不能证明模糊任务调查、Claude Code
+assist、高风险修改、任意仓库成功率或生产安全。

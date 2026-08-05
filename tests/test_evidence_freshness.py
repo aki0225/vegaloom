@@ -91,6 +91,14 @@ def test_finish_rejects_workspace_changes_after_approved_review(tmp_path: Path) 
     assert summary["loop_status"] == "success"
     assert summary["evidence_freshness"]["fresh"] is False
     assert "workspace_changed_since_review" in summary["evidence_freshness"]["issues"]
+    assert any(
+        "reviewer 结论对应的工作区快照已变化" in note
+        for note in summary["handoff_notes"]
+    )
+    assert any(
+        "Reviewer 结论对应的工作区证据已过期" in limit
+        for limit in summary["first_screen"]["evidence_limits"]
+    )
 
 
 def test_goal_complete_revalidates_expired_finish_evidence(tmp_path: Path) -> None:

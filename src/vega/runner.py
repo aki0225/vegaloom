@@ -319,6 +319,7 @@ class CodexExecRunner:
             repo_path,
             timeout_seconds,
             context,
+            environment={"PYTHONDONTWRITEBYTECODE": "1"},
         )
         status = result.status
         error = result.error

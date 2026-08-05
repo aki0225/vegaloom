@@ -1331,7 +1331,9 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
     repo_dir.mkdir()
     captured: dict[str, object] = {}
 
-    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, context, **kwargs
+    ):
         captured.update(
             {
                 "command": command,
@@ -1339,6 +1341,7 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
                 "cwd": cwd,
                 "timeout_seconds": timeout_seconds,
                 "context": context,
+                "environment": kwargs["environment"],
             }
         )
         assert context.output_line_observer is not None
@@ -1401,6 +1404,7 @@ def test_codex_exec_runner_builds_allowlisted_role_command(tmp_path, monkeypatch
         "-",
     ]
     assert captured["input_text"] == "完成最小修改"
+    assert captured["environment"] == {"PYTHONDONTWRITEBYTECODE": "1"}
 
 
 def test_codex_exec_runner_executes_raw_command_but_redacts_result_command(
@@ -1412,9 +1416,12 @@ def test_codex_exec_runner_executes_raw_command_but_redacts_result_command(
     repo_dir.mkdir()
     captured: dict[str, object] = {}
 
-    def fake_run_owned_process(command, input_text, cwd, timeout_seconds, context):
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, context, **kwargs
+    ):
         del input_text, cwd, timeout_seconds
         captured["command"] = command
+        assert kwargs["environment"] == {"PYTHONDONTWRITEBYTECODE": "1"}
         assert context.output_line_observer is not None
         context.output_line_observer(
             json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "ok"}})
