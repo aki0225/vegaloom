@@ -1104,7 +1104,7 @@ class LoopAutomationRuntime:
                     run_dir,
                     state,
                     None,
-                    "worker 结束后工作区污染检查失败，已停止自动验证和审查。",
+                    "worker 结束后工作区完整性检查失败，已停止自动验证和审查。",
                 )
                 self._save_loop_done(
                     run_dir,

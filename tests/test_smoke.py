@@ -1948,13 +1948,18 @@ def test_loop_writes_project_context_into_worker_prompt(tmp_path) -> None:
     assert "## 验证职责边界" in project_context
     assert "不是对 worker 命令执行能力的确定性拦截" in project_context
     assert "必须保持未加引号" in project_context
+    assert "worker 自检不得新增或修改 ignored、未跟踪文件或 Git 控制状态" in project_context
+    assert "仓库内目录不属于 Workspace Gate 豁免区" in project_context
+    assert "否则跳过并说明，交给 Runtime 固定 verification" in project_context
     assert "## 项目上下文" in worker_prompt
     assert "测试必须说明结果" in worker_prompt
     assert "Vega 会在 worker 返回后独立执行" in worker_prompt
-    assert "所有自检产生的缓存、临时文件和中间输出" in worker_prompt
-    assert "不得使用仓库父目录、工作区集合根目录、兄弟仓库或盘符根目录" in worker_prompt
+    assert "Worker 自检不得新增或修改 ignored、未跟踪文件或 Git 控制状态" in worker_prompt
+    assert "仓库内的 `.tmp/`、`target/` 等路径也不属于 Workspace Gate 豁免区" in worker_prompt
+    assert "不得为了绕过检查把自检产物写到仓库父目录" in worker_prompt
     assert "不要运行带 `{{vega_verification_temp}}` 的 harness-owned 命令" in worker_prompt
-    assert "不共享 harness 临时目录的最小检查" in worker_prompt
+    assert "否则跳过并说明，交给 Vega 固定 verification" in worker_prompt
+    assert "所有自检产生的缓存、临时文件和中间输出" not in worker_prompt
 
 
 def test_loop_auto_runs_detected_verification_commands(tmp_path) -> None:
@@ -2566,6 +2571,12 @@ def test_loop_auto_stops_on_workspace_pollution_before_review(tmp_path) -> None:
     workspace_check = run_dir / "iterations" / "01" / "workspace-check.md"
     assert workspace_check.exists()
     assert "3 > 1" in workspace_check.read_text(encoding="utf-8")
+    assert "工作区完整性检查失败" in run_dir.joinpath("final-report.md").read_text(
+        encoding="utf-8"
+    )
+    next_steps = run_status_payload(tmp_path, run_dir.name)["next_steps"]
+    assert any("工作区完整性检查失败" in item for item in next_steps)
+    assert any("ignored 路径、Git 控制状态和启动基线变化" in item for item in next_steps)
 
 
 def test_latest_and_status_cli_show_next_steps_for_loop(tmp_path, monkeypatch) -> None:

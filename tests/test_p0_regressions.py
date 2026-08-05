@@ -992,6 +992,10 @@ def test_auto_worker_cannot_mutate_existing_ignored_content_before_verification(
     assert reviewer.calls == 0
     assert workspace_check["baseline_ignored_changed"] is True
     assert workspace_check["git_control_changed"] is False
+    fix_prompt = (run_dir / "iterations" / "01" / "fix-prompt.md").read_text(encoding="utf-8")
+    assert "ignored 路径变化" in fix_prompt
+    assert "启动基线中的已有路径" in fix_prompt
+    assert "普通 ignored 目录不是豁免区" in fix_prompt
 
 
 @pytest.mark.parametrize("target", ["exclude", "config"])
@@ -1033,6 +1037,9 @@ def test_auto_worker_cannot_mutate_git_control_files(
     assert state["current_step"] == "workspace_check_failed"
     assert reviewer.calls == 0
     assert workspace_check["git_control_changed"] is True
+    fix_prompt = (run_dir / "iterations" / "01" / "fix-prompt.md").read_text(encoding="utf-8")
+    assert "Git HEAD/控制文件变化" in fix_prompt
+    assert "恢复 Git 状态" in fix_prompt
 
 
 def test_assist_continue_cannot_bypass_scope_gate(tmp_path: Path) -> None:

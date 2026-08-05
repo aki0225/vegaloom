@@ -112,7 +112,10 @@ def render_project_context(
             "也不应清理 harness 临时目录。",
             "- 配置中的 `{{vega_verification_temp}}` 必须保持未加引号，"
             "Runtime 会负责安全引用。",
-            "- worker 如需自检，应使用不共享 harness 临时目录的最小检查。",
+            "- worker 自检不得新增或修改 ignored、未跟踪文件或 Git 控制状态；"
+            "`.tmp/`、`target/` 等仓库内目录不属于 Workspace Gate 豁免区。",
+            "- 只有能确保不额外留下文件或 Git 状态变化时才自检；"
+            "否则跳过并说明，交给 Runtime 固定 verification。",
             "- 这是职责约定，不是对 worker 命令执行能力的确定性拦截。",
         ]
     )
