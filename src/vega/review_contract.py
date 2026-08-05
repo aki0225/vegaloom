@@ -5,6 +5,15 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+def normalize_review_path(value: str) -> str:
+    """统一 Reviewer 返回的仓库相对路径格式。"""
+
+    normalized = value.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
 class ReviewFinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,7 +98,19 @@ class ReviewVerdict(BaseModel):
     findings: list[ReviewFinding] = Field(default_factory=list)
     # 保持默认空列表，确保升级后仍能读取历史 review-verdict.json。
     risk_disclosures: list[ReviewRiskDisclosure] = Field(default_factory=list)
+    # 历史 verdict 允许缺少该字段，但新 Review Runtime 会做确定性覆盖校验。
+    reviewed_files: list[str] = Field(default_factory=list)
     checked_items: list[str] = Field(default_factory=list)
+
+    @field_validator("reviewed_files")
+    @classmethod
+    def validate_reviewed_files(cls, value: list[str]) -> list[str]:
+        normalized = [normalize_review_path(item) for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("reviewed_files 不能包含空路径")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("reviewed_files 不能包含重复路径")
+        return normalized
 
     @model_validator(mode="after")
     def validate_decision_contract(self) -> "ReviewVerdict":

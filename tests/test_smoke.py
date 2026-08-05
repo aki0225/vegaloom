@@ -37,13 +37,21 @@ from vega.experimental.inspection.loop_spec import (
 )
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.experimental.memory import MemoryLedgerStore
-from vega.models import BriefInput, MemoryProposal, RunState, ToolResult
+from vega.models import (
+    BriefInput,
+    MemoryProposal,
+    ReviewFinding,
+    ReviewVerdict,
+    RunState,
+    ToolResult,
+)
 from vega.project_config import CodexExecOptions, check_project_config, load_project_config
 from vega.project_profile import build_project_profile
 from vega.reflect_runtime import ReflectRuntime
 from vega.recovery_runtime import RecoveryRuntime
 from vega.review_runtime import ReviewPackRuntime, ReviewRuntime, parse_review_verdict
 from vega.repository_identity import repository_scope
+from vega.risk_review_reporting import build_finish_review_section
 from vega.runner import CodexExecRunner, RunnerResult
 from vega.run_status import run_status_payload
 from vega.run_lock import RunMutationLock
@@ -3280,6 +3288,11 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert "不要执行 Worker，也不要 `loop continue`" in loop_skill_text
     assert "宿主原生子代理" in loop_skill_text
     assert "不把子代理完整聊天传给 Reviewer" in loop_skill_text
+    assert "vega finish --run <loop_run_id> --json" in loop_skill_text
+    assert "git diff --cached --no-ext-diff --unified=3" in loop_skill_text
+    assert "git diff --no-ext-diff --unified=3" in loop_skill_text
+    assert "不得静默省略" in loop_skill_text
+    assert "未被 Reviewer 标记为重点" in loop_skill_text
     required_plan_sections = [
         "## User Goal",
         "## Non-goals",
@@ -3355,6 +3368,10 @@ def test_finish_cli_summarizes_successful_loop(tmp_path, monkeypatch) -> None:
         item["status"] for item in first_screen["verification"]["checks"]
     } == {"passed"}
     assert first_screen["review"]["verdict"] == "approve"
+    assert first_screen["review"]["coverage"]["complete"] is True
+    assert first_screen["review"]["coverage"]["reviewed_files"] == ["README.md"]
+    assert first_screen["review"]["priority_files"] == []
+    assert first_screen["review"]["other_changed_files"] == ["README.md"]
 
     report_text = run_dir.joinpath("finish-report.md").read_text(encoding="utf-8")
     expected_sections = [
@@ -3370,6 +3387,9 @@ def test_finish_cli_summarizes_successful_loop(tmp_path, monkeypatch) -> None:
         report_text.index(section) for section in expected_sections
     )
     assert "ready_to_commit 只表示满足人工提交前检查" in report_text
+    assert "Reviewer 文件覆盖：`1/1`，状态=`complete`" in report_text
+    assert "其他已变更项：`README.md`" in report_text
+    assert "不代表这些文件不重要" in report_text
     assert "commit 前 checklist" in report_text.lower()
 
     json_result = CliRunner().invoke(app, ["finish", "--run", run_dir.name, "--json"])
@@ -3465,6 +3485,33 @@ def test_finish_report_preserves_missing_reviewer_line_and_verification_statuses
     assert "基本可以" not in report_text
     for status in ["PASSED", "FAILED", "TIMED_OUT", "SKIPPED"]:
         assert f"`{status}`" in report_text
+
+
+def test_finish_review_keeps_priority_and_other_changed_files() -> None:
+    review = build_finish_review_section(
+        ReviewVerdict(
+            verdict="request_changes",
+            summary="主实现存在需要修复的问题。",
+            findings=[
+                ReviewFinding(
+                    severity="major",
+                    file="src/main.py",
+                    line=12,
+                    title="错误处理不完整",
+                    evidence="异常分支未保留原始原因。",
+                    recommendation="保留异常链并补测试。",
+                )
+            ],
+            reviewed_files=["src/main.py", "src/glue.py"],
+            checked_items=["完整 diff", "错误处理"],
+        ),
+        ["src/main.py", "src/glue.py"],
+        changed_files_source="trusted_risk_gate",
+    )
+
+    assert review["coverage"]["complete"] is True
+    assert review["priority_files"] == ["src/main.py"]
+    assert review["other_changed_files"] == ["src/glue.py"]
 
 
 def test_decision_cli_records_run_decisions_and_status_shows_them(tmp_path, monkeypatch) -> None:
@@ -4315,6 +4362,7 @@ def _review_json(verdict: str) -> str:
             "verdict": verdict,
             "summary": "测试 reviewer 结论",
             "findings": findings,
+            "reviewed_files": ["README.md"],
             "checked_items": ["需求覆盖", "测试覆盖"],
         },
         ensure_ascii=False,

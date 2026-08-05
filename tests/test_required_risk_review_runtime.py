@@ -60,6 +60,7 @@ def test_low_risk_prompt_reserves_disclosures_for_gate_ids() -> None:
     assert "不得在 `risk_disclosures` 中放入字符串、对象或一般风险说明" in prompt_rules
     assert "普通风险、验证缺口和项目规则问题写入 `summary` 或 `findings`" in prompt_rules
     assert set(output_schema["required"]) == set(output_schema["properties"])
+    assert "reviewed_files" in output_schema["required"]
     assert output_schema["properties"]["risk_disclosures"]["maxItems"] == 0
 
 
@@ -178,7 +179,9 @@ def test_incomplete_required_risk_review_falls_back_for_every_category(
     assert "FAIL: required risk disclosure：" in eval_text
 
 
-def test_low_risk_legacy_approve_remains_success(tmp_path: Path) -> None:
+def test_low_risk_legacy_approve_without_reviewed_files_needs_human(
+    tmp_path: Path,
+) -> None:
     workspace = tmp_path / "workspace"
     repo = tmp_path / "repo"
     _init_repo(
@@ -212,11 +215,14 @@ def test_low_risk_legacy_approve_remains_success(tmp_path: Path) -> None:
 
     verdict = _read_json(review_run / "review-verdict.json")
     state = _read_json(review_run / "state.json")
+    eval_text = (review_run / "eval.md").read_text(encoding="utf-8")
 
-    assert verdict["verdict"] == "approve"
+    assert verdict["verdict"] == "needs_human"
     assert verdict["risk_disclosures"] == []
-    assert state["status"] == "success"
+    assert verdict["reviewed_files"] == []
+    assert state["status"] != "success"
     assert state["current_step"] == "done"
+    assert "reviewed_files_missing:src/core.py" in eval_text
     assert "risk_disclosures` 必须返回空列表" in reviewer.prompts[0]
     assert '"risk_disclosures": []' in reviewer.prompts[0]
 
@@ -253,6 +259,7 @@ def test_low_risk_unbound_risk_disclosure_cannot_succeed(
                         "residual_risk": "无支付变更。",
                     }
                 ],
+                "reviewed_files": ["src/core.py"],
                 "checked_items": ["需求覆盖"],
             },
             ensure_ascii=False,
@@ -654,6 +661,11 @@ def _complete_risk_verdict() -> str:
                     "residual_risk": "人工确认大表执行时的锁表时间。",
                 },
             ],
+            "reviewed_files": [
+                "src/payments/charge.py",
+                "src/payments/refund.py",
+                "db/migrations/024_add_status.sql",
+            ],
             "checked_items": ["支付风险", "数据库迁移", "测试覆盖"],
         },
         ensure_ascii=False,
@@ -711,6 +723,11 @@ def _incomplete_risk_verdict(omission: str) -> str:
             "summary": "Reviewer 返回了不完整的高风险披露。",
             "findings": [],
             "risk_disclosures": disclosures,
+            "reviewed_files": [
+                "src/payments/charge.py",
+                "src/payments/refund.py",
+                "db/migrations/024_add_status.sql",
+            ],
             "checked_items": ["风险审查"],
         },
         ensure_ascii=False,

@@ -509,6 +509,13 @@ Finish 的作用是把“能不能交付、提交前还要检查什么、哪些�
 Reviewer 意见、证据上限和下一步排序；它不重新运行验证、不调用模型，也不产生新的裁决。
 Reviewer 未提供有效行号时，Finish 明确显示缺失，不自行推断位置。
 
+`first_screen.review` 还会从可信 `changed_files` 和 Reviewer verdict 派生 `coverage`、
+`priority_files` 与 `other_changed_files`。新 Review Runtime 要求 `reviewed_files` 精确覆盖
+完整变更文件清单，漏报或多报时 fail-closed；历史 verdict 仍可读取，但缺少覆盖声明时不会被
+展示为完整覆盖。`priority_files` 只根据 finding 和命名高风险位置帮助人工定位，
+不能过滤 `actual_changes.changed_files`。文件级覆盖也不等于逐行语义理解，代码复核仍以宿主
+Changes / Diff 视图或完整 staged/unstaged Git Diff 为准。
+
 Finish 会重新读取当前 `.vega.yaml/.vega.yml`，核对启动时文件摘要、scope 摘要和
 `project-policy-snapshot.json` 的根状态绑定。升级前缺少三阶段 scope 证据的旧 run 只允许
 复盘，不会被提升为 `ready_to_commit`。

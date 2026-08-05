@@ -246,6 +246,7 @@ class CountingReviewer:
         self.calls += 1
         self.prompts.append(prompt)
         verdict = self.verdicts.pop(0) if self.verdicts else "approve"
+        reviewed_files = _reviewed_files_from_prompt(prompt)
         return RunnerResult(
             status="success",
             output=json.dumps(
@@ -253,12 +254,25 @@ class CountingReviewer:
                     "verdict": verdict,
                     "summary": f"probe {verdict}",
                     "findings": [],
+                    "reviewed_files": reviewed_files,
                     "checked_items": ["scope", "diff"],
                 },
                 ensure_ascii=False,
             ),
             command=["counting-reviewer"],
         )
+
+
+def _reviewed_files_from_prompt(prompt: str) -> list[str]:
+    marker = "## 完整变更文件清单"
+    if marker not in prompt:
+        return []
+    section = prompt.split(marker, 1)[1].split("\n## ", 1)[0]
+    return [
+        line[3:-1]
+        for line in section.splitlines()
+        if line.startswith("- `") and line.endswith("`")
+    ]
 
 
 def test_auto_stops_before_worker_when_tracked_baseline_is_dirty(tmp_path: Path) -> None:
@@ -1006,6 +1020,10 @@ def test_auto_worker_cannot_mutate_existing_ignored_content_before_verification(
         finish_summary["first_screen"]["actual_changes"]["changed_files_source"]
         == "unavailable"
     )
+    review_coverage = finish_summary["first_screen"]["review"]["coverage"]
+    assert review_coverage["available"] is False
+    assert review_coverage["complete"] is False
+    assert "Reviewer 文件覆盖：`unavailable`" in finish_report
     assert any(
         "尚未产生可采用的 reviewer 快照" in note
         for note in finish_summary["handoff_notes"]

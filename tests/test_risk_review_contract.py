@@ -10,6 +10,10 @@ from vega.review_contract import (
     ReviewRiskDisclosure,
     ReviewVerdict,
 )
+from vega.review_coverage import (
+    build_review_file_coverage,
+    review_file_coverage_issues,
+)
 from vega.risk_review import (
     build_insufficient_evidence_disclosures,
     validate_required_risk_disclosures,
@@ -53,6 +57,36 @@ def test_legacy_verdict_defaults_to_empty_risk_disclosures() -> None:
     )
 
     assert verdict.risk_disclosures == []
+    assert verdict.reviewed_files == []
+
+
+def test_reviewed_files_are_normalized_and_must_be_unique() -> None:
+    verdict = ReviewVerdict.model_validate(
+        {
+            "verdict": "approve",
+            "summary": "已检查全部变更文件。",
+            "findings": [],
+            "reviewed_files": [".\\src\\core.py", "tests/test_core.py"],
+            "checked_items": ["需求覆盖"],
+        }
+    )
+
+    assert verdict.reviewed_files == ["src/core.py", "tests/test_core.py"]
+
+    payload = verdict.model_dump(mode="json")
+    payload["reviewed_files"] = ["src/core.py", "./src/core.py"]
+    with pytest.raises(ValidationError):
+        ReviewVerdict.model_validate(payload)
+
+    coverage = build_review_file_coverage(
+        ["src/core.py"],
+        ["src/core.py", "README.md"],
+    )
+    assert coverage["complete"] is False
+    assert coverage["unexpected_files"] == ["README.md"]
+    assert review_file_coverage_issues(coverage) == [
+        "reviewed_files_unknown:README.md"
+    ]
 
 
 @pytest.mark.parametrize(

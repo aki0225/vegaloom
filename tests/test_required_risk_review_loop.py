@@ -81,6 +81,7 @@ class RequiredReviewReviewer:
                             "residual_risk": "人工确认重复请求不会造成重复扣款。",
                         }
                     ],
+                    "reviewed_files": [self.relative_path],
                     "checked_items": ["需求覆盖", "支付风险", "验证证据"],
                 },
                 ensure_ascii=False,
