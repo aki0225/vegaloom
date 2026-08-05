@@ -79,11 +79,13 @@ def build_worker_prompt(
         "- 只修改满足需求所需的文件。",
         "- 不要 git commit、git push、发布或改长期 memory。",
         "- Vega 会在 worker 返回后独立执行 Runtime 策略中的固定验证命令。",
-        "- 所有自检产生的缓存、临时文件和中间输出都必须放在目标仓库内的专用目录（例如 `.tmp/`）。",
-        "- 不得使用仓库父目录、工作区集合根目录、兄弟仓库或盘符根目录存放这些产物。",
+        "- Worker 自检不得新增或修改 ignored、未跟踪文件或 Git 控制状态；"
+        "仓库内的 `.tmp/`、`target/` 等路径也不属于 Workspace Gate 豁免区。",
+        "- 不得为了绕过检查把自检产物写到仓库父目录、工作区集合根目录、兄弟仓库或盘符根目录。",
         "- 不要运行带 `{{vega_verification_temp}}` 的 harness-owned 命令，"
         "也不要清理 harness 临时目录。",
-        "- 如需自检，只运行不共享 harness 临时目录的最小检查，并在输出里总结结果。",
+        "- 只运行不会额外留下文件或 Git 状态变化的最小自检，并在输出中记录结果；"
+        "否则跳过并说明，交给 Vega 固定 verification。",
         "- 如果需求或环境阻塞，停止并明确说明。",
         "",
         "## 项目上下文",
@@ -163,12 +165,16 @@ def render_workspace_fix_prompt(next_iteration: int) -> str:
             "# Fix Prompt",
             "",
             f"- 下一轮：`{next_iteration}`",
-            "- 阻塞原因：worker 结束后工作区污染检查失败。",
+            "- 阻塞原因：worker 结束后工作区完整性检查失败。",
             "",
             "请先读取本轮 `workspace-check.md`：",
-            "- 确认新增未跟踪文件哪些是需求必须产物，哪些是 worker 误生成的临时/噪声文件。",
-            "- 手动清理无关文件，或把真实需要新增的文件纳入明确 scope 后再继续。",
-            "- Vega 不会自动删除文件，也不会自动 kill 外部进程。",
+            "- 核对新增未跟踪路径、ignored 路径变化、Git HEAD/控制文件变化，"
+            "以及启动基线中的已有路径是否被改动或删除。",
+            "- 真实需要新增的文件必须纳入 tracked diff 和明确 scope；"
+            "其余自检缓存、构建产物或噪声由人工确认后清理或恢复。",
+            "- `.tmp/`、`target/` 等普通 ignored 目录不是豁免区；"
+            "Vega 只排除明确的 harness-owned 路径。",
+            "- Vega 不会自动删除文件、恢复 Git 状态或终止外部进程。",
             "",
             "清理或确认完成后，再运行 `vega loop continue --repo <repo> --run <run>` 继续复盘与审查。",
         ]

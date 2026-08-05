@@ -342,9 +342,9 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
         workspace_check = _latest_iteration_file(run_dir, "workspace-check.md")
         fix_prompt = _latest_iteration_file(run_dir, "fix-prompt.md")
         return [
-            f"工作区污染检查失败，先读取 `{workspace_check}`。",
-            f"按 `{fix_prompt}` 清理或确认新增文件范围后，再运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
-            "Vega 不会自动删除文件；请人工确认哪些文件属于需求产物。",
+            f"工作区完整性检查失败，先读取 `{workspace_check}`。",
+            f"按 `{fix_prompt}` 核对新增未跟踪路径、ignored 路径、Git 控制状态和启动基线变化后，再运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
+            "Vega 不会自动删除文件或恢复 Git 状态；请人工确认哪些变化属于需求产物。",
         ]
     verdict = latest_iteration.get("verdict") if latest_iteration else None
     if latest_iteration and latest_iteration.get("verification_status") == "failed":
