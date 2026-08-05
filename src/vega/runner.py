@@ -5,11 +5,12 @@ import shutil
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from .execution_control import RunnerExecutionContext, run_owned_process
 from .execution_output import MAX_JSONL_LINE_CHARS
+from .execution_paths import ExecutionPathGuard
 from .project_config import CodexExecOptions
 from .redaction import redact_text
 
@@ -243,9 +244,11 @@ class CodexExecRunner:
         self,
         executable: str = "codex",
         options: CodexExecOptions | None = None,
+        output_schema: dict[str, Any] | None = None,
     ) -> None:
         self.executable = executable
         self.options = options or CodexExecOptions()
+        self.output_schema = output_schema
 
     def run(
         self,
@@ -265,6 +268,16 @@ class CodexExecRunner:
                 command=[self.executable, "exec"],
             )
 
+        standalone_root = Path.cwd()
+        context = execution_context or RunnerExecutionContext(
+            execution_root=standalone_root,
+            execution_dir=standalone_root
+            / "runs"
+            / "_standalone-executions"
+            / f"codex-{uuid4().hex[:12]}",
+            run_id="standalone-runner",
+            step="codex-exec",
+        )
         command = [
             resolved,
             "exec",
@@ -294,19 +307,39 @@ class CodexExecRunner:
             )
         if self.options.ephemeral:
             command.append("--ephemeral")
+        if self.output_schema is not None:
+            schema_path = context.execution_dir / "output-schema.json"
+            try:
+                path_guard = ExecutionPathGuard(
+                    context.execution_root,
+                    context.execution_dir,
+                )
+                path_guard.prepare()
+                path_guard.validate_artifact(schema_path)
+                schema_path.write_text(
+                    json.dumps(
+                        self.output_schema,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                    newline="\n",
+                )
+            except (OSError, TypeError, ValueError) as exc:
+                return RunnerResult(
+                    status="error",
+                    output="",
+                    error=(
+                        "无法写入 codex exec output schema："
+                        f"{type(exc).__name__}"
+                    ),
+                    command=command,
+                )
+            command.extend(["--output-schema", str(schema_path.resolve())])
         command.append("--json")
         command.append("-")
         prompt = redact_text(prompt)
-        standalone_root = Path.cwd()
-        context = execution_context or RunnerExecutionContext(
-            execution_root=standalone_root,
-            execution_dir=standalone_root
-            / "runs"
-            / "_standalone-executions"
-            / f"codex-{uuid4().hex[:12]}",
-            run_id="standalone-runner",
-            step="codex-exec",
-        )
         progress = _CodexJsonlProgress(context)
         context = replace(
             context,
@@ -345,10 +378,18 @@ class CodexExecRunner:
         )
 
 
-def make_runner(name: str, options: CodexExecOptions | None = None) -> Runner:
+def make_runner(
+    name: str,
+    options: CodexExecOptions | None = None,
+    *,
+    output_schema: dict[str, Any] | None = None,
+) -> Runner:
     normalized = name.strip().lower()
     if normalized in {"none", "prompt-only"}:
         return NoneRunner()
     if normalized in {"codex-exec", "codex"}:
-        return CodexExecRunner(options=options)
+        return CodexExecRunner(
+            options=options,
+            output_schema=output_schema,
+        )
     raise ValueError(f"不支持的 runner：{name}")

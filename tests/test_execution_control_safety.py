@@ -179,6 +179,65 @@ def test_codex_exec_runner_propagates_termination_unconfirmed(
     assert result.termination_unconfirmed is True
 
 
+def test_codex_exec_runner_writes_output_schema_inside_execution_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "review" / "executions" / "reviewer",
+        run_id="review",
+        step="reviewer",
+    )
+    output_schema = {
+        "type": "object",
+        "properties": {"verdict": {"type": "string"}},
+        "required": ["verdict"],
+        "additionalProperties": False,
+    }
+    captured: dict[str, object] = {}
+
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, stream_context, **kwargs
+    ):
+        del input_text, cwd, timeout_seconds
+        schema_index = command.index("--output-schema") + 1
+        schema_path = Path(command[schema_index])
+        captured["schema_path"] = schema_path
+        captured["schema"] = json.loads(schema_path.read_text(encoding="utf-8"))
+        assert stream_context.output_line_observer is not None
+        payload = {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": '{"verdict":"approve"}',
+            },
+        }
+        return OwnedProcessResult(
+            status="success",
+            output=json.dumps(payload),
+            error=None,
+            returncode=0,
+        )
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+
+    result = CodexExecRunner(output_schema=output_schema).run(
+        "test prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+        execution_context=context,
+    )
+
+    assert result.status == "success"
+    assert captured["schema"] == output_schema
+    assert captured["schema_path"] == context.execution_dir / "output-schema.json"
+
+
 def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

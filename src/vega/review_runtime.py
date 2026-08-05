@@ -46,7 +46,7 @@ from .review_risk_gate import (
 from .risk_review_reporting import (
     render_review_checklist,
     render_review_findings,
-    render_runner_output,
+    render_runner_output, verdict_output_schema as _verdict_output_schema,
     verdict_schema_example as _verdict_schema_example,
 )
 from .risk_review_runtime import (
@@ -331,8 +331,8 @@ class ReviewRuntime:
             )
         else:
             runner = self.runner or make_runner(
-                runner_name,
-                options=execution_config.runner.codex_exec.reviewer,
+                runner_name, options=execution_config.runner.codex_exec.reviewer,
+                output_schema=_verdict_output_schema(risk_gate_result.required_reviews),
             )
             execution_context = execution_context or RunnerExecutionContext(
                 execution_root=run_dir,

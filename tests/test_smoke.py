@@ -2097,16 +2097,22 @@ def test_loop_uses_separate_worker_and_reviewer_codex_options(tmp_path, monkeypa
         encoding="utf-8",
     )
     _commit_repo_paths(repo_dir, ".vega.yaml", message="add runner config")
-    captured: dict[str, CodexExecOptions | None] = {}
+    captured: dict[str, object] = {}
 
     def make_worker_runner(name: str, options: CodexExecOptions | None = None):
         assert name == "codex-exec"
         captured["worker"] = options
         return TrackedChangeRunner(["worker done"])
 
-    def make_reviewer_runner(name: str, options: CodexExecOptions | None = None):
+    def make_reviewer_runner(
+        name: str,
+        options: CodexExecOptions | None = None,
+        *,
+        output_schema: dict[str, object] | None = None,
+    ):
         assert name == "codex-exec"
         captured["reviewer"] = options
+        captured["reviewer_output_schema"] = output_schema
         return StaticRunner([_review_json("approve")])
 
     monkeypatch.setattr("vega.loop_runtime.make_runner", make_worker_runner)
@@ -2134,6 +2140,9 @@ def test_loop_uses_separate_worker_and_reviewer_codex_options(tmp_path, monkeypa
         reasoning_effort="high",
         ephemeral=True,
     )
+    reviewer_schema = captured["reviewer_output_schema"]
+    assert isinstance(reviewer_schema, dict)
+    assert reviewer_schema["properties"]["risk_disclosures"]["maxItems"] == 0
     project_context = run_dir.joinpath("project-context.md").read_text(encoding="utf-8")
     assert "`worker.reasoning_effort`：`medium`" in project_context
     assert "`reviewer.reasoning_effort`：`high`" in project_context
@@ -2193,9 +2202,15 @@ def test_auto_loop_keeps_start_time_reviewer_policy_after_worker_changes_config(
     reviewer = StaticRunner([_review_json("approve")])
     captured: dict[str, object] = {}
 
-    def make_reviewer_runner(name: str, options: CodexExecOptions | None = None):
+    def make_reviewer_runner(
+        name: str,
+        options: CodexExecOptions | None = None,
+        *,
+        output_schema: dict[str, object] | None = None,
+    ):
         captured["name"] = name
         captured["options"] = options
+        captured["output_schema"] = output_schema
         return reviewer
 
     monkeypatch.setattr("vega.review_runtime.make_runner", make_reviewer_runner)
