@@ -64,12 +64,25 @@ class StaticReviewer:
                     "verdict": "approve",
                     "summary": "dogfood 静态 reviewer 通过。",
                     "findings": [],
+                    "reviewed_files": _reviewed_files_from_prompt(prompt),
                     "checked_items": ["dogfood"],
                 },
                 ensure_ascii=False,
             ),
             command=["static-reviewer"],
         )
+
+
+def _reviewed_files_from_prompt(prompt: str) -> list[str]:
+    marker = "## 完整变更文件清单"
+    if marker not in prompt:
+        return []
+    section = prompt.split(marker, 1)[1].split("\n## ", 1)[0]
+    return [
+        line[3:-1]
+        for line in section.splitlines()
+        if line.startswith("- `") and line.endswith("`")
+    ]
 
 
 class StaticWorker:
