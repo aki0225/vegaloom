@@ -1,0 +1,39 @@
+{
+  "case_id": "C2",
+  "commands": [
+    {
+      "command": "python -m compileall src scripts/check_repository_hygiene.py",
+      "duration_seconds": 1.047,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8a1993e1a4a204edaf3fac79f895b62f2d42ba1fa7df97e75ad0422652d719e5"
+    },
+    {
+      "command": "python -m pytest tests/test_p0_regressions.py::test_auto_worker_cannot_mutate_existing_ignored_content_before_verification tests/test_p0_regressions.py::test_auto_worker_cannot_mutate_git_control_files tests/test_smoke.py::test_loop_writes_project_context_into_worker_prompt tests/test_smoke.py::test_loop_auto_stops_on_workspace_pollution_before_review -q",
+      "duration_seconds": 30.328,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "0633ec273309d4f77329edf8687571ca8c728d4027ee811fcc42b48b03f8ea12"
+    },
+    {
+      "command": "ruff check src/vega/loop_prompts.py src/vega/loop_runtime.py src/vega/project_context.py src/vega/run_status.py tests/test_p0_regressions.py tests/test_smoke.py",
+      "duration_seconds": 3.109,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "command": "git diff --check 6c106c2f02c0e128770bf30d25e400ce88a8befe 7b1f283b4506902510e5b3d3f3e5caab91969f25",
+      "duration_seconds": 0.25,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "schema_version": 1,
+  "source_revision": "7b1f283b4506902510e5b3d3f3e5caab91969f25"
+}

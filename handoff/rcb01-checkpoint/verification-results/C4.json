@@ -1,0 +1,39 @@
+{
+  "case_id": "C4",
+  "commands": [
+    {
+      "command": "python -m compileall src scripts/check_repository_hygiene.py",
+      "duration_seconds": 1.625,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "42a86c8076fd903bd116856286175ad1444e38d355ca312cb444b2084b4d843c"
+    },
+    {
+      "command": "python -m pytest tests/test_cli_progress.py::test_execution_progress_is_stderr_only_and_uses_safe_step_labels tests/test_execution_control_safety.py::test_codex_exec_runner_emits_only_sanitized_jsonl_progress tests/test_execution_control_safety.py::test_codex_exec_runner_rejects_success_without_final_message tests/test_execution_control_safety.py::test_owned_process_observes_complete_lines_before_child_exit tests/test_execution_control_safety.py::test_output_reader_start_failure_terminates_owned_process tests/test_smoke.py::test_codex_exec_runner_builds_allowlisted_role_command tests/test_smoke.py::test_codex_exec_runner_executes_raw_command_but_redacts_result_command -q",
+      "duration_seconds": 6.797,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "32107ff8eccb343a4ca98d0f6dda9f43d8e9b7ee778593e58c6c6a7acdfdfe81"
+    },
+    {
+      "command": "ruff check src/vega/cli_support.py src/vega/execution_control.py src/vega/execution_output.py src/vega/runner.py tests/test_cli_progress.py tests/test_execution_control_safety.py tests/test_smoke.py",
+      "duration_seconds": 0.734,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "command": "git diff --check 1f68e3a8b3c224d9946f3cdb2aa8af19285a0c5b 0ceb78945c2ef3287cd9acdc53bde099939b679c",
+      "duration_seconds": 0.375,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "schema_version": 1,
+  "source_revision": "0ceb78945c2ef3287cd9acdc53bde099939b679c"
+}

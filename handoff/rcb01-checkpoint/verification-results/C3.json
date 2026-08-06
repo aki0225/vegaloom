@@ -1,0 +1,39 @@
+{
+  "case_id": "C3",
+  "commands": [
+    {
+      "command": "python -m compileall src scripts/check_repository_hygiene.py",
+      "duration_seconds": 0.984,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "5a1feab2f783a597df6f809e219901f1ccd48890530db82ced2936cb92d34758"
+    },
+    {
+      "command": "python -m pytest tests/test_workspace_snapshot_budget.py::test_workspace_check_excludes_same_repo_vega_run_artifacts tests/test_workspace_snapshot_budget.py::test_review_snapshot_ignores_owned_run_changes_but_keeps_other_untracked tests/test_workspace_snapshot_budget.py::test_workspace_check_keeps_non_owned_untracked_paths_fail_closed tests/test_workspace_snapshot_budget.py::test_verification_temp_root_rejects_logical_path_resolution_mismatch -q",
+      "duration_seconds": 14.031,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "b34677b918bd0724e980e0afd271e8e07116be1a16d977cbc30aadea25a680c7"
+    },
+    {
+      "command": "ruff check src/vega/codex_workspace.py src/vega/git_inventory.py src/vega/workspace_check.py src/vega/workspace_inventory.py tests/test_workspace_snapshot_budget.py",
+      "duration_seconds": 0.36,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "command": "git diff --check 12a2f0d1529780e0c5f5423d57f76a80901a7808 dce7d35ad681a3efc1923a132e502dcaff2eabe6",
+      "duration_seconds": 0.218,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "schema_version": 1,
+  "source_revision": "dce7d35ad681a3efc1923a132e502dcaff2eabe6"
+}

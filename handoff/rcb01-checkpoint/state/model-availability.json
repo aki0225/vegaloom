@@ -1,0 +1,26 @@
+{
+  "availability_status": "catalog_and_provider_route_confirmed",
+  "checked_at": "2026-08-06T06:57:38.307631+00:00",
+  "codex_version": "0.146.0",
+  "doctor_overall_status": "warning",
+  "formal_model_calls_started": false,
+  "limitation": "本检查未发送推理请求；正式运行仍按预注册顺序处理 Provider、timeout 或无效输出。",
+  "model": "gpt-5.6-sol",
+  "model_catalog_sha256": "b6bdb42aa8faaa2903e19a0c2c860c464a0aefa8f0e5acb97e035558066e047b",
+  "model_entry_sha256": "9e60f60c50d30e0486da725b266dc4ce9063793fa4d8fdd1317a9697768ff209",
+  "provider": "ciii",
+  "reasoning_effort": "high",
+  "required_doctor_checks": {
+    "auth.credentials": "ok",
+    "config.load": "ok",
+    "network.provider_reachability": "ok"
+  },
+  "supported_reasoning_levels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra"
+  ]
+}

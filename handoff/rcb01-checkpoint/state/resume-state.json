@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "experiment_id": "RCB-01",
+  "generator_revision": "4e195df3f27a9ce8037d9ba6ccbd173fdd8c0105",
+  "consumed_run_labels": [
+    "01-C1-A1",
+    "02-C1-B1",
+    "03-C2-B1",
+    "04-C2-A1",
+    "05-C3-A1",
+    "06-C3-B1",
+    "07-C4-B1",
+    "08-C4-A1",
+    "09-C5-A1"
+  ],
+  "next_run": {
+    "sequence": 10,
+    "label": "10-C5-B1",
+    "confirmation": "RCB-01-RUN-10"
+  },
+  "result_artifacts_included": false,
+  "reason": "中间 Reviewer 输出不进入远端 Git，避免污染后续独立会话。"
+}

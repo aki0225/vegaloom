@@ -1,0 +1,39 @@
+{
+  "case_id": "C5",
+  "commands": [
+    {
+      "command": "python -m compileall src scripts/check_repository_hygiene.py",
+      "duration_seconds": 2.844,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8a1993e1a4a204edaf3fac79f895b62f2d42ba1fa7df97e75ad0422652d719e5"
+    },
+    {
+      "command": "python -m pytest tests/test_execution_control_safety.py::test_codex_exec_runner_writes_output_schema_inside_execution_dir tests/test_required_risk_review_runtime.py::test_low_risk_prompt_reserves_disclosures_for_gate_ids tests/test_required_risk_review_runtime.py::test_required_risk_schema_requires_exact_disclosure_count tests/test_smoke.py::test_loop_uses_separate_worker_and_reviewer_codex_options tests/test_smoke.py::test_auto_loop_keeps_start_time_reviewer_policy_after_worker_changes_config -q",
+      "duration_seconds": 21.844,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "1b59eac73d864d08b092b8f0b1ca979c48eda8030bcd37a59fa985a455a577d5"
+    },
+    {
+      "command": "ruff check src/vega/review_runtime.py src/vega/risk_review_reporting.py src/vega/risk_review_runtime.py src/vega/runner.py tests/test_execution_control_safety.py tests/test_required_risk_review_runtime.py tests/test_smoke.py",
+      "duration_seconds": 0.672,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "command": "git diff --check 09c1001eee0b04f9ebbaaf8b7d3183aa7ac1c308 20461acb889870fa608b18f9d2eb8eff9f35d7ad",
+      "duration_seconds": 0.218,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "schema_version": 1,
+  "source_revision": "20461acb889870fa608b18f9d2eb8eff9f35d7ad"
+}

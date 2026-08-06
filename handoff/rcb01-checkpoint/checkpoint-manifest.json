@@ -1,0 +1,73 @@
+{
+  "experiment_id": "RCB-01",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "f586082af77f3a1000042ddf5d9915b3eee27caded21484d89f6c49704db4656",
+      "size": 1464
+    },
+    {
+      "path": "restore.ps1",
+      "sha256": "82bfd583aeda8844db123387a0a22ac4c62b9841be203cb928694807a5753365",
+      "size": 3302
+    },
+    {
+      "path": "runner/fake_codex.cmd",
+      "sha256": "3044fc6bd1a9024e2cdf7e47fb14bb120d2b8a0abe7ab790ba666fa71ff4d979",
+      "size": 65
+    },
+    {
+      "path": "runner/fake_codex.py",
+      "sha256": "5de04a21ed6318171e398efbf5136e4bf088cb530adcac744a1b2b182a3b6ede",
+      "size": 4300
+    },
+    {
+      "path": "runner/run_reviewer_experiment.py",
+      "sha256": "22c41e5d4e5f837c3dbe33f86cbb8f18f9565f5324ae4c0ea4be3493ea6e5d61",
+      "size": 42087
+    },
+    {
+      "path": "state/experiment-freeze.json",
+      "sha256": "2029440d51ad4b09b8b2b209d67e06d442cd5cf4d4d053ca6192a6c8c034fecb",
+      "size": 8932
+    },
+    {
+      "path": "state/model-availability.json",
+      "sha256": "feeb89b0ea398ed08fad75c170ab1fc58d86c42687b5ce42838548ef2b19bd74",
+      "size": 865
+    },
+    {
+      "path": "state/resume-state.json",
+      "sha256": "b935dc490410556a73de16a1b038b92840e78b530e7de15f56c6c6b7511f8fa4",
+      "size": 530
+    },
+    {
+      "path": "verification-results/C1.json",
+      "sha256": "cc0f486dcd3797e77ba8ec71a51f8211c2cdda79d8cbcde960e1da2b19a1047a",
+      "size": 1747
+    },
+    {
+      "path": "verification-results/C2.json",
+      "sha256": "cf6dbe5be5b991e9d982801bbd83e9dd45cc8b832c1f7ae870a0f9418751287a",
+      "size": 1988
+    },
+    {
+      "path": "verification-results/C3.json",
+      "sha256": "f417a1eeb8230045b162abe33d1ef32c3745a1373b400784b8a0b9098553d0e4",
+      "size": 2085
+    },
+    {
+      "path": "verification-results/C4.json",
+      "sha256": "b1d0a3aaae5f2330a58cdd8f2b7f1d4182c0465c8f77c993c4cbe16998844198",
+      "size": 2349
+    },
+    {
+      "path": "verification-results/C5.json",
+      "sha256": "89f0a05908b6970c314e311c7469ae6905587b5723d85a9af6bfed31d61de8ca",
+      "size": 2198
+    }
+  ],
+  "generator_revision": "4e195df3f27a9ce8037d9ba6ccbd173fdd8c0105",
+  "next_run": "10-C5-B1",
+  "schema_version": 1
+}

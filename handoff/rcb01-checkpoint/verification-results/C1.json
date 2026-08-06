@@ -1,0 +1,39 @@
+{
+  "case_id": "C1",
+  "commands": [
+    {
+      "command": "python -m compileall src scripts/check_repository_hygiene.py",
+      "duration_seconds": 2.109,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "8a1993e1a4a204edaf3fac79f895b62f2d42ba1fa7df97e75ad0422652d719e5"
+    },
+    {
+      "command": "python -m pytest tests/test_smoke.py::test_finish_cli_summarizes_successful_loop tests/test_smoke.py::test_finish_report_preserves_missing_reviewer_line_and_verification_statuses -q",
+      "duration_seconds": 60.0,
+      "exit_code": null,
+      "status": "timed_out",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "ruff check src/vega/finish_presentation.py src/vega/finish_runtime.py tests/test_smoke.py",
+      "duration_seconds": 0.797,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "command": "git diff --check f7c8e853d58223339a5423f641d361758a4c5c46 3b25afc45cb67ce737cffa5021d3963d1fcba64b",
+      "duration_seconds": 0.437,
+      "exit_code": 0,
+      "status": "passed",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "schema_version": 1,
+  "source_revision": "3b25afc45cb67ce737cffa5021d3963d1fcba64b"
+}
