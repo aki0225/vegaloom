@@ -1,0 +1,90 @@
+{
+  "budgets": {
+    "context_appendix_max_chars": 20000,
+    "core_pack_max_chars": 100000,
+    "reviewer_diff_max_chars": 50000,
+    "timeout_seconds": 900,
+    "total_prompt_max_chars": 120000
+  },
+  "cases": [
+    {
+      "base_revision": "f7c8e853d58223339a5423f641d361758a4c5c46",
+      "candidate_revision": "3b25afc45cb67ce737cffa5021d3963d1fcba64b",
+      "case_id": "C1",
+      "expected_changed_file_count": 8,
+      "expected_diff_sha256": "5c1a1d4c054e6f9a383211f74ba29a03fbc891f551778fd30b66dfe3a9427849",
+      "expected_diff_size": 46902,
+      "task": "在不增加模型调用、命令、状态或第二套裁决的前提下，重排 Finish 第一屏，使用户能判断实际变更、确定性 Gate、验证、Reviewer、证据限制和下一步；保持既有成功语义与高风险人工确认语义。",
+      "verification_commands": [
+        "python -m compileall src scripts/check_repository_hygiene.py",
+        "python -m pytest tests/test_smoke.py::test_finish_cli_summarizes_successful_loop tests/test_smoke.py::test_finish_report_preserves_missing_reviewer_line_and_verification_statuses -q",
+        "ruff check src/vega/finish_presentation.py src/vega/finish_runtime.py tests/test_smoke.py",
+        "git diff --check f7c8e853d58223339a5423f641d361758a4c5c46 3b25afc45cb67ce737cffa5021d3963d1fcba64b"
+      ]
+    },
+    {
+      "base_revision": "6c106c2f02c0e128770bf30d25e400ce88a8befe",
+      "candidate_revision": "7b1f283b4506902510e5b3d3f3e5caab91969f25",
+      "case_id": "C2",
+      "expected_changed_file_count": 6,
+      "expected_diff_sha256": "31ea589e9479ebd3f6c567db5b332fc28334ebe6886006c77baa02da50cf7be4",
+      "expected_diff_size": 10248,
+      "task": "收紧 Worker 自检边界，避免自检留下 ignored、未跟踪文件或 Git 状态变化，同时保留 Vega 的固定验证、fail-closed、人工清理和 Finish 行为。",
+      "verification_commands": [
+        "python -m compileall src scripts/check_repository_hygiene.py",
+        "python -m pytest tests/test_p0_regressions.py::test_auto_worker_cannot_mutate_existing_ignored_content_before_verification tests/test_p0_regressions.py::test_auto_worker_cannot_mutate_git_control_files tests/test_smoke.py::test_loop_writes_project_context_into_worker_prompt tests/test_smoke.py::test_loop_auto_stops_on_workspace_pollution_before_review -q",
+        "ruff check src/vega/loop_prompts.py src/vega/loop_runtime.py src/vega/project_context.py src/vega/run_status.py tests/test_p0_regressions.py tests/test_smoke.py",
+        "git diff --check 6c106c2f02c0e128770bf30d25e400ce88a8befe 7b1f283b4506902510e5b3d3f3e5caab91969f25"
+      ]
+    },
+    {
+      "base_revision": "12a2f0d1529780e0c5f5423d57f76a80901a7808",
+      "candidate_revision": "dce7d35ad681a3efc1923a132e502dcaff2eabe6",
+      "case_id": "C3",
+      "expected_changed_file_count": 4,
+      "expected_diff_sha256": "be495418ccd5aec794acad7568dedcda3558fb66e32f32a2c48045c882a309a2",
+      "expected_diff_size": 8396,
+      "task": "隔离 Codex 或 Vega 自己产生的 workspace 噪声，同时保持普通项目文件、未跟踪文件和 ignored 文件的 fail-closed 检查，不扩大 harness-owned 豁免范围。",
+      "verification_commands": [
+        "python -m compileall src scripts/check_repository_hygiene.py",
+        "python -m pytest tests/test_workspace_snapshot_budget.py::test_workspace_check_excludes_same_repo_vega_run_artifacts tests/test_workspace_snapshot_budget.py::test_review_snapshot_ignores_owned_run_changes_but_keeps_other_untracked tests/test_workspace_snapshot_budget.py::test_workspace_check_keeps_non_owned_untracked_paths_fail_closed tests/test_workspace_snapshot_budget.py::test_verification_temp_root_rejects_logical_path_resolution_mismatch -q",
+        "ruff check src/vega/codex_workspace.py src/vega/git_inventory.py src/vega/workspace_check.py src/vega/workspace_inventory.py tests/test_workspace_snapshot_budget.py",
+        "git diff --check 12a2f0d1529780e0c5f5423d57f76a80901a7808 dce7d35ad681a3efc1923a132e502dcaff2eabe6"
+      ]
+    },
+    {
+      "base_revision": "1f68e3a8b3c224d9946f3cdb2aa8af19285a0c5b",
+      "candidate_revision": "0ceb78945c2ef3287cd9acdc53bde099939b679c",
+      "case_id": "C4",
+      "expected_changed_file_count": 11,
+      "expected_diff_sha256": "c3a182b479115c5926fb146658f5721030ba9c8ebe6cdd313c7f347f06594123",
+      "expected_diff_size": 34281,
+      "task": "为 Codex JSONL 执行显示实时进度，同时保证原始输出完整落盘，并保持 timeout、stop、heartbeat 和最终消息解析的既有语义。",
+      "verification_commands": [
+        "python -m compileall src scripts/check_repository_hygiene.py",
+        "python -m pytest tests/test_cli_progress.py::test_execution_progress_is_stderr_only_and_uses_safe_step_labels tests/test_execution_control_safety.py::test_codex_exec_runner_emits_only_sanitized_jsonl_progress tests/test_execution_control_safety.py::test_codex_exec_runner_rejects_success_without_final_message tests/test_execution_control_safety.py::test_owned_process_observes_complete_lines_before_child_exit tests/test_execution_control_safety.py::test_output_reader_start_failure_terminates_owned_process tests/test_smoke.py::test_codex_exec_runner_builds_allowlisted_role_command tests/test_smoke.py::test_codex_exec_runner_executes_raw_command_but_redacts_result_command -q",
+        "ruff check src/vega/cli_support.py src/vega/execution_control.py src/vega/execution_output.py src/vega/runner.py tests/test_cli_progress.py tests/test_execution_control_safety.py tests/test_smoke.py",
+        "git diff --check 1f68e3a8b3c224d9946f3cdb2aa8af19285a0c5b 0ceb78945c2ef3287cd9acdc53bde099939b679c"
+      ]
+    },
+    {
+      "base_revision": "09c1001eee0b04f9ebbaaf8b7d3183aa7ac1c308",
+      "candidate_revision": "20461acb889870fa608b18f9d2eb8eff9f35d7ad",
+      "case_id": "C5",
+      "expected_changed_file_count": 7,
+      "expected_diff_sha256": "86229dd5e3cec182b007433afb7476fbd6a17837d27796b4e7acb26050e66fc0",
+      "expected_diff_size": 15889,
+      "task": "加固 Reviewer 对必审高风险类别和完整变更文件清单的输出契约，保持现有 fail-closed、风险披露和架构增长门禁，不增加新的默认 Runtime 或成功状态。",
+      "verification_commands": [
+        "python -m compileall src scripts/check_repository_hygiene.py",
+        "python -m pytest tests/test_execution_control_safety.py::test_codex_exec_runner_writes_output_schema_inside_execution_dir tests/test_required_risk_review_runtime.py::test_low_risk_prompt_reserves_disclosures_for_gate_ids tests/test_required_risk_review_runtime.py::test_required_risk_schema_requires_exact_disclosure_count tests/test_smoke.py::test_loop_uses_separate_worker_and_reviewer_codex_options tests/test_smoke.py::test_auto_loop_keeps_start_time_reviewer_policy_after_worker_changes_config -q",
+        "ruff check src/vega/review_runtime.py src/vega/risk_review_reporting.py src/vega/risk_review_runtime.py src/vega/runner.py tests/test_execution_control_safety.py tests/test_required_risk_review_runtime.py tests/test_smoke.py",
+        "git diff --check 09c1001eee0b04f9ebbaaf8b7d3183aa7ac1c308 20461acb889870fa608b18f9d2eb8eff9f35d7ad"
+      ]
+    }
+  ],
+  "experiment_id": "RCB-01",
+  "runtime_commit": "bec82840ae9e3815b860686095c531418c011821",
+  "runtime_src_tree": "c016a28abb6384e783db2fdec74d70396d785db2",
+  "schema_version": 1
+}

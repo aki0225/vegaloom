@@ -38,8 +38,8 @@ jobs:
 
       - name: 编译与静态检查
         run: |
-          python -m compileall src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/build_showcase_data.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py scripts/run_assurance_stage3_dml_backfill_experiment.py
-          ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/build_showcase_data.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py scripts/run_assurance_stage3_dml_backfill_experiment.py
+          python -m compileall src scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/build_showcase_data.py scripts/rcb01_materializer.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py scripts/run_assurance_stage3_dml_backfill_experiment.py
+          ruff check src tests scripts/check_repository_hygiene.py scripts/check_architecture_growth.py scripts/build_showcase_data.py scripts/rcb01_materializer.py scripts/run_assurance_stage2_sqlite_experiment.py scripts/run_assurance_stage2_expand_contract_experiment.py scripts/run_assurance_stage3_dml_backfill_experiment.py
 
       - name: 检查仓库路径与私密文件卫生
         shell: bash
@@ -217,6 +217,7 @@ jobs:
               tests/test_assurance_stage2_sqlite_experiment.py
               tests/test_assurance_stage2_expand_contract_experiment.py
               tests/test_assurance_stage3_dml_backfill_experiment.py
+              tests/test_rcb01_materializer.py
 
     steps:
       - name: 检出源码
