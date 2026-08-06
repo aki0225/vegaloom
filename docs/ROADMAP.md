@@ -1,10 +1,10 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-05
+> 更新时间：2026-08-06
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
-> 当前顺序：Phase 4 真实使用验收已完成；进入日常使用观察。下一步只预注册
-> Reviewer Context Bootstrap 对照实验，不启动 Stage 4 或新的 Runtime、Memory、LangGraph
+> 当前顺序：Phase 4 真实使用验收已完成；继续日常使用观察。Reviewer Context Bootstrap
+> 对照实验已完成预注册、尚未运行；不启动 Stage 4 或新的 Runtime、Memory、LangGraph
 > 集成，也不在取得实验结果前改变默认 Reviewer。
 
 本文是 Vega 当前路线的统一入口，只回答：
@@ -30,7 +30,7 @@ v0.1.4 发布（完成）
   -> 改进现有 Finish 第一屏（完成）
   -> 真实使用验收（完成）
   -> 停止扩张，进入日常使用观察（当前）
-  -> 预注册 Reviewer Context Bootstrap 对照实验（下一步）
+  -> Reviewer Context Bootstrap 对照实验（已预注册，未运行）
 ```
 
 Phase 3 已完成：
@@ -55,12 +55,15 @@ Phase 4 已完成：
 
 PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤，但该门禁只证明
 `reviewed_files` 路径声明完整，不证明 Reviewer 已理解未修改的调用方、测试、配置和接口契约。
-因此当前唯一的研究性下一步是先预注册下述对照实验；实验结果形成前不修改默认 Runtime。
+因此当前唯一的研究性下一步是按正式预注册物化并运行下述对照实验；实验结果形成前不修改
+默认 Runtime。完整合同见
+[`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
 
 ### RCB-01：Reviewer Context Bootstrap 对照实验
 
-- 状态：`preregistration-needed`
-- 基线：`main@bec8284`，使用当前 Review Pack、项目上下文、只读 Reviewer 和文件覆盖门禁。
+- 状态：`preregistered / not-run`
+- Runtime 代码基线：`main@bec8284`；文档登记基线：`main@6fa3f91`。
+- 两组共同使用当前 Review Pack、项目上下文、只读 Reviewer 和文件覆盖门禁。
 - 问题：Reviewer 已获得任务、规则、项目画像、完整 Diff 和测试证据，也能只读访问目标仓库；
   但当前协议没有要求它在给出 verdict 前独立检查未修改的调用方、被调用方、相邻测试、配置或
   公共契约。项目画像提供导航，不等于完成影响面理解。
@@ -82,32 +85,32 @@ PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤�
 1. 先冻结 5 个真实历史 PR；至少 3 个案例的正确审查必须读取未修改文件才能发现关键风险。
 2. 每个案例冻结任务、目标 revision、Diff、验证证据、模型、reasoning effort、超时和
    Reviewer Prompt 预算，不按运行结果临时修改。
-3. A 组使用 `main@bec8284` 的当前 Reviewer。
-4. B 组只增加以下变量：
-   - 基于 tracked revision 生成的项目稳定地图；
-   - 从 changed files 派生的相邻测试、导入、反向引用、配置、接口和架构文档候选；
-   - 同一只读 Reviewer 会话内先 Reconnaissance、后 Verdict；
-   - 结构化 `context_evidence`，记录路径、角色和相关原因。
-5. A/B 顺序在运行前固定并交叉排列，禁止只保留成功样本。
-6. Golden finding 由独立人工先冻结；实验实现者不得根据 Reviewer 输出反向修改标签。
+3. A 组使用 `main@bec8284` 的 Reviewer Prompt、输出 Schema 和只读执行合同。
+4. B 组只在字节一致的 Core Review Pack 后增加以下变量：
+   - 确定性 `impact-candidates.json`；
+   - 同一只读 Reviewer 会话内先做一次有目标的 Reconnaissance，再输出 Verdict。
+5. `project-context.md` 在 A、B 两组中保持一致，不重复生成项目稳定地图。
+6. 不修改 `ReviewVerdict` Schema；实际读取优先由执行 Trace 证明，Reviewer 自述只算声明。
+7. A/B 顺序在运行前固定并交叉排列，禁止只保留成功样本。
+8. Golden finding 由独立人工先冻结；实验实现者不得根据 Reviewer 输出反向修改标签。
 
 第一版 B 组只允许使用 `git ls-files`、`git grep`、路径、命名和 manifest 启发式生成候选。
 没有证据证明这些启发式不足前，不增加语言服务器、全量调用图或复杂索引。
 
 记录指标：
 
-- `context_dependent_finding_recall`：需要未修改文件上下文的 Golden finding 命中数；
+- 3 个上下文依赖案例的 6 次 Golden 命中机会；
 - `false_positive_count`：无法由代码、规则或测试证据支持的 finding 数量；
 - `relevant_context_precision`：实际有助于判断的上下文路径占候选路径的比例；
 - `reviewer_duration_seconds` 与 `reviewer_tokens`；
-- `needs_human_rate`；
-- Reviewer 是否覆盖 changed files、直接依赖、相关测试和契约位置。
+- `needs_human` 的具体原因；
+- Reviewer 是否实际读取直接依赖、相关测试和契约位置。
 
 阶段性判断：
 
-- `candidate-for-opt-in`：至少形成 3 个有效上下文依赖案例；B 组比 A 组多发现至少 2 个
-  Golden finding，误报最多增加 1 个，Reviewer Token 与耗时中位数均不超过 A 组的
-  `1.5x`。
+- `candidate-for-opt-in`：B 组比 A 组多命中至少 2 次、覆盖至少 2 个上下文案例，误报最多
+  增加 1 个，Reviewer Token 与耗时中位数均不超过 A 组的 `1.5x`，且安全负向对照不重复
+  产生无依据高严重级别 finding。
 - `continue-experiment`：出现有效改善，但样本、标签一致性或成本证据不足。
 - `reject`：没有改善真实 finding，主要收益只是增加文件数量，或 Token/耗时持续超过
   `1.5x`。
@@ -121,13 +124,13 @@ PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤�
 4. 只有 `candidate-for-opt-in` 才讨论独立 PR；进入主线前仍需验证向后兼容、Prompt
    截断、敏感信息脱敏、跨平台行为和完整 CI。
 
-明天的固定起点：
+下一次执行的固定起点：
 
-1. 拉取最新 `main`，确认基线包含 PR `#49`；
-2. 创建唯一短期实验分支；
-3. 先登记 5 个案例、Golden finding、固定变量和 A/B 顺序；
-4. 在案例冻结前不修改 `review_runtime.py`；
-5. 完成首轮 A 组基线后，再决定是否实现最小 B 组。
+1. 从本文冻结的 5 个案例和 20 次顺序开始，不再继续筛选替代 PR；
+2. 先实现实验专用的 deterministic materializer、候选生成器和离线校验；
+3. 物化 Core Review Pack、验证证据和全部哈希后，才允许首个模型调用；
+4. 不修改 `review_runtime.py`，不接入默认 CLI，不改变默认 Reviewer；
+5. 固定顺序全部运行后再评分，不根据中间结果修改 Prompt、Golden 或候选规则。
 
 CRWP-V1 已完成合同允许的全部处理：
 
@@ -439,6 +442,17 @@ PR `#49` 已保证完整 changed files 不会被 Reviewer 重点摘要隐藏，�
 Golden finding、A/B 顺序和成本预算；没有至少 3 个真实上下文依赖案例，不实现或宣称
 Reviewer Context Bootstrap 有效。实验失败时停止，不通过向量库、知识图谱、多 Reviewer 或
 新 Runtime 扩大方案。
+
+### 2026-08-06：完成 Reviewer Context Bootstrap 正式预注册
+
+五个历史案例、三个上下文依赖 Golden、一个 Diff 自足正例、一个安全负向对照、20 次固定
+顺序、模型预算、A/B 唯一变量和停止条件已经冻结。B 组不再重复生成项目稳定地图，只追加
+确定性 `impact-candidates.json` 和一次有目标的只读 Reconnaissance；A、B 两组的 Core Review
+Pack 必须字节一致。
+
+本决策仍不改变默认 Reviewer。下一步只物化实验专用 Artifact 和离线校验，未完成哈希绑定前
+不启动模型调用；详细合同见
+[`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
 
 ## 七、更新规则
 

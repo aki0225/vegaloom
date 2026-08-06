@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-05
+> 更新时间：2026-08-06
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -15,6 +15,7 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
+| 查看 Reviewer 上下文对照实验 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 已预注册，未运行 |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
 | 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
@@ -34,6 +35,20 @@
 
 - [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：已完成阶段与验收记录。
 - [`ROADMAP.md`](ROADMAP.md)：当前观察期和冻结方向。
+
+### Reviewer Context Bootstrap 对照实验
+
+PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但路径声明完整不等于理解
+未修改的调用方、测试、配置和公共契约。`RCB-01` 已完成正式预注册，尚未运行：
+
+- 冻结 3 个上下文依赖正例、1 个 Diff 自足正例和 1 个安全负向对照；
+- A、B 两组使用字节一致的 Core Review Pack；
+- B 组只增加确定性 `impact-candidates.json` 和一次有目标的只读 Reconnaissance；
+- 不修改默认 Reviewer，不新增 Runtime、CLI、状态或 Verdict 字段；
+- 只有达到预注册门槛，才讨论默认关闭的 opt-in 或 shadow 方案。
+
+完整案例、20 次固定顺序、模型预算、评分规则和停止条件见
+[`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
 
 ### 已完成的当前阶段
 
