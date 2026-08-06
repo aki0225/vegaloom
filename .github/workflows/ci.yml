@@ -143,6 +143,26 @@ jobs:
       - name: 安装测试依赖
         run: python -m pip install -e ".[dev]" pytest-timeout
 
+      - name: 获取 RCB-01 历史提交
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          mapfile -t revisions < <(
+            python - <<'PY' | tr -d '\r'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("scripts/rcb01_cases.json").read_text(encoding="utf-8"))
+          revisions = {
+              case[field]
+              for case in payload["cases"]
+              for field in ("base_revision", "candidate_revision")
+          }
+          print("\n".join(sorted(revisions)))
+          PY
+          )
+          git fetch --no-tags --depth=1 origin "${revisions[@]}"
+
       - name: PR 编译与节点收集
         if: github.event_name == 'pull_request'
         run: |
@@ -232,6 +252,26 @@ jobs:
 
       - name: 安装测试依赖
         run: python -m pip install -e ".[dev]" pytest-timeout
+
+      - name: 获取 RCB-01 历史提交
+        if: matrix.name == 'config-assurance-pilot'
+        shell: bash
+        run: |
+          mapfile -t revisions < <(
+            python - <<'PY' | tr -d '\r'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("scripts/rcb01_cases.json").read_text(encoding="utf-8"))
+          revisions = {
+              case[field]
+              for case in payload["cases"]
+              for field in ("base_revision", "candidate_revision")
+          }
+          print("\n".join(sorted(revisions)))
+          PY
+          )
+          git fetch --no-tags --depth=1 origin "${revisions[@]}"
 
       - name: 运行测试分片
         shell: bash
