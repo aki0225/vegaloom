@@ -5,9 +5,9 @@
 ## 当前检查点
 
 - 冻结代码：`4e195df3f27a9ce8037d9ba6ccbd173fdd8c0105`
-- 已消费：`01-C1-A1` 至 `10-C5-B1`
-- 下一项：`11-C5-B2`
-- 下一次确认：`RCB-01-RUN-11`
+- 已消费：`01-C1-A1` 至 `11-C5-B2`
+- 下一项：`12-C5-A2`
+- 下一次确认：`RCB-01-RUN-12`
 - Runner、Freeze、模型、推理强度、顺序和评分规则均保持冻结
 
 ## 两层材料
@@ -25,7 +25,7 @@ Git 中不保存 Reviewer 输出、JSONL、Token、finding 或本机绝对路径
 
 ### 私有证据面
 
-私有归档 `RCB-01-through-10-C5-B1.zip` 保存 Run 01～10 的原始 Artifact
+私有归档 `RCB-01-through-11-C5-B2.zip` 保存 Run 01～11 的原始 Artifact
 （不包含可重新物化的 `candidate-worktree`），并附带逐文件 SHA-256 清单。
 归档必须通过私有介质或加密存储传递，不能上传到公开仓库。
 
@@ -74,8 +74,8 @@ pwsh -File <handoff-worktree>\handoff\rcb01-checkpoint\restore.ps1 `
 恢复后必须看到：
 
 ```text
-next_run = 11-C5-B2
-run_count_existing = 10
+next_run = 12-C5-A2
+run_count_existing = 11
 ```
 
 恢复完成后，再按冻结确认值执行下一项。实验结束前不要删除源机器上的原始

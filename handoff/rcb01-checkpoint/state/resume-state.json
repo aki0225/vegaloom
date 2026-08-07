@@ -14,19 +14,20 @@
     "07-C4-B1",
     "08-C4-A1",
     "09-C5-A1",
-    "10-C5-B1"
+    "10-C5-B1",
+    "11-C5-B2"
   ],
   "next_run": {
-    "sequence": 11,
-    "label": "11-C5-B2",
-    "confirmation": "RCB-01-RUN-11"
+    "sequence": 12,
+    "label": "12-C5-A2",
+    "confirmation": "RCB-01-RUN-12"
   },
   "private_artifact_bundle": {
-    "filename": "RCB-01-through-10-C5-B1.zip",
-    "sha256": "7fc57e917038be81d29f1325cf618eb1fa3073ce7b220eab1e7e1cc6a8012b73",
-    "size": 1429072,
-    "artifact_file_count": 146,
-    "artifact_manifest_sha256": "1100a0cd90fd23b4deb89f60fb7150e23d3e30c7d39d960c2b61cfedbfe910d5"
+    "filename": "RCB-01-through-11-C5-B2.zip",
+    "sha256": "c85f3db92eb20c472c06154359df856dc2d67123e97c45d3a1e1285d71710930",
+    "size": 1739817,
+    "artifact_file_count": 161,
+    "artifact_manifest_sha256": "09e5fae104980050507edca3ff9993615bc786d2c8df1692a03798ccc5f94447"
   },
   "result_artifacts_included": false,
   "reason": "远端只保存恢复控制面；中间 Reviewer 输出不进入公开 Git，避免污染后续独立会话。"
