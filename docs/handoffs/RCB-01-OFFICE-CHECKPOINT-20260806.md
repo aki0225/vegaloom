@@ -4,18 +4,18 @@
 >
 > 冻结代码：`4e195df3f27a9ce8037d9ba6ccbd173fdd8c0105`
 >
-> 当前已消费：`01-C1-A1` 至 `12-C5-A2`
+> 当前已消费：`01-C1-A1` 至 `14-C4-B2`
 >
-> 下一运行：`13-C4-A2`
+> 下一运行：`15-C3-B2`
 
 ## 当前状态
 
-- Run 01 至 Run 12 均已登记，禁止重跑。
-- Run 12 在冻结的 `gpt-5.6-sol/high`、只读、临时会话和 900 秒上限下正常结束。
+- Run 01 至 Run 14 均已登记，禁止重跑。
+- Run 13 和 Run 14 均在冻结的 `gpt-5.6-sol/high`、只读、临时会话和 900 秒上限下正常结束。
 - Runner、Prompt、案例、模型、推理强度、预算、顺序和评分规则继续保持 Freeze。
 - 主工作区的原始 Artifact 仍保留在忽略目录，没有进入 Git。
 - 本分支不包含 Reviewer 结论、中间 finding、Token 或会话 JSONL。
-- 私有归档 `RCB-01-through-12-C5-A2.zip` 保存 Run 01～12 的原始证据，
+- 私有归档 `RCB-01-through-14-C4-B2.zip` 保存 Run 01～14 的原始证据，
   不包含可重新物化的 `candidate-worktree`；归档的 SHA-256 已写入
   `handoff/rcb01-checkpoint/state/resume-state.json`。
 
@@ -62,8 +62,8 @@ pwsh -File `
 5. 恢复脚本完成后，必须确认：
 
 ```text
-next_run = 13-C4-A2
-run_count_existing = 12
+next_run = 15-C3-B2
+run_count_existing = 14
 ```
 
 6. 只在预检通过后执行下一项：
@@ -71,7 +71,7 @@ run_count_existing = 12
 ```powershell
 .local-validation\rcb-01\venv\Scripts\python.exe `
   .local-validation\rcb-01\run_reviewer_experiment.py `
-  run --sequence 13 --confirm RCB-01-RUN-13
+  run --sequence 15 --confirm RCB-01-RUN-15
 ```
 
 ## 2026-08-07 恢复验证
@@ -90,6 +90,9 @@ Run 11 完成后又执行了一次私有归档往返校验，161 个证据文件
 
 Run 12 完成后生成了新的私有归档，176 个证据文件通过清单与 SHA-256
 检查；恢复验证得到 12 个连续运行目录，下一项为 `13-C4-A2`。
+
+Run 13 和 Run 14 连续完成后生成批次检查点，206 个证据文件进入新的私有
+归档；恢复验证得到 14 个连续运行目录，下一项为 `15-C3-B2`。
 
 ## 恢复约束
 
