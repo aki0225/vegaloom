@@ -2,14 +2,19 @@
   "experiment_id": "RCB-01",
   "files": [
     {
+      "path": "private_checkpoint.py",
+      "sha256": "bf6352dc773d1c71781690aa70c9ba85c610fe1d372dde10833aec2531673a99",
+      "size": 19052
+    },
+    {
       "path": "README.md",
-      "sha256": "f586082af77f3a1000042ddf5d9915b3eee27caded21484d89f6c49704db4656",
-      "size": 1464
+      "sha256": "a300ec9e99cc0c05b1ed76385a10e700babed7450d59f02b1460b2f2f226f9c1",
+      "size": 2675
     },
     {
       "path": "restore.ps1",
-      "sha256": "82bfd583aeda8844db123387a0a22ac4c62b9841be203cb928694807a5753365",
-      "size": 3302
+      "sha256": "33d774778bb7e2f359bf08ce15b6640a7332e1cd500d23b324b4a57b10a18155",
+      "size": 4571
     },
     {
       "path": "runner/fake_codex.cmd",
@@ -38,8 +43,8 @@
     },
     {
       "path": "state/resume-state.json",
-      "sha256": "b935dc490410556a73de16a1b038b92840e78b530e7de15f56c6c6b7511f8fa4",
-      "size": 530
+      "sha256": "316444e926f4a56338c3ff116a46548f44adae2cf35f3acad0dcef87ee96371b",
+      "size": 1071
     },
     {
       "path": "verification-results/C1.json",
@@ -68,6 +73,6 @@
     }
   ],
   "generator_revision": "4e195df3f27a9ce8037d9ba6ccbd173fdd8c0105",
-  "next_run": "10-C5-B1",
-  "schema_version": 1
+  "next_run": "11-C5-B2",
+  "schema_version": 2
 }

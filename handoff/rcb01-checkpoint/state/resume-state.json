@@ -1,7 +1,9 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "experiment_id": "RCB-01",
   "generator_revision": "4e195df3f27a9ce8037d9ba6ccbd173fdd8c0105",
+  "runner_sha256": "22c41e5d4e5f837c3dbe33f86cbb8f18f9565f5324ae4c0ea4be3493ea6e5d61",
+  "freeze_sha256": "2029440d51ad4b09b8b2b209d67e06d442cd5cf4d4d053ca6192a6c8c034fecb",
   "consumed_run_labels": [
     "01-C1-A1",
     "02-C1-B1",
@@ -11,13 +13,21 @@
     "06-C3-B1",
     "07-C4-B1",
     "08-C4-A1",
-    "09-C5-A1"
+    "09-C5-A1",
+    "10-C5-B1"
   ],
   "next_run": {
-    "sequence": 10,
-    "label": "10-C5-B1",
-    "confirmation": "RCB-01-RUN-10"
+    "sequence": 11,
+    "label": "11-C5-B2",
+    "confirmation": "RCB-01-RUN-11"
+  },
+  "private_artifact_bundle": {
+    "filename": "RCB-01-through-10-C5-B1.zip",
+    "sha256": "7fc57e917038be81d29f1325cf618eb1fa3073ce7b220eab1e7e1cc6a8012b73",
+    "size": 1429072,
+    "artifact_file_count": 146,
+    "artifact_manifest_sha256": "1100a0cd90fd23b4deb89f60fb7150e23d3e30c7d39d960c2b61cfedbfe910d5"
   },
   "result_artifacts_included": false,
-  "reason": "中间 Reviewer 输出不进入远端 Git，避免污染后续独立会话。"
+  "reason": "远端只保存恢复控制面；中间 Reviewer 输出不进入公开 Git，避免污染后续独立会话。"
 }

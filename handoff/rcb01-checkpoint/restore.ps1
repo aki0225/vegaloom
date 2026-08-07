@@ -4,15 +4,32 @@ param(
     [string]$RepoRoot,
 
     [Parameter(Mandatory = $true)]
-    [string]$Python
+    [string]$Python,
+
+    [string]$PrivateCheckpoint
 )
 
 $ErrorActionPreference = "Stop"
-$expectedHead = "4e195df3f27a9ce8037d9ba6ccbd173fdd8c0105"
+# 恢复脚本会跨 PowerShell、Python 和 Git 传递中文状态，显式统一为 UTF-8，避免重定向时按系统代码页解码。
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = $utf8NoBom
+[Console]::OutputEncoding = $utf8NoBom
+$OutputEncoding = $utf8NoBom
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 $checkpointRoot = $PSScriptRoot
+$resumeStatePath = Join-Path $checkpointRoot "state\resume-state.json"
+$resumeState = Get-Content -LiteralPath $resumeStatePath -Raw | ConvertFrom-Json
+$expectedHead = $resumeState.generator_revision
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
 $pythonCommand = (Get-Command $Python -ErrorAction Stop).Source
 $localRoot = Join-Path $repo ".local-validation\rcb-01"
+if ($resumeState.experiment_id -ne "RCB-01") {
+    throw "resume-state 的实验标识不匹配"
+}
+if (-not $expectedHead) {
+    throw "resume-state 缺少 generator_revision"
+}
 if ((Split-Path -Leaf $repo) -ne "vegaloom") {
     throw "目标目录名必须为 vegaloom；项目画像会把目录名写入冻结 Prompt，其他名称会造成哈希漂移"
 }
@@ -72,14 +89,27 @@ foreach ($case in "C1", "C2", "C3", "C4", "C5") {
 }
 
 $formalRuns = Join-Path $localRoot "formal-runs"
-New-Item -ItemType Directory -Path $formalRuns | Out-Null
-$consumed = @(
-    "01-C1-A1", "02-C1-B1", "03-C2-B1",
-    "04-C2-A1", "05-C3-A1", "06-C3-B1",
-    "07-C4-B1", "08-C4-A1", "09-C5-A1"
-)
-foreach ($label in $consumed) {
-    New-Item -ItemType Directory -Path (Join-Path $formalRuns $label) | Out-Null
+$consumed = @($resumeState.consumed_run_labels)
+if ($consumed.Count -eq 0) {
+    throw "resume-state 缺少已消费序号"
+}
+if ($PrivateCheckpoint) {
+    $privateArchive = (Resolve-Path -LiteralPath $PrivateCheckpoint).Path
+    & $pythonCommand (Join-Path $checkpointRoot "private_checkpoint.py") restore `
+        --archive $privateArchive `
+        --destination $formalRuns `
+        --resume-state $resumeStatePath `
+        --runner (Join-Path $localRoot "run_reviewer_experiment.py") `
+        --freeze (Join-Path $localRoot "experiment-freeze.json")
+    if ($LASTEXITCODE -ne 0) {
+        throw "私有 Artifact 检查点恢复失败"
+    }
+}
+else {
+    New-Item -ItemType Directory -Path $formalRuns | Out-Null
+    foreach ($label in $consumed) {
+        New-Item -ItemType Directory -Path (Join-Path $formalRuns $label) | Out-Null
+    }
 }
 
 & $pythonCommand (Join-Path $localRoot "run_reviewer_experiment.py") preflight
@@ -87,4 +117,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "恢复后预检失败；不要修改 Freeze 或补跑已消费样本"
 }
 
-Write-Host "RCB-01 恢复完成；下一项固定为 10-C5-B1。"
+Write-Host "RCB-01 恢复完成；下一项固定为 $($resumeState.next_run.label)。"
