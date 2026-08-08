@@ -4,8 +4,8 @@
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 已完成并判定为
-> `insufficient-evidence`；RCB-02 在 Phase 0 因协议与真实关系不一致而停止。当前回到日常使用
-> 观察，不启动新的 Runtime、Memory、LangGraph 集成，也不改变默认 Reviewer。
+> `insufficient-evidence`；RCB-02 在 Phase 0 因协议与真实关系不一致而停止；RCB-03 只验证
+> Reviewer 自主形成有界风险假设的开发门槛。默认 Runtime 与 Reviewer 保持不变。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -32,6 +32,7 @@ v0.1.4 发布（完成）
   -> 停止扩张，进入日常使用观察（产品主线持续）
   -> RCB-01 Reviewer Context Bootstrap 对照实验（完成，insufficient-evidence）
   -> RCB-02 Diff-driven 符号检索离线验证（Phase 0 停止，未运行 Holdout）
+  -> RCB-03 有界假设调查（已预注册，开发门槛尚未运行）
 ```
 
 Phase 3 已完成：
@@ -57,8 +58,8 @@ Phase 4 已完成：
 PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤，但该门禁只证明
 `reviewed_files` 路径声明完整，不证明 Reviewer 已理解未修改的调用方、测试、配置和接口契约。
 RCB-02 的 Phase 0 已证明原计划的两跳 AST 假设不足，且 C3 存在历史标签误标，因此没有进入
-Holdout 或模型 A/B。当前没有自动进入下一项研究实验；在标签和复杂度预算重新冻结前，不修改
-默认 Runtime。RCB-01 完整合同见
+Holdout 或模型 A/B。RCB-03 已重新冻结 C3 标签和更小的 Prompt-only 开发门槛；它不提供候选
+清单、不实现静态关系图，也不修改默认 Runtime。RCB-01 完整合同见
 [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
 
 ### RCB-01：Reviewer Context Bootstrap 对照实验
@@ -144,6 +145,17 @@ RCB-02 Phase 0 的实际结果：
 4. 受限原型的通用合同测试为 4 个通过，C1-C3 精确开发集断言为 3 个失败；
 5. Holdout 未解封、未评分，未启动模型调用，也未修改默认 Reviewer；详细裁决见
    [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)。
+
+### RCB-03：有界假设调查开发门槛
+
+- 状态：`preregistered / not-run`。
+- A 组复用 RCB-01 的 C1-C3 Core Review Pack；B 组不接收候选文件，只追加一段固定调查协议。
+- B 组从 Diff 形成最多三个跨文件风险假设，最多使用 12 次只读搜索/读取命令，并最多读取 6 个
+  Diff 外文件。
+- 六次开发调用只有在 B 相对 A 增加至少两次 Golden 命中、误报不显著增加且 Token/耗时均不
+  超过 `1.5x` 时，才允许另行冻结新 Holdout。
+- 完整合同见
+  [`REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md`](REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md)。
 
 CRWP-V1 已完成合同允许的全部处理：
 
