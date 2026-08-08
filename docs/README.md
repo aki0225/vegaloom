@@ -17,7 +17,7 @@
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
-| 查看 RCB-02 离线检索计划 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | 草案，未开始 |
+| 查看 RCB-02 离线检索结果 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | Phase 0 停止，未运行 Holdout |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
 | 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
@@ -54,9 +54,10 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)，
 脱敏结果见 [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md)。
 
-当前不把 Context Appendix 接入主线。下一步只做离线的
-[`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)：
-先验证 `Diff → 符号 → 有界关系扩展 → 代码区段` 的必要路径召回，不调用模型，不修改默认 Reviewer。
+当前不把 Context Appendix 接入主线。后续离线计划
+[`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)
+已在 Phase 0 停止：开发集需要超出冻结两跳边界的字段数据流、工厂 dispatch 和嵌套实参来源
+分析，C3 还存在历史标签误标。Holdout 未解封、未评分，默认 Reviewer 没有改变。
 
 ### 已完成的当前阶段
 

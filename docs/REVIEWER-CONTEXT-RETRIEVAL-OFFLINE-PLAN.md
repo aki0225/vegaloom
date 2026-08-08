@@ -1,13 +1,44 @@
 # RCB-02 Reviewer 上下文离线检索计划
 
 > 实验 ID：`RCB-02`
-> 状态：`draft / not-started`
+> 状态：`phase-0-stopped / protocol-revision-required`
 > 登记日期：2026-08-08
 > 前置结果：[`eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md)
 
 本文是 RCB-01 之后的计划草案，不是开始模型调用的授权，也不是主线 Runtime 变更申请。
 只有本文的输入、标签、指标和停止条件再次冻结后，才允许执行离线脚本；离线门槛通过后，
 还需要单独预注册 RCB-03 Reviewer A/B 对照实验。
+
+## 执行结果：Phase 0 停止
+
+2026-08-08 完成关系可达性审计后，本计划没有进入 Phase 1，也没有解封或评分 Holdout，
+原因不是测试环境或 Provider 失败，而是开发集暴露了协议与真实代码关系不一致：
+
+1. C1 的两个必要区段可以由静态关系解释，但从 changed symbol 到根因需要反向 caller、
+   `LoopArtifactIntegrity` 字段生产者/消费者和约五段调用关系；这不符合本文冻结的普通两跳边界。
+2. C2 可以静态到达，但必须识别 `Runner` Protocol、`make_runner()` 工厂回退和
+   `CodexExecRunner.run()` 的具体 dispatch；简单的名称相同或 import 命中不构成有效关系链。
+3. C3 预注册材料把 `workspace_check.py` 中仅因前方 import 增行而平移的未修改调用点误写为
+   candidate Diff。真正关系还需要从 changed filter 反向到 `snapshot_workspace()`，再追踪
+   `ignored_path_exclusions` 的嵌套实参来源；它不是 `ignored_coverage_level()` 的同文件兄弟关系。
+4. RCB-01 control 只冻结 revision、Diff 和 task，没有为 RCB-02 冻结机器可读的 required
+   symbol/span 标签，无法在不补写评分合同的情况下正式计算 `required_span_recall_at_8`。
+
+一次受限原型验证了预算、稳定输出、tracked control 和简单一至两跳调用的基本合同，相关
+4 个测试通过；C1-C3 的精确开发集断言为 3 个失败。继续通过提高同文件关键词权重或把共享
+import 当作调用关系可以让路径看起来命中，但不能提供本文要求的可复核因果链，因此不计通过，
+也不提交为 Vega 能力。
+
+阶段裁决为 `stopped-before-holdout`：
+
+- 不运行 Holdout，不根据其标签调整检索器；
+- 不启动 RCB-03 模型 A/B；
+- 不修改 Runtime、Reviewer、CLI、Schema 或默认行为；
+- 不把两跳 AST 原型扩大成自研通用静态分析平台。
+
+后续若重新提出实验，必须先独立修正 C3 标签和机器可读评分合同，并在新协议中明确选择：
+接受更高的静态分析复杂度，或缩小研究问题到“只召回高置信直接关系”。不能沿用本文门槛，
+同时事后放宽关系深度来宣称通过。
 
 ## 一、要回答的问题
 

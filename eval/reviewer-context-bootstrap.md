@@ -136,3 +136,31 @@ Token 字段并非 20/20 可用。
 原始 Reviewer 输出、运行日志和 candidate worktree 保留在本地 ignored 验证目录，没有提交。
 本记录来自全部 20 次登记结果的脱敏汇总，不包含凭据、本机绝对路径或原始模型正文。公开记录
 能够审查样本完整性和裁决逻辑，但不能替代本地原始 Artifact 的逐字复核。
+
+## RCB-02 Phase 0：关系可达性审计
+
+> 审计日期：2026-08-08
+> 阶段裁决：`stopped-before-holdout`
+
+本轮只审计 C1-C3 的 Diff 种子到必要区段是否能由冻结的两跳 AST 关系解释，没有调用模型，
+没有修改 Runtime，也没有读取或评分独立 Holdout。
+
+审计结果：
+
+- C1 的必要区段位于 `validated_review_workspace_fingerprint()` 和
+  `_validate_iteration_review()`。从 changed `build_finish_summary()` 到这两个位置需要反向
+  caller、`LoopArtifactIntegrity` 字段生产者/消费者及约五段调用关系，不符合普通两跳边界。
+- C2 可由静态关系解释，但必须识别 `Runner` Protocol、`make_runner()` 工厂回退、具体
+  `CodexExecRunner.run()` dispatch 和 `run_owned_process()`，简单同名调用不能作为高置信证据。
+- C3 的真正必要调用点 `snapshot_workspace()` 没有被 candidate 修改，只因前方 import 增行而
+  从 base 行号平移。它通过嵌套关键字实参取得 `workspace_ignored_path_exclusions()`，并非与
+  changed `ignored_coverage_level()` 存在同文件语义关系。
+- RCB-01 control 没有冻结 RCB-02 所需的机器可读 symbol/span 标签，正式区段评分合同不完整。
+
+受限原型的预算、稳定输出、tracked control 和简单调用关系测试为 4 个通过；C1-C3 精确区段
+断言为 3 个失败。通过提高关键词权重或把共享 import 当作因果边可以制造表面命中，但无法满足
+“候选都有可复核关系链”的门槛，因此没有把原型提交为能力，也没有进入 Holdout。
+
+这个结果不证明所有 Diff-driven 检索都无效。它证明当前“标准库 AST + 普通两跳 + 最多 8 个
+区段”的复杂度预算无法覆盖已知开发集；继续实现需要先修正标签和重新预注册关系深度，不能在
+看到开发集后直接放宽原协议。

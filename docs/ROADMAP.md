@@ -4,8 +4,8 @@
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 已完成并判定为
-> `insufficient-evidence`；下一步只做 RCB-02 离线检索验证。不启动新的 Runtime、Memory、
-> LangGraph 集成，也不改变默认 Reviewer。
+> `insufficient-evidence`；RCB-02 在 Phase 0 因协议与真实关系不一致而停止。当前回到日常使用
+> 观察，不启动新的 Runtime、Memory、LangGraph 集成，也不改变默认 Reviewer。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -31,7 +31,7 @@ v0.1.4 发布（完成）
   -> 真实使用验收（完成）
   -> 停止扩张，进入日常使用观察（产品主线持续）
   -> RCB-01 Reviewer Context Bootstrap 对照实验（完成，insufficient-evidence）
-  -> RCB-02 Diff-driven 符号检索离线验证（当前计划，未开始）
+  -> RCB-02 Diff-driven 符号检索离线验证（Phase 0 停止，未运行 Holdout）
 ```
 
 Phase 3 已完成：
@@ -56,8 +56,9 @@ Phase 4 已完成：
 
 PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤，但该门禁只证明
 `reviewed_files` 路径声明完整，不证明 Reviewer 已理解未修改的调用方、测试、配置和接口契约。
-因此当前唯一的研究性下一步是先完成 RCB-02 的离线候选召回验证；在新的必要路径和代码区段
-召回达到门槛前，不修改默认 Runtime。RCB-01 完整合同见
+RCB-02 的 Phase 0 已证明原计划的两跳 AST 假设不足，且 C3 存在历史标签误标，因此没有进入
+Holdout 或模型 A/B。当前没有自动进入下一项研究实验；在标签和复杂度预算重新冻结前，不修改
+默认 Runtime。RCB-01 完整合同见
 [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
 
 ### RCB-01：Reviewer Context Bootstrap 对照实验
@@ -135,13 +136,13 @@ PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤�
 4. 只有 `candidate-for-opt-in` 才讨论独立 PR；进入主线前仍需验证向后兼容、Prompt
    截断、敏感信息脱敏、跨平台行为和完整 CI。
 
-下一步固定为 RCB-02 离线检索计划：
+RCB-02 Phase 0 的实际结果：
 
-1. 将 C1-C3 作为已知开发集，新增独立冻结的 Holdout 案例，防止针对旧 Golden 调参；
-2. 先做 Diff hunk 到符号、定义、引用、调用和 changed file 未修改区段的确定性召回；
-3. 先通过必要路径和代码区段离线门槛，再重新预注册任何模型 A/B 调用；
-4. 不修改 `review_runtime.py`，不接入默认 CLI，不改变默认 Reviewer；
-5. 详细输入、输出合同、指标和停止条件见
+1. C1 的精确根因需要约五段调用关系和字段生产者/消费者分析，超出冻结的普通两跳边界；
+2. C2 需要 Protocol、工厂和具体 Runner dispatch，属于可解释但尚未实现的静态关系；
+3. C3 需要反向 caller 与嵌套实参来源分析，且原材料把未修改调用点误写为 candidate Diff；
+4. 受限原型的通用合同测试为 4 个通过，C1-C3 精确开发集断言为 3 个失败；
+5. Holdout 未解封、未评分，未启动模型调用，也未修改默认 Reviewer；详细裁决见
    [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)。
 
 CRWP-V1 已完成合同允许的全部处理：
@@ -477,6 +478,16 @@ Context Appendix 没有带来 Golden 增量命中，必要路径召回只有 `20
 不启动新的模型 A/B，不引入向量库、知识图谱、LSP/SCIP 平台或第二 Reviewer。结果与计划分别见
 [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) 和
 [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)。
+
+### 2026-08-08：RCB-02 在 Phase 0 停止
+
+关系可达性审计发现，C1、C2、C3 分别依赖字段数据流、工厂 dispatch 和嵌套实参来源；原计划
+将它们概括为普通两跳调用或同文件关系并不准确。C3 的预注册材料还把仅因前方增行而平移的
+未修改代码误写为 candidate Diff。
+
+因此本轮没有为了通过开发集而增加模糊 import、同文件关键词或无界多跳，也没有打开 Holdout。
+默认 Runtime、Reviewer、CLI、Schema 和成功语义均未改变。任何后续实验都必须先修正独立标签，
+再明确静态分析复杂度预算；本计划不能通过事后放宽门槛继续执行。
 
 ## 七、更新规则
 
