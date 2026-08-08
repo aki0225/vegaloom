@@ -3,9 +3,9 @@
 > 更新时间：2026-08-08
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
-> 当前顺序：Phase 4 真实使用验收已完成；RCB-01 已完成并判定为
-> `insufficient-evidence`；RCB-02 在 Phase 0 因协议与真实关系不一致而停止；RCB-03 只验证
-> Reviewer 自主形成有界风险假设的开发门槛。默认 Runtime 与 Reviewer 保持不变。
+> 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
+> Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
+> 默认 Runtime 与 Reviewer 保持不变，主线回到真实日常使用观察。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -32,7 +32,7 @@ v0.1.4 发布（完成）
   -> 停止扩张，进入日常使用观察（产品主线持续）
   -> RCB-01 Reviewer Context Bootstrap 对照实验（完成，insufficient-evidence）
   -> RCB-02 Diff-driven 符号检索离线验证（Phase 0 停止，未运行 Holdout）
-  -> RCB-03 有界假设调查（已预注册，开发门槛尚未运行）
+  -> RCB-03 有界假设调查（完成，reject-before-holdout）
 ```
 
 Phase 3 已完成：
@@ -58,8 +58,9 @@ Phase 4 已完成：
 PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤，但该门禁只证明
 `reviewed_files` 路径声明完整，不证明 Reviewer 已理解未修改的调用方、测试、配置和接口契约。
 RCB-02 的 Phase 0 已证明原计划的两跳 AST 假设不足，且 C3 存在历史标签误标，因此没有进入
-Holdout 或模型 A/B。RCB-03 已重新冻结 C3 标签和更小的 Prompt-only 开发门槛；它不提供候选
-清单、不实现静态关系图，也不修改默认 Runtime。RCB-01 完整合同见
+Holdout 或模型 A/B。RCB-03 随后按修正标签完成更小的 Prompt-only 开发实验；B 只比 A 多命中
+一次 Golden，未达到进入 Holdout 的门槛。它没有提供候选清单、实现静态关系图或修改默认
+Runtime。RCB-01 完整合同见
 [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
 
 ### RCB-01：Reviewer Context Bootstrap 对照实验
@@ -148,14 +149,19 @@ RCB-02 Phase 0 的实际结果：
 
 ### RCB-03：有界假设调查开发门槛
 
-- 状态：`preregistered / not-run`。
+- 状态：`completed / reject-before-holdout`。
 - A 组复用 RCB-01 的 C1-C3 Core Review Pack；B 组不接收候选文件，只追加一段固定调查协议。
 - B 组从 Diff 形成最多三个跨文件风险假设，最多使用 12 次只读搜索/读取命令，并最多读取 6 个
   Diff 外文件。
-- 六次开发调用只有在 B 相对 A 增加至少两次 Golden 命中、误报不显著增加且 Token/耗时均不
-  超过 `1.5x` 时，才允许另行冻结新 Holdout。
+- 六次调用全部形成有效终态；A 命中 `0/3`，B 命中 `1/3`，只增加 1 次，不满足至少 `2/3`
+  和增量 2 次的门槛。
+- A/B Token 中位数为 682,980 / 526,043，耗时中位数为 332.266s / 296.531s；误报为 0 / 0，
+  三次 B 经逐条命令审计均满足只读预算。
+- 不进入 Holdout，不修改默认 Reviewer，也不继续增加 Prompt、静态关系图或检索基础设施。
 - 完整合同见
-  [`REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md`](REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md)。
+  [`REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md`](REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md)，
+  脱敏结果见
+  [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md)。
 
 CRWP-V1 已完成合同允许的全部处理：
 
@@ -500,6 +506,16 @@ Context Appendix 没有带来 Golden 增量命中，必要路径召回只有 `20
 因此本轮没有为了通过开发集而增加模糊 import、同文件关键词或无界多跳，也没有打开 Holdout。
 默认 Runtime、Reviewer、CLI、Schema 和成功语义均未改变。任何后续实验都必须先修正独立标签，
 再明确静态分析复杂度预算；本计划不能通过事后放宽门槛继续执行。
+
+### 2026-08-08：RCB-03 未通过 Holdout 门槛
+
+RCB-03 按固定模型、顺序和六次调用完成，所有样本均可解析、覆盖完整、终止确认且 worktree
+不变。B 在 C1 命中一项 Golden，但 C2、C3 均未命中；A 为 `0/3`，B 为 `1/3`，增量只有 1。
+三次 B 的只读命令预算、误报和中位成本均通过，仍不能替代预注册的命中门槛。
+
+正式裁决为 `reject-before-holdout`。不冻结新 Holdout，不修改默认 Reviewer，不继续增加提示层、
+静态关系图、检索服务或第二 Reviewer。主线回到真实日常使用观察；只有新的可重复失败证据才能
+启动另一份独立预注册。
 
 ## 七、更新规则
 

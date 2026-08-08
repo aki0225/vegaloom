@@ -18,7 +18,8 @@
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
 | 查看 RCB-02 离线检索结果 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | Phase 0 停止，未运行 Holdout |
-| 查看 RCB-03 开发实验 | [`REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md`](REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md) | 已预注册，尚未运行 |
+| 查看 RCB-03 预注册合同 | [`REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md`](REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md) | 历史冻结合同 |
+| 查看 RCB-03 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `reject-before-holdout` |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
 | 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
@@ -60,10 +61,12 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 已在 Phase 0 停止：开发集需要超出冻结两跳边界的字段数据流、工厂 dispatch 和嵌套实参来源
 分析，C3 还存在历史标签误标。Holdout 未解封、未评分，默认 Reviewer 没有改变。
 
-下一步只运行
 [`REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md`](REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md)
-登记的开发门槛：不提供候选清单，让同一 Reviewer 从 Diff 形成最多三个可证伪风险假设，并用
-有界只读调查核验。开发集未达到命中与成本门槛时，不进入新 Holdout，也不修改默认 Reviewer。
+登记的 RCB-03 开发门槛也已完成。六次调用全部有效；A 命中 `0/3`，B 命中 `1/3`，只增加一次，
+虽然误报、只读预算和中位成本均通过，仍未达到至少 `2/3` 且增量 2 次的命中门槛。正式裁决为
+`reject-before-holdout`，不进入新 Holdout，不修改默认 Reviewer，也不继续增加提示层或检索
+基础设施。脱敏结果已追加到
+[`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md)。
 
 ### 已完成的当前阶段
 
