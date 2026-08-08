@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-06
+> 更新时间：2026-08-08
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -15,7 +15,9 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Reviewer 上下文对照实验 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 已预注册，未运行 |
+| 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
+| 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
+| 查看 RCB-02 离线检索计划 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | 草案，未开始 |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
 | 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
@@ -39,16 +41,22 @@
 ### Reviewer Context Bootstrap 对照实验
 
 PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但路径声明完整不等于理解
-未修改的调用方、测试、配置和公共契约。`RCB-01` 已完成正式预注册，尚未运行：
+未修改的调用方、测试、配置和公共契约。`RCB-01` 已按预注册协议完成 20 次运行，正式裁决为
+`insufficient-evidence`：
 
-- 冻结 3 个上下文依赖正例、1 个 Diff 自足正例和 1 个安全负向对照；
-- A、B 两组使用字节一致的 Core Review Pack；
-- B 组只增加确定性 `impact-candidates.json` 和一次有目标的只读 Reconnaissance；
-- 不修改默认 Reviewer，不新增 Runtime、CLI、状态或 Verdict 字段；
-- 只有达到预注册门槛，才讨论默认关闭的 opt-in 或 shadow 方案。
+- A 组上下文 Golden 命中 `0/6`，B 组有效机会命中 `0/5`；
+- 候选必要路径召回为 `1/5 = 20%`；
+- B 组 Token 中位数约为 A 组 `2.57x`，有效终态耗时约为 `1.52x`；
+- 三次 Provider/模型失败按协议消费，C5 还发现了真实的 candidate 契约缺陷，安全负向对照失效；
+- 默认 Reviewer、Runtime、CLI、Verdict Schema 和成功语义均未改变。
 
-完整案例、20 次固定顺序、模型预算、评分规则和停止条件见
-[`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
+完整预注册合同见
+[`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)，
+脱敏结果见 [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md)。
+
+当前不把 Context Appendix 接入主线。下一步只做离线的
+[`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)：
+先验证 `Diff → 符号 → 有界关系扩展 → 代码区段` 的必要路径召回，不调用模型，不修改默认 Reviewer。
 
 ### 已完成的当前阶段
 

@@ -1,11 +1,11 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-06
+> 更新时间：2026-08-08
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
-> 当前顺序：Phase 4 真实使用验收已完成；继续日常使用观察。Reviewer Context Bootstrap
-> 对照实验已完成预注册、尚未运行；不启动 Stage 4 或新的 Runtime、Memory、LangGraph
-> 集成，也不在取得实验结果前改变默认 Reviewer。
+> 当前顺序：Phase 4 真实使用验收已完成；RCB-01 已完成并判定为
+> `insufficient-evidence`；下一步只做 RCB-02 离线检索验证。不启动新的 Runtime、Memory、
+> LangGraph 集成，也不改变默认 Reviewer。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -29,8 +29,9 @@ v0.1.4 发布（完成）
   -> 调查现有入口并固定 Plan 与人工确认协议（完成）
   -> 改进现有 Finish 第一屏（完成）
   -> 真实使用验收（完成）
-  -> 停止扩张，进入日常使用观察（当前）
-  -> Reviewer Context Bootstrap 对照实验（已预注册，未运行）
+  -> 停止扩张，进入日常使用观察（产品主线持续）
+  -> RCB-01 Reviewer Context Bootstrap 对照实验（完成，insufficient-evidence）
+  -> RCB-02 Diff-driven 符号检索离线验证（当前计划，未开始）
 ```
 
 Phase 3 已完成：
@@ -55,14 +56,21 @@ Phase 4 已完成：
 
 PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤，但该门禁只证明
 `reviewed_files` 路径声明完整，不证明 Reviewer 已理解未修改的调用方、测试、配置和接口契约。
-因此当前唯一的研究性下一步是按正式预注册物化并运行下述对照实验；实验结果形成前不修改
-默认 Runtime。完整合同见
+因此当前唯一的研究性下一步是先完成 RCB-02 的离线候选召回验证；在新的必要路径和代码区段
+召回达到门槛前，不修改默认 Runtime。RCB-01 完整合同见
 [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
 
 ### RCB-01：Reviewer Context Bootstrap 对照实验
 
-- 状态：`preregistered / not-run`
+- 状态：`completed / insufficient-evidence`
 - Runtime 代码基线：`main@bec8284`；文档登记基线：`main@6fa3f91`。
+- 运行结果：20 次登记，17 次有效 Reviewer 终态；正式裁决为
+  [`eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) 中记录的
+  `insufficient-evidence`。
+- 方向性结论：当前文件级 Context Appendix 必要路径召回 `1/5`，没有观察到上下文 Golden
+  增量命中，且 B 组 Token/耗时超过门槛；不进入 opt-in、shadow 或默认 Runtime。
+- C5 负向对照发现 candidate 自身存在可复核的 `reviewed_files` 契约缺口，因此该对照失效，
+  不是可以忽略的“模型误报”。
 - 两组共同使用当前 Review Pack、项目上下文、只读 Reviewer 和文件覆盖门禁。
 - 问题：Reviewer 已获得任务、规则、项目画像、完整 Diff 和测试证据，也能只读访问目标仓库；
   但当前协议没有要求它在给出 verdict 前独立检查未修改的调用方、被调用方、相邻测试、配置或
@@ -94,8 +102,9 @@ PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤�
 7. A/B 顺序在运行前固定并交叉排列，禁止只保留成功样本。
 8. Golden finding 由独立人工先冻结；实验实现者不得根据 Reviewer 输出反向修改标签。
 
-第一版 B 组只允许使用 `git ls-files`、`git grep`、路径、命名和 manifest 启发式生成候选。
-没有证据证明这些启发式不足前，不增加语言服务器、全量调用图或复杂索引。
+历史 B 组只使用 `git ls-files`、`git grep`、路径、命名和 manifest 启发式生成候选。结果已经
+证明这套文件级启发式不足，但不授权直接引入语言服务器、全量调用图或复杂索引；下一轮先做
+实验专用、离线的符号区段检索验证。
 
 记录指标：
 
@@ -114,6 +123,8 @@ PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤�
 - `continue-experiment`：出现有效改善，但样本、标签一致性或成本证据不足。
 - `reject`：没有改善真实 finding，主要收益只是增加文件数量，或 Token/耗时持续超过
   `1.5x`。
+- `insufficient-evidence`：Provider/模型失败导致比较不完整，或冻结负向对照失效；RCB-01
+  的正式裁决属于这一类。
 
 停止条件：
 
@@ -124,13 +135,14 @@ PR `#49` 已确保 Git 变更文件清单不会被 Reviewer 摘要静默过滤�
 4. 只有 `candidate-for-opt-in` 才讨论独立 PR；进入主线前仍需验证向后兼容、Prompt
    截断、敏感信息脱敏、跨平台行为和完整 CI。
 
-下一次执行的固定起点：
+下一步固定为 RCB-02 离线检索计划：
 
-1. 从本文冻结的 5 个案例和 20 次顺序开始，不再继续筛选替代 PR；
-2. 先实现实验专用的 deterministic materializer、候选生成器和离线校验；
-3. 物化 Core Review Pack、验证证据和全部哈希后，才允许首个模型调用；
+1. 将 C1-C3 作为已知开发集，新增独立冻结的 Holdout 案例，防止针对旧 Golden 调参；
+2. 先做 Diff hunk 到符号、定义、引用、调用和 changed file 未修改区段的确定性召回；
+3. 先通过必要路径和代码区段离线门槛，再重新预注册任何模型 A/B 调用；
 4. 不修改 `review_runtime.py`，不接入默认 CLI，不改变默认 Reviewer；
-5. 固定顺序全部运行后再评分，不根据中间结果修改 Prompt、Golden 或候选规则。
+5. 详细输入、输出合同、指标和停止条件见
+   [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)。
 
 CRWP-V1 已完成合同允许的全部处理：
 
@@ -453,6 +465,18 @@ Pack 必须字节一致。
 本决策仍不改变默认 Reviewer。下一步只物化实验专用 Artifact 和离线校验，未完成哈希绑定前
 不启动模型调用；详细合同见
 [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)。
+
+### 2026-08-08：完成 RCB-01，转入 RCB-02 离线检索验证
+
+RCB-01 已按固定 20 次顺序运行。Provider/模型失败、无效终态和 C5 负向对照失效均按预注册
+规则保留，因此正式裁决为 `insufficient-evidence`。方向性结果同时表明，当前文件级
+Context Appendix 没有带来 Golden 增量命中，必要路径召回只有 `20%`，Token 和耗时却明显增加。
+
+本结果不改变默认 Reviewer，也不将实验能力接入主线。下一步只登记 RCB-02 计划，先离线验证
+以 Diff 符号为种子、沿有界定义/引用/调用关系扩展到代码区段的召回能力；没有通过离线门槛前，
+不启动新的模型 A/B，不引入向量库、知识图谱、LSP/SCIP 平台或第二 Reviewer。结果与计划分别见
+[`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) 和
+[`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)。
 
 ## 七、更新规则
 
