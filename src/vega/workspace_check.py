@@ -632,11 +632,11 @@ def collect_tracked_diff_parts(
     它只给出 HEAD 到最终工作区的净差异，可能把 index 中尚未审查的内容抵消掉。
     """
     allowed_returncodes = (0, 1, 2) if "--check" in options else (0,)
+    diff_command = ["git", "-c", "core.autocrlf=input", "diff"]
     staged = _run_git_bytes(
         repo_path,
         [
-            "git",
-            "diff",
+            *diff_command,
             "--no-ext-diff",
             "--no-textconv",
             "--cached",
@@ -648,7 +648,7 @@ def collect_tracked_diff_parts(
     ).decode("utf-8", errors="replace")
     unstaged = _run_git_bytes(
         repo_path,
-        ["git", "diff", "--no-ext-diff", "--no-textconv", *options, "--"],
+        [*diff_command, "--no-ext-diff", "--no-textconv", *options, "--"],
         allowed_returncodes=allowed_returncodes,
     ).decode("utf-8", errors="replace")
     return _normalize_newlines(staged), _normalize_newlines(unstaged)

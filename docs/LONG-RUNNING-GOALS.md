@@ -1,6 +1,8 @@
 # 长任务 Goal Loop 设计
 
-> 状态：P0 人工状态层已实现；P1 有限自动 checkpoint 推进仍是设计草案。
+> 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进已在当前实验分支实现，
+> fake-runner 机制测试和一次真实 Codex child 恢复路径已通过。合并前仍需通过 PR CI；
+> 多 checkpoint 自动串联、父 Goal 自动重同步、跨小时/跨天无人值守和真实模型收益仍未证明。
 
 ## 1. 背景
 
@@ -116,6 +118,10 @@ checkpoint_budget:
   max_iterations: 2
 ```
 
+当前实现的 `GoalContract` 只保存 objective、repo/input、scope、non-goals 和
+success conditions。上例中的 `validation`、`stop_when` 和 `checkpoint_budget` 仍是设计目标，
+尚未进入 Goal 状态机或自动调度合同。
+
 这个 contract 的目标是区分四种情况：
 
 | 情况 | 判断方式 | 应对 |
@@ -127,35 +133,24 @@ checkpoint_budget:
 
 ## 5. 状态语义
 
-当前状态较少：
+当前实现会主动产生：
 
 ```text
-running / success / failed / needs_human
+created / running / checkpoint_done / paused / stopped / needs_human / success
 ```
 
-长任务需要更明确的状态，但仍应保持轻量：
+schema 预留、当前 Goal Runtime 不会主动产生：
 
 ```text
-created          goal 已创建，尚未开始
-running          当前 checkpoint 正在执行
-checkpoint_done  当前 checkpoint 完成，等待进入下一阶段
-paused           用户主动暂停，可恢复
-stopping         收到 stop 请求，正在等安全边界
-stopped          已停止，不再调度
 blocked          缺信息或连续失败，需要人介入
 timeout          当前 step 超时，不等于 goal 失败
 stale            疑似断开或无心跳，需要 recover
-success          goal 达成 success_conditions
 failed           runtime 自身异常或不可恢复错误
 ```
 
-关键区别：
-
-- `timeout` 不等于失败。
-- `stale` 不等于失败。
-- `paused` 不等于失败。
-- `blocked` 表示继续会乱来，需要人判断。
-- `success` 必须满足 goal contract 中的停止条件。
+`stopping` 尚未进入 schema 或 Runtime。当前 P1 的 child 异常、损坏、失败或证据不足统一写为
+`needs_human/checkpoint_blocked`；人工 recover 固定写为 `needs_human/recovered`。
+`success` 仍必须由人工执行 `goal complete`，并通过 Goal eval 与 checkpoint 证据复核。
 
 ## 6. 建议 CLI 形态
 
@@ -180,11 +175,16 @@ vega goal recover --run <goal_run> --reason "CLI 中断"
 vega goal start --repo . --text "分阶段整理 runtime 状态机" --scope refactor
 ```
 
-P1 再增加有限自动推进：
+P1 当前只开放一次有限自动推进：
 
 ```powershell
-vega goal run --run <goal_run> --max-checkpoints 3
+vega goal step --run <goal_run> --text "完成一个边界明确的阶段"
+vega goal run --run <goal_run> --max-checkpoints 1
 ```
+
+`goal run` 还支持 `--worker`、`--reviewer`、`--max-iterations 1..5` 和
+`--verify/--no-verify`；默认最多两轮 iteration。它没有 `--model` 参数，模型、profile 和
+推理强度由目标仓库 `.vega.yaml` 与 Codex CLI 配置决定。
 
 `goal run` 不能无限执行。每个 checkpoint 都必须经过：
 
@@ -193,6 +193,16 @@ checkpoint plan -> loop/worker -> workspace-check -> verification -> reflect -> 
 ```
 
 如果 gate 是 high risk、验证失败、污染门禁失败、reviewer request_changes 或达到 checkpoint 预算，就停在人工判断。
+
+child loop 创建后，Goal 会把 `active_child_run` 写入状态。另一个终端可以运行：
+
+```powershell
+vega watch --run <child_run> --follow
+```
+
+`watch` 只展示安全阶段事件、耗时、iteration 和 checkpoint/child run 标识，不展示模型正文、
+内部推理、原始命令、命令输出、工具参数或敏感路径。Goal 本身不会恢复外部模型会话；跨会话
+恢复依据仍是 Goal/child run artifacts、checkpoint 证据和目标仓库的真实 Git 状态。
 
 ## 7. 目录结构草案
 
@@ -204,6 +214,7 @@ runs/<goal_run>/
   goal-state.json
   goal-trace.jsonl
   progress.md
+  progress.jsonl
   decisions.jsonl
   goal-final-report.md
   goal-eval.md
@@ -212,11 +223,16 @@ runs/<goal_run>/
       checkpoint-plan.md
       checkpoint-evidence.json
       checkpoint-report.md
+      checkpoint-blocked.md
     02/
       ...
+  stop-report.md
+  recovery-report.md
 ```
 
-`progress.md` 面向人阅读；`goal-state.json` 面向 runtime；`goal-trace.jsonl` 面向追溯和恢复。`state.json` 与 `goal-state.json` 保持同内容，用于复用通用 `vega status/latest`。
+`checkpoint-blocked.md`、`stop-report.md` 和 `recovery-report.md` 是条件产物。`progress.md`
+面向人阅读；`goal-state.json` 面向 runtime；`goal-trace.jsonl` 面向追溯和恢复。
+`state.json` 与 `goal-state.json` 保持同内容，用于复用通用 `vega status/latest`。
 
 ## 8. 断开、超时、停止的定义
 
@@ -232,8 +248,8 @@ state.json 仍是 running，但 trace.jsonl 长时间没有新事件，且当前
 
 - 不假设失败。
 - 不自动清理。
-- 写 `recovery-report.md`。
-- 标记为 `stale` 或 `needs_human`。
+- 由人工运行 `goal recover` 写 `recovery-report.md`。
+- 当前实现标记为 `needs_human/recovered`，不会自动检测或产生 `stale`。
 - 让用户决定继续、停止或重开。
 
 ### 8.2 超时
@@ -248,7 +264,9 @@ state.json 仍是 running，但 trace.jsonl 长时间没有新事件，且当前
 
 超时不应自动判定整个 goal 失败，因为长任务可能只是验证慢、模型慢或网络慢。
 
-当前已先落地普通 loop 的 worker/reviewer attempt 控制：`execution.json` 保存 heartbeat、lease、deadline 和 owned PID；单次超时会停止该 attempt、写 `timeout-report.md` 并进入 `needs_human`。checkpoint timeout 和 goal wall-clock timeout 仍属于后续 Goal P1。
+当前已先落地普通 loop 的 worker/reviewer attempt 控制：`execution.json` 保存 heartbeat、lease、
+deadline 和 owned PID；单次超时会停止该 attempt、写 `timeout-report.md` 并进入
+`needs_human`。checkpoint timeout 和 goal wall-clock timeout 尚未实现。
 
 ### 8.3 停止
 
@@ -259,11 +277,15 @@ state.json 仍是 running，但 trace.jsonl 长时间没有新事件，且当前
 
 停止后：
 
-- 不再调度新的 worker/reviewer。
+- Goal 不再调度新的 checkpoint。
 - 写 `stop-report.md`。
 - 保留当前 checkpoint 证据。
 - 不自动 revert。
 - 不自动删文件。
+
+如果 child loop 正在运行，`vega goal stop` 不会终止 child。应先运行
+`vega stop --run <child_run> --reason "..."` 请求当前 owned process 在安全边界停止，
+再根据 Goal 状态和现场决定 `goal recover` 或 `goal stop`。
 
 普通 loop 的运行中停止使用：
 
@@ -318,21 +340,45 @@ Goal 层不替代这些模块，只是把它们串成可恢复的长任务协议
 - 能从 running 状态恢复为 needs_human。
 - 不调用外部 worker 也能完整追溯目标和状态。
 
-### P1：有限自动 checkpoint
+### P1：单 checkpoint 自动推进实验
 
-目标：允许小范围自动推进，但每个 checkpoint 都有硬边界。
+状态：`experimental / single-checkpoint implemented`
 
-- `goal run --max-checkpoints N`。
-- 每个 checkpoint 调一次普通 `loop`。
-- checkpoint 后自动跑 gate/review/report。
-- 任意门禁失败都停止。
-- 连续无进展时停止。
+当前实现：
+
+- `goal step --text/--input` 固化本 checkpoint 的唯一任务输入。
+- `goal run --max-checkpoints 1` 调用一次普通 auto loop。
+- child run 复用 Worker、workspace-check、verification、risk gate、Reviewer 和 loop eval。
+- child run 身份、终态和证据引用写回 Goal。
+- child 成功且证据资格通过时，自动生成 checkpoint report 并停在 `checkpoint_done`。
+- child 异常、损坏、失败或证据不足时，生成 `checkpoint-blocked.md` 并停在 `needs_human`。
+- run-local `progress.jsonl` 与 `vega watch` 提供安全阶段可见性。
 
 验收：
 
-- 能完成 2-3 个 checkpoint 的小型重构演示。
-- 任意 checkpoint 失败不会影响前面 checkpoint 证据。
-- 可以从中断处恢复并继续或停止。
+- fake Worker/Reviewer 的真实本地 child loop 能完成一个验证通过的 checkpoint。
+- 损坏 child state 会保留完整 Goal 状态、trace、progress 和阻塞报告。
+- fake API key 不进入 Goal 或 child run artifacts。
+- `max_checkpoints > 1` 被明确拒绝。
+
+尚未证明：
+
+- 自动完成 2-3 个连续 checkpoint。
+- 模型在数小时或数天任务中的目标稳定性和恢复成功率。
+- 主进程崩溃后自动重连原外部 Worker 会话。
+- 相比人工拆分多个普通 loop，P1 能显著提高任务成功率或降低成本。
+
+因此当前阶段只验证控制机制和单 checkpoint 恢复路径，不把它描述为长期自治能力。
+
+2026-08-09 的一次真实 Codex 实验在可丢弃目标仓库中完成了受限代码修改、固定验证、
+Reflect、Risk Gate 和独立 Reviewer。child 首次因 Windows CRLF 的确定性 diff check
+误判停在 `needs_human`；修复后使用 `loop continue` 继续同一 child，最终得到
+`success/approve`。完整追加记录见 `eval/long-task-controller-experiment.md`。
+
+该结果仍有明确边界：父 Goal 在 child 首次阻塞时已保存 `checkpoint_blocked`，之后不会
+轮询或自动重同步人工继续后的 child 终态。因此真实 child 的恢复成功不等于父 Goal 已自动
+进入 `checkpoint_done`。后续若处理该问题，应优先评估显式人工 reconcile，而不是引入后台
+服务、自动轮询或无限重试。
 
 ### P2：更强 eval 和经验沉淀
 

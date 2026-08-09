@@ -196,6 +196,7 @@ jobs:
               tests/test_p0_regressions.py
               tests/test_cli_recovery_hardening.py
               tests/test_cli_progress.py
+              tests/test_long_task_controller.py
               tests/test_run_mutation_lock.py
               tests/test_redaction.py
           - name: execution-artifacts

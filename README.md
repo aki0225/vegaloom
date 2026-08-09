@@ -128,6 +128,22 @@ vega do feature --repo . --text "新增批量导入用户功能"
 如果外部 CLI 没有及时输出或执行超时，Vega 不会伪造进度，而是按 timeout 与 fail-closed
 规则保留现场并交还人工。
 
+实验性长任务入口把大目标拆成显式 checkpoint。当前只允许自动执行一个 checkpoint，
+结束后必须停在证据边界，不会继续调度下一阶段：
+
+```powershell
+vega goal start --repo . --input goal.md --scope refactor
+vega goal step --run <goal_run> --text "完成第一阶段的明确修改与验证"
+vega goal run --run <goal_run> --max-checkpoints 1
+vega goal status --run <goal_run>
+```
+
+`goal run` 复用普通 auto loop 的 Worker、确定性验证、风险门禁和独立 Reviewer。child run
+创建后会写入 Goal 状态；可在另一个终端运行 `vega watch --run <child_run> --follow`
+查看不含模型正文、推理、原始命令参数和敏感路径的安全阶段事件。child 失败、状态损坏或
+证据不足时，Goal 写出 `checkpoint-blocked.md` 并转为 `needs_human`。当前实验不支持自动
+串联多个 checkpoint，也不自动 commit、push、回滚或写长期 Memory。
+
 查看运行状态并生成交付结论：
 
 ```powershell
@@ -211,6 +227,7 @@ Claude Code 主会话复用同一份
 | v0.1.4 发布摘要 | [RELEASE-SUMMARY-0.1.4](docs/RELEASE-SUMMARY-0.1.4.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| 实验性长任务 Goal 与 checkpoint 边界 | [LONG-RUNNING-GOALS](docs/LONG-RUNNING-GOALS.md) |
 | Assurance 逐项验证记录 | [assurance-validation](eval/assurance-validation.md) |
 | v0.1 范围与取舍 | [MVP-SCOPE](docs/MVP-SCOPE.md) |
 | 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |

@@ -1,29 +1,68 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
 from typing import cast
 
 from pydantic import ValidationError
 
 from .goal_evidence import validate_goal_evidence
-from ..models import (
+from ..goal_models import (
     GoalCheckpointEvidenceType,
     GoalCheckpointRecord,
     GoalCheckpointRef,
     GoalContract,
     GoalState,
 )
+from .goal_reporting import (
+    render_checkpoint_plan,
+    render_checkpoint_report,
+    render_contract_markdown,
+    render_goal_eval,
+    render_goal_final_report,
+    render_progress,
+    render_recovery_report,
+    render_stop_report,
+)
 from ..project_config import normalize_scope_profile
+from ..progress import RunProgressLog
 from ..redaction import write_redacted_json, write_redacted_text
+from ..run_lock import RunMutationLock
 from ..run_utils import create_run_dir, resolve_run_dir
 from ..trace import TraceWriter
 
 
+def _goal_mutation(
+    operation: str,
+) -> Callable[[Callable[..., Path]], Callable[..., Path]]:
+    def decorate(method: Callable[..., Path]) -> Callable[..., Path]:
+        @wraps(method)
+        def locked(
+            self: GoalRuntime,
+            run: str,
+            *args: object,
+            **kwargs: object,
+        ) -> Path:
+            run_dir = resolve_run_dir(self.workspace, run)
+            with RunMutationLock.acquire(run_dir, operation):
+                return method(self, run, *args, **kwargs)
+
+        return locked
+
+    return decorate
+
+
 class GoalRuntime:
-    def __init__(self, workspace: Path) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        progress_reporter: Callable[[str, int], None] | None = None,
+    ) -> None:
         self.workspace = workspace
+        self.progress_reporter = progress_reporter
 
     def start(
         self,
@@ -53,6 +92,7 @@ class GoalRuntime:
                 "goal-contract.md",
                 "goal-contract.json",
                 "progress.md",
+                "progress.jsonl",
             ],
         )
         _write_progress(run_dir, state, contract)
@@ -63,9 +103,16 @@ class GoalRuntime:
             repo_path=str(repo_path.resolve()),
             scope_profile=scope_profile,
         )
+        RunProgressLog(run_dir).append("goal.started")
         return run_dir
 
-    def step(self, run: str) -> Path:
+    @_goal_mutation("goal.step")
+    def step(
+        self,
+        run: str,
+        task_text: str | None = None,
+        task_source: str | None = None,
+    ) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "step")
         active = _active_checkpoint(state)
@@ -80,7 +127,12 @@ class GoalRuntime:
         plan_path = checkpoint_dir / "checkpoint-plan.md"
         write_redacted_text(
             plan_path,
-            _render_checkpoint_plan(state, contract, next_index),
+            render_checkpoint_plan(
+                state,
+                contract,
+                next_index,
+                task_text=task_text,
+            ),
         )
 
         rel_path = f"checkpoints/{next_index:02d}/checkpoint-plan.md"
@@ -90,7 +142,12 @@ class GoalRuntime:
         state.checkpoints = [*state.checkpoints, rel_path]
         state.checkpoint_records = [
             *state.checkpoint_records,
-            GoalCheckpointRecord(checkpoint=f"{next_index:02d}", plan_path=rel_path),
+            GoalCheckpointRecord(
+                checkpoint=f"{next_index:02d}",
+                plan_path=rel_path,
+                task_text=task_text.strip() if task_text and task_text.strip() else None,
+                task_source=task_source.strip() if task_source and task_source.strip() else None,
+            ),
         ]
         state.artifacts = _dedupe([*state.artifacts, rel_path])
         _write_progress(run_dir, state, contract)
@@ -100,9 +157,53 @@ class GoalRuntime:
             checkpoint=next_index,
             path=rel_path,
         )
+        RunProgressLog(run_dir).append(
+            "goal.checkpoint_planned",
+            checkpoint=f"{next_index:02d}",
+        )
         return run_dir
 
+    @_goal_mutation("goal.run")
+    def run_one(
+        self,
+        run: str,
+        *,
+        worker_name: str = "codex-exec",
+        reviewer_name: str = "codex-exec",
+        max_iterations: int = 2,
+        verify: bool = True,
+        max_checkpoints: int = 1,
+    ) -> Path:
+        from .goal_controller import run_one_checkpoint
+
+        return run_one_checkpoint(
+            self,
+            run,
+            worker_name=worker_name,
+            reviewer_name=reviewer_name,
+            max_iterations=max_iterations,
+            verify=verify,
+            max_checkpoints=max_checkpoints,
+        )
+
+    @_goal_mutation("goal.attach")
     def attach(
+        self,
+        run: str,
+        checkpoint: str,
+        child_run: str,
+        evidence_type: str,
+        note: str | None = None,
+    ) -> Path:
+        return self._attach_without_lock(
+            run,
+            checkpoint,
+            child_run,
+            evidence_type,
+            note,
+        )
+
+    def _attach_without_lock(
         self,
         run: str,
         checkpoint: str,
@@ -152,7 +253,23 @@ class GoalRuntime:
         )
         return run_dir
 
+    @_goal_mutation("goal.checkpoint_done")
     def checkpoint_done(
+        self,
+        run: str,
+        checkpoint: str,
+        note: str | None = None,
+        *,
+        allow_manual_evidence: bool = False,
+    ) -> Path:
+        return self._checkpoint_done_without_lock(
+            run,
+            checkpoint,
+            note=note,
+            allow_manual_evidence=allow_manual_evidence,
+        )
+
+    def _checkpoint_done_without_lock(
         self,
         run: str,
         checkpoint: str,
@@ -204,7 +321,7 @@ class GoalRuntime:
         record.completion_mode = completion_mode
         write_redacted_text(
             checkpoint_dir / "checkpoint-report.md",
-            _render_checkpoint_report(state, contract, record),
+            render_checkpoint_report(state, contract, record),
         )
         write_redacted_json(
             checkpoint_dir / "checkpoint-evidence.json",
@@ -227,8 +344,13 @@ class GoalRuntime:
             ref_count=len(record.refs),
             completion_mode=completion_mode,
         )
+        RunProgressLog(run_dir).append(
+            "goal.checkpoint_done",
+            checkpoint=checkpoint_id,
+        )
         return run_dir
 
+    @_goal_mutation("goal.pause")
     def pause(self, run: str, reason: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "pause")
@@ -244,6 +366,7 @@ class GoalRuntime:
         TraceWriter(run_dir / "goal-trace.jsonl").write("goal_paused", reason=reason)
         return run_dir
 
+    @_goal_mutation("goal.resume")
     def resume(self, run: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "resume")
@@ -258,6 +381,7 @@ class GoalRuntime:
         TraceWriter(run_dir / "goal-trace.jsonl").write("goal_resumed")
         return run_dir
 
+    @_goal_mutation("goal.stop")
     def stop(self, run: str, reason: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "stop")
@@ -268,7 +392,7 @@ class GoalRuntime:
         state.stop_reason = reason
         write_redacted_text(
             run_dir / "stop-report.md",
-            _render_stop_report(state, contract, reason),
+            render_stop_report(state, contract, reason),
         )
         state.artifacts = _dedupe([*state.artifacts, "stop-report.md"])
         _write_progress(run_dir, state, contract)
@@ -276,6 +400,7 @@ class GoalRuntime:
         TraceWriter(run_dir / "goal-trace.jsonl").write("goal_stopped", reason=reason)
         return run_dir
 
+    @_goal_mutation("goal.complete")
     def complete(self, run: str, note: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "complete")
@@ -306,15 +431,15 @@ class GoalRuntime:
         state.completed_at = datetime.now(UTC).isoformat()
         report_path = run_dir / "goal-final-report.md"
         eval_path = run_dir / "goal-eval.md"
-        write_redacted_text(report_path, _render_goal_final_report(state, contract))
+        write_redacted_text(report_path, render_goal_final_report(state, contract))
         state.artifacts = _dedupe([*state.artifacts, "goal-final-report.md", "goal-eval.md"])
         state.eval_results = _run_goal_eval(run_dir, state, contract)
-        write_redacted_text(eval_path, _render_goal_eval(state.eval_results))
+        write_redacted_text(eval_path, render_goal_eval(state.eval_results))
         has_failures = any(item.startswith("FAIL:") for item in state.eval_results)
         if has_failures:
             state.status = "needs_human"
             state.current_step = "completion_eval_failed"
-            write_redacted_text(report_path, _render_goal_final_report(state, contract))
+            write_redacted_text(report_path, render_goal_final_report(state, contract))
         _write_progress(run_dir, state, contract)
         _save_goal_state(run_dir, state)
         event = "goal_completion_failed" if has_failures else "goal_completed"
@@ -326,6 +451,7 @@ class GoalRuntime:
         )
         return run_dir
 
+    @_goal_mutation("goal.recover")
     def recover(self, run: str, reason: str) -> Path:
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "recover")
@@ -337,7 +463,7 @@ class GoalRuntime:
         state.recover_reason = reason
         write_redacted_text(
             run_dir / "recovery-report.md",
-            _render_recovery_report(state, previous_step, reason),
+            render_recovery_report(state, previous_step, reason),
         )
         state.artifacts = _dedupe([*state.artifacts, "recovery-report.md"])
         _write_progress(run_dir, state, contract)
@@ -406,7 +532,7 @@ def _write_contract(run_dir: Path, contract: GoalContract) -> None:
     )
     write_redacted_text(
         run_dir / "goal-contract.md",
-        _render_contract_markdown(contract),
+        render_contract_markdown(contract),
     )
 
 
@@ -482,244 +608,8 @@ def _validate_checkpoint_artifacts(run_dir: Path, state: GoalState) -> None:
 def _write_progress(run_dir: Path, state: GoalState, contract: GoalContract) -> None:
     write_redacted_text(
         run_dir / "progress.md",
-        _render_progress(state, contract),
+        render_progress(state, contract),
     )
-
-
-def _render_contract_markdown(contract: GoalContract) -> str:
-    lines = [
-        "# Goal Contract",
-        "",
-        f"- 仓库：`{contract.repo_path}`",
-        f"- 输入：`{contract.input_source}`",
-        f"- scope：`{contract.scope_profile or 'default'}`",
-        "",
-        "## Objective",
-        "",
-        contract.objective,
-        "",
-        "## Non-goals",
-        "",
-    ]
-    lines.extend(f"- {item}" for item in contract.non_goals or ["未显式声明。"])
-    lines.extend(["", "## Success Conditions", ""])
-    lines.extend(f"- {item}" for item in contract.success_conditions or ["未显式声明。"])
-    lines.extend(
-        [
-            "",
-            "## Raw Goal",
-            "",
-            contract.raw_text.strip(),
-        ]
-    )
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _render_progress(state: GoalState, contract: GoalContract) -> str:
-    lines = [
-        "# Goal Progress",
-        "",
-        f"- run：`{state.run_id}`",
-        f"- 状态：`{state.status}`",
-        f"- 当前步骤：`{state.current_step}`",
-        f"- 仓库：`{state.repo_path}`",
-        f"- scope：`{state.scope_profile or 'default'}`",
-        f"- checkpoint 数：`{state.checkpoint_count}`",
-        "",
-        "## Objective",
-        "",
-        contract.objective,
-        "",
-        "## Checkpoints",
-        "",
-    ]
-    if state.checkpoint_records:
-        for record in state.checkpoint_records:
-            refs = (
-                ", ".join(
-                    f"{item.type}:{item.run}"
-                    + ("(eligible)" if item.completion_eligible else "(evidence)")
-                    for item in record.refs
-                )
-                or "无"
-            )
-            mode = f"，mode=`{record.completion_mode}`" if record.completion_mode else ""
-            lines.append(f"- `{record.checkpoint}`：`{record.status}`{mode}，refs：{refs}")
-    elif state.checkpoints:
-        lines.extend(f"- `{item}`" for item in state.checkpoints)
-    else:
-        lines.append("- 尚未生成 checkpoint plan。")
-    lines.extend(
-        [
-            "",
-            "## Safety",
-            "",
-            "- Goal P0 只维护状态、checkpoint plan 和经过校验的证据引用。",
-            "- 不调用 worker，不自动修改目标仓库，不自动 commit，不写长期 memory。",
-        ]
-    )
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _render_checkpoint_plan(state: GoalState, contract: GoalContract, index: int) -> str:
-    return "\n".join(
-        [
-            f"# Checkpoint {index:02d} Plan",
-            "",
-            f"- goal：`{state.run_id}`",
-            f"- 仓库：`{state.repo_path}`",
-            f"- scope：`{state.scope_profile or 'default'}`",
-            "",
-            "## Objective",
-            "",
-            contract.objective,
-            "",
-            "## Suggested Manual Loop",
-            "",
-            "1. 人工确认本 checkpoint 的目标和非目标。",
-            "2. 如需执行代码修改，另行启动普通 `vega loop` 或主会话人工实现。",
-            "3. 修改后使用 reflect/gate/review/finish 形成证据。",
-            "4. 再决定是否进入下一个 checkpoint。",
-            "",
-            "## P0 Boundary",
-            "",
-            "- 本文件只是计划产物。",
-            "- 未调用 worker/reviewer。",
-            "- 未修改目标仓库。",
-            "- 未写长期 memory。",
-        ]
-    ).rstrip() + "\n"
-
-
-def _render_checkpoint_report(
-    state: GoalState,
-    contract: GoalContract,
-    record: GoalCheckpointRecord,
-) -> str:
-    lines = [
-        f"# Checkpoint {record.checkpoint} Report",
-        "",
-        f"- goal：`{state.run_id}`",
-        f"- 仓库：`{state.repo_path}`",
-        f"- 状态：`{record.status}`",
-        f"- 完成时间：`{record.completed_at or 'unknown'}`",
-        "",
-        "## Objective",
-        "",
-        contract.objective,
-        "",
-        "## Evidence Refs",
-        "",
-    ]
-    if record.refs:
-        for item in record.refs:
-            lines.extend(
-                [
-                    f"- `{item.type}`：`{item.run}`",
-                    f"  - validated：`{item.validated}`",
-                    f"  - completion eligible：`{item.completion_eligible}`",
-                    f"  - validation：{item.validation_summary or '未提供'}",
-                    f"  - note：{item.note or '无'}",
-                ]
-            )
-    else:
-        lines.append("- 未挂载证据引用。")
-    lines.extend(
-        [
-            "",
-            "## Completion Decision",
-            "",
-            f"- mode：`{record.completion_mode or 'unknown'}`",
-            f"- note：{record.completed_note or '未填写。'}",
-        ]
-    )
-    lines.extend(
-        [
-            "",
-            "## P0 Boundary",
-            "",
-            "- 本报告只汇总人工挂载的证据引用。",
-            "- 未自动调用 worker/reviewer，未修改目标仓库，未写长期 memory。",
-        ]
-    )
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def _render_stop_report(state: GoalState, contract: GoalContract, reason: str) -> str:
-    return "\n".join(
-        [
-            "# Goal Stop Report",
-            "",
-            f"- run：`{state.run_id}`",
-            f"- 仓库：`{state.repo_path}`",
-            f"- 原因：{reason}",
-            f"- checkpoint 数：`{state.checkpoint_count}`",
-            "",
-            "## Objective",
-            "",
-            contract.objective,
-            "",
-            "## 结论",
-            "",
-            "- 已停止继续调度新的 goal step。",
-            "- 未自动回滚，未删除文件，未提交代码。",
-        ]
-    ).rstrip() + "\n"
-
-
-def _render_recovery_report(state: GoalState, previous_step: str, reason: str) -> str:
-    return "\n".join(
-        [
-            "# Goal Recovery Report",
-            "",
-            f"- run：`{state.run_id}`",
-            f"- 仓库：`{state.repo_path}`",
-            f"- 原步骤：`{previous_step}`",
-            f"- 原因：{reason}",
-            "",
-            "## 结论",
-            "",
-            "- 已将 goal 从 `running` 标记为 `needs_human`。",
-            "- 未恢复外部 worker 上下文，未清理工作区，未继续执行。",
-            "- 请人工检查目标仓库和 checkpoint 产物后再决定继续、停止或重开。",
-        ]
-    ).rstrip() + "\n"
-
-
-def _render_goal_final_report(state: GoalState, contract: GoalContract) -> str:
-    lines = [
-        "# Goal Final Report",
-        "",
-        f"- run：`{state.run_id}`",
-        f"- 仓库：`{state.repo_path}`",
-        f"- 状态：`{state.status}`",
-        f"- 完成时间：`{state.completed_at or 'unknown'}`",
-        f"- 完成说明：{state.completion_note or '未提供'}",
-        "",
-        "## Objective",
-        "",
-        contract.objective,
-        "",
-        "## Success Conditions",
-        "",
-    ]
-    lines.extend(f"- {item}" for item in contract.success_conditions)
-    lines.extend(["", "## Checkpoints", ""])
-    for record in state.checkpoint_records:
-        lines.append(
-            f"- `{record.checkpoint}`：`{record.status}`，"
-            f"mode=`{record.completion_mode or 'unknown'}`，refs={len(record.refs)}"
-        )
-    lines.extend(
-        [
-            "",
-            "## Completion Boundary",
-            "",
-            "- Goal complete 是人工确认后的状态收口，不会自动 commit、push、release。",
-            "- 完成结论来自 checkpoint 证据和人工说明，不代表 Vega 自动理解了全部业务正确性。",
-        ]
-    )
-    return "\n".join(lines).rstrip() + "\n"
 
 
 def _run_goal_eval(run_dir: Path, state: GoalState, contract: GoalContract) -> list[str]:
@@ -761,10 +651,6 @@ def _run_goal_eval(run_dir: Path, state: GoalState, contract: GoalContract) -> l
         else f"FAIL: checkpoint 证据不完整：{', '.join(invalid)}"
     )
     return results
-
-
-def _render_goal_eval(results: list[str]) -> str:
-    return "# Goal Eval\n\n" + "\n".join(f"- {item}" for item in results) + "\n"
 
 
 def _extract_objective(goal_text: str) -> str:
@@ -895,6 +781,7 @@ def _ensure_action_allowed(state: GoalState, action: str) -> None:
         "step": {"created", "running", "checkpoint_done"},
         "attach": {"running"},
         "checkpoint_done": {"running"},
+        "run_one": {"running"},
         "pause": {"created", "running", "checkpoint_done"},
         "stop": {
             "created",
