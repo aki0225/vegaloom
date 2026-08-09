@@ -12,7 +12,10 @@ import vega.cli as cli_module
 import vega.experimental.goal_controller as goal_controller_module
 from vega.cli import app
 from vega.execution_control import RunnerExecutionContext
+from vega.experimental.goal_reconcile import bound_child_run
+from vega.experimental.goal_runtime import _checkpoint_completion_is_valid
 from vega.experimental.goal_runtime import GoalRuntime
+from vega.goal_models import GoalCheckpointRecord, GoalCheckpointRef, GoalState
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput
 from vega.progress import RunProgressLog, render_progress_items
@@ -181,6 +184,50 @@ def _mark_child_running(child_dir: Path) -> None:
         encoding="utf-8",
         newline="\n",
     )
+
+
+def test_new_checkpoint_does_not_inherit_previous_child_binding() -> None:
+    state = GoalState(
+        run_id="goal-run",
+        repo_path="repo",
+        input_source="test",
+        status="needs_human",
+        current_step="checkpoint_blocked",
+        last_child_run="previous-child-loop",
+        last_child_status="success",
+    )
+    record = GoalCheckpointRecord(
+        checkpoint="02",
+        plan_path="checkpoints/02/checkpoint-plan.md",
+    )
+
+    assert bound_child_run(state, record) is None
+
+
+def test_validated_completion_requires_bound_child_loop_to_be_eligible() -> None:
+    record = GoalCheckpointRecord(
+        checkpoint="01",
+        status="done",
+        plan_path="checkpoints/01/checkpoint-plan.md",
+        bound_child_run="child-loop",
+        completion_mode="validated",
+        refs=[
+            GoalCheckpointRef(
+                run="child-loop",
+                type="loop",
+                validated=True,
+                completion_eligible=False,
+            ),
+            GoalCheckpointRef(
+                run="review-run",
+                type="review",
+                validated=True,
+                completion_eligible=True,
+            ),
+        ],
+    )
+
+    assert _checkpoint_completion_is_valid(record) is False
 
 
 def test_progress_log_redacts_secret_and_tolerates_partial_trailing_line(

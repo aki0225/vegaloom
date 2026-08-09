@@ -307,8 +307,6 @@ def bound_child_run(
         for item in [record.bound_child_run, state.active_child_run]
         if item
     }
-    if state.current_step in automatic_steps and state.last_child_run:
-        candidates.add(state.last_child_run)
     loop_refs = {
         reference.run
         for reference in record.refs

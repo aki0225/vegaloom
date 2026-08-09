@@ -108,25 +108,10 @@ def _resolve_completion_mode(
     allow_manual_evidence: bool,
     note: str | None,
 ) -> str:
-    eligible_refs = [
-        item
-        for item in record.refs
-        if item.validated and item.completion_eligible
-    ]
-    bound_child_eligible = (
-        record.bound_child_run is None
-        or any(
-            item.type == "loop"
-            and item.run == record.bound_child_run
-            and item.validated
-            and item.completion_eligible
-            for item in record.refs
-        )
-    )
-    if eligible_refs and bound_child_eligible:
+    if validated_completion_eligible(record):
         return "validated"
     if not allow_manual_evidence:
-        if record.bound_child_run and not bound_child_eligible:
+        if record.bound_child_run:
             raise ValueError(
                 "checkpoint 已绑定自动 child，但该 child 的 loop 证据尚不具备完成资格。"
             )
@@ -144,3 +129,22 @@ def _resolve_completion_mode(
     if not note or not note.strip():
         raise ValueError("manual evidence override 必须提供 --note，说明人工完成依据。")
     return "manual_override"
+
+
+def validated_completion_eligible(record: GoalCheckpointRecord) -> bool:
+    eligible_refs = [
+        item
+        for item in record.refs
+        if item.validated and item.completion_eligible
+    ]
+    if not eligible_refs:
+        return False
+    if record.bound_child_run is None:
+        return True
+    return any(
+        item.type == "loop"
+        and item.run == record.bound_child_run
+        and item.validated
+        and item.completion_eligible
+        for item in record.refs
+    )

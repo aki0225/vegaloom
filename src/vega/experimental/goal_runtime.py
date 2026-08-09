@@ -9,6 +9,7 @@ from typing import cast
 
 from pydantic import ValidationError
 
+from .goal_checkpoint import validated_completion_eligible
 from .goal_evidence import validate_goal_evidence
 from ..goal_models import (
     GoalCheckpointEvidenceType,
@@ -34,9 +35,7 @@ from ..run_utils import create_run_dir, resolve_run_dir
 from ..trace import TraceWriter
 
 
-def _goal_mutation(
-    operation: str,
-) -> Callable[[Callable[..., Path]], Callable[..., Path]]:
+def _goal_mutation(operation: str) -> Callable[[Callable[..., Path]], Callable[..., Path]]:
     def decorate(method: Callable[..., Path]) -> Callable[..., Path]:
         @wraps(method)
         def locked(
@@ -693,7 +692,7 @@ def _checkpoint_completion_is_valid(record: GoalCheckpointRecord) -> bool:
     if record.status != "done" or not record.refs:
         return False
     if record.completion_mode == "validated":
-        return any(item.validated and item.completion_eligible for item in record.refs)
+        return validated_completion_eligible(record)
     if record.completion_mode == "manual_override":
         return any(item.validated and item.type == "manual" for item in record.refs)
     return False
