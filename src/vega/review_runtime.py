@@ -10,8 +10,7 @@ from pydantic import ValidationError
 
 from .execution_control import RunnerExecutionContext
 from .models import (
-    BriefState,
-    GateResult,
+    BriefState, GateResult,
     ReviewFinding,
     ReviewState,
     ReviewVerdict,
@@ -31,6 +30,7 @@ from .prompt_metrics import (
     write_context_budget_report,
     write_prompt_metrics,
 )
+from .progress import make_execution_progress_reporter
 from .redaction import redact_text, redact_value
 from .review_coverage import (
     review_file_coverage_issues_for_verdict,
@@ -346,7 +346,7 @@ class ReviewRuntime:
                 execution_dir=run_dir / "executions" / "reviewer",
                 run_id=run_id,
                 step="reviewer",
-                progress_reporter=self.progress_reporter,
+                progress_reporter=make_execution_progress_reporter(run_dir, self.progress_reporter),
             )
             reviewer_started = True
             result = runner.run(

@@ -313,7 +313,7 @@ def test_auto_cli_fails_before_creating_run_when_codex_is_missing(
     repo = tmp_path / "repo"
     _init_git_repo(repo)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("vega.cli.shutil.which", lambda _: None)
+    monkeypatch.setattr("vega.cli_support.shutil.which", lambda _: None)
 
     result = CliRunner().invoke(
         app,

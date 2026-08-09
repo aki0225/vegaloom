@@ -111,7 +111,7 @@ reviewer 合同。该提示词边界只能降低误跟随风险，不能证明�
 ### 实验能力
 
 - Memory proposal / ledger。
-- Goal P0 长任务人工状态层。
+- Goal P0 长任务人工状态层，以及默认关闭、一次只运行一个 checkpoint 的 P1 实验入口。
 - Codex skill adapter。
 
 实验能力不得反向扩大核心成功条件。未使用 Memory、Goal 或 adapter 时，bug/feature

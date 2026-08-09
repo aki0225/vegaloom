@@ -12,6 +12,7 @@ from .execution_control import (
     ExecutionRecord,
     find_execution_records,
 )
+from .goal_status_guidance import goal_next_steps
 from .run_status_guidance import (
     classify_assist_initialization_status as _classify_init,
     initialization_next_steps as _initialization_next_steps,
@@ -94,6 +95,9 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         "repo_path": state.get("repo_path"),
         "risk": state.get("risk"),
         "recommendation": state.get("recommendation"),
+        "active_child_run": state.get("active_child_run"),
+        "last_child_run": state.get("last_child_run"),
+        "last_child_status": state.get("last_child_status"),
         "decision_count": len(decisions),
         "latest_decisions": [entry.model_dump() for entry in decisions[-3:]],
         "execution": execution,
@@ -192,7 +196,7 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
             "之后按 phase 拆成多个 `vega do` 或 `vega loop` 任务执行。",
         ]
     if run_kind == "goal":
-        return _goal_next_steps(run_dir, state)
+        return goal_next_steps(run_dir, state)
     return [
         "读取 report/review/eval 判断是否通过。",
         "如发现跨任务可复用经验，可通过 `vega reflect --lesson \"...\"` 显式生成候选。",
@@ -207,6 +211,7 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
             "worker-prompt-metrics.md",
             "worker-context-budget-report.md",
             "project-context.md",
+            "progress.jsonl",
             "final-report.md",
             "recovery-report.md",
             "eval.md",
@@ -225,6 +230,7 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
             "review-findings.md",
             "review-verdict.json",
             "review-runner-output.txt",
+            "progress.jsonl",
             "review-prompt-metrics.md",
             "review-context-budget-report.md",
             "runner-error-report.md",
@@ -239,6 +245,7 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
         "goal": [
             "goal-contract.md",
             "progress.md",
+            "progress.jsonl",
             "goal-state.json",
             "goal-trace.jsonl",
             "goal-final-report.md",
@@ -375,54 +382,6 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
             f"读取 `{findings}` 和 `final-report.md`，人工判断是否重跑 reviewer 或继续修复。",
         ]
     return [f"读取 `{run_dir / 'state.json'}` 确认当前 loop 状态。"]
-
-
-def _goal_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
-    status = state.get("status")
-    if status == "created":
-        return [
-            f"人工审查 `{run_dir / 'goal-contract.md'}`。",
-            f"确认后运行：`vega goal step --run {run_dir.name}` 生成第一个 checkpoint plan。",
-        ]
-    if status == "running":
-        return [
-            f"读取 `{run_dir / 'progress.md'}` 和最新 checkpoint plan。",
-            f"完成人工执行后运行：`vega goal attach --run {run_dir.name} --checkpoint <n> --ref <child_run> --type <type>`。",
-            f"证据挂载完成后运行：`vega goal checkpoint-done --run {run_dir.name} --checkpoint <n>`。",
-        ]
-    if status == "checkpoint_done":
-        return [
-            f"读取 `{run_dir / 'progress.md'}` 和最新 `checkpoint-report.md`。",
-            f"如继续推进，运行：`vega goal step --run {run_dir.name}` 生成下一个 checkpoint plan。",
-            f"如 success conditions 已满足，运行：`vega goal complete --run {run_dir.name} --note \"...\"`。",
-            f"如放弃目标，运行：`vega goal stop --run {run_dir.name} --reason \"...\"`。",
-        ]
-    if status == "paused":
-        return [
-            f"如确认继续，运行：`vega goal resume --run {run_dir.name}`。",
-            f"如方向变化，运行：`vega goal stop --run {run_dir.name} --reason \"...\"`。",
-        ]
-    if status == "needs_human":
-        if state.get("current_step") == "completion_eval_failed":
-            return [
-                f"读取 `{run_dir / 'goal-eval.md'}` 和 `{run_dir / 'goal-final-report.md'}`。",
-                "修复缺失产物或不可信 checkpoint 证据后，再重新执行 goal complete。",
-            ]
-        return [
-            f"读取 `{run_dir / 'recovery-report.md'}` 和 `{run_dir / 'progress.md'}`。",
-            "人工检查目标仓库和 checkpoint 产物，再决定 resume、stop 或重开 goal。",
-        ]
-    if status == "stopped":
-        return [
-            f"读取 `{run_dir / 'stop-report.md'}` 了解停止原因。",
-            "该 goal 不再调度新的 checkpoint；如目标仍有效，建议重开新的 goal。",
-        ]
-    if status == "success":
-        return [
-            f"读取 `{run_dir / 'goal-final-report.md'}` 和 `{run_dir / 'goal-eval.md'}`。",
-            "Goal 已完成；如需提交代码，仍应人工检查关联 child run 的 diff 和 finish 报告。",
-        ]
-    return [f"读取 `{run_dir / 'goal-state.json'}` 确认当前 goal 状态。"]
 
 
 def _read_state(run_dir: Path) -> dict[str, Any]:

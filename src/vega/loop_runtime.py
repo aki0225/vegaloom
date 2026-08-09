@@ -47,6 +47,7 @@ from .prompt_metrics import (
     write_context_budget_report,
     write_prompt_metrics,
 )
+from .progress import RunProgressLog, make_execution_progress_reporter, notify_run_created
 from .redaction import redact_text, redact_value
 from .reflect_runtime import ReflectRuntime
 from .review_runtime import PrecomputedReviewRiskGate, ReviewRuntime
@@ -130,6 +131,7 @@ class LoopAutomationRuntime:
         reviewer_name: str = "codex-exec",
         max_iterations: int = 2,
         verify: bool = True,
+        on_run_created: Callable[[Path], None] | None = None,
     ) -> Path:
         repo_path = Path(brief_input.repo_path).resolve()
         config, policy_snapshot, initial_head_sha = _load_stable_start_policy(
@@ -140,10 +142,8 @@ class LoopAutomationRuntime:
             worker_name,
             reviewer_name,
         )
-        run_id, run_dir = create_run_dir(
-            self.workspace,
-            _new_loop_run_id(brief_input.mode),
-        )
+        run_id, run_dir = create_run_dir(self.workspace, _new_loop_run_id(brief_input.mode))
+        notify_run_created(on_run_created, run_dir)
         with RunMutationLock.acquire(run_dir, "loop.start"):
             return self._start_locked(
                 brief_input,
@@ -494,7 +494,7 @@ class LoopAutomationRuntime:
                 repo,
                 iteration_dir,
                 iteration=iteration_number,
-                progress_reporter=self.progress_reporter,
+                progress_reporter=make_execution_progress_reporter(run_dir, self.progress_reporter, iteration=iteration_number),
             )
             verification_status = _verification_status(
                 verification.command_count,
@@ -975,7 +975,7 @@ class LoopAutomationRuntime:
                     run_id=state.run_id,
                     step="worker",
                     iteration=iteration_number,
-                    progress_reporter=self.progress_reporter,
+                    progress_reporter=make_execution_progress_reporter(run_dir, self.progress_reporter, iteration=iteration_number),
                 ),
             )
             worker_output = (
@@ -1198,7 +1198,7 @@ class LoopAutomationRuntime:
                     repo_path,
                     iteration_dir,
                     iteration=iteration_number,
-                    progress_reporter=self.progress_reporter,
+                    progress_reporter=make_execution_progress_reporter(run_dir, self.progress_reporter, iteration=iteration_number),
                 )
                 verification_log = verification.summary_path
                 verification_status = _verification_status(
@@ -1835,7 +1835,7 @@ class LoopAutomationRuntime:
                 run_id=loop_run_dir.name,
                 step="reviewer",
                 iteration=iteration,
-                progress_reporter=self.progress_reporter,
+                progress_reporter=make_execution_progress_reporter(loop_run_dir, self.progress_reporter, iteration=iteration),
             ),
             project_config=config,
             precomputed_risk_gate=PrecomputedReviewRiskGate(
@@ -3038,10 +3038,7 @@ def _finalize_loop_eval(
 
     try:
         base_results = run_loop_eval(
-            run_dir,
-            artifacts,
-            require_terminal=False,
-            status_for_eval=requested_status,
+            run_dir, artifacts, require_terminal=False, status_for_eval=requested_status
         )
     except Exception as exc:  # noqa: BLE001 - 终态收口必须 fail-closed
         base_results = [f"FAIL: loop eval 执行异常：{type(exc).__name__}"]
@@ -3054,6 +3051,7 @@ def _finalize_loop_eval(
     trace.write("eval_written", results=base_results)
     if final_status == "needs_human":
         state.status = final_status
+        RunProgressLog(run_dir).append("loop.run_finished", iteration=state.current_iteration, status=state.status)
         state.save(run_dir / "state.json")
         trace.write("run_paused", status=state.status, current_step=state.current_step)
         return
@@ -3069,6 +3067,7 @@ def _finalize_loop_eval(
     state.status = final_status
     state.eval_results = [*base_results, *terminal_results]
     _write_text_artifact(run_dir / "eval.md", render_eval(state.eval_results))
+    RunProgressLog(run_dir).append("loop.run_finished", iteration=state.current_iteration, status=state.status)
     state.save(run_dir / "state.json")
 
 

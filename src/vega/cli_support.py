@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import typer
 
 from .loop_runtime import LoopAutomationRuntime
-from .redaction import redact_text
+from .redaction import redact_text, sensitive_path_reason
 from .review_runtime import ReviewRuntime
 from .run_status import render_run_status
 
@@ -70,6 +71,54 @@ def require_repo_directory(repo: Path) -> Path:
     if not resolved.is_dir():
         raise typer.BadParameter(f"目标仓库路径必须是目录：{redact_text(str(repo))}")
     return resolved
+
+
+def load_brief_input(input_path: Path | None, text: str | None) -> tuple[str, str]:
+    if input_path and text:
+        raise typer.BadParameter("--input 和 --text 只能二选一")
+    if not input_path and not text:
+        raise typer.BadParameter("必须提供 --input 或 --text")
+    if input_path:
+        reject_sensitive_input_path(input_path, "--input")
+        if not input_path.exists():
+            raise typer.BadParameter(f"输入文件不存在：{safe_path_display(input_path)}")
+        return input_path.read_text(encoding="utf-8"), str(input_path.resolve())
+    assert text is not None
+    if not text.strip():
+        raise typer.BadParameter("--text 不能为空")
+    return text, "inline-text"
+
+
+def ensure_runner_ready(runner: str, role: str) -> None:
+    normalized = validate_runner_name(runner, role)
+    if normalized not in {"codex", "codex-exec"}:
+        return
+    if shutil.which("codex"):
+        return
+    raise typer.BadParameter(
+        f"{role} 配置为 codex-exec，但当前 PATH 中未找到 Codex CLI；"
+        "请先安装并登录 Codex CLI，或显式选择 none/prompt-only runner。"
+    )
+
+
+def validate_runner_name(runner: str, role: str) -> str:
+    normalized = runner.strip().lower()
+    if normalized not in {"none", "prompt-only", "codex", "codex-exec"}:
+        raise typer.BadParameter(
+            f"{role} runner 不受支持：{runner}；可用值为 "
+            "none、prompt-only、codex、codex-exec。"
+        )
+    return normalized
+
+
+def reject_sensitive_input_path(path: Path, option_name: str) -> None:
+    reason = sensitive_path_reason(path)
+    if reason:
+        raise typer.BadParameter(f"{option_name} 拒绝读取敏感路径（{reason}）")
+
+
+def safe_path_display(path: Path) -> str:
+    return redact_text(str(path))
 
 
 def read_engineering_change_status(run_dir: Path) -> str:

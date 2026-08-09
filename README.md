@@ -128,6 +128,38 @@ vega do feature --repo . --text "新增批量导入用户功能"
 如果外部 CLI 没有及时输出或执行超时，Vega 不会伪造进度，而是按 timeout 与 fail-closed
 规则保留现场并交还人工。
 
+实验性长任务入口把大目标拆成显式 checkpoint。当前只允许自动执行一个 checkpoint，
+结束后必须停在证据边界，不会继续调度下一阶段：
+
+```powershell
+vega goal start --repo . --input goal.md --scope refactor
+vega goal step --run <goal_run> --text "完成第一阶段的明确修改与验证"
+vega goal run --run <goal_run> --max-checkpoints 1 --max-iterations 5 --runner-timeout 3600
+vega goal status --run <goal_run>
+```
+
+`goal run` 复用普通 auto loop 的 Worker、确定性验证、风险门禁和独立 Reviewer。child run
+创建后会写入 Goal 状态；可在另一个终端运行 `vega watch --run <child_run> --follow`
+查看不含模型正文、推理、原始命令参数和敏感路径的安全阶段事件。child 失败、状态损坏或
+证据不足时，Goal 写出 `checkpoint-blocked.md` 并转为 `needs_human`。
+
+`--runner-timeout` 控制单次 Worker 或 Reviewer 外部进程，范围为 60 到 3600 秒；一个
+checkpoint 最多 5 轮，因此控制器可以覆盖由多个长模型回合、验证和审查组成的数小时任务。
+这不代表单个模型调用会稳定运行数小时，也不代表无人值守自动串联多个 checkpoint。
+
+控制 CLI 或机器中断后，Goal 会保留 checkpoint 与唯一绑定的 child。确认原进程已退出后，
+按同一证据链恢复：
+
+```powershell
+vega goal reconcile --run <goal_run>
+vega recover --run <child_run> --reason "控制进程中断"
+vega loop continue --run <child_run> --repo .
+vega goal reconcile --run <goal_run>
+```
+
+`goal reconcile` 只锁定并重新校验已绑定 child，不启动新 Worker，不自动重试或替换 child。
+当前实验仍不自动串联多个 checkpoint，也不自动 commit、push、回滚或写长期 Memory。
+
 查看运行状态并生成交付结论：
 
 ```powershell
@@ -211,6 +243,7 @@ Claude Code 主会话复用同一份
 | v0.1.4 发布摘要 | [RELEASE-SUMMARY-0.1.4](docs/RELEASE-SUMMARY-0.1.4.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| 实验性长任务 Goal 与 checkpoint 边界 | [LONG-RUNNING-GOALS](docs/LONG-RUNNING-GOALS.md) |
 | Assurance 逐项验证记录 | [assurance-validation](eval/assurance-validation.md) |
 | v0.1 范围与取舍 | [MVP-SCOPE](docs/MVP-SCOPE.md) |
 | 真实 Issue 上的运行记录与边界 | [real-world-runs](eval/real-world-runs.md) |

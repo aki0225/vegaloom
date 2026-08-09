@@ -16,11 +16,12 @@ import vega.loop_runtime as loop_runtime_module
 import vega.recovery_runtime as recovery_runtime_module
 from vega.cli import app
 from vega.execution_control import ExecutionLease, is_process_alive
+from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_evidence import validate_loop_artifact_integrity
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.recovery_runtime import RecoveryRuntime
-from vega.run_lock import RunMutationLock
+from vega.run_lock import RunMutationBusyError, RunMutationLock
 from vega.run_status import run_status_payload
 from vega.runner import RunnerResult
 from vega.trace import TraceWriter
@@ -176,6 +177,19 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
     workspace = tmp_path / "workspace with spaces 空格"
     repo = tmp_path / "repo with spaces 空格"
     _init_git_repo(repo, with_verification=True)
+    goal_runtime = GoalRuntime(workspace)
+    goal_dir = goal_runtime.start(
+        repo,
+        "# Goal\n\nObjective: 验证长任务中断恢复\n\n"
+        "Success conditions:\n- checkpoint 证据通过\n",
+        "recovery-chaos",
+        None,
+    )
+    goal_runtime.step(
+        goal_dir.name,
+        task_text="完成 README 的受限修改",
+        task_source="recovery-chaos",
+    )
     ready = workspace / "control" / "child-ready"
     release = workspace / "control" / "child-release"
     ready.parent.mkdir(parents=True)
@@ -204,6 +218,7 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
     child_pid: int | None = None
     try:
         run_dir = _wait_for_loop_run(workspace, owner)
+        _bind_goal_child(goal_dir, run_dir)
         _wait_until(lambda: ready.exists(), owner=owner, description="child ready marker")
         execution_path = run_dir / "iterations" / "01" / "executions" / "worker" / "execution.json"
         lease = ExecutionLease.model_validate_json(execution_path.read_text(encoding="utf-8"))
@@ -212,6 +227,15 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
         assert is_process_alive(owner.pid)
         assert is_process_alive(child_pid)
         assert "partial worker change" in repo.joinpath("README.md").read_text(encoding="utf-8")
+        parent_before_busy_reconcile = goal_dir.joinpath(
+            "goal-state.json"
+        ).read_bytes()
+        with pytest.raises(RunMutationBusyError):
+            GoalRuntime(workspace).reconcile(goal_dir.name)
+        assert (
+            goal_dir.joinpath("goal-state.json").read_bytes()
+            == parent_before_busy_reconcile
+        )
         state_before_busy_recover = run_dir.joinpath("state.json").read_bytes()
         trace_before_busy_recover = run_dir.joinpath("trace.jsonl").read_bytes()
         monkeypatch.chdir(workspace)
@@ -231,6 +255,17 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
         owner.kill()
         owner.wait(timeout=10)
         assert is_process_alive(child_pid)
+        with pytest.raises(ValueError, match="仍存在可确认执行主体"):
+            GoalRuntime(workspace).recover(goal_dir.name, "controller exited")
+        assert (
+            goal_dir.joinpath("goal-state.json").read_bytes()
+            == parent_before_busy_reconcile
+        )
+        GoalRuntime(workspace).reconcile(goal_dir.name)
+        waiting_parent = _read_json(goal_dir / "goal-state.json")
+        assert waiting_parent["status"] == "running"
+        assert waiting_parent["current_step"] == "waiting_for_worker"
+        assert waiting_parent["active_child_run"] == run_dir.name
         crashed_execution = execution_path.read_bytes()
         with RunMutationLock.acquire(run_dir, "loop.finish"):
             assert is_process_alive(child_pid)
@@ -249,6 +284,20 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
             lambda: not is_process_alive(child_pid),
             description="owned child exit",
         )
+        GoalRuntime(workspace).recover(goal_dir.name, "controller exited")
+        recovered_parent = _read_json(goal_dir / "goal-state.json")
+        assert recovered_parent["status"] == "needs_human"
+        assert recovered_parent["current_step"] == "recovered"
+        assert recovered_parent["active_child_run"] is None
+        assert (
+            recovered_parent["checkpoint_records"][0]["bound_child_run"]
+            == run_dir.name
+        )
+        with pytest.raises(ValueError, match="仍绑定未完成 child"):
+            GoalRuntime(workspace).resume(goal_dir.name)
+        GoalRuntime(workspace).reconcile(goal_dir.name)
+        orphaned_parent = _read_json(goal_dir / "goal-state.json")
+        assert orphaned_parent["current_step"] == "child_recovery_required"
         recovered = CliRunner().invoke(
             app,
             ["recover", "--run", run_dir.name, "--reason", "owner crash child gone"],
@@ -295,6 +344,16 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
         assert not [item for item in eval_results if item.startswith("FAIL:")]
         assert "recovery-report.md" in final_state.artifacts
         assert "iterations/01/interruption-report.md" in final_state.artifacts
+        GoalRuntime(workspace).reconcile(goal_dir.name)
+        final_parent = _read_json(goal_dir / "goal-state.json")
+        final_record = final_parent["checkpoint_records"][0]
+        assert final_parent["status"] == "checkpoint_done"
+        assert final_parent["current_step"] == "checkpoint_done"
+        assert final_parent["active_child_run"] is None
+        assert final_record["bound_child_run"] == run_dir.name
+        assert len(final_record["refs"]) == 1
+        assert final_record["refs"][0]["run"] == run_dir.name
+        assert final_record["refs"][0]["completion_eligible"] is True
 
         interruption_report = run_dir / "iterations" / "01" / "interruption-report.md"
         interruption_report.write_text(
@@ -1354,6 +1413,26 @@ def _init_git_repo(path: Path, *, with_verification: bool = False) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _bind_goal_child(goal_dir: Path, child_dir: Path) -> None:
+    state = _read_json(goal_dir / "goal-state.json")
+    record = state["checkpoint_records"][0]
+    assert isinstance(record, dict)
+    record["bound_child_run"] = child_dir.name
+    record["runner_timeout_seconds"] = 3600
+    state["status"] = "running"
+    state["current_step"] = "waiting_for_worker"
+    state["active_child_run"] = child_dir.name
+    state["last_child_run"] = child_dir.name
+    state["last_child_status"] = "running"
+    text = json.dumps(state, ensure_ascii=False, indent=2) + "\n"
+    for name in ("goal-state.json", "state.json"):
+        goal_dir.joinpath(name).write_text(
+            text,
+            encoding="utf-8",
+            newline="\n",
+        )
 
 
 def _wait_for_loop_run(workspace: Path, owner: subprocess.Popen[str]) -> Path:

@@ -10,6 +10,7 @@ import pytest
 
 import vega.review_evidence as review_evidence_module
 from vega.models import BriefState
+from vega.progress import ExecutionProgressAdapter
 from vega.reflect_runtime import ReflectRuntime
 from vega.review_runtime import (
     ReviewPackRuntime,
@@ -135,7 +136,9 @@ def test_standalone_review_propagates_progress_reporter(tmp_path: Path) -> None:
         progress_reporter=reporter,
     ).run(repo, reflect_run.name)
 
-    assert runner.execution_contexts[0].progress_reporter is reporter
+    progress_reporter = runner.execution_contexts[0].progress_reporter
+    assert isinstance(progress_reporter, ExecutionProgressAdapter)
+    assert progress_reporter.delegate is reporter
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,7 @@ from vega.gate_runtime import GateRuntime
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput, LoopIterationState
 from vega.project_config import ScopeConfig
+from vega.progress import RunProgressLog
 from vega.reflect_runtime import ReflectRuntime
 from vega.review_runtime import ReviewRuntime
 from vega.runner import RunnerResult
@@ -508,6 +509,9 @@ def test_auto_does_not_review_when_reflect_deterministic_eval_failed(tmp_path: P
     assert reflect_state["status"] == "failed"
     assert reviewer.calls == 0
     assert (run_dir / "iterations" / "01" / "reflect-failure.md").exists()
+    terminal_progress = RunProgressLog(run_dir).read()[-1]
+    assert terminal_progress["event"] == "run_finished"
+    assert terminal_progress["status"] == "needs_human"
 
 
 def test_standalone_review_rejects_failed_reflect_without_running_reviewer(tmp_path: Path) -> None:
@@ -2069,6 +2073,20 @@ def test_reflect_diff_check_covers_staged_changes(tmp_path: Path) -> None:
     assert "staged trailing whitespace" in (reflect_run / "full-diff.patch").read_text(
         encoding="utf-8"
     )
+
+
+def test_reflect_diff_check_accepts_crlf_without_trailing_spaces(
+    tmp_path: Path,
+) -> None:
+    workspace, repo = _init_repo(tmp_path)
+    _git(repo, "config", "--unset", "core.autocrlf")
+    repo.joinpath("README.md").write_bytes(b"# Demo\r\nsemantic change\r\n")
+
+    reflect_run = ReflectRuntime(workspace).run(repo, note="CRLF semantic change")
+
+    state = _read_json(reflect_run / "state.json")
+    assert state["status"] == "success"
+    assert "PASS: git diff --check 通过" in state["eval_results"]
 
 
 def test_gate_diff_check_covers_both_diff_streams_when_reflect_misses_check(

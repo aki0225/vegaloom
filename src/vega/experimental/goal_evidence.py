@@ -16,7 +16,6 @@ from ..loop_evidence import (
     validate_review_evidence_freshness,
 )
 from ..loop_integrity import trusted_verification_passed
-from ..models import GoalCheckpointEvidenceType, GoalCheckpointRef
 from ..redaction import sensitive_path_reason
 from ..run_status import run_status_payload
 from ..run_utils import resolve_run_dir
@@ -24,6 +23,7 @@ from .goal_integrity import (
     validate_finish_summary_integrity,
     validate_gate_artifact_integrity,
 )
+from ..goal_models import GoalCheckpointEvidenceType, GoalCheckpointRef
 
 
 def validate_goal_evidence(

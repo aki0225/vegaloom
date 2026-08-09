@@ -40,7 +40,7 @@ wheel 安装后也能在任意 workspace 使用该检查入口。
 语义不同。`BriefRuntime`、`ReviewPackRuntime` 和 `ReviewRuntime` 是阶段组件或可单独调用阶段，
 不是额外的长期 Agent。
 
-长任务 P0 已提供人工驱动状态层：`goal start/status/step/attach/checkpoint-done/pause/resume/stop/recover`。它只写 goal contract、状态、trace、progress、checkpoint plan 和人工证据报告，不调用 worker。有限自动 checkpoint 推进仍处于设计阶段，详见 `docs/LONG-RUNNING-GOALS.md`。
+长任务 P0 已提供人工驱动状态层：`goal start/status/step/attach/checkpoint-done/pause/resume/stop/recover`。实验性 P1 另外提供 `goal run --max-checkpoints 1`，只调度一个普通 auto loop，并在 checkpoint 证据边界停止。每个 checkpoint 持久化唯一 `bound_child_run` 和单次 runner timeout；控制进程中断后，`goal reconcile` 只重新校验这个 child。它不自动串联下一 checkpoint，不自动 commit/push，也不声称模型能够跨小时或跨天无人值守自治。详见 `docs/LONG-RUNNING-GOALS.md`。
 
 ## 核心流程
 
@@ -540,18 +540,22 @@ Decision ledger 用来记录“为什么允许继续”“为什么退回”“�
 
 ## Goal P0
 
-Goal P0 是长任务的人工状态层，不是自动调度器。它负责把大目标固化为可追踪的 contract，并让用户在每个 checkpoint 前后明确决定继续、挂载证据、标记完成、暂停、停止或恢复。
+Goal P0 是长任务的人工状态层。实验性 P1 在此之上增加一次受限调度：用户先明确写出 checkpoint
+任务，Runtime 再复用一个普通 auto loop，结束后依据 child state、artifact integrity、
+verification 和 Reviewer 证据决定 `checkpoint_done` 或 `needs_human`。
 
 ```text
 goal start -> goal-contract -> progress
-goal step  -> checkpoints/<n>/checkpoint-plan.md
+goal step --text/--input -> checkpoints/<n>/checkpoint-plan.md
+goal run --max-checkpoints 1 -> 绑定唯一 child loop -> evidence qualification
+goal reconcile -> child lifecycle lock -> 重新校验原 child -> checkpoint report 或 needs_human
 goal attach -> 校验 child run / manual file -> checkpoint-evidence.json
 goal checkpoint-done -> 证据资格检查 -> checkpoint-report.md
 goal complete -> goal-final-report.md + goal-eval.md
 pause/resume/stop/recover -> goal-state + goal-trace
 ```
 
-每个 goal run 写入：
+每个 goal run 的基础产物：
 
 ```text
 runs/<goal_run>/
@@ -561,14 +565,38 @@ runs/<goal_run>/
   goal-contract.md
   goal-contract.json
   progress.md
+  progress.jsonl
   checkpoints/01/checkpoint-plan.md
-  checkpoints/01/checkpoint-evidence.json
-  checkpoints/01/checkpoint-report.md
-  goal-final-report.md
-  goal-eval.md
 ```
 
-`state.json` 和 `goal-state.json` 内容保持一致，前者用于复用通用 `status/latest` 读取链路，后者保留 goal 专属语义。同一时间只允许一个 active checkpoint。自动证据必须来自当前 workspace 的真实 child run，且 kind、repo 和状态会被校验；manual 证据必须是 workspace 或目标仓库内的真实文件。完成后的 checkpoint 不允许继续挂载或改写证据。`goal complete` 表示满足 success conditions，`goal stop` 表示目标被终止，两者不会混用。Goal P0 不调用 worker/reviewer，不修改目标仓库，不自动 commit，不写长期 memory。P1 的 `goal run --max-checkpoints N` 才会考虑有限自动推进。
+随状态生成的条件产物：
+
+```text
+  # checkpoint 完成或阻塞
+  checkpoints/01/checkpoint-evidence.json
+  checkpoints/01/checkpoint-report.md
+  checkpoints/01/checkpoint-blocked.md
+  checkpoints/01/checkpoint-reconcile.md
+
+  # goal 完成、停止或恢复
+  goal-final-report.md
+  goal-eval.md
+  stop-report.md
+  recovery-report.md
+```
+
+`state.json` 和 `goal-state.json` 内容保持一致，前者用于复用通用 `status/latest` 读取链路，后者保留 goal 专属语义。同一时间只允许一个 active checkpoint。自动证据必须来自当前 workspace 的真实 child run，且 kind、repo、artifact integrity、verification 和状态会被校验；manual 证据必须是 workspace 或目标仓库内的真实文件。完成后的 checkpoint 不允许继续挂载或改写证据。`goal complete` 表示满足 success conditions，`goal stop` 表示目标被终止，两者不会混用。
+
+P0 不调用 worker/reviewer。P1 只在用户明确执行 `goal run` 时启动一个 child loop，并写入
+checkpoint 级 `bound_child_run`、`runner_timeout_seconds`，以及 Goal 级
+`active_child_run`、`last_child_run`、`last_child_status` 和 `progress.jsonl`。绑定后不能用
+另一个成功 loop 替换原 child；`resume` 和重复 `goal run` 也不能产生第二个 child。
+
+`goal reconcile` 先持有父 Goal lock，再持有 child lifecycle lock。child 仍有 owner、子进程、
+Windows Job 或 POSIX process group 时只等待；child 状态为 running 但执行主体已消失时进入
+`needs_human/child_recovery_required`；只有 child 成功且 artifact integrity、verification、
+证据新鲜度和仓库身份重新校验通过时，才完成 checkpoint。该流程不会自动恢复模型会话、
+重试、回滚、commit、push、写长期 Memory 或进入下一 checkpoint。
 
 ## Tool Adapter
 
