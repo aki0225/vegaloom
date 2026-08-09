@@ -18,6 +18,7 @@ from .loop_integrity import (
     validate_verification_failure_kind_schema,
     validated_review_workspace_fingerprint,
 )
+from .worker_rerun import worker_rerun_binding_issues
 from .models import (
     GateResult,
     LoopAutomationState,
@@ -348,6 +349,7 @@ def validate_loop_artifact_integrity(
     ):
         issues.append("loop_success_latest_iteration_interrupted")
     _validate_project_policy_snapshot(loop_dir, repo_path, state, issues)
+    issues.extend(worker_rerun_binding_issues(loop_dir, state))
 
     verdicts: list[ReviewVerdict] = []
     verification_results: list[dict[str, Any]] = []
@@ -1299,10 +1301,7 @@ def _freshness(
 
 def _sha256_json(payload: Any) -> str:
     serialized = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
     return _sha256_text(serialized)
 

@@ -78,6 +78,10 @@ from .scope_gate import (
 )
 from .trace import TraceWriter, active_run_finished_indices, read_trace_items
 from .verification import VerificationRunResult, run_project_verification
+from .worker_rerun import (
+    capture_auto_worker_workspace_baseline,
+    worker_rerun_eval_results,
+)
 from .workspace_baseline import (
     ASSIST_BASELINE_BLOCKED_ARTIFACTS,
     ASSIST_INITIALIZATION_ARTIFACTS,
@@ -912,6 +916,12 @@ class LoopAutomationRuntime:
             expected_first_workspace_snapshot=(
                 recovery_plan.expected_workspace_snapshot
             ),
+            source_interrupted_iteration=(
+                recovery_plan.source_interrupted_iteration
+            ),
+            source_worker_baseline_sha256=(
+                recovery_plan.source_worker_baseline_sha256
+            ),
         )
 
     def _run_auto_iterations(
@@ -928,6 +938,8 @@ class LoopAutomationRuntime:
         initial_previous_verdict: ReviewVerdict | None = None,
         worker_rerun_requested: bool = False,
         expected_first_workspace_snapshot: WorkspaceSnapshot | None = None,
+        source_interrupted_iteration: int | None = None,
+        source_worker_baseline_sha256: str | None = None,
     ) -> Path:
         trace = TraceWriter(run_dir / "trace.jsonl")
         repo_path = Path(brief_input.repo_path).resolve()
@@ -939,11 +951,14 @@ class LoopAutomationRuntime:
         recovered_workspace_baseline = initialize_auto_worker_rerun(
             self.workspace,
             repo_path,
+            run_dir,
             state,
             trace,
             start_iteration=start_iteration,
             rerun_requested=worker_rerun_requested,
             expected_workspace_snapshot=expected_first_workspace_snapshot,
+            source_interrupted_iteration=source_interrupted_iteration,
+            source_worker_baseline_sha256=source_worker_baseline_sha256,
         )
         for iteration_number in range(start_iteration, state.max_iterations + 1):
             iteration_state = LoopIterationState(
@@ -1063,6 +1078,13 @@ class LoopAutomationRuntime:
                     current_step=current_step,
                 )
                 return run_dir
+            capture_auto_worker_workspace_baseline(
+                run_dir,
+                state,
+                trace,
+                iteration=iteration_number,
+                snapshot=workspace_baseline,
+            )
             trace.write("worker_started", iteration=iteration_number, runner=worker_name)
             worker_result = worker.run(
                 prompt,
@@ -2085,6 +2107,7 @@ def run_loop_eval(
         results.append("PASS: state.artifacts 与必需 artifact 一致")
     results.extend(project_policy_snapshot_eval_results(run_dir, state))
     results.extend(workspace_baseline_eval_results(run_dir, state))
+    results.extend(worker_rerun_eval_results(run_dir, state))
 
     effective_status = status_for_eval or state.status
     if require_terminal:

@@ -30,6 +30,7 @@ from .workspace_inventory import (
     CurrentWorkspaceInventory,
     WorkspaceSnapshot,
     build_content_manifest,
+    hash_tracked_diff,
     ignored_coverage_level,
     safe_git_status as _safe_git_status,
     safe_path_for_report as _safe_path_for_report,
@@ -153,10 +154,9 @@ def snapshot_workspace(
 ) -> WorkspaceSnapshot:
     repo = repo_path.resolve()
     try:
-        tracked_snapshot = capture_tracked_scope_snapshot(
-            repo,
-            include_untracked=True,
-        )
+        tracked_snapshot = capture_tracked_scope_snapshot(repo, include_untracked=True)
+        tracked_diffs = collect_tracked_diff_parts(repo, ["--binary", "--full-index"])
+        tracked_diff_sha256 = hash_tracked_diff(*tracked_diffs)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         return WorkspaceSnapshot(
             raw_status=f"<git status failed before worker: {exc}>",
@@ -165,10 +165,7 @@ def snapshot_workspace(
             ignored_path_exclusions=ignored_path_exclusions,
             capture_complete=False,
         )
-    tracked_files = [
-        *tracked_snapshot.staged_files,
-        *tracked_snapshot.unstaged_files,
-    ]
+    tracked_files = [*tracked_snapshot.staged_files, *tracked_snapshot.unstaged_files]
     untracked_files = filter_codex_runtime_untracked_paths(
         repo,
         list(tracked_snapshot.untracked_files),
@@ -196,6 +193,7 @@ def snapshot_workspace(
             untracked_files=frozenset(untracked_files),
             ignored_path_exclusions=ignored_path_exclusions,
             head_sha=tracked_snapshot.head_sha,
+            tracked_diff_sha256=tracked_diff_sha256, tracked_diff_complete=True,
             untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
             capture_complete=False,
         )
@@ -205,6 +203,7 @@ def snapshot_workspace(
         untracked_files=frozenset(untracked_files),
         ignored_path_exclusions=ignored_path_exclusions,
         head_sha=tracked_snapshot.head_sha,
+        tracked_diff_sha256=tracked_diff_sha256, tracked_diff_complete=True,
         untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
         ignored_manifest_sha256=ignored_manifest_sha256,
         ignored_manifest_complete=ignored_manifest_complete,

@@ -1177,6 +1177,43 @@ def test_status_recovered_auto_worker_without_diff_guides_explicit_rerun(
     )
 
 
+def test_status_recovered_auto_worker_at_iteration_limit_hides_rerun(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    run_dir = tmp_path / "runs" / "recovered-auto-loop-at-limit"
+    run_dir.mkdir(parents=True)
+    state = _loop_state(repo, run_dir.name)
+    state.automation_mode = "auto"
+    state.status = "needs_human"
+    state.current_step = "recovered"
+    state.current_iteration = 2
+    state.max_iterations = 2
+    state.iterations = [
+        models.LoopIterationState(iteration=1),
+        models.LoopIterationState(
+            iteration=2,
+            lifecycle="interrupted",
+            interrupted_step="worker",
+            interrupted_at="2026-08-09T12:00:00+00:00",
+        ),
+    ]
+    state.save(run_dir / "state.json")
+
+    text = render_run_status(tmp_path, run_dir.name)
+
+    assert "已达到自动 Worker 迭代上限" in text
+    assert (
+        f"vega loop continue --repo <repo> --run {run_dir.name} --rerun-worker"
+        not in text
+    )
+    assert (
+        f"vega loop continue --repo <repo> --run {run_dir.name}`"
+        in text
+    )
+
+
 def test_status_text_keeps_active_owned_child_pid(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "active-child-loop"
     run_dir.mkdir(parents=True)

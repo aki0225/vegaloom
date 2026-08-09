@@ -117,6 +117,21 @@ def recovery_next_steps(
         and latest.get("lifecycle") == "interrupted"
         and latest.get("interrupted_step") == "worker"
     ):
+        current_iteration = state.get("current_iteration")
+        max_iterations = state.get("max_iterations")
+        if (
+            isinstance(current_iteration, int)
+            and isinstance(max_iterations, int)
+            and current_iteration >= max_iterations
+        ):
+            steps.extend(
+                [
+                    "当前已达到自动 Worker 迭代上限，不能再使用 `--rerun-worker`。",
+                    "如需继续，请人工完成并验证现场修改，再运行："
+                    f"`vega loop continue --repo <repo> --run {run_dir.name}`。",
+                ]
+            )
+            return steps
         steps.extend(
             [
                 "如果没有新的 tracked 或非 ignored untracked diff，"

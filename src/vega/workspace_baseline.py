@@ -82,6 +82,8 @@ class WorkspaceBaselineArtifact(BaseModel):
     tracked_files: list[str] = Field(default_factory=list)
     untracked_files: list[str] = Field(default_factory=list)
     ignored_path_exclusions: list[str] = Field(default_factory=list)
+    tracked_diff_sha256: str = ""
+    tracked_diff_complete: bool = False
     untracked_manifest_sha256: str
     ignored_manifest_sha256: str
     ignored_manifest_complete: bool
@@ -99,6 +101,8 @@ def write_workspace_baseline(path: Path, snapshot: WorkspaceSnapshot) -> str:
         tracked_files=sorted(snapshot.tracked_files),
         untracked_files=sorted(snapshot.untracked_files),
         ignored_path_exclusions=sorted(snapshot.ignored_path_exclusions),
+        tracked_diff_sha256=snapshot.tracked_diff_sha256,
+        tracked_diff_complete=snapshot.tracked_diff_complete,
         untracked_manifest_sha256=snapshot.untracked_manifest_sha256,
         ignored_manifest_sha256=snapshot.ignored_manifest_sha256,
         ignored_manifest_complete=snapshot.ignored_manifest_complete,
@@ -149,6 +153,8 @@ def read_workspace_baseline(
         untracked_files=frozenset(artifact.untracked_files),
         ignored_path_exclusions=frozenset(artifact.ignored_path_exclusions),
         head_sha=artifact.head_sha,
+        tracked_diff_sha256=artifact.tracked_diff_sha256,
+        tracked_diff_complete=artifact.tracked_diff_complete,
         untracked_manifest_sha256=artifact.untracked_manifest_sha256,
         ignored_manifest_sha256=artifact.ignored_manifest_sha256,
         ignored_manifest_complete=artifact.ignored_manifest_complete,

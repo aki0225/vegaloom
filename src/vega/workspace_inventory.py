@@ -18,6 +18,8 @@ class WorkspaceSnapshot:
     untracked_files: frozenset[str]
     ignored_path_exclusions: frozenset[str] = frozenset()
     head_sha: str = ""
+    tracked_diff_sha256: str = ""
+    tracked_diff_complete: bool = False
     untracked_manifest_sha256: str = ""
     ignored_manifest_sha256: str = ""
     ignored_manifest_complete: bool = False
@@ -30,6 +32,11 @@ class WorkspaceSnapshot:
     def has_tracked_changes(self) -> bool:
         """启动前已有 tracked diff 时，loop 无法安全归因本轮成果。"""
         return bool(self.tracked_files)
+
+
+def hash_tracked_diff(staged_diff: str, unstaged_diff: str) -> str:
+    payload = f"staged\0{staged_diff}\0unstaged\0{unstaged_diff}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 @dataclass(frozen=True)

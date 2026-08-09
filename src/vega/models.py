@@ -403,6 +403,14 @@ class SupersededTerminalRecord(BaseModel):
     recovery_id: str = Field(min_length=1)
 
 
+class WorkerRerunAuthorization(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rerun_iteration: int = Field(ge=1)
+    source_interrupted_iteration: int = Field(ge=1)
+    recovery_id: str = Field(min_length=1)
+    source_worker_baseline_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class LoopAutomationState(BaseModel):
     run_id: str
     status: Literal["created", "running", "success", "failed", "needs_human"] = "created"
@@ -421,6 +429,10 @@ class LoopAutomationState(BaseModel):
     verification_artifact_version: Literal[2] | None = None
     workspace_baseline_artifact_version: Literal[1] | None = None
     workspace_baseline_sha256: str | None = None
+    worker_baseline_artifact_version: Literal[1] | None = None
+    worker_baseline_iteration: int | None = Field(default=None, ge=1)
+    worker_baseline_sha256: str | None = None
+    worker_rerun_authorizations: list[WorkerRerunAuthorization] = Field(default_factory=list)
     current_iteration: int = 0
     max_iterations: int = 2
     iterations: list[LoopIterationState] = Field(default_factory=list)

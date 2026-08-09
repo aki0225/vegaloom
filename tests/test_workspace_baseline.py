@@ -50,6 +50,8 @@ def test_workspace_baseline_round_trip_preserves_control_manifests(
         untracked_files=frozenset({"notes.txt"}),
         ignored_path_exclusions=frozenset({"runs"}),
         head_sha="abc123",
+        tracked_diff_sha256="tracked-diff-sha",
+        tracked_diff_complete=True,
         untracked_manifest_sha256="untracked-sha",
         ignored_manifest_sha256="ignored-sha",
         ignored_manifest_complete=True,
@@ -68,6 +70,8 @@ def test_workspace_baseline_round_trip_preserves_control_manifests(
         untracked_files=frozenset({"notes.txt"}),
         ignored_path_exclusions=frozenset({"runs"}),
         head_sha="abc123",
+        tracked_diff_sha256="tracked-diff-sha",
+        tracked_diff_complete=True,
         untracked_manifest_sha256="untracked-sha",
         ignored_manifest_sha256="ignored-sha",
         ignored_manifest_complete=True,
@@ -161,3 +165,5 @@ def test_read_workspace_baseline_accepts_repository_relative_windows_separator(
     snapshot = read_workspace_baseline(path, expected_sha256=digest)
 
     assert snapshot.tracked_files == frozenset(tracked_files)
+    assert snapshot.tracked_diff_sha256 == ""
+    assert snapshot.tracked_diff_complete is False

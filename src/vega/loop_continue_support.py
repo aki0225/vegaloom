@@ -6,9 +6,14 @@ from pathlib import Path
 from .execution_control import inspect_execution_for_recovery
 from .loop_evidence import validate_review_evidence_freshness
 from .loop_initialization import loop_initialization_issues
-from .models import LoopAutomationState, ReviewVerdict
+from .models import (
+    LoopAutomationState,
+    ReviewVerdict,
+    WorkerRerunAuthorization,
+)
 from .run_utils import resolve_run_dir
 from .trace import TraceWriter, active_run_finished_indices, read_trace_items
+from .worker_rerun import load_bound_auto_worker_baseline
 from .workspace_baseline import LEGACY_WORKSPACE_BASELINE_UNAVAILABLE
 from .workspace_check import snapshot_workspace
 from .workspace_inventory import WorkspaceSnapshot, workspace_ignored_path_exclusions
@@ -20,6 +25,8 @@ class AutoWorkerRecoveryPlan:
     iteration_number: int | None = None
     previous_verdict: ReviewVerdict | None = None
     expected_workspace_snapshot: WorkspaceSnapshot | None = None
+    source_interrupted_iteration: int | None = None
+    source_worker_baseline_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -27,6 +34,8 @@ class _AutoWorkerRecoveryAssessment:
     snapshot: WorkspaceSnapshot
     rerun_safe: bool
     previous_verdict: ReviewVerdict | None = None
+    source_interrupted_iteration: int | None = None
+    source_worker_baseline_sha256: str | None = None
 
 
 def plan_recovered_auto_worker(
@@ -39,7 +48,12 @@ def plan_recovered_auto_worker(
     has_test_log: bool,
     has_note: bool,
 ) -> AutoWorkerRecoveryPlan:
-    assessment = _assess_recovered_auto_worker(workspace, repo_path, state)
+    assessment = _assess_recovered_auto_worker(
+        workspace,
+        repo_path,
+        run_dir,
+        state,
+    )
     if assessment is None:
         if rerun_requested:
             raise ValueError(
@@ -73,6 +87,8 @@ def plan_recovered_auto_worker(
             iteration_number=iteration_number,
             previous_verdict=assessment.previous_verdict,
             expected_workspace_snapshot=snapshot,
+            source_interrupted_iteration=assessment.source_interrupted_iteration,
+            source_worker_baseline_sha256=assessment.source_worker_baseline_sha256,
         )
     if rerun_requested:
         raise ValueError(
@@ -85,12 +101,15 @@ def plan_recovered_auto_worker(
 def initialize_auto_worker_rerun(
     workspace: Path,
     repo_path: Path,
+    run_dir: Path,
     state: LoopAutomationState,
     trace: TraceWriter,
     *,
     start_iteration: int,
     rerun_requested: bool,
     expected_workspace_snapshot: WorkspaceSnapshot | None,
+    source_interrupted_iteration: int | None = None,
+    source_worker_baseline_sha256: str | None = None,
 ) -> WorkspaceSnapshot | None:
     recovered_snapshot: WorkspaceSnapshot | None = None
     if expected_workspace_snapshot is not None:
@@ -107,12 +126,31 @@ def initialize_auto_worker_rerun(
                 "已拒绝 --rerun-worker，避免覆盖新的人工或外部修改。"
             )
     if rerun_requested:
+        if (
+            state.last_recovery_id is None
+            or source_interrupted_iteration is None
+            or source_worker_baseline_sha256 is None
+        ):
+            raise ValueError("Worker 重跑缺少可验证的恢复授权绑定。")
+        authorization = WorkerRerunAuthorization(
+            rerun_iteration=start_iteration,
+            source_interrupted_iteration=source_interrupted_iteration,
+            recovery_id=state.last_recovery_id,
+            source_worker_baseline_sha256=source_worker_baseline_sha256,
+        )
+        if any(
+            item.rerun_iteration == authorization.rerun_iteration
+            or item.recovery_id == authorization.recovery_id
+            for item in state.worker_rerun_authorizations
+        ):
+            raise ValueError("Worker 重跑授权已存在，已拒绝重复写入。")
+        state.worker_rerun_authorizations.append(authorization)
+        state.status = "running"
+        state.save(run_dir / "state.json")
         trace.write(
             "auto_worker_rerun_requested",
-            iteration=start_iteration,
-            recovery_id=state.last_recovery_id,
+            **authorization.model_dump(mode="json"),
         )
-        state.status = "running"
     return recovered_snapshot
 
 
@@ -225,6 +263,7 @@ def require_recovery_trace_binding(
 def _assess_recovered_auto_worker(
     workspace: Path,
     repo_path: Path,
+    run_dir: Path,
     state: LoopAutomationState,
 ) -> _AutoWorkerRecoveryAssessment | None:
     if (
@@ -243,6 +282,23 @@ def _assess_recovered_auto_worker(
             repo_path,
         ),
     )
+    try:
+        source_baseline = load_bound_auto_worker_baseline(
+            run_dir,
+            state,
+            iteration=latest.iteration,
+        )
+    except ValueError:
+        return _AutoWorkerRecoveryAssessment(
+            snapshot=snapshot,
+            rerun_safe=False,
+            source_interrupted_iteration=latest.iteration,
+        )
+    baseline_unchanged = (
+        source_baseline.capture_complete
+        and source_baseline.tracked_diff_complete
+        and snapshot == source_baseline
+    )
     previous_reviewed = next(
         (
             iteration
@@ -257,9 +313,10 @@ def _assess_recovered_auto_worker(
         return _AutoWorkerRecoveryAssessment(
             snapshot=snapshot,
             rerun_safe=(
-                not snapshot.has_tracked_changes
-                and not snapshot.untracked_files
+                baseline_unchanged
             ),
+            source_interrupted_iteration=latest.iteration,
+            source_worker_baseline_sha256=state.worker_baseline_sha256,
         )
     try:
         freshness = validate_review_evidence_freshness(
@@ -277,6 +334,8 @@ def _assess_recovered_auto_worker(
         return _AutoWorkerRecoveryAssessment(
             snapshot=snapshot,
             rerun_safe=False,
+            source_interrupted_iteration=latest.iteration,
+            source_worker_baseline_sha256=state.worker_baseline_sha256,
         )
     if (
         not freshness.fresh
@@ -286,11 +345,15 @@ def _assess_recovered_auto_worker(
         return _AutoWorkerRecoveryAssessment(
             snapshot=snapshot,
             rerun_safe=False,
+            source_interrupted_iteration=latest.iteration,
+            source_worker_baseline_sha256=state.worker_baseline_sha256,
         )
     return _AutoWorkerRecoveryAssessment(
         snapshot=snapshot,
-        rerun_safe=True,
+        rerun_safe=baseline_unchanged,
         previous_verdict=previous_verdict,
+        source_interrupted_iteration=latest.iteration,
+        source_worker_baseline_sha256=state.worker_baseline_sha256,
     )
 
 

@@ -396,3 +396,54 @@ Gate、Reviewer 与父 Goal checkpoint evidence 绑定到正确 iteration。
 文档单文件任务不能代表复杂代码迁移或高风险业务任务；故障注入也不等同于真实供应商断线。
 后续不因本轮结果增加 daemon、数据库、多 checkpoint 自动编排、自动重试或新 Agent 框架。
 下一步只在真实日常任务中观察；只有重复出现同一问题，才评估新的窄改动。
+
+## r6 后代码审阅与 Worker 重跑授权加固
+
+> 日期：2026-08-09
+> 分支：`codex/goal-p1-real-dogfood`
+> 证据类型：r6 后静态审阅、定向恢复测试与 artifact 完整性测试
+> 新真实模型 dogfood：未运行
+
+### 审阅发现
+
+r6 的 clean-workspace 成功样本没有覆盖以下两项 P1：
+
+1. 首轮 Worker 中断恢复只检查 tracked 与非 ignored untracked 路径。若 Worker 写入被
+   `.gitignore` 覆盖的 partial work 后崩溃，旧判断可能错误允许显式重跑。
+2. 后续 iteration 已有可信 tracked diff 时，旧快照只记录路径集合。确认重跑后、Worker
+   启动前若同一路径内容被外部修改，路径集合不变，旧比较可能无法发现。
+
+另有两项证据与交互缺口：
+
+- `auto_worker_rerun_requested` 只存在于 trace，没有与根状态及来源 baseline 绑定。
+- `current_iteration == max_iterations` 时，状态仍可能继续展示重跑建议。
+
+### 最小修复
+
+- 复用现有 `WorkspaceBaselineArtifact`，增加 tracked staged/unstaged diff 的完整内容哈希；
+  旧 v1 artifact 仍可读取，但不能作为缺少 tracked diff 完整性的重跑依据。
+- 每轮 auto Worker 启动前写入 `iterations/<NN>/worker-baseline.json`，并在启动 Worker 前
+  将 iteration、artifact version 与 SHA256 原子保存到根状态。
+- 恢复判断读取中断 iteration 的已绑定 baseline，要求 HEAD、tracked diff、untracked、
+  ignored、Git control 与捕获完整性全部一致。
+- 根状态新增结构化 Worker 重跑授权，绑定重跑轮次、来源中断轮次、recovery ID 和来源
+  baseline SHA256；trace 必须与授权一一对应。
+- loop eval 与 artifact integrity 会复核授权、来源 baseline 和 trace；删除重跑事件、
+  删除 baseline 或篡改 baseline 均产生 FAIL。
+- 达到最大自动迭代数时，不再输出完整 `--rerun-worker` 命令，改为提示人工完成现场后使用
+  普通 continue。
+
+### 验证与边界
+
+本轮定向测试覆盖：
+
+- ignored partial work 后中断时拒绝重跑。
+- 后续轮同路径 tracked 内容变化时拒绝启动 Worker。
+- 来源 baseline 缺失或哈希损坏时 fail-closed。
+- 删除 `auto_worker_rerun_requested` 后，loop eval FAIL 且 artifact integrity invalid。
+- 最大迭代数耗尽后不再建议显式重跑。
+- 旧 workspace baseline artifact 仍可读取。
+
+本条记录不改变 r6 的 `candidate-for-opt-in` 历史裁决，也不新增真实模型收益结论。修复只提高
+显式 Worker 重跑的安全性和证据可验证性；不证明模型能连续数小时或跨天自治，不允许自动
+重试、多 checkpoint 串联、后台 daemon 或绕过人工选择。

@@ -6,8 +6,9 @@
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
 > 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式恢复已作为实验能力
-> 进入主线；真实控制进程中断 dogfood 已完成，正式裁决为 `reject`，机制附加判断为
-> `fail-closed-mechanism-pass`，不自动串联多个 checkpoint。
+> 进入主线；显式 `--rerun-worker` 仍在实验分支。r6 已真实通过该路径，后续代码审阅发现
+> ignored partial work 与同路径 tracked 内容变化两项 P1，当前实验分支已完成窄范围加固。
+> 在分支验证和后续观察完成前不提升为默认能力，也不自动串联多个 checkpoint。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -36,7 +37,8 @@ v0.1.4 发布（完成）
   -> RCB-02 Diff-driven 符号检索离线验证（Phase 0 停止，未运行 Holdout）
   -> RCB-03 有界假设调查（完成，reject-before-holdout）
   -> Goal P1 单 checkpoint 控制与显式恢复（实验能力已合并）
-  -> 真实控制进程中断 dogfood（完成，reject）
+  -> 真实控制进程中断 dogfood（r3 reject；r6 显式重跑路径通过）
+  -> r6 后安全审阅与 baseline/授权加固（当前实验分支）
   -> 保持实验入口，不提升为默认或正式长任务能力
 ```
 
@@ -594,6 +596,23 @@ child。普通 continue 非零且 state、trace、iteration 目录不变；显�
 
 完整追加证据见
 [`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
+
+### 2026-08-09：Goal P1 r6 后安全审阅与加固
+
+r6 之后的代码审阅发现，原显式重跑判断没有完整绑定“中断 Worker 启动前的工作区”：
+
+- ignored partial work 可能不进入首轮 `rerun_safe` 判断。
+- 后续轮相同 tracked 路径的内容变化可能绕过仅按路径比较的快照。
+- 重跑 trace 没有与根状态和来源 baseline 形成可由 eval/Finish 复核的授权记录。
+- 达到最大自动迭代数后，状态仍可能展示重跑建议。
+
+当前实验分支只做与这些缺口直接相关的修复：每轮 Worker baseline、tracked diff 哈希、
+结构化重跑授权、eval/artifact integrity 绑定和迭代上限提示。没有新增 daemon、数据库、
+多 checkpoint 自动串联、后台自动重试或新的 Agent 框架。
+
+该修复不会改写 r6 的历史证据，也没有产生新的真实模型结论。合并前仍需以本地分片、
+仓库卫生检查和 PR CI 验证；通过后也只表示显式恢复路径更可靠，不表示数小时或跨天
+无人值守自治已经成立。
 
 ## 七、更新规则
 
