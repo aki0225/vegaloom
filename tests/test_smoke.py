@@ -47,6 +47,7 @@ from vega.models import (
 )
 from vega.project_config import CodexExecOptions, check_project_config, load_project_config
 from vega.project_profile import build_project_profile
+from vega.progress import ExecutionProgressAdapter
 from vega.reflect_runtime import ReflectRuntime
 from vega.recovery_runtime import RecoveryRuntime
 from vega.review_runtime import ReviewPackRuntime, ReviewRuntime, parse_review_verdict
@@ -1885,8 +1886,12 @@ def test_loop_runtime_propagates_progress_reporter_to_worker_and_reviewer(
         verify=False,
     )
 
-    assert worker.calls[0]["execution_context"].progress_reporter is reporter
-    assert reviewer.calls[0]["execution_context"].progress_reporter is reporter
+    worker_reporter = worker.calls[0]["execution_context"].progress_reporter
+    reviewer_reporter = reviewer.calls[0]["execution_context"].progress_reporter
+    assert isinstance(worker_reporter, ExecutionProgressAdapter)
+    assert isinstance(reviewer_reporter, ExecutionProgressAdapter)
+    assert worker_reporter.delegate is reporter
+    assert reviewer_reporter.delegate is reporter
 
 
 def test_loop_continue_rejects_repo_mismatch_without_mutating_run(tmp_path) -> None:
