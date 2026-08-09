@@ -207,3 +207,70 @@ checkpoint 由最多五轮、每次最长一小时的 Worker/Reviewer 调用组�
 
 该结果不能证明外部模型已经真实连续运行数小时，也不能证明无人值守多 checkpoint 自治。
 真实模型长时稳定性仍需要单独的长时间 dogfood，不能由虚拟 deadline 或短时故障测试替代。
+
+## 真实控制进程中断 Dogfood 追加
+
+> 日期：2026-08-09
+> Goal：`20260809-173526-goal`
+> child：`20260809-173624-626164-feature-loop`
+> 正式裁决：`reject`
+> 机制附加判断：`fail-closed-mechanism-pass`
+
+本轮在 `.tmp/dogfood/20260809-echo-ai-api-style-r3/target-repo` 的可丢弃副本中执行一个真实
+配置契约修复任务。目标是统一 `AI_API_STYLE=chat_completions` 的运行时语义，允许修改范围、
+文件数量、Diff 预算和四条确定性验证命令均在运行前固定。真实项目目录未被修改，目标副本
+禁止 push。
+
+### 故障注入与恢复过程
+
+1. 父 Goal 创建唯一 child，并启动真实 Codex Worker。
+2. Worker 尚未形成 tracked diff 时，父控制进程被中断。
+3. child Worker 短暂继续存活，随后退出；父 Goal 首次 reconcile 正确进入
+   `child_recovery_required`，没有创建替代 child。
+4. 对同一个 child 执行 recover 和 `loop continue`。
+5. 恢复后的第 2 轮没有重新运行 Worker，而是把 Worker 标记为 `skipped`，直接对原始基线
+   执行 workspace-check、scope gate 和全部固定验证。
+6. 验证通过后，Vega 发现没有 tracked diff，按 `needs_human/no_diff` 停止；Reviewer 未启动。
+7. 父 Goal 再次 reconcile，最终停在 `needs_human/checkpoint_blocked`。
+
+### 观察结果
+
+- child 恢复全程复用同一个 run，替代 child 数量为 `0`。
+- 后端固定测试为 `123 passed`，耗时 `754.39s`。
+- 前端测试为 `178 passed`，前端构建和 `git diff --check` 通过。
+- child 从创建到终态约 `15m18s`，父 Goal 从创建到最终 reconcile 约 `18m22s`。
+- tracked diff 数量为 `0`，有效 Worker 完成次数为 `0`，Reviewer 调用次数为 `0`。
+- Goal、child 和 continue 相关进程在实验结束后均已退出。
+- run artifacts 未发现环境 API key、`sk-` 凭据或 Bearer token。
+
+预注册任务文字写了“完整后端测试”，但实际机器策略执行的是相关后端测试集合，共
+`123` 项。该差异属于实验协议文字缺陷，不能事后把本轮改写成“完整后端测试已通过”。
+
+### 能证明什么
+
+- 控制进程中断后，Vega 能保留唯一 child 身份、进程所有权、恢复记录和完整终态证据。
+- Worker 未产生可信结果时，Vega 没有误报成功，也没有启动 Reviewer 审查空 Diff。
+- 父 Goal 能把 child 的 `needs_human` 终态重新归档为 `checkpoint_blocked`。
+- 敏感信息、目标仓库边界和禁止 push 约束在本轮保持有效。
+
+### 暴露的产品缺口
+
+当 `interrupted_step=worker` 且恢复时没有 tracked diff，当前 `loop continue` 会跳过 Worker，
+直接进入昂贵验证。这在安全上是 fail-closed，但在长任务恢复上没有完成原 checkpoint，
+并浪费了约 13 分钟验证时间。
+
+下一次实现只应处理这一条恢复决策：
+
+- 明确重新运行 Worker；或者
+- 在任何昂贵验证前停止，并要求人工明确选择重新运行 Worker 或接受当前工作区。
+
+在该决策被实现并通过新的真实中断 dogfood 前，不增加自动多 checkpoint、后台 daemon、
+自动重试策略或新的编排框架。
+
+### 最终裁决
+
+本轮满足 `fail-closed-mechanism-pass`：控制与证据机制在故障后保持安全、可追溯。
+
+本轮不满足 `candidate-for-opt-in`：checkpoint 没有完成，恢复没有重新获得 Worker 产物，
+也没有证明比人工重新启动普通 loop 更可靠或更省成本。因此保留现有实验入口，但不提升为
+默认能力、正式长任务模式或多 checkpoint 自动编排。

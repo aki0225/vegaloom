@@ -1,11 +1,13 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-08
+> 更新时间：2026-08-09
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
-> 默认 Runtime 与 Reviewer 保持不变，主线回到真实日常使用观察。
+> 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式恢复已作为实验能力
+> 进入主线；真实控制进程中断 dogfood 已完成，正式裁决为 `reject`，机制附加判断为
+> `fail-closed-mechanism-pass`，不自动串联多个 checkpoint。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -33,6 +35,9 @@ v0.1.4 发布（完成）
   -> RCB-01 Reviewer Context Bootstrap 对照实验（完成，insufficient-evidence）
   -> RCB-02 Diff-driven 符号检索离线验证（Phase 0 停止，未运行 Holdout）
   -> RCB-03 有界假设调查（完成，reject-before-holdout）
+  -> Goal P1 单 checkpoint 控制与显式恢复（实验能力已合并）
+  -> 真实控制进程中断 dogfood（完成，reject）
+  -> 保持实验入口，不提升为默认或正式长任务能力
 ```
 
 Phase 3 已完成：
@@ -378,9 +383,15 @@ Stage 3 当前停止条件：
 
 ### Goal P1
 
-- 状态：`planned` / `design-only`
-- Goal P0 人工状态层已实现，P1 有限自动 checkpoint 仍是设计草案。
-- 只有真实长任务反复需要自动 checkpoint，才进入实现评估。
+- 状态：`experimental` / `single-checkpoint implemented`
+- PR `#54` 已将有限自动 checkpoint、唯一 child 绑定、显式 `goal reconcile`、一小时单次
+  runner deadline 和跨进程恢复证据合并到主线。
+- 真实控制进程中断 dogfood 已完成：唯一 child、进程所有权、reconcile 和 fail-closed
+  终态保持正确，但 Worker 无 Diff 时恢复会跳过 Worker，直接验证原始基线。
+- 正式裁决为 `reject`，机制附加判断为 `fail-closed-mechanism-pass`。现有实验入口保留，
+  但不提升为默认能力、正式长任务模式或自动多 checkpoint。
+- 唯一允许的后续代码方向是：`interrupted_step=worker` 且无 tracked diff 时，在昂贵验证前
+  明确重新运行 Worker 或要求人工选择。修复前不继续扩大 Goal 编排。
 - 不与 LangGraph 绑定，先证明 Goal/Handoff 是引擎无关能力。
 - 详细设计见 [`LONG-RUNNING-GOALS.md`](LONG-RUNNING-GOALS.md)。
 
@@ -516,6 +527,30 @@ RCB-03 按固定模型、顺序和六次调用完成，所有样本均可解析�
 正式裁决为 `reject-before-holdout`。不冻结新 Holdout，不修改默认 Reviewer，不继续增加提示层、
 静态关系图、检索服务或第二 Reviewer。主线回到真实日常使用观察；只有新的可重复失败证据才能
 启动另一份独立预注册。
+
+### 2026-08-09：Goal P1 单 checkpoint 实验能力进入主线
+
+PR `#54` 已合并单 checkpoint 自动推进、唯一 child 绑定、显式 reconcile、最长一小时的单次
+runner deadline、跨进程控制器中断恢复和 fail-closed 完成语义。该能力默认不自动运行，不改变
+`vega do`、普通 `vega loop` 或 Reviewer 的成功语义，也不自动创建下一 checkpoint。
+
+当前证据只证明控制状态、进程所有权、进度和 evidence 能跨父 CLI 中断恢复；没有证明真实模型
+连续数小时稳定自治。下一步只进行一次预注册的真实长时间 dogfood，不借此新增 daemon、数据库、
+自动重试、多 checkpoint 编排或新的 Agent 框架。
+
+### 2026-08-09：Goal P1 真实中断 Dogfood 不进入 Opt-in
+
+预注册 dogfood 在可丢弃真实项目副本中中断父控制进程，并恢复同一个 child。唯一 child 绑定、
+进程所有权、显式 reconcile、终态归档和敏感信息保护均保持正确；Worker 未形成 tracked diff
+时，Vega 最终也正确停在 `needs_human`，没有启动 Reviewer 或误报成功。
+
+但恢复后的第 2 轮跳过 Worker，直接对原始基线执行约 13 分钟验证，最后因 `no_diff` 停止。
+因此正式裁决为 `reject`，机制附加判断为 `fail-closed-mechanism-pass`。现有实验入口继续
+保留，默认 Runtime 不变；在“Worker 中断且无 Diff”的恢复决策得到窄范围修复和新 dogfood
+证据前，不提升为正式长任务能力，也不增加多 checkpoint、daemon 或自动重试。
+
+完整追加证据见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
 
 ## 七、更新规则
 

@@ -1,9 +1,10 @@
 # 长任务 Goal Loop 设计
 
-> 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进与显式 child reconcile 已在当前
-> 实验分支实现。fake-runner、真实 Codex child 恢复和跨进程控制器中断测试已通过；合并前
-> 仍需通过 PR CI。多 checkpoint 自动串联、真实模型连续运行数小时/跨天的稳定性和收益
-> 仍未证明。
+> 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进与显式 child reconcile 已通过
+> PR `#54` 进入主线。fake-runner、真实 Codex child 恢复、跨进程控制器中断测试和 PR CI
+> 已通过。真实控制进程中断 dogfood 的正式裁决为 `reject`，机制附加判断为
+> `fail-closed-mechanism-pass`：安全恢复成立，但 Worker 无 Diff 时没有有效继续。多
+> checkpoint 自动串联、真实模型连续运行数小时/跨天的稳定性和收益仍未证明。
 
 ## 1. 背景
 
@@ -404,7 +405,8 @@ Goal 层不替代这些模块，只是把它们串成可恢复的长任务协议
 2026-08-09 的一次真实 Codex 实验在可丢弃目标仓库中完成了受限代码修改、固定验证、
 Reflect、Risk Gate 和独立 Reviewer。child 首次因 Windows CRLF 的确定性 diff check
 误判停在 `needs_human`；修复后使用 `loop continue` 继续同一 child，最终得到
-`success/approve`。完整追加记录见 `eval/long-task-controller-experiment.md`。
+`success/approve`。完整追加记录见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
 
 该真实运行暴露的父 Goal 重新归档缺口，已经通过显式 `goal reconcile` 修复。该命令不轮询、
 不启动模型、不自动重试，只重新读取 checkpoint 已绑定的 child。跨进程测试已证明：
@@ -412,6 +414,20 @@ Reflect、Risk Gate 和独立 Reviewer。child 首次因 Windows CRLF 的确定�
 父 Goal 能重新验证证据并进入 `checkpoint_done`。
 
 这仍然只证明控制器和证据恢复机制，不证明真实模型可以无人值守稳定工作数小时。
+
+2026-08-09 的真实控制进程中断 dogfood 又验证了一个更严格的场景：父控制进程在真实 Codex
+Worker 尚未形成 tracked diff 时退出。Goal 正确保留唯一 child，Worker 退出后允许 recover，
+并能由 reconcile 归档最终 `needs_human` 证据；没有创建替代 run、误报成功或泄露凭据。
+
+但恢复后的 `loop continue` 跳过 Worker，直接对原始基线运行全部固定验证，最终因 `no_diff`
+停止。该行为安全但无效，也产生了约 13 分钟无必要验证成本。因此本轮正式裁决为
+`reject`，机制附加判断为 `fail-closed-mechanism-pass`。
+
+P1 当前保持实验入口，不提升为默认或正式长任务模式。唯一允许的后续实现是处理
+`interrupted_step=worker` 且无 tracked diff 的恢复决策：明确重新运行 Worker，或者在昂贵
+验证前要求人工选择。完成该窄修复和新 dogfood 前，不进入多 checkpoint、后台 daemon、
+自动重试策略或 P2 扩建。完整记录见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
 
 ### P2：更强 eval 和经验沉淀
 
