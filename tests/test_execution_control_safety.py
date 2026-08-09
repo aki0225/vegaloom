@@ -100,6 +100,27 @@ def test_execution_prepare_rejects_linked_descendant_before_launch(tmp_path: Pat
     assert not outside.joinpath("worker").exists()
 
 
+def test_execution_records_one_hour_deadline_without_waiting(
+    tmp_path: Path,
+) -> None:
+    execution_root = tmp_path / "run"
+    execution_root.mkdir()
+    controller = ExecutionController(
+        RunnerExecutionContext(
+            execution_root=execution_root,
+            execution_dir=execution_root / "executions" / "worker",
+            run_id="one-hour-runner",
+            step="worker",
+        )
+    )
+
+    lease = controller.prepare(["runner"], 3600)
+
+    started_at = datetime.fromisoformat(lease.started_at)
+    deadline = datetime.fromisoformat(lease.deadline)
+    assert (deadline - started_at).total_seconds() == 3600
+
+
 @pytest.mark.parametrize("operation", ["heartbeat", "output", "stderr"])
 def test_execution_revalidates_directory_before_later_writes(
     tmp_path: Path,

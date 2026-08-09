@@ -19,7 +19,6 @@ from ..goal_models import (
 )
 from .goal_reporting import (
     render_checkpoint_plan,
-    render_checkpoint_report,
     render_contract_markdown,
     render_goal_eval,
     render_goal_final_report,
@@ -173,6 +172,7 @@ class GoalRuntime:
         max_iterations: int = 2,
         verify: bool = True,
         max_checkpoints: int = 1,
+        runner_timeout_seconds: int = 900,
     ) -> Path:
         from .goal_controller import run_one_checkpoint
 
@@ -184,7 +184,14 @@ class GoalRuntime:
             max_iterations=max_iterations,
             verify=verify,
             max_checkpoints=max_checkpoints,
+            runner_timeout_seconds=runner_timeout_seconds,
         )
+
+    @_goal_mutation("goal.reconcile")
+    def reconcile(self, run: str) -> Path:
+        from .goal_reconcile import reconcile_checkpoint
+
+        return reconcile_checkpoint(self, run)
 
     @_goal_mutation("goal.attach")
     def attach(
@@ -226,6 +233,15 @@ class GoalRuntime:
             raise ValueError(f"--type 只能是：{', '.join(sorted(_EVIDENCE_TYPES))}")
         if not child_run.strip():
             raise ValueError("--ref 不能为空。")
+        if (
+            record.bound_child_run
+            and evidence_type == "loop"
+            and child_run.strip() != record.bound_child_run
+        ):
+            raise ValueError(
+                f"checkpoint {checkpoint_id} 已绑定自动 child "
+                f"{record.bound_child_run}，不能用另一个 loop 替换。"
+            )
         checked_evidence_type = cast(GoalCheckpointEvidenceType, evidence_type)
         evidence = validate_goal_evidence(
             self.workspace, Path(state.repo_path), child_run.strip(),
@@ -277,78 +293,15 @@ class GoalRuntime:
         *,
         allow_manual_evidence: bool = False,
     ) -> Path:
-        run_dir, state, contract = self._load(run)
-        _ensure_action_allowed(state, "checkpoint_done")
-        checkpoint_id = _normalize_checkpoint(checkpoint)
-        record = _find_checkpoint_record(state, checkpoint_id)
-        if record is None:
-            raise ValueError(f"checkpoint 不存在：{checkpoint_id}")
-        if record.status != "planned":
-            raise ValueError(f"checkpoint {checkpoint_id} 已经完成，不能重复 checkpoint-done。")
-        active = _active_checkpoint(state)
-        if active is None or active.checkpoint != checkpoint_id:
-            raise ValueError(f"只能完成当前 active checkpoint：{active.checkpoint if active else '无'}")
-        if not record.refs:
-            raise ValueError("checkpoint 没有挂载任何证据，不能标记完成。")
-        refreshed_refs, refresh_errors = _revalidate_checkpoint_refs(
-            self.workspace, Path(state.repo_path), record, state.scope_profile,
+        from .goal_checkpoint import checkpoint_done_without_lock
+
+        return checkpoint_done_without_lock(
+            self,
+            run,
+            checkpoint,
+            note=note,
+            allow_manual_evidence=allow_manual_evidence,
         )
-        if refresh_errors:
-            raise ValueError(
-                "checkpoint 证据重新校验失败：" + "；".join(refresh_errors)
-            )
-        record.refs = refreshed_refs
-        eligible_refs = [item for item in record.refs if item.validated and item.completion_eligible]
-        manual_refs = [item for item in record.refs if item.validated and item.type == "manual"]
-        completion_mode = "validated"
-        if not eligible_refs:
-            if not allow_manual_evidence:
-                raise ValueError(
-                    "checkpoint 缺少可完成证据；请挂载成功的 loop/approved review/"
-                    "ready_to_commit finish，或显式使用 --allow-manual-evidence。"
-                )
-            if not manual_refs:
-                raise ValueError("--allow-manual-evidence 需要至少一个已校验的 manual 证据文件。")
-            if not note or not note.strip():
-                raise ValueError("manual evidence override 必须提供 --note，说明人工完成依据。")
-            completion_mode = "manual_override"
-        checkpoint_dir = run_dir / "checkpoints" / checkpoint_id
-        report_rel = f"checkpoints/{checkpoint_id}/checkpoint-report.md"
-        record.status = "done"
-        record.report_path = report_rel
-        record.completed_note = note.strip() if note and note.strip() else None
-        record.completed_at = datetime.now(UTC).isoformat()
-        record.completion_mode = completion_mode
-        write_redacted_text(
-            checkpoint_dir / "checkpoint-report.md",
-            render_checkpoint_report(state, contract, record),
-        )
-        write_redacted_json(
-            checkpoint_dir / "checkpoint-evidence.json",
-            record.model_dump(mode="json"),
-        )
-        state.status = "checkpoint_done"
-        state.current_step = "checkpoint_done"
-        state.artifacts = _dedupe(
-            [
-                *state.artifacts,
-                f"checkpoints/{checkpoint_id}/checkpoint-evidence.json",
-                report_rel,
-            ]
-        )
-        _write_progress(run_dir, state, contract)
-        _save_goal_state(run_dir, state)
-        TraceWriter(run_dir / "goal-trace.jsonl").write(
-            "goal_checkpoint_done",
-            checkpoint=checkpoint_id,
-            ref_count=len(record.refs),
-            completion_mode=completion_mode,
-        )
-        RunProgressLog(run_dir).append(
-            "goal.checkpoint_done",
-            checkpoint=checkpoint_id,
-        )
-        return run_dir
 
     @_goal_mutation("goal.pause")
     def pause(self, run: str, reason: str) -> Path:
@@ -368,8 +321,17 @@ class GoalRuntime:
 
     @_goal_mutation("goal.resume")
     def resume(self, run: str) -> Path:
+        from .goal_reconcile import bound_child_run
+
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "resume")
+        active = _active_checkpoint(state)
+        bound_child = bound_child_run(state, active)
+        if state.active_child_run or bound_child:
+            raise ValueError(
+                "goal 仍绑定未完成 child；请先运行 `vega goal reconcile`，"
+                "避免 resume 后重复创建 child。"
+            )
         resumed_status = state.paused_from_status or "running"
         if state.status == "needs_human":
             resumed_status = "running"
@@ -453,10 +415,15 @@ class GoalRuntime:
 
     @_goal_mutation("goal.recover")
     def recover(self, run: str, reason: str) -> Path:
+        from .goal_reconcile import ensure_bound_child_recoverable
+
         run_dir, state, contract = self._load(run)
         _ensure_action_allowed(state, "recover")
         if not reason.strip():
             raise ValueError("recover 必须提供原因。")
+        active = _active_checkpoint(state)
+        if ensure_bound_child_recoverable(self.workspace, state, active) is not None:
+            state.active_child_run = None
         previous_step = state.current_step
         state.status = "needs_human"
         state.current_step = "recovered"
@@ -782,6 +749,7 @@ def _ensure_action_allowed(state: GoalState, action: str) -> None:
         "attach": {"running"},
         "checkpoint_done": {"running"},
         "run_one": {"running"},
+        "reconcile": {"running", "needs_human", "checkpoint_done"},
         "pause": {"created", "running", "checkpoint_done"},
         "stop": {
             "created",

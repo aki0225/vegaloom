@@ -173,3 +173,37 @@ Decimal 退款比例分摊任务。任务只允许修改 `settlement/allocator.p
 - `compileall`、Ruff、仓库卫生检查与 `git diff --check`：通过。
 
 本机没有把超过 60 秒的组合命令记为通过；完整执行交由 PR CI 的既有分片完成。
+
+## 显式 Reconcile 与跨进程恢复追加
+
+> 日期：2026-08-09
+> 结论更新：`single-checkpoint-reconcile-pass / multi-hour-control-mechanism-pass`
+
+父 Goal 现为每个自动 checkpoint 持久化唯一 `bound_child_run` 和
+`runner_timeout_seconds`。`goal reconcile` 只读取这个 child，并按固定锁顺序持有父 Goal
+与 child lifecycle lock；它不启动新 Worker、不替换 child、不自动重试或回滚。
+
+新增跨进程测试执行了以下故障链：
+
+1. 独立控制进程创建父 Goal、child loop 和 owned worker 子进程。
+2. worker 写入部分修改后保持运行，测试强制终止控制进程。
+3. owned worker 仍存活时，父 Goal `recover` 被拒绝，`reconcile` 只保持等待状态。
+4. worker 退出后，父 Goal 记录 recovery；child 进入 `child_recovery_required`。
+5. 对同一个 child 执行普通 loop recovery，并在第 2 个 iteration 完成 Worker、固定验证和
+   独立 Reviewer。
+6. 父 Goal 再次 reconcile，刷新原 child 的证据并进入 `checkpoint_done`。
+
+测试同时确认：
+
+- checkpoint 只绑定一个 child，恢复后没有创建替代 run。
+- 重复 reconcile 不追加重复 evidence ref。
+- 单次 runner timeout 的 deadline 精确记录为 3600 秒。
+- timeout 范围外的 59 和 3601 秒被拒绝。
+- fake key 不进入 Goal 或 child artifacts。
+
+该结果能够证明 Vega 的控制状态、进度、进程所有权和证据可以跨 CLI 中断恢复，并允许一个
+checkpoint 由最多五轮、每次最长一小时的 Worker/Reviewer 调用组成。因此“数小时任务”的
+控制机制成立。
+
+该结果不能证明外部模型已经真实连续运行数小时，也不能证明无人值守多 checkpoint 自治。
+真实模型长时稳定性仍需要单独的长时间 dogfood，不能由虚拟 deadline 或短时故障测试替代。

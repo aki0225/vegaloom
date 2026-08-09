@@ -93,6 +93,13 @@ def goal_run(
     worker: str = typer.Option("codex-exec", "--worker", help="auto 模式 worker runner。"),
     reviewer: str = typer.Option("codex-exec", "--reviewer", help="隔离 reviewer runner。"),
     max_iterations: int = typer.Option(2, "--max-iterations", min=1, max=5),
+    runner_timeout_seconds: int = typer.Option(
+        900,
+        "--runner-timeout",
+        min=60,
+        max=3600,
+        help="单个 Worker 或 Reviewer 外部进程的超时秒数。",
+    ),
     verify: bool = typer.Option(True, "--verify/--no-verify"),
 ) -> None:
     """自动执行一个明确 checkpoint，并在证据边界停下。"""
@@ -106,10 +113,27 @@ def goal_run(
             max_iterations=max_iterations,
             verify=verify,
             max_checkpoints=max_checkpoints,
+            runner_timeout_seconds=runner_timeout_seconds,
         )
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"goal checkpoint 执行完成：{run_dir}")
+    typer.echo("")
+    typer.echo(render_run_status(Path.cwd(), run_dir.name))
+    if run_status_payload(Path.cwd(), run_dir.name)["status"] != "checkpoint_done":
+        raise typer.Exit(code=1)
+
+
+@goal_app.command("reconcile")
+def goal_reconcile(
+    run: str = typer.Option(..., "--run", help="goal run_id 或 runs/<run_id>。"),
+) -> None:
+    """重启后重新核对已记录 child，不启动新的 worker。"""
+    try:
+        run_dir = _goal_runtime().reconcile(run)
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"goal child 重新核对完成：{run_dir}")
     typer.echo("")
     typer.echo(render_run_status(Path.cwd(), run_dir.name))
     if run_status_payload(Path.cwd(), run_dir.name)["status"] != "checkpoint_done":

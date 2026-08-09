@@ -38,6 +38,7 @@ def render_progress(state: GoalState, contract: GoalContract) -> str:
         f"- active child run：`{state.active_child_run or '无'}`",
         f"- 最近 child run：`{state.last_child_run or '无'}`"
         f"（{state.last_child_status or '未知'}）",
+        f"- 最近重新核对：`{state.last_reconciled_at or '无'}`",
         "",
         "## Objective",
         "",
@@ -57,7 +58,16 @@ def render_progress(state: GoalState, contract: GoalContract) -> str:
                 or "无"
             )
             mode = f"，mode=`{record.completion_mode}`" if record.completion_mode else ""
-            lines.append(f"- `{record.checkpoint}`：`{record.status}`{mode}，refs：{refs}")
+            child = record.bound_child_run or "无"
+            timeout = (
+                f"{record.runner_timeout_seconds}s"
+                if record.runner_timeout_seconds is not None
+                else "未设置"
+            )
+            lines.append(
+                f"- `{record.checkpoint}`：`{record.status}`{mode}，"
+                f"bound child：`{child}`，runner timeout：`{timeout}`，refs：{refs}"
+            )
     elif state.checkpoints:
         lines.extend(f"- `{item}`" for item in state.checkpoints)
     else:
@@ -68,11 +78,48 @@ def render_progress(state: GoalState, contract: GoalContract) -> str:
             "## Safety",
             "",
             "- Goal P0 只维护状态、checkpoint plan 和经过校验的证据引用。",
-            "- Goal P1 实验最多自动执行一个 checkpoint，边界处暂停。",
+            "- Goal 自动执行始终限制在一个明确 checkpoint 内，边界处暂停。",
             "- 不自动修改目标仓库之外的路径，不自动 commit，不写长期 memory。",
         ]
     )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_checkpoint_reconcile_report(
+    state: GoalState,
+    contract: GoalContract,
+    checkpoint: str,
+    child_run: str,
+    child_status: str,
+    decision: str,
+    detail: str,
+) -> str:
+    return "\n".join(
+        [
+            f"# Checkpoint {checkpoint} Reconcile Report",
+            "",
+            f"- goal：`{state.run_id}`",
+            f"- checkpoint：`{checkpoint}`",
+            f"- child run：`{child_run}`",
+            f"- child status：`{child_status}`",
+            f"- decision：`{decision}`",
+            f"- reconciled at：`{state.last_reconciled_at or 'unknown'}`",
+            "",
+            "## Objective",
+            "",
+            contract.objective,
+            "",
+            "## Evidence",
+            "",
+            detail,
+            "",
+            "## Boundary",
+            "",
+            "- 本次操作只重新读取已记录 child 的状态、执行主体和证据。",
+            "- 不自动启动新 child，不自动恢复外部模型会话，不自动重试或回滚。",
+            "- child 证据不满足完成资格时，checkpoint 继续交还人工。",
+        ]
+    ).rstrip() + "\n"
 
 
 def render_checkpoint_plan(

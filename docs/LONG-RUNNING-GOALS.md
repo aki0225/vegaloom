@@ -1,8 +1,9 @@
 # 长任务 Goal Loop 设计
 
-> 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进已在当前实验分支实现，
-> fake-runner 机制测试和一次真实 Codex child 恢复路径已通过。合并前仍需通过 PR CI；
-> 多 checkpoint 自动串联、父 Goal 自动重同步、跨小时/跨天无人值守和真实模型收益仍未证明。
+> 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进与显式 child reconcile 已在当前
+> 实验分支实现。fake-runner、真实 Codex child 恢复和跨进程控制器中断测试已通过；合并前
+> 仍需通过 PR CI。多 checkpoint 自动串联、真实模型连续运行数小时/跨天的稳定性和收益
+> 仍未证明。
 
 ## 1. 背景
 
@@ -179,12 +180,17 @@ P1 当前只开放一次有限自动推进：
 
 ```powershell
 vega goal step --run <goal_run> --text "完成一个边界明确的阶段"
-vega goal run --run <goal_run> --max-checkpoints 1
+vega goal run --run <goal_run> --max-checkpoints 1 --max-iterations 5 --runner-timeout 3600
 ```
 
 `goal run` 还支持 `--worker`、`--reviewer`、`--max-iterations 1..5` 和
-`--verify/--no-verify`；默认最多两轮 iteration。它没有 `--model` 参数，模型、profile 和
-推理强度由目标仓库 `.vega.yaml` 与 Codex CLI 配置决定。
+`--runner-timeout 60..3600`、`--verify/--no-verify`；默认最多两轮 iteration、单次
+Worker/Reviewer 最多 900 秒。它没有 `--model` 参数，模型、profile 和推理强度由目标仓库
+`.vega.yaml` 与外部 runner 配置决定。
+
+这里的“数小时任务”指一个 checkpoint 可以由多轮 Worker、Reviewer 和确定性验证组成；
+每个外部 Worker/Reviewer 调用最多一小时，最多五轮。它不是把单个模型调用无限延长，也不
+承诺外部模型在几小时内始终保持目标稳定。
 
 `goal run` 不能无限执行。每个 checkpoint 都必须经过：
 
@@ -194,7 +200,8 @@ checkpoint plan -> loop/worker -> workspace-check -> verification -> reflect -> 
 
 如果 gate 是 high risk、验证失败、污染门禁失败、reviewer request_changes 或达到 checkpoint 预算，就停在人工判断。
 
-child loop 创建后，Goal 会把 `active_child_run` 写入状态。另一个终端可以运行：
+child loop 创建后，Goal 会把 checkpoint 级 `bound_child_run` 与 Goal 级
+`active_child_run` 写入状态。绑定一旦形成就不能替换。另一个终端可以运行：
 
 ```powershell
 vega watch --run <child_run> --follow
@@ -203,6 +210,20 @@ vega watch --run <child_run> --follow
 `watch` 只展示安全阶段事件、耗时、iteration 和 checkpoint/child run 标识，不展示模型正文、
 内部推理、原始命令、命令输出、工具参数或敏感路径。Goal 本身不会恢复外部模型会话；跨会话
 恢复依据仍是 Goal/child run artifacts、checkpoint 证据和目标仓库的真实 Git 状态。
+
+控制进程中断后，使用显式核对路径：
+
+```powershell
+vega goal reconcile --run <goal_run>
+vega recover --run <child_run> --reason "控制进程中断"
+vega loop continue --run <child_run> --repo .
+vega goal reconcile --run <goal_run>
+```
+
+第一次 reconcile 会检查 child 是否仍有存活执行主体。仍存活时只等待；状态仍为 running
+但执行主体已消失时，父 Goal 进入 `child_recovery_required`。人工恢复并继续同一个 child
+后，第二次 reconcile 会重新验证仓库身份、artifact integrity、verification 和 freshness，
+通过后才把原 checkpoint 标记为完成。
 
 ## 7. 目录结构草案
 
@@ -224,6 +245,7 @@ runs/<goal_run>/
       checkpoint-evidence.json
       checkpoint-report.md
       checkpoint-blocked.md
+      checkpoint-reconcile.md
     02/
       ...
   stop-report.md
@@ -248,9 +270,12 @@ state.json 仍是 running，但 trace.jsonl 长时间没有新事件，且当前
 
 - 不假设失败。
 - 不自动清理。
-- 由人工运行 `goal recover` 写 `recovery-report.md`。
+- 先运行 `goal reconcile` 检查绑定 child 是否仍有执行主体。
+- 需要记录父控制进程中断时，可运行 `goal recover` 写 `recovery-report.md`；活 child 会阻止
+  父 Goal 先行 recover。
+- child 执行主体消失后，先恢复并继续 child，再次运行 `goal reconcile`。
 - 当前实现标记为 `needs_human/recovered`，不会自动检测或产生 `stale`。
-- 让用户决定继续、停止或重开。
+- 不创建替代 child，让用户决定继续、停止或重开。
 
 ### 8.2 超时
 
@@ -266,7 +291,8 @@ state.json 仍是 running，但 trace.jsonl 长时间没有新事件，且当前
 
 当前已先落地普通 loop 的 worker/reviewer attempt 控制：`execution.json` 保存 heartbeat、lease、
 deadline 和 owned PID；单次超时会停止该 attempt、写 `timeout-report.md` 并进入
-`needs_human`。checkpoint timeout 和 goal wall-clock timeout 尚未实现。
+`needs_human`。`goal run --runner-timeout` 可把单次 Worker/Reviewer timeout 配置为 60 到
+3600 秒，checkpoint 最多五轮。checkpoint 总 timeout 和 goal wall-clock timeout 尚未实现。
 
 ### 8.3 停止
 
@@ -348,23 +374,28 @@ Goal 层不替代这些模块，只是把它们串成可恢复的长任务协议
 
 - `goal step --text/--input` 固化本 checkpoint 的唯一任务输入。
 - `goal run --max-checkpoints 1` 调用一次普通 auto loop。
+- checkpoint 持久化唯一 `bound_child_run` 和 `runner_timeout_seconds`。
 - child run 复用 Worker、workspace-check、verification、risk gate、Reviewer 和 loop eval。
 - child run 身份、终态和证据引用写回 Goal。
 - child 成功且证据资格通过时，自动生成 checkpoint report 并停在 `checkpoint_done`。
 - child 异常、损坏、失败或证据不足时，生成 `checkpoint-blocked.md` 并停在 `needs_human`。
+- `goal reconcile` 只重新核对绑定 child，并与 child 的 continue/recover lifecycle lock 串行。
 - run-local `progress.jsonl` 与 `vega watch` 提供安全阶段可见性。
 
 验收：
 
 - fake Worker/Reviewer 的真实本地 child loop 能完成一个验证通过的 checkpoint。
 - 损坏 child state 会保留完整 Goal 状态、trace、progress 和阻塞报告。
+- 控制进程中断且 worker 仍存活时，父 Goal 不接管；worker 退出后可恢复同一 child。
+- 同一 child 恢复成功后，父 Goal 能刷新原 evidence ref 并完成 checkpoint，不会增加替代 ref。
+- 单次 runner timeout 可安全记录为 3600 秒，59 和 3601 秒会被拒绝。
 - fake API key 不进入 Goal 或 child run artifacts。
 - `max_checkpoints > 1` 被明确拒绝。
 
 尚未证明：
 
 - 自动完成 2-3 个连续 checkpoint。
-- 模型在数小时或数天任务中的目标稳定性和恢复成功率。
+- 真实模型连续运行数小时或数天时的目标稳定性、供应商连接稳定性和成功率。
 - 主进程崩溃后自动重连原外部 Worker 会话。
 - 相比人工拆分多个普通 loop，P1 能显著提高任务成功率或降低成本。
 
@@ -375,10 +406,12 @@ Reflect、Risk Gate 和独立 Reviewer。child 首次因 Windows CRLF 的确定�
 误判停在 `needs_human`；修复后使用 `loop continue` 继续同一 child，最终得到
 `success/approve`。完整追加记录见 `eval/long-task-controller-experiment.md`。
 
-该结果仍有明确边界：父 Goal 在 child 首次阻塞时已保存 `checkpoint_blocked`，之后不会
-轮询或自动重同步人工继续后的 child 终态。因此真实 child 的恢复成功不等于父 Goal 已自动
-进入 `checkpoint_done`。后续若处理该问题，应优先评估显式人工 reconcile，而不是引入后台
-服务、自动轮询或无限重试。
+该真实运行暴露的父 Goal 重新归档缺口，已经通过显式 `goal reconcile` 修复。该命令不轮询、
+不启动模型、不自动重试，只重新读取 checkpoint 已绑定的 child。跨进程测试已证明：
+控制进程退出、owned child 仍存活时不会并发接管；child 退出后可恢复同一 run，继续成功后
+父 Goal 能重新验证证据并进入 `checkpoint_done`。
+
+这仍然只证明控制器和证据恢复机制，不证明真实模型可以无人值守稳定工作数小时。
 
 ### P2：更强 eval 和经验沉淀
 

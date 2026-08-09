@@ -17,6 +17,7 @@ _ALLOWED_OPERATIONS = {
     "goal.checkpoint_done",
     "goal.complete",
     "goal.pause",
+    "goal.reconcile",
     "goal.recover",
     "goal.resume",
     "goal.run",

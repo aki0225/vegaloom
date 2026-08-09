@@ -70,6 +70,8 @@ class GoalCheckpointRecord(BaseModel):
     plan_path: str
     task_text: str | None = None
     task_source: str | None = None
+    bound_child_run: str | None = None
+    runner_timeout_seconds: int | None = Field(default=None, ge=60, le=3600)
     report_path: str | None = None
     refs: list[GoalCheckpointRef] = Field(default_factory=list)
     completed_note: str | None = None
@@ -108,6 +110,7 @@ class GoalState(BaseModel):
     active_child_run: str | None = None
     last_child_run: str | None = None
     last_child_status: str | None = None
+    last_reconciled_at: str | None = None
     completion_note: str | None = None
     completed_at: str | None = None
     eval_results: list[str] = Field(default_factory=list)
