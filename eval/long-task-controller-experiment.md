@@ -327,3 +327,72 @@ Runtime，也不增加 daemon、多 checkpoint、自动重试或新的 Agent 框
 如果未来仍要验证显式重跑，必须新建一份独立预注册协议，先解决 Windows launcher/job
 树导致的故障注入歧义，并在注入时再次确认 Worker 仍处于“无成果”窗口；不得复用 r4、
 不得按结果挑选重跑、不得把本轮 partial diff 当作成功样本。
+
+## Goal P1 显式 Worker 重跑 r5/r6 Dogfood
+
+> 日期：2026-08-09
+> r5 Goal：`20260809-202608-goal`
+> r5 child：`20260809-202649-738344-feature-loop`
+> r5 裁决：`protocol-invalid`
+> r6 Goal：`20260809-203310-goal`
+> r6 child：`20260809-203322-746247-feature-loop`
+> r6 裁决：`candidate-for-opt-in`
+> r6 机制判断：`explicit-worker-rerun-path-pass`
+
+### r5：实验装置无效，不评价产品
+
+r5 把任务缩小为仅修改 `README.md` 的 API 风格说明，固定一个文件、40 行 Diff、两条验证、
+两轮 iteration 和 900 秒 runner timeout。精确注入器先使用独立 sleep owner/child 完成
+演练，证明它只终止登记的 owner PID 与唯一命名 Windows Job。
+
+真实 r5 启动后，监控脚本在 `execution.json` 仍为 `starting`、`child_pid` 尚未持久化时
+过早读取并拒绝注入。真实 Worker 随后继续运行，错过预注册的 5 秒窗口。本轮使用
+`vega stop` 安全停止唯一 child；目标仓库始终 clean，父 Goal 正确归档
+`needs_human/checkpoint_blocked`，所有登记进程均已退出。
+
+因此 r5 没有执行故障注入，没有进入 recover 或 `--rerun-worker`，不能作为产品通过或失败
+证据。r6 只修正监控条件：等待 execution 为 `running` 且 owner/child identity 与 Job
+全部持久化；任务、预算、目标 HEAD、注入器和通过条件保持不变。
+
+### r6：同一 child 显式重跑通过
+
+r6 在可丢弃 LF checkout 副本中执行，prepared HEAD 为
+`f2513bcd9943b2654bd1c12f27c8eed459ccb8e4`，本地
+`core.autocrlf=input`，push URL 被禁用。真实 Echo Vault 未修改。
+
+1. iteration 01 在 execution 启动约 `0.55s` 时满足全部注入条件：
+   `status=running`、trace 已有 `worker_started`、没有 `file_changed`，目标 HEAD、
+   tracked/cached Diff 与非 ignored untracked 均未变化。
+2. 注入器精确终止 owner PID `32020` 与命名 Job
+   `Local\Vega-e0a3ce1c05cd4cfb83ea18c0d65bc65d`；登记 child 同时结束，Job 为空，
+   注入后仓库仍 clean。
+3. `goal reconcile` 进入 `needs_human/child_recovery_required`；child recover 将
+   iteration 01 冻结为 `interrupted/worker`。
+4. 普通 continue 以退出码 `2` 拒绝。前后 `state.json`、`trace.jsonl` SHA256 和
+   iteration 目录清单完全一致，仍只有 `01`。
+5. `--rerun-worker` 在同一 child 创建 iteration 02，trace 写入
+   `auto_worker_rerun_requested` 和新的 `worker_started`，没有替代 child。
+6. 真实 Codex Worker 成功结束，只修改 `README.md`；Diff 为 6 行新增、6 行删除。
+7. 固定句子断言和 `git diff --check` 均通过；三阶段 scope gate 只看到
+   `README.md`；Risk Gate 为 low。
+8. 独立 Reviewer 覆盖唯一变更文件并返回 `approve`，child 为 `success/done`。
+9. 父 Goal 再次 reconcile 后进入 `checkpoint_done`，checkpoint status 为 `done`。
+
+最终检查遍历了 child 下 5 个 execution；所有 owner、child 和命名 Job 均为
+`gone/empty`。凭据扫描最初把 `vega-risk-...` HTML 标记中的子串误识别为 `sk-`；将规则
+收紧为独立 token 边界且至少 20 个 key 字符后，同一批 Goal、child、Reviewer artifacts
+与目标 README 为 0 命中。该误报没有包含真实凭据。
+
+### 阶段结论
+
+r6 证明了这一条窄恢复路径：Worker 无成果中断后，普通 continue 不会静默跳过 Worker；
+人工显式选择后，同一 child 可以在下一 iteration 重跑真实 Worker，并把后续 Diff、验证、
+Gate、Reviewer 与父 Goal checkpoint evidence 绑定到正确 iteration。
+
+因此单 checkpoint Goal P1 可以继续作为显式 opt-in 实验能力使用，r3 暴露的“无成果恢复
+直接浪费验证”缺口已经关闭。
+
+本轮仍不证明外部模型连续数小时或数天稳定运行，也不证明无人值守多 checkpoint 自治。
+文档单文件任务不能代表复杂代码迁移或高风险业务任务；故障注入也不等同于真实供应商断线。
+后续不因本轮结果增加 daemon、数据库、多 checkpoint 自动编排、自动重试或新 Agent 框架。
+下一步只在真实日常任务中观察；只有重复出现同一问题，才评估新的窄改动。

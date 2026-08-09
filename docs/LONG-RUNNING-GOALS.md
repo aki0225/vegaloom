@@ -448,6 +448,26 @@ Worker 或 Reviewer。正式裁决为 `reject`，机制附加判断为
 若未来继续实验，必须新建独立协议验证真实显式重跑路径，先解决 Windows 故障注入的进程
 所有权歧义；在此之前不增加 daemon、多 checkpoint、后台自动重试或新的编排框架。
 
+同日后续 r5 因监控脚本在 execution 仍为 `starting` 时过早裁决而
+`protocol-invalid`，没有执行故障注入，也没有得到产品结论。该 child 使用 `vega stop`
+安全结束，目标副本保持 clean，父 Goal 正确停在 `checkpoint_blocked`。
+
+独立 r6 只修正监控条件，并在同一任务、预算和 prepared HEAD 下命中真实显式重跑路径：
+iteration 01 在 Worker running、工作区 clean 且尚无 `file_changed` 时精确终止本次 owner
+与命名 Job；reconcile 与 recover 后，普通 continue 无副作用拒绝，`--rerun-worker` 在同一
+child 创建 iteration 02。真实 Codex 只修改 `README.md`，固定验证通过，Risk Gate 为 low，
+独立 Reviewer 返回 `approve`，child 为 `success/done`，父 Goal reconcile 后为
+`checkpoint_done`。
+
+r6 正式裁决为 `candidate-for-opt-in`，机制判断为
+`explicit-worker-rerun-path-pass`。这关闭了“Worker 无成果中断后直接跳过 Worker 并浪费
+验证”的窄缺口，证明单 checkpoint 可以通过人工显式选择恢复并完成。
+
+能力边界仍不变：这不是无人值守长任务系统，不证明模型连续数小时或数天稳定运行，也不自动
+恢复、自动重试或创建多个 checkpoint。P1 保持显式实验入口，默认 Runtime 不变；后续只在
+真实日常任务中观察，不因本轮结果增加 daemon、数据库或新的编排框架。完整追加证据见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
+
 ### P2：更强 eval 和经验沉淀
 
 目标：让长任务是否成功更可量化。

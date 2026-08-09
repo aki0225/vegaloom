@@ -570,6 +570,31 @@ Worker 脱离父控制器后仍能独立完成，也没有证明真实模型的�
 框架。若未来继续，只能新建独立预注册 dogfood，先解决 Windows 进程树的故障注入歧义，
 并在确认“无成果”窗口后验证一次显式重跑。
 
+### 2026-08-09：Goal P1 显式 Worker 重跑 r6 通过
+
+r5 因监控脚本在 execution 仍为 `starting` 时过早退出而 `protocol-invalid`；它没有执行
+故障注入，也没有形成产品结论。r6 只修正为等待 identity 完整的 `running` execution，
+其余任务、预算、prepared HEAD、精确 owner/Job 注入器和通过条件保持不变。
+
+r6 在无 Diff 窗口精确中断 iteration 01 后，`goal reconcile` 与 child recover 保留唯一
+child。普通 continue 非零且 state、trace、iteration 目录不变；显式
+`--rerun-worker` 才在同一 child 创建 iteration 02。真实 Codex 只修改 `README.md`，
+固定验证、三阶段 scope gate、low Risk Gate 和独立 Reviewer 全部通过；child 为
+`success/done`，父 Goal 为 `checkpoint_done`。所有 execution 进程和命名 Job 均已退出，
+凭据扫描为 0 命中。
+
+正式裁决为 `candidate-for-opt-in`，机制判断为
+`explicit-worker-rerun-path-pass`。P1 继续保持显式实验入口，不改变默认 `vega do`、
+普通 loop 或 Reviewer 语义。该证据关闭单 checkpoint 的无成果 Worker 恢复缺口，但不证明
+数小时无人值守模型稳定性或自动多 checkpoint 自治。
+
+当前停止新增长任务基础设施。下一步只在真实日常任务中观察 P1；只有重复出现同一缺口时，
+才评估新的窄改动。不得因本轮通过增加 daemon、数据库、自动重试、多 checkpoint 编排或
+新的 Agent 框架。
+
+完整追加证据见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
+
 ## 七、更新规则
 
 路线变化时只更新本文，并写清：
