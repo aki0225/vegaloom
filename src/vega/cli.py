@@ -10,7 +10,9 @@ from . import __version__
 from .brief_runtime import BriefRuntime
 from .change_plan_runtime import ChangePlanRuntime
 from .cli_support import (
+    continue_loop_run,
     echo_run_status,
+    ensure_git_ready as _ensure_git_ready,
     ensure_runner_ready as _ensure_runner_ready,
     exit_for_loop_result,
     exit_if_failed,
@@ -36,13 +38,11 @@ from .progress import (
     safe_run_status,
     safe_run_step,
 )
-from .redaction import redact_text
 from .reflect_runtime import ReflectRuntime
 from .recovery_runtime import RecoveryRuntime
 from .review_runtime import ReviewPackRuntime
 from .run_status import latest_run_dir, render_run_status, run_status_payload
 from .run_utils import resolve_run_dir
-from .tools.git_tools import run_git
 
 app = typer.Typer(help="Vega 本地 Agent Loop Runtime。", invoke_without_command=True)
 memory_app = typer.Typer(help="管理 memory proposal 的显式接受、拒绝和检索。")
@@ -657,30 +657,27 @@ def do_feature(
 
 @loop_app.command("continue")
 def loop_continue(
-    run: str = typer.Option(..., "--run", help="assist loop run_id 或 runs/<run_id>。"),
+    run: str = typer.Option(..., "--run", help="needs_human loop run_id 或 runs/<run_id>。"),
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
+    worker: str = typer.Option("codex-exec", "--worker", help="重跑 auto Worker 时使用的 runner。"),
     reviewer: str = typer.Option("codex-exec", "--reviewer", help="隔离 reviewer runner。"),
     test_log: Path | None = typer.Option(None, "--test-log", help="测试输出日志文件。"),
     note: str | None = typer.Option(None, "--note", help="本轮复盘备注。"),
     verify: bool = typer.Option(True, "--verify/--no-verify", help="未提供 --test-log 时自动执行验证命令。"),
+    rerun_worker: bool = typer.Option(False, "--rerun-worker", help="显式重跑无新 diff 的中断 Worker。"),
 ) -> None:
-    """在主会话/人工完成修改后，继续 needs_human loop 的 reflect + review。"""
-    repo = require_repo_directory(repo)
-    _ensure_git_ready(repo)
-    if test_log and not test_log.exists():
-        raise typer.BadParameter(f"测试日志不存在：{_safe_path_display(test_log)}")
-    _ensure_runner_ready(reviewer, "reviewer")
-    try:
-        run_dir = make_loop_runtime(Path.cwd()).continue_assist(
-            run,
-            repo,
-            reviewer_name=reviewer,
-            test_log=test_log.resolve() if test_log else None,
-            note=note,
-            verify=verify,
-        )
-    except (FileNotFoundError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
+    """继续 needs_human loop；auto Worker 中断恢复必须显式选择是否重跑 Worker。"""
+    run_dir = continue_loop_run(
+        Path.cwd(),
+        run,
+        repo,
+        worker,
+        reviewer,
+        test_log,
+        note,
+        verify,
+        rerun_worker,
+    )
     typer.echo(f"loop continue 完成：{run_dir}")
     typer.echo("")
     echo_run_status(run_dir)
@@ -751,14 +748,6 @@ def _run_loop(
         run_dir,
         allow_initial_assist_wait=allow_initial_assist_wait,
     )
-
-
-def _ensure_git_ready(repo: Path) -> None:
-    returncode, _, stderr = run_git(repo, "git.status")
-    if returncode == 0:
-        return
-    detail = redact_text(stderr.strip()) or f"git status 退出码 {returncode}"
-    raise typer.BadParameter(f"目标仓库 Git 预检失败：\n{detail}")
 
 
 @memory_app.command("list")

@@ -10,6 +10,7 @@ from .loop_runtime import LoopAutomationRuntime
 from .redaction import redact_text, sensitive_path_reason
 from .review_runtime import ReviewRuntime
 from .run_status import render_run_status
+from .tools.git_tools import run_git
 
 _PROGRESS_STEP_LABELS = {
     "worker": "worker",
@@ -61,6 +62,43 @@ def make_review_runtime(workspace: Path) -> ReviewRuntime:
     )
 
 
+def continue_loop_run(
+    workspace: Path,
+    run: str,
+    repo: Path,
+    worker_name: str,
+    reviewer_name: str,
+    test_log: Path | None,
+    note: str | None,
+    verify: bool,
+    rerun_worker: bool,
+) -> Path:
+    if rerun_worker and (test_log is not None or note is not None):
+        raise typer.BadParameter("--rerun-worker 不能与 --test-log 或 --note 同时使用。")
+    validate_runner_name(worker_name, "worker")
+    validate_runner_name(reviewer_name, "reviewer")
+    repo = require_repo_directory(repo)
+    ensure_git_ready(repo)
+    if test_log and not test_log.exists():
+        raise typer.BadParameter(f"测试日志不存在：{safe_path_display(test_log)}")
+    if rerun_worker:
+        ensure_runner_ready(worker_name, "worker")
+    ensure_runner_ready(reviewer_name, "reviewer")
+    try:
+        return make_loop_runtime(workspace).continue_assist(
+            run,
+            repo,
+            worker_name=worker_name,
+            reviewer_name=reviewer_name,
+            test_log=test_log.resolve() if test_log else None,
+            note=note,
+            verify=verify,
+            rerun_worker=rerun_worker,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
 def require_repo_directory(repo: Path) -> Path:
     if not repo.exists():
         raise typer.BadParameter(f"目标仓库路径不存在：{redact_text(str(repo))}")
@@ -71,6 +109,14 @@ def require_repo_directory(repo: Path) -> Path:
     if not resolved.is_dir():
         raise typer.BadParameter(f"目标仓库路径必须是目录：{redact_text(str(repo))}")
     return resolved
+
+
+def ensure_git_ready(repo: Path) -> None:
+    returncode, _, stderr = run_git(repo, "git.status")
+    if returncode == 0:
+        return
+    detail = redact_text(stderr.strip()) or f"git status 退出码 {returncode}"
+    raise typer.BadParameter(f"目标仓库 Git 预检失败：\n{detail}")
 
 
 def load_brief_input(input_path: Path | None, text: str | None) -> tuple[str, str]:

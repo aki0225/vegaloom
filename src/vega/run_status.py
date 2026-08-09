@@ -17,6 +17,7 @@ from .run_status_guidance import (
     classify_assist_initialization_status as _classify_init,
     initialization_next_steps as _initialization_next_steps,
     latest_iteration_file as _latest_iteration_file,
+    recovery_next_steps as _recovery_next_steps,
     verification_failure_next_steps as _verification_failure_next_steps,
 )
 from .run_utils import resolve_run_dir, resolve_runs_root
@@ -281,29 +282,9 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     initialization_steps = _initialization_next_steps(run_dir, state)
     if initialization_steps is not None:
         return initialization_steps
-    if (
-        status == "needs_human"
-        and current_step == "recovered_initialization_incomplete"
-    ):
-        return [
-            f"读取 `{run_dir / 'recovery-report.md'}`，确认初始化中断位置。",
-            "原始 brief 尚未绑定到 loop state，不能安全 continue。",
-            "保留当前 run 作为中断证据，并从新的 run 重新开始任务。",
-        ]
-    if status == "needs_human" and current_step == "recovered":
-        interruption = _latest_iteration_file(run_dir, "interruption-report.md")
-        steps = [
-            f"读取 `{run_dir / 'recovery-report.md'}`，确认中断原因和现场。",
-        ]
-        if interruption.is_file():
-            steps.append(f"读取 `{interruption}`，确认被冻结的 iteration 与原执行步骤。")
-        steps.extend(
-            [
-                "先人工检查目标仓库 `git status`，不要直接覆盖或清理未知文件。",
-                f"如果工作区已有合理修复，再运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
-            ]
-        )
-        return steps
+    recovery_steps = _recovery_next_steps(run_dir, state)
+    if recovery_steps is not None:
+        return recovery_steps
     if status == "needs_human" and current_step in {"timed_out", "stopped"}:
         report_name = "timeout-report.md" if current_step == "timed_out" else "stop-report.md"
         report = _latest_iteration_file(run_dir, report_name)

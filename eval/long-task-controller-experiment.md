@@ -274,3 +274,56 @@ checkpoint 由最多五轮、每次最长一小时的 Worker/Reviewer 调用组�
 本轮不满足 `candidate-for-opt-in`：checkpoint 没有完成，恢复没有重新获得 Worker 产物，
 也没有证明比人工重新启动普通 loop 更可靠或更省成本。因此保留现有实验入口，但不提升为
 默认能力、正式长任务模式或多 checkpoint 自动编排。
+
+## Goal P1 显式 Worker 重跑窄修复后的 r4 Dogfood
+
+> 日期：2026-08-09
+> Goal：`20260809-191214-goal`
+> child：`20260809-191248-657688-feature-loop`
+> 目标：验证 Worker 中断且没有可信新成果时，普通 `loop continue` 不会悄悄跳过
+> Worker；只有显式 `--rerun-worker` 才允许在同一 child 的下一 iteration 重跑。
+
+### 实施内容
+
+本轮在同一分支完成了一个窄范围恢复改动：
+
+- 新增 `loop continue --rerun-worker`，只允许恢复 auto loop 的 Worker 中断场景。
+- 没有新 tracked 或非 ignored untracked 改动时，普通 continue 会拒绝并要求人工明确重跑。
+- 已有 tracked 或非 ignored untracked partial work 时，`--rerun-worker` 会拒绝覆盖现场。
+- Worker 启动前重新核对恢复快照，发现并发人工修改时拒绝启动。
+- 后续 iteration 可以复用上一轮可信 Reviewer findings，但不打通 Worker 对话。
+
+### 真实过程
+
+1. r4 在可丢弃的 Echo Vault 副本中创建一个 Goal 和唯一 child，固定了配置契约任务、
+   相关测试门禁和禁止 push 的副本边界。
+2. 启动时目标副本为 clean，execution 绑定了唯一的 Worker owner 和 child PID。
+3. 按协议只终止 Goal 控制层，不主动终止 Worker、Codex 或其他进程。
+4. Windows 进程树在本机表现为多层 launcher；控制层退出后，child owner/Codex 也随作业树结束。
+   因此本轮没有证明“Worker 脱离父控制器后仍能独立完成”这一更强条件。
+5. 退出前后目标副本出现了 12 个文件的 tracked partial work。Vega 没有重建 Goal、没有
+   创建替代 child，也没有覆盖或清理这些文件。
+6. `goal reconcile` 正确进入 `needs_human/child_recovery_required`；同一 child 执行
+   `recover` 后进入 `needs_human/recovered`。
+7. 由于现场已有 partial work，普通 `loop continue` 返回非零并进入人工风险门禁路径，
+   没有重新启动 Worker 或 Reviewer，也没有把任务标记成功；Goal 最终为
+   `needs_human/checkpoint_blocked`。
+
+### 结果与限制
+
+- 唯一 child 绑定、reconcile、recover、进程消失后的 fail-closed 和 partial work 不覆盖
+  得到真实证据支持。
+- `--rerun-worker` 的“无成果时显式重跑”在本轮真实任务中没有被命中；它由本地恢复测试覆盖，
+  但不能冒充真实模型 dogfood 证据。
+- 本轮没有完成固定任务验证、Reviewer 或 checkpoint，因此不能评价 Echo Vault 代码改动是否正确。
+- 本轮没有读取、写入或提交真实项目目录，也没有发现凭据进入 Goal、child 或控制产物。
+
+正式裁决：`reject`。
+
+机制附加判断：`fail-closed-partial-work-pass`。这表示 Vega 在最危险的覆盖边界上保持
+保守，但不表示长任务恢复已经达到可选入或无人值守水平。P1 继续保持实验状态，不进入默认
+Runtime，也不增加 daemon、多 checkpoint、自动重试或新的 Agent 框架。
+
+如果未来仍要验证显式重跑，必须新建一份独立预注册协议，先解决 Windows launcher/job
+树导致的故障注入歧义，并在注入时再次确认 Worker 仍处于“无成果”窗口；不得复用 r4、
+不得按结果挑选重跑、不得把本轮 partial diff 当作成功样本。

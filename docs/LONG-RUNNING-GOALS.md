@@ -429,6 +429,25 @@ P1 当前保持实验入口，不提升为默认或正式长任务模式。唯�
 自动重试策略或 P2 扩建。完整记录见
 [`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
 
+该窄修复随后增加了显式 `loop continue --rerun-worker`：没有新成果时普通 continue 会先
+拒绝，只有人工明确选择后才在同一 child 的下一 iteration 重跑；已有 tracked 或非 ignored
+untracked partial work 时禁止重跑覆盖。相关恢复与 CLI 分片测试已通过。
+
+同日 r4 真实 dogfood 没有命中“无成果时显式重跑”的理想路径。Goal
+`20260809-191214-goal` 与唯一 child `20260809-191248-657688-feature-loop` 均被保留；
+控制层中断后，Windows launcher/job tree 使 child owner/Codex 一并结束，目标副本留下
+12 个文件的 partial work。Vega 没有覆盖、清理或创建替代 child；reconcile、recover 和
+最终 `checkpoint_blocked` 均按 fail-closed 语义工作。
+
+普通 `loop continue` 在该 partial work 现场返回非零，进入人工风险门禁，不启动新的
+Worker 或 Reviewer。正式裁决为 `reject`，机制附加判断为
+`fail-closed-partial-work-pass`。因此当前长任务能力只应表述为支持 Goal/child 状态、
+进度、证据和人工恢复，并能在单个 checkpoint 的进程故障后安全停下；不应表述为数小时
+或数天无人值守自治。
+
+若未来继续实验，必须新建独立协议验证真实显式重跑路径，先解决 Windows 故障注入的进程
+所有权歧义；在此之前不增加 daemon、多 checkpoint、后台自动重试或新的编排框架。
+
 ### P2：更强 eval 和经验沉淀
 
 目标：让长任务是否成功更可量化。

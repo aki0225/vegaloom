@@ -552,6 +552,24 @@ runner deadline、跨进程控制器中断恢复和 fail-closed 完成语义。�
 完整追加证据见
 [`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
 
+### 2026-08-09：Goal P1 显式 Worker 重跑 r4 未通过协议
+
+本轮完成了窄范围的 `--rerun-worker` 恢复决策：无新成果时普通 continue 不会静默跳过
+Worker；显式参数才允许同一 child 进入下一 iteration；已有 tracked 或非 ignored
+untracked partial work 时禁止覆盖。恢复与 CLI 分片测试全部通过，说明代码边界和
+fail-closed 保护已经落地。
+
+真实 r4 在可丢弃 Echo Vault 副本中只创建一个 Goal 和一个 child。控制层中断后，Windows
+launcher/job tree 使 child owner/Codex 一并结束，且目标副本留下了 12 个文件的 partial
+work。Vega 正确完成 reconcile、recover 和人工风险门禁，没有替代 child、没有误报成功、
+没有启动 Reviewer，也没有把目标改动写回真实项目。
+
+正式裁决为 `reject`，机制附加判断为 `fail-closed-partial-work-pass`。本轮没有证明外部
+Worker 脱离父控制器后仍能独立完成，也没有证明真实模型的显式 `--rerun-worker` 路径；
+因此不把 P1 提升为正式长任务能力，不增加 daemon、多 checkpoint、自动重试或新的 Agent
+框架。若未来继续，只能新建独立预注册 dogfood，先解决 Windows 进程树的故障注入歧义，
+并在确认“无成果”窗口后验证一次显式重跑。
+
 ## 七、更新规则
 
 路线变化时只更新本文，并写清：
