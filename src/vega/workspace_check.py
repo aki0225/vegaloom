@@ -25,6 +25,12 @@ from .git_inventory import (
 from .git_read import run_git_bytes as _run_git_bytes
 from .project_config import load_project_config
 from .redaction import redact_text, redact_value
+from .tracked_workspace import (
+    capture_tracked_scope_snapshot,
+    collect_tracked_diff_parts,
+    render_tracked_diff_sections,
+    unsafe_index_paths as _unsafe_index_paths,
+)
 from .workspace_inventory import (
     ContentManifestBudget,
     CurrentWorkspaceInventory,
@@ -38,7 +44,6 @@ from .workspace_inventory import (
 )
 from .workspace_status import (
     parse_porcelain_v1_paths as _parse_porcelain_v1_paths,
-    parse_porcelain_v2_status as _parse_porcelain_v2_status,
 )
 
 
@@ -80,33 +85,6 @@ class ReviewWorkspaceSnapshot:
             self.ignored_manifest_complete,
             self.ignored_content_complete,
         )
-
-
-@dataclass(frozen=True)
-class TrackedScopeSnapshot:
-    """scope gate 读取到的一致 HEAD、tracked status 与双 diff 路径快照。"""
-
-    head_sha: str
-    status_sha256: str
-    index_flags_sha256: str
-    staged_files: tuple[str, ...]
-    unstaged_files: tuple[str, ...]
-    untracked_files: tuple[str, ...] = ()
-    unsafe_index_paths: tuple[str, ...] = ()
-
-    @property
-    def changed_paths_sha256(self) -> str:
-        payload = json.dumps(
-            {
-                "staged": self.staged_files,
-                "unstaged": self.unstaged_files,
-                "untracked": self.untracked_files,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return _sha256(payload)
 
 
 class WorkspaceCheckResult(BaseModel):
@@ -151,11 +129,16 @@ def snapshot_workspace(
     repo_path: Path,
     *,
     ignored_path_exclusions: frozenset[str] = frozenset(),
+    capture_ignored_descendants: bool = False,
 ) -> WorkspaceSnapshot:
     repo = repo_path.resolve()
     try:
         tracked_snapshot = capture_tracked_scope_snapshot(repo, include_untracked=True)
-        tracked_diffs = collect_tracked_diff_parts(repo, ["--binary", "--full-index"])
+        tracked_diffs = collect_tracked_diff_parts(
+            repo,
+            ["--binary", "--full-index"],
+            run_git=_run_git_bytes,
+        )
         tracked_diff_sha256 = hash_tracked_diff(*tracked_diffs)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         return WorkspaceSnapshot(
@@ -195,8 +178,22 @@ def snapshot_workspace(
             head_sha=tracked_snapshot.head_sha,
             tracked_diff_sha256=tracked_diff_sha256, tracked_diff_complete=True,
             untracked_manifest_sha256=_untracked_manifest_hash(repo, untracked_files),
+            index_flags_sha256=tracked_snapshot.index_flags_sha256,
+            unsafe_index_paths=tracked_snapshot.unsafe_index_paths,
             capture_complete=False,
         )
+    ignored_descendants_manifest_sha256 = ""
+    ignored_descendants_complete = False
+    if capture_ignored_descendants:
+        try:
+            (
+                ignored_descendants_manifest_sha256,
+                ignored_descendants_complete,
+            ) = _ignored_descendants_manifest(repo, ignored_files)
+        except (RuntimeError, OSError, subprocess.SubprocessError):
+            # 严格后代清单只决定中断后的 Worker 能否重跑，不降低首次执行的既有快照合同。
+            ignored_descendants_manifest_sha256 = ""
+            ignored_descendants_complete = False
     return WorkspaceSnapshot(
         raw_status="",
         tracked_files=frozenset(dict.fromkeys(tracked_files)),
@@ -210,9 +207,27 @@ def snapshot_workspace(
         ignored_content_complete=ignored_content_complete,
         git_control_sha256=git_control_sha256,
         git_control_complete=git_control_complete,
+        index_flags_sha256=tracked_snapshot.index_flags_sha256,
+        unsafe_index_paths=tracked_snapshot.unsafe_index_paths,
+        ignored_descendants_manifest_sha256=ignored_descendants_manifest_sha256,
+        ignored_descendants_complete=ignored_descendants_complete,
         capture_complete=(
             ignored_manifest_complete and git_control_complete
         ),
+    )
+
+
+def snapshot_worker_workspace(
+    repo_path: Path,
+    *,
+    ignored_path_exclusions: frozenset[str] = frozenset(),
+) -> WorkspaceSnapshot:
+    """捕获可用于显式 Worker 重跑判断的严格工作区快照。"""
+
+    return snapshot_workspace(
+        repo_path,
+        ignored_path_exclusions=ignored_path_exclusions,
+        capture_ignored_descendants=True,
     )
 
 
@@ -232,6 +247,7 @@ def capture_review_workspace(
     staged_diff, unstaged_diff = collect_tracked_diff_parts(
         repo,
         ["--binary", "--full-index"],
+        run_git=_run_git_bytes,
     )
     status = filter_codex_runtime_porcelain_v1_status(
         repo, status, ignored_path_exclusions
@@ -621,109 +637,6 @@ def render_workspace_check(result: WorkspaceCheckResult) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def collect_tracked_diff_parts(
-    repo_path: Path,
-    options: list[str],
-) -> tuple[str, str]:
-    """分别读取 staged（index 对 HEAD）和 unstaged（工作区对 index）差异。
-
-    不能用 ``git diff HEAD`` 代替两者并集：当同一文件同时是 ``MM`` 状态时，
-    它只给出 HEAD 到最终工作区的净差异，可能把 index 中尚未审查的内容抵消掉。
-    """
-    allowed_returncodes = (0, 1, 2) if "--check" in options else (0,)
-    diff_command = ["git", "-c", "core.autocrlf=input", "diff"]
-    staged = _run_git_bytes(
-        repo_path,
-        [
-            *diff_command,
-            "--no-ext-diff",
-            "--no-textconv",
-            "--cached",
-            *options,
-            "HEAD",
-            "--",
-        ],
-        allowed_returncodes=allowed_returncodes,
-    ).decode("utf-8", errors="replace")
-    unstaged = _run_git_bytes(
-        repo_path,
-        [*diff_command, "--no-ext-diff", "--no-textconv", *options, "--"],
-        allowed_returncodes=allowed_returncodes,
-    ).decode("utf-8", errors="replace")
-    return _normalize_newlines(staged), _normalize_newlines(unstaged)
-
-
-def render_tracked_diff_sections(staged_diff: str, unstaged_diff: str) -> str:
-    """生成可审查的双事实流 patch，明确区分 index 与工作区差异。"""
-    sections: list[str] = []
-    if staged_diff.strip():
-        sections.append(
-            "# --- Vega staged diff: index vs HEAD ---\n"
-            + staged_diff.rstrip()
-        )
-    if unstaged_diff.strip():
-        sections.append(
-            "# --- Vega unstaged diff: working tree vs index ---\n"
-            + unstaged_diff.rstrip()
-        )
-    return "\n\n".join(sections).rstrip() + ("\n" if sections else "")
-
-
-def capture_tracked_scope_snapshot(
-    repo_path: Path,
-    *,
-    include_untracked: bool = False,
-) -> TrackedScopeSnapshot:
-    """在两次 HEAD/status 读取之间采集 staged 与 unstaged 路径。
-
-    porcelain v2 的单次输出同时包含 HEAD、index 与工作区状态；前后两次字节完全一致才
-    采信。这样既避免 staged/unstaged 独立进程之间的混合时刻，也只需前后各读取一次
-    status 与 index flags，共 4 个只读 Git 进程，仍符合轻量 runtime 的约束。
-    """
-    repo = repo_path.resolve()
-    command = [
-        "git",
-        "status",
-        "--porcelain=v2",
-        "--branch",
-        "-z",
-        f"--untracked-files={'all' if include_untracked else 'no'}",
-    ]
-    index_flags_before = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
-    status_before = _run_git_bytes(repo, command)
-    status_after = _run_git_bytes(repo, command)
-    index_flags_after = _run_git_bytes(repo, ["git", "ls-files", "-v", "-z"])
-    if status_before != status_after or index_flags_before != index_flags_after:
-        raise RuntimeError("scope gate 采集期间 HEAD、tracked status 或 index 标记发生变化")
-    head_sha, staged, unstaged, untracked = _parse_porcelain_v2_status(
-        status_after
-    )
-    return TrackedScopeSnapshot(
-        head_sha=head_sha,
-        status_sha256=_sha256(status_after),
-        index_flags_sha256=_sha256(index_flags_after),
-        staged_files=tuple(staged),
-        unstaged_files=tuple(unstaged),
-        untracked_files=tuple(untracked),
-        unsafe_index_paths=tuple(_unsafe_index_paths(index_flags_after)),
-    )
-
-
-def _unsafe_index_paths(payload: bytes) -> list[str]:
-    """找出会让 Git 工作区视图忽略真实文件变化的 index 标记。"""
-    paths: list[str] = []
-    for item in payload.split(b"\0"):
-        if not item:
-            continue
-        record = item.decode("utf-8", errors="replace")
-        if len(record) < 3 or record[1] != " ":
-            raise RuntimeError("git ls-files -v 输出格式不完整")
-        tag = record[0]
-        if tag == "S" or tag.islower():
-            paths.append(record[2:])
-    return list(dict.fromkeys(paths))
-
-
 def read_head_sha(repo_path: Path) -> str:
     """读取当前提交身份；没有可解析 HEAD 时由调用方 fail-closed。"""
     return _read_head_sha(repo_path, run_git_bytes=_run_git_bytes)
@@ -785,6 +698,25 @@ def _ignored_manifest(
     )
 
 
+def _ignored_descendants_manifest(
+    repo_path: Path,
+    paths: list[str],
+) -> tuple[str, bool]:
+    result = build_content_manifest(
+        repo_path,
+        paths,
+        version="ignored-descendants-v1",
+        budget=ContentManifestBudget(
+            max_content_files=MAX_IGNORED_CONTENT_FILES,
+            max_file_bytes=MAX_IGNORED_FILE_BYTES,
+            max_content_bytes=MAX_IGNORED_CONTENT_BYTES,
+            max_metadata_files=MAX_IGNORED_METADATA_FILES,
+            expand_directories=True,
+        ),
+    )
+    return result.sha256, result.metadata_complete and result.content_complete
+
+
 def _git_control_manifest(repo_path: Path) -> tuple[str, bool]:
     return build_git_control_manifest(
         repo_path,
@@ -795,7 +727,3 @@ def _git_control_manifest(repo_path: Path) -> tuple[str, bool]:
 
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
-
-
-def _normalize_newlines(text: str) -> str:
-    return text.replace("\r\n", "\n").replace("\r", "\n")

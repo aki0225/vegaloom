@@ -16,6 +16,7 @@ from vega.workspace_check import (
     capture_review_workspace,
     evaluate_workspace,
     snapshot_workspace,
+    snapshot_worker_workspace,
 )
 from vega.workspace_inventory import (
     prepare_verification_temp_root,
@@ -300,6 +301,41 @@ def test_ignored_directory_is_folded_without_exhausting_metadata_budget(
     assert review_snapshot.ignored_manifest_complete is True
     assert review_snapshot.ignored_content_complete is False
     assert review_snapshot.ignored_coverage_level == "metadata_bounded"
+
+
+def test_worker_rerun_snapshot_fails_closed_when_ignored_descendants_exceed_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    repo.joinpath(".gitignore").write_text(
+        "ignored-dir/\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(repo, "add", "--", ".gitignore")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "ignore fixture directory",
+    )
+    ignored_dir = repo / "ignored-dir"
+    ignored_dir.mkdir()
+    ignored_dir.joinpath("a.txt").write_text("a\n", encoding="utf-8")
+    ignored_dir.joinpath("b.txt").write_text("b\n", encoding="utf-8")
+    monkeypatch.setattr(workspace_check_module, "MAX_IGNORED_METADATA_FILES", 2)
+
+    snapshot = snapshot_worker_workspace(repo)
+
+    assert snapshot.capture_complete is True
+    assert snapshot.ignored_manifest_complete is True
+    assert snapshot.ignored_descendants_complete is False
+    assert len(snapshot.ignored_descendants_manifest_sha256) == 64
 
 
 def test_workspace_check_allows_new_empty_root_agents_directory(

@@ -4,73 +4,13 @@ from pathlib import Path
 from typing import Any
 
 from .models import LoopAutomationState, WorkerRerunAuthorization
-from .trace import TraceWriter, read_trace_items
-from .workspace_baseline import read_workspace_baseline, write_workspace_baseline
-from .workspace_inventory import WorkspaceSnapshot
-
-WORKER_BASELINE_ARTIFACT = "worker-baseline.json"
-
-
-def worker_baseline_relative_path(iteration: int) -> str:
-    if iteration < 1:
-        raise ValueError("worker baseline iteration 必须从 1 开始")
-    return f"iterations/{iteration:02d}/{WORKER_BASELINE_ARTIFACT}"
-
-
-def capture_auto_worker_workspace_baseline(
-    run_dir: Path,
-    state: LoopAutomationState,
-    trace: TraceWriter,
-    *,
-    iteration: int,
-    snapshot: WorkspaceSnapshot,
-) -> str:
-    """在 auto Worker 启动前持久化当前轮次的完整工作区基线。"""
-
-    if not snapshot.capture_complete or not snapshot.tracked_diff_complete:
-        raise ValueError("auto Worker 启动前工作区基线不完整")
-    relative_path = worker_baseline_relative_path(iteration)
-    digest = write_workspace_baseline(run_dir / relative_path, snapshot)
-    state.worker_baseline_artifact_version = 1
-    state.worker_baseline_iteration = iteration
-    state.worker_baseline_sha256 = digest
-    state.artifacts = list(dict.fromkeys([*state.artifacts, relative_path]))
-    state.save(run_dir / "state.json")
-    trace.write(
-        "worker_baseline_captured",
-        iteration=iteration,
-        artifact=relative_path,
-        artifact_version=state.worker_baseline_artifact_version,
-        sha256=digest,
-        head_sha=snapshot.head_sha,
-        tracked_files=len(snapshot.tracked_files),
-        untracked_files=len(snapshot.untracked_files),
-        tracked_diff_complete=snapshot.tracked_diff_complete,
-        ignored_manifest_complete=snapshot.ignored_manifest_complete,
-        git_control_complete=snapshot.git_control_complete,
-        capture_complete=snapshot.capture_complete,
-    )
-    return digest
-
-
-def load_bound_auto_worker_baseline(
-    run_dir: Path,
-    state: LoopAutomationState,
-    *,
-    iteration: int,
-) -> WorkspaceSnapshot:
-    """读取最新中断 Worker 启动前、已绑定到根状态的工作区基线。"""
-
-    if (
-        state.worker_baseline_artifact_version != 1
-        or state.worker_baseline_iteration != iteration
-        or not state.worker_baseline_sha256
-    ):
-        raise ValueError("loop 缺少当前中断 Worker 的已绑定 workspace baseline")
-    return read_workspace_baseline(
-        run_dir / worker_baseline_relative_path(iteration),
-        expected_sha256=state.worker_baseline_sha256,
-    )
+from .trace import read_trace_items
+from .worker_baseline import (
+    WORKER_BASELINE_ARTIFACT_VERSION,
+    read_worker_workspace_baseline,
+    worker_baseline_relative_path,
+)
+from .worker_rerun_transaction import worker_rerun_transaction_pending
 
 
 def worker_rerun_binding_issues(
@@ -78,7 +18,7 @@ def worker_rerun_binding_issues(
     state: LoopAutomationState,
     trace_items: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    """校验显式 Worker 重跑的 state、baseline 与 trace 三方绑定。"""
+    """校验显式 Worker 重跑的 state、baseline、trace 与 iteration 因果链。"""
 
     if state.automation_mode != "auto":
         return (
@@ -94,22 +34,39 @@ def worker_rerun_binding_issues(
         )
     except (OSError, ValueError):
         return ["worker_rerun_trace_unreadable"]
+
     requested = [
         item for item in items if item.get("event") == "auto_worker_rerun_requested"
     ]
     authorizations = state.worker_rerun_authorizations
-    if len(requested) != len(authorizations):
-        return ["worker_rerun_authorization_trace_count_mismatch"]
-    if not requested:
-        return []
-
-    recovery_ids = {
-        str(item.get("recovery_id"))
-        for item in items
-        if item.get("event") == "loop_recovered"
-        and isinstance(item.get("recovery_id"), str)
-    }
     issues: list[str] = []
+    if worker_rerun_transaction_pending(run_dir):
+        issues.append("worker_rerun_transaction_pending")
+    if len(requested) != len(authorizations):
+        issues.append("worker_rerun_authorization_trace_count_mismatch")
+
+    required_pairs = _required_rerun_pairs(state, items)
+    authorization_pairs = [
+        (item.source_interrupted_iteration, item.rerun_iteration)
+        for item in authorizations
+    ]
+    request_pairs = [
+        (
+            item.get("source_interrupted_iteration"),
+            item.get("rerun_iteration"),
+        )
+        for item in requested
+    ]
+    for source_iteration, rerun_iteration in required_pairs:
+        if authorization_pairs.count((source_iteration, rerun_iteration)) != 1:
+            issues.append(
+                f"worker_rerun_{rerun_iteration:02d}_authorization_missing"
+            )
+        if request_pairs.count((source_iteration, rerun_iteration)) != 1:
+            issues.append(
+                f"worker_rerun_{rerun_iteration:02d}_request_trace_missing"
+            )
+
     seen_recovery_ids: set[str] = set()
     for authorization in authorizations:
         issues.extend(
@@ -119,12 +76,11 @@ def worker_rerun_binding_issues(
                 items,
                 requested,
                 authorization,
-                recovery_ids,
                 seen_recovery_ids,
             )
         )
         seen_recovery_ids.add(authorization.recovery_id)
-    return issues
+    return list(dict.fromkeys(issues))
 
 
 def worker_rerun_eval_results(
@@ -149,15 +105,20 @@ def _authorization_issues(
     trace_items: list[dict[str, Any]],
     requested: list[dict[str, Any]],
     authorization: WorkerRerunAuthorization,
-    recovery_ids: set[str],
     seen_recovery_ids: set[str],
 ) -> list[str]:
     prefix = f"worker_rerun_{authorization.rerun_iteration:02d}"
     issues: list[str] = []
     if authorization.recovery_id in seen_recovery_ids:
         issues.append(f"{prefix}_duplicate_recovery_id")
-    if authorization.recovery_id not in recovery_ids:
-        issues.append(f"{prefix}_recovery_event_missing")
+    recovery_matches = [
+        item
+        for item in trace_items
+        if item.get("event") == "loop_recovered"
+        and item.get("recovery_id") == authorization.recovery_id
+    ]
+    if len(recovery_matches) != 1:
+        issues.append(f"{prefix}_recovery_event_invalid")
     if authorization.source_interrupted_iteration >= authorization.rerun_iteration:
         issues.append(f"{prefix}_iteration_order_invalid")
     issues.extend(_iteration_issues(state, authorization, prefix))
@@ -166,6 +127,7 @@ def _authorization_issues(
         issues.append(f"{prefix}_source_baseline_trace_invalid")
     if not _has_rerun_request(requested, authorization):
         issues.append(f"{prefix}_trace_binding_invalid")
+    issues.extend(_causal_order_issues(trace_items, authorization, prefix))
     return issues
 
 
@@ -198,8 +160,13 @@ def _source_baseline_issues(
     authorization: WorkerRerunAuthorization,
     prefix: str,
 ) -> list[str]:
+    if (
+        authorization.source_worker_baseline_artifact_version
+        != WORKER_BASELINE_ARTIFACT_VERSION
+    ):
+        return [f"{prefix}_source_baseline_version_unsupported"]
     try:
-        baseline = read_workspace_baseline(
+        baseline = read_worker_workspace_baseline(
             run_dir
             / worker_baseline_relative_path(
                 authorization.source_interrupted_iteration
@@ -213,6 +180,10 @@ def _source_baseline_issues(
         issues.append(f"{prefix}_source_baseline_incomplete")
     if not baseline.tracked_diff_complete:
         issues.append(f"{prefix}_source_tracked_diff_incomplete")
+    if not baseline.ignored_descendants_complete:
+        issues.append(f"{prefix}_source_ignored_descendants_incomplete")
+    if baseline.unsafe_index_paths_count:
+        issues.append(f"{prefix}_source_unsafe_index_paths")
     return issues
 
 
@@ -229,7 +200,8 @@ def _has_source_baseline_event(
         if item.get("event") == "worker_baseline_captured"
         and item.get("iteration") == authorization.source_interrupted_iteration
         and item.get("artifact") == expected_path
-        and item.get("artifact_version") == 1
+        and item.get("artifact_version")
+        == authorization.source_worker_baseline_artifact_version
         and item.get("sha256") == authorization.source_worker_baseline_sha256
     ]
     return len(matches) == 1
@@ -246,7 +218,100 @@ def _has_rerun_request(
         and item.get("source_interrupted_iteration")
         == authorization.source_interrupted_iteration
         and item.get("recovery_id") == authorization.recovery_id
+        and item.get("source_worker_baseline_artifact_version")
+        == authorization.source_worker_baseline_artifact_version
         and item.get("source_worker_baseline_sha256")
         == authorization.source_worker_baseline_sha256
     ]
     return len(matches) == 1
+
+
+def _causal_order_issues(
+    trace_items: list[dict[str, Any]],
+    authorization: WorkerRerunAuthorization,
+    prefix: str,
+) -> list[str]:
+    event_groups = [
+        [
+            index
+            for index, item in enumerate(trace_items)
+            if item.get("event") == "worker_baseline_captured"
+            and item.get("iteration") == authorization.source_interrupted_iteration
+            and item.get("sha256") == authorization.source_worker_baseline_sha256
+        ],
+        [
+            index
+            for index, item in enumerate(trace_items)
+            if item.get("event") == "loop_iteration_interrupted"
+            and item.get("iteration") == authorization.source_interrupted_iteration
+            and item.get("recovery_id") == authorization.recovery_id
+        ],
+        [
+            index
+            for index, item in enumerate(trace_items)
+            if item.get("event") == "loop_recovered"
+            and item.get("recovery_id") == authorization.recovery_id
+        ],
+        [
+            index
+            for index, item in enumerate(trace_items)
+            if item.get("event") == "auto_worker_rerun_requested"
+            and item.get("rerun_iteration") == authorization.rerun_iteration
+            and item.get("recovery_id") == authorization.recovery_id
+        ],
+    ]
+    cancelled = [
+        index
+        for index, item in enumerate(trace_items)
+        if item.get("event") == "auto_worker_rerun_cancelled"
+        and item.get("rerun_iteration") == authorization.rerun_iteration
+        and item.get("recovery_id") == authorization.recovery_id
+    ]
+    rerun_baseline = [
+        index
+        for index, item in enumerate(trace_items)
+        if item.get("event") == "worker_baseline_captured"
+        and item.get("iteration") == authorization.rerun_iteration
+    ]
+    worker_started = [
+        index
+        for index, item in enumerate(trace_items)
+        if item.get("event") == "worker_started"
+        and item.get("iteration") == authorization.rerun_iteration
+    ]
+    if cancelled:
+        if len(cancelled) != 1 or rerun_baseline or worker_started:
+            return [f"{prefix}_causal_event_count_invalid"]
+        event_groups.append(cancelled)
+    else:
+        event_groups.extend([rerun_baseline, worker_started])
+    if any(len(group) != 1 for group in event_groups):
+        return [f"{prefix}_causal_event_count_invalid"]
+    indices = [group[0] for group in event_groups]
+    if indices != sorted(indices) or len(set(indices)) != len(indices):
+        return [f"{prefix}_causal_order_invalid"]
+    return []
+
+
+def _required_rerun_pairs(
+    state: LoopAutomationState,
+    trace_items: list[dict[str, Any]],
+) -> list[tuple[int, int]]:
+    worker_started_iterations = {
+        item.get("iteration")
+        for item in trace_items
+        if item.get("event") == "worker_started"
+        and type(item.get("iteration")) is int
+    }
+    required: list[tuple[int, int]] = []
+    for source, rerun in zip(state.iterations, state.iterations[1:]):
+        if (
+            source.lifecycle == "interrupted"
+            and source.interrupted_step == "worker"
+            and (
+                rerun.worker_status != "skipped"
+                or rerun.iteration in worker_started_iterations
+            )
+        ):
+            required.append((source.iteration, rerun.iteration))
+    return required

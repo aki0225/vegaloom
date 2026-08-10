@@ -408,8 +408,8 @@ class WorkerRerunAuthorization(BaseModel):
     rerun_iteration: int = Field(ge=1)
     source_interrupted_iteration: int = Field(ge=1)
     recovery_id: str = Field(min_length=1)
+    source_worker_baseline_artifact_version: Literal[1, 2] = 1
     source_worker_baseline_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
 
 class LoopAutomationState(BaseModel):
     run_id: str
@@ -429,7 +429,7 @@ class LoopAutomationState(BaseModel):
     verification_artifact_version: Literal[2] | None = None
     workspace_baseline_artifact_version: Literal[1] | None = None
     workspace_baseline_sha256: str | None = None
-    worker_baseline_artifact_version: Literal[1] | None = None
+    worker_baseline_artifact_version: Literal[1, 2] | None = None
     worker_baseline_iteration: int | None = Field(default=None, ge=1)
     worker_baseline_sha256: str | None = None
     worker_rerun_authorizations: list[WorkerRerunAuthorization] = Field(default_factory=list)

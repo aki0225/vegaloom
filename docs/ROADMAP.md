@@ -7,8 +7,8 @@
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
 > 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式恢复已作为实验能力
 > 进入主线；显式 `--rerun-worker` 仍在实验分支。r6 已真实通过该路径，后续代码审阅发现
-> ignored partial work 与同路径 tracked 内容变化两项 P1，当前实验分支已完成窄范围加固。
-> 在分支验证和后续观察完成前不提升为默认能力，也不自动串联多个 checkpoint。
+> 七项启动前证据与崩溃恢复缺口；当前实验分支已完成对应加固，等待 PR CI 与独立审查。
+> 在验证完成和后续观察前不提升为默认能力，也不自动串联多个 checkpoint。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -613,6 +613,18 @@ r6 之后的代码审阅发现，原显式重跑判断没有完整绑定“中�
 该修复不会改写 r6 的历史证据，也没有产生新的真实模型结论。合并前仍需以本地分片、
 仓库卫生检查和 PR CI 验证；通过后也只表示显式恢复路径更可靠，不表示数小时或跨天
 无人值守自治已经成立。
+
+### 2026-08-10：Goal P1 Worker 重跑阻断项已实现
+
+实验分支已经补齐 Worker baseline V2、敏感路径摘要、Git index flag 防护、有界 ignored
+目录后代清单、来源 baseline trace 校验、授权因果链推导、重跑事务和最终启动边界复查。
+baseline 准备、iteration claim 或 `worker_started` 附近崩溃时，Recovery 不会把未启动的
+Worker 误记为普通中断，也不会在同一事务上启动两个 Worker。
+
+本地静态门禁、仓库卫生、44 个 recovery chaos 节点、30 个 workspace snapshot 节点及
+config-assurance-pilot 文件集合已通过。Windows 单进程全量测试因 Git 子进程累计延迟没有
+可信终态，且精确旧 HEAD 对照也出现同类超时；因此当前状态是“推送实验分支并等待 PR CI”，
+不是直接合并。默认命令、成功语义、Reviewer 边界和 r6 历史裁决均未改变。
 
 ## 七、更新规则
 

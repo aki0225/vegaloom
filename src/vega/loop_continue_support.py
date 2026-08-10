@@ -9,13 +9,18 @@ from .loop_initialization import loop_initialization_issues
 from .models import (
     LoopAutomationState,
     ReviewVerdict,
-    WorkerRerunAuthorization,
 )
 from .run_utils import resolve_run_dir
-from .trace import TraceWriter, active_run_finished_indices, read_trace_items
-from .worker_rerun import load_bound_auto_worker_baseline
+from .trace import active_run_finished_indices, read_trace_items
+from .worker_baseline import (
+    load_bound_auto_worker_baseline,
+    worker_workspace_matches_baseline,
+    worker_workspace_rerun_ready,
+    worker_workspace_snapshot_rerun_ready,
+)
+from .worker_rerun_transaction import pending_worker_rerun_iteration
 from .workspace_baseline import LEGACY_WORKSPACE_BASELINE_UNAVAILABLE
-from .workspace_check import snapshot_workspace
+from .workspace_check import snapshot_worker_workspace
 from .workspace_inventory import WorkspaceSnapshot, workspace_ignored_path_exclusions
 
 
@@ -36,6 +41,7 @@ class _AutoWorkerRecoveryAssessment:
     previous_verdict: ReviewVerdict | None = None
     source_interrupted_iteration: int | None = None
     source_worker_baseline_sha256: str | None = None
+    block_reason: str | None = None
 
 
 def plan_recovered_auto_worker(
@@ -70,27 +76,17 @@ def plan_recovered_auto_worker(
     ):
         raise ValueError("Worker 中断后 Git HEAD 已变化，已拒绝重新运行 Worker。")
     if assessment.rerun_safe:
-        if not rerun_requested:
-            raise ValueError(
-                "auto Worker 在中断前未形成相对于上一可信基线的新 tracked diff；"
-                "默认 continue 不会跳过 Worker 执行验证。"
-                "检查 recovery-report.md 后，明确使用 --rerun-worker "
-                "重新运行同一 child 的 Worker。"
-            )
-        if has_test_log or has_note:
-            raise ValueError("--rerun-worker 不能与 --test-log 或 --note 同时使用。")
-        iteration_number = next_iteration_number(run_dir, state)
-        if iteration_number > state.max_iterations:
-            raise ValueError("当前 loop 已达到最大迭代轮数，不能重新运行 Worker。")
-        return AutoWorkerRecoveryPlan(
-            rerun=True,
-            iteration_number=iteration_number,
-            previous_verdict=assessment.previous_verdict,
-            expected_workspace_snapshot=snapshot,
-            source_interrupted_iteration=assessment.source_interrupted_iteration,
-            source_worker_baseline_sha256=assessment.source_worker_baseline_sha256,
+        return _build_rerun_plan(
+            run_dir,
+            state,
+            assessment,
+            rerun_requested=rerun_requested,
+            has_test_log=has_test_log,
+            has_note=has_note,
         )
     if rerun_requested:
+        if assessment.block_reason:
+            raise ValueError(assessment.block_reason)
         raise ValueError(
             "Worker 中断后工作区已偏离上一可信基线；"
             "为避免覆盖 partial work，已拒绝 --rerun-worker。"
@@ -98,81 +94,46 @@ def plan_recovered_auto_worker(
     return AutoWorkerRecoveryPlan(rerun=False)
 
 
-def initialize_auto_worker_rerun(
-    workspace: Path,
-    repo_path: Path,
+def _build_rerun_plan(
     run_dir: Path,
     state: LoopAutomationState,
-    trace: TraceWriter,
+    assessment: _AutoWorkerRecoveryAssessment,
     *,
-    start_iteration: int,
     rerun_requested: bool,
-    expected_workspace_snapshot: WorkspaceSnapshot | None,
-    source_interrupted_iteration: int | None = None,
-    source_worker_baseline_sha256: str | None = None,
-) -> WorkspaceSnapshot | None:
-    recovered_snapshot: WorkspaceSnapshot | None = None
-    if expected_workspace_snapshot is not None:
-        recovered_snapshot = snapshot_workspace(
-            repo_path,
-            ignored_path_exclusions=workspace_ignored_path_exclusions(
-                workspace,
-                repo_path,
-            ),
+    has_test_log: bool,
+    has_note: bool,
+) -> AutoWorkerRecoveryPlan:
+    if not rerun_requested:
+        raise ValueError(
+            "auto Worker 在中断前未形成相对于上一可信基线的新 tracked diff；"
+            "默认 continue 不会跳过 Worker 执行验证。"
+            "检查 recovery-report.md 后，明确使用 --rerun-worker "
+            "重新运行同一 child 的 Worker。"
         )
-        if recovered_snapshot != expected_workspace_snapshot:
-            raise ValueError(
-                "工作区在确认重跑后、Worker 启动前发生变化；"
-                "已拒绝 --rerun-worker，避免覆盖新的人工或外部修改。"
-            )
-    if rerun_requested:
-        if (
-            state.last_recovery_id is None
-            or source_interrupted_iteration is None
-            or source_worker_baseline_sha256 is None
-        ):
-            raise ValueError("Worker 重跑缺少可验证的恢复授权绑定。")
-        authorization = WorkerRerunAuthorization(
-            rerun_iteration=start_iteration,
-            source_interrupted_iteration=source_interrupted_iteration,
-            recovery_id=state.last_recovery_id,
-            source_worker_baseline_sha256=source_worker_baseline_sha256,
-        )
-        if any(
-            item.rerun_iteration == authorization.rerun_iteration
-            or item.recovery_id == authorization.recovery_id
-            for item in state.worker_rerun_authorizations
-        ):
-            raise ValueError("Worker 重跑授权已存在，已拒绝重复写入。")
-        state.worker_rerun_authorizations.append(authorization)
-        state.status = "running"
-        state.save(run_dir / "state.json")
-        trace.write(
-            "auto_worker_rerun_requested",
-            **authorization.model_dump(mode="json"),
-        )
-    return recovered_snapshot
-
-
-def select_worker_workspace_snapshot(
-    workspace: Path,
-    repo_path: Path,
-    recovered_snapshot: WorkspaceSnapshot | None,
-    *,
-    iteration_number: int,
-    start_iteration: int,
-) -> tuple[WorkspaceSnapshot, WorkspaceSnapshot | None]:
-    if recovered_snapshot is not None and iteration_number == start_iteration:
-        return recovered_snapshot, None
-    return (
-        snapshot_workspace(
-            repo_path,
-            ignored_path_exclusions=workspace_ignored_path_exclusions(
-                workspace,
-                repo_path,
-            ),
-        ),
-        recovered_snapshot,
+    if has_test_log or has_note:
+        raise ValueError("--rerun-worker 不能与 --test-log 或 --note 同时使用。")
+    source_iteration = assessment.source_interrupted_iteration
+    source_baseline_sha256 = assessment.source_worker_baseline_sha256
+    if source_iteration is None or source_baseline_sha256 is None:
+        raise ValueError("Worker 重跑缺少可验证的来源 baseline 绑定。")
+    iteration_number = pending_worker_rerun_iteration(
+        run_dir,
+        state,
+        expected_workspace_snapshot=assessment.snapshot,
+        source_interrupted_iteration=source_iteration,
+        source_worker_baseline_sha256=source_baseline_sha256,
+    )
+    if iteration_number is None:
+        iteration_number = next_iteration_number(run_dir, state)
+    if iteration_number > state.max_iterations:
+        raise ValueError("当前 loop 已达到最大迭代轮数，不能重新运行 Worker。")
+    return AutoWorkerRecoveryPlan(
+        rerun=True,
+        iteration_number=iteration_number,
+        previous_verdict=assessment.previous_verdict,
+        expected_workspace_snapshot=assessment.snapshot,
+        source_interrupted_iteration=source_iteration,
+        source_worker_baseline_sha256=source_baseline_sha256,
     )
 
 
@@ -275,7 +236,7 @@ def _assess_recovered_auto_worker(
     latest = state.iterations[-1]
     if latest.lifecycle != "interrupted" or latest.interrupted_step != "worker":
         return None
-    snapshot = snapshot_workspace(
+    snapshot = snapshot_worker_workspace(
         repo_path,
         ignored_path_exclusions=workspace_ignored_path_exclusions(
             workspace,
@@ -293,11 +254,35 @@ def _assess_recovered_auto_worker(
             snapshot=snapshot,
             rerun_safe=False,
             source_interrupted_iteration=latest.iteration,
+            block_reason=(
+                "来源 Worker baseline artifact 或 trace 无法验证；"
+                "为避免覆盖 partial work，证据不足时不会启动可写 Worker。"
+            ),
+        )
+    if not worker_workspace_rerun_ready(source_baseline):
+        return _AutoWorkerRecoveryAssessment(
+            snapshot=snapshot,
+            rerun_safe=False,
+            source_interrupted_iteration=latest.iteration,
+            source_worker_baseline_sha256=state.worker_baseline_sha256,
+            block_reason=(
+                "来源 Worker baseline 缺少完整 ignored 后代清单，"
+                "或包含不安全 Git index 标记；已拒绝重跑。"
+            ),
+        )
+    if not worker_workspace_snapshot_rerun_ready(snapshot):
+        return _AutoWorkerRecoveryAssessment(
+            snapshot=snapshot,
+            rerun_safe=False,
+            source_interrupted_iteration=latest.iteration,
+            source_worker_baseline_sha256=state.worker_baseline_sha256,
+            block_reason=(
+                "当前工作区无法完整读取 ignored 后代，"
+                "或包含 assume-unchanged/skip-worktree 标记；已拒绝重跑。"
+            ),
         )
     baseline_unchanged = (
-        source_baseline.capture_complete
-        and source_baseline.tracked_diff_complete
-        and snapshot == source_baseline
+        worker_workspace_matches_baseline(snapshot, source_baseline)
     )
     previous_reviewed = next(
         (

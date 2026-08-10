@@ -2,9 +2,10 @@
 
 > 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进与显式 child reconcile 已通过
 > PR `#54` 进入主线。主线仍只包含单 checkpoint 控制；显式 `--rerun-worker` 继续位于
-> 实验分支。r6 已真实通过同一 child 的显式重跑路径，但后续代码审阅发现 ignored partial
-> work 与同路径 tracked 内容变化两项 P1，当前分支已用每轮 Worker baseline 和结构化重跑
-> 授权修复。该能力在分支验证完成并获得后续观察前不提升为默认能力。多 checkpoint 自动
+> 实验分支。r6 已真实通过同一 child 的显式重跑路径，后续代码审阅发现七项启动前证据与
+> 崩溃恢复缺口；当前分支已完成 Worker baseline V2、有界 ignored 后代清单、index flag
+> 防护、来源证据校验、重跑事务和最终启动边界复查。该能力在 PR CI 与独立审查完成前不提升
+> 为默认能力。多 checkpoint 自动
 > 串联、真实模型连续运行数小时/跨天的稳定性和收益仍未证明。
 
 ## 1. 背景
@@ -492,6 +493,23 @@ r6 的真实成功只证明当时命中的 clean-workspace 路径。随后代码
 本轮只修复 r6 后审阅发现的恢复边界，没有运行新的真实模型 dogfood，也没有改变 r6 的历史
 裁决。显式 Worker 重跑仍是实验分支能力；主线、默认 `vega do`、普通 loop 和 Reviewer
 语义均不改变。
+
+### 2026-08-10：七项阻断修复完成，等待 PR CI
+
+本分支已经完成审阅要求的启动前证据加固：
+
+- Worker baseline V2 不保存原始路径列表，并绑定 tracked diff、Git index 标记和有界
+  ignored 后代清单。
+- 来源 baseline artifact、SHA-256 与 trace 在可写 Worker 启动前验证；iteration 生命周期
+  反向要求唯一的 state 授权与 trace 请求。
+- 重跑事务覆盖 baseline 准备、iteration claim 和 `worker_started` 边界；claim 已落盘但
+  Worker 未启动时可恢复到人工状态，并可幂等继续同一 iteration。
+- 最终启动前重新捕获工作区，偏离授权快照时不调用 runner。
+
+本地编译、Ruff、架构增长、仓库卫生、44 个 recovery chaos 节点和 30 个 workspace
+snapshot 节点已通过。单进程 1129 节点全量测试在 Windows 上因 Git 子进程累计延迟没有取得
+可信终态；精确旧 HEAD 的对照节点也出现相同 60 秒超时。当前结论是“实现完成、等待 PR CI
+与独立审查”，不是“可以直接合并”，也没有产生新的真实模型能力结论。
 
 ### P2：更强 eval 和经验沉淀
 
