@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from click.utils import strip_ansi
 from typer.testing import CliRunner
 
 from vega import git_read as git_read_module
@@ -820,7 +821,9 @@ def test_loop_continue_rejects_worker_rerun_conflicts_before_runtime(
     )
 
     assert result.exit_code == 2
-    assert "--rerun-worker 不能与 --test-log 或 --note 同时使用" in result.output
+    assert "--rerun-worker 不能与 --test-log 或 --note 同时使用" in strip_ansi(
+        result.output
+    )
     assert runtime_created is False
 
 

@@ -57,6 +57,8 @@ execution control safety：61 passed, 1 skipped
 security evidence：42 passed
 workspace baseline：18 passed
 context boundaries：38 passed
+P0 regressions：55 passed
+CLI recovery hardening：50 passed, 1 skipped
 ```
 
 本机未取得可信的单进程全量终态。1129 节点单进程运行到约 13% 时，在与本次改动无关的
@@ -77,6 +79,12 @@ Assurance 用例中等待 Git 子进程超过 60 秒；多个 Git 密集型大�
    patch 恢复评估与重跑规划模块；三个节点通过。
 3. 内容清单 helper 移动后，containment 测试仍引用旧私有位置。测试已指向新模块；11 个节点
    通过。
+4. PR #55 首轮 CI 发现 scope-gate 故障注入仍 patch 旧的 `workspace_check` 模块，导致突变没有
+   发生。测试现已 patch 实际承载快照逻辑的 `tracked_workspace` 模块；P0 regression 55 个节点
+   全部通过。
+5. PR #55 首轮 CI 使用的 Typer/Rich 版本会在参数错误输出中插入 ANSI 控制码。新增冲突测试
+   现在只在断言前去除 ANSI，不改变 CLI 输出或生产行为；CLI recovery hardening 为 50 passed、
+   1 skipped，并在强制颜色环境下复核相关节点。
 
 ## 回家后继续
 
