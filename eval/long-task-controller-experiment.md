@@ -207,3 +207,243 @@ checkpoint 由最多五轮、每次最长一小时的 Worker/Reviewer 调用组�
 
 该结果不能证明外部模型已经真实连续运行数小时，也不能证明无人值守多 checkpoint 自治。
 真实模型长时稳定性仍需要单独的长时间 dogfood，不能由虚拟 deadline 或短时故障测试替代。
+
+## 真实控制进程中断 Dogfood 追加
+
+> 日期：2026-08-09
+> Goal：`20260809-173526-goal`
+> child：`20260809-173624-626164-feature-loop`
+> 正式裁决：`reject`
+> 机制附加判断：`fail-closed-mechanism-pass`
+
+本轮在 `.tmp/dogfood/20260809-echo-ai-api-style-r3/target-repo` 的可丢弃副本中执行一个真实
+配置契约修复任务。目标是统一 `AI_API_STYLE=chat_completions` 的运行时语义，允许修改范围、
+文件数量、Diff 预算和四条确定性验证命令均在运行前固定。真实项目目录未被修改，目标副本
+禁止 push。
+
+### 故障注入与恢复过程
+
+1. 父 Goal 创建唯一 child，并启动真实 Codex Worker。
+2. Worker 尚未形成 tracked diff 时，父控制进程被中断。
+3. child Worker 短暂继续存活，随后退出；父 Goal 首次 reconcile 正确进入
+   `child_recovery_required`，没有创建替代 child。
+4. 对同一个 child 执行 recover 和 `loop continue`。
+5. 恢复后的第 2 轮没有重新运行 Worker，而是把 Worker 标记为 `skipped`，直接对原始基线
+   执行 workspace-check、scope gate 和全部固定验证。
+6. 验证通过后，Vega 发现没有 tracked diff，按 `needs_human/no_diff` 停止；Reviewer 未启动。
+7. 父 Goal 再次 reconcile，最终停在 `needs_human/checkpoint_blocked`。
+
+### 观察结果
+
+- child 恢复全程复用同一个 run，替代 child 数量为 `0`。
+- 后端固定测试为 `123 passed`，耗时 `754.39s`。
+- 前端测试为 `178 passed`，前端构建和 `git diff --check` 通过。
+- child 从创建到终态约 `15m18s`，父 Goal 从创建到最终 reconcile 约 `18m22s`。
+- tracked diff 数量为 `0`，有效 Worker 完成次数为 `0`，Reviewer 调用次数为 `0`。
+- Goal、child 和 continue 相关进程在实验结束后均已退出。
+- run artifacts 未发现环境 API key、`sk-` 凭据或 Bearer token。
+
+预注册任务文字写了“完整后端测试”，但实际机器策略执行的是相关后端测试集合，共
+`123` 项。该差异属于实验协议文字缺陷，不能事后把本轮改写成“完整后端测试已通过”。
+
+### 能证明什么
+
+- 控制进程中断后，Vega 能保留唯一 child 身份、进程所有权、恢复记录和完整终态证据。
+- Worker 未产生可信结果时，Vega 没有误报成功，也没有启动 Reviewer 审查空 Diff。
+- 父 Goal 能把 child 的 `needs_human` 终态重新归档为 `checkpoint_blocked`。
+- 敏感信息、目标仓库边界和禁止 push 约束在本轮保持有效。
+
+### 暴露的产品缺口
+
+当 `interrupted_step=worker` 且恢复时没有 tracked diff，当前 `loop continue` 会跳过 Worker，
+直接进入昂贵验证。这在安全上是 fail-closed，但在长任务恢复上没有完成原 checkpoint，
+并浪费了约 13 分钟验证时间。
+
+下一次实现只应处理这一条恢复决策：
+
+- 明确重新运行 Worker；或者
+- 在任何昂贵验证前停止，并要求人工明确选择重新运行 Worker 或接受当前工作区。
+
+在该决策被实现并通过新的真实中断 dogfood 前，不增加自动多 checkpoint、后台 daemon、
+自动重试策略或新的编排框架。
+
+### 最终裁决
+
+本轮满足 `fail-closed-mechanism-pass`：控制与证据机制在故障后保持安全、可追溯。
+
+本轮不满足 `candidate-for-opt-in`：checkpoint 没有完成，恢复没有重新获得 Worker 产物，
+也没有证明比人工重新启动普通 loop 更可靠或更省成本。因此保留现有实验入口，但不提升为
+默认能力、正式长任务模式或多 checkpoint 自动编排。
+
+## Goal P1 显式 Worker 重跑窄修复后的 r4 Dogfood
+
+> 日期：2026-08-09
+> Goal：`20260809-191214-goal`
+> child：`20260809-191248-657688-feature-loop`
+> 目标：验证 Worker 中断且没有可信新成果时，普通 `loop continue` 不会悄悄跳过
+> Worker；只有显式 `--rerun-worker` 才允许在同一 child 的下一 iteration 重跑。
+
+### 实施内容
+
+本轮在同一分支完成了一个窄范围恢复改动：
+
+- 新增 `loop continue --rerun-worker`，只允许恢复 auto loop 的 Worker 中断场景。
+- 没有新 tracked 或非 ignored untracked 改动时，普通 continue 会拒绝并要求人工明确重跑。
+- 已有 tracked 或非 ignored untracked partial work 时，`--rerun-worker` 会拒绝覆盖现场。
+- Worker 启动前重新核对恢复快照，发现并发人工修改时拒绝启动。
+- 后续 iteration 可以复用上一轮可信 Reviewer findings，但不打通 Worker 对话。
+
+### 真实过程
+
+1. r4 在可丢弃的 Echo Vault 副本中创建一个 Goal 和唯一 child，固定了配置契约任务、
+   相关测试门禁和禁止 push 的副本边界。
+2. 启动时目标副本为 clean，execution 绑定了唯一的 Worker owner 和 child PID。
+3. 按协议只终止 Goal 控制层，不主动终止 Worker、Codex 或其他进程。
+4. Windows 进程树在本机表现为多层 launcher；控制层退出后，child owner/Codex 也随作业树结束。
+   因此本轮没有证明“Worker 脱离父控制器后仍能独立完成”这一更强条件。
+5. 退出前后目标副本出现了 12 个文件的 tracked partial work。Vega 没有重建 Goal、没有
+   创建替代 child，也没有覆盖或清理这些文件。
+6. `goal reconcile` 正确进入 `needs_human/child_recovery_required`；同一 child 执行
+   `recover` 后进入 `needs_human/recovered`。
+7. 由于现场已有 partial work，普通 `loop continue` 返回非零并进入人工风险门禁路径，
+   没有重新启动 Worker 或 Reviewer，也没有把任务标记成功；Goal 最终为
+   `needs_human/checkpoint_blocked`。
+
+### 结果与限制
+
+- 唯一 child 绑定、reconcile、recover、进程消失后的 fail-closed 和 partial work 不覆盖
+  得到真实证据支持。
+- `--rerun-worker` 的“无成果时显式重跑”在本轮真实任务中没有被命中；它由本地恢复测试覆盖，
+  但不能冒充真实模型 dogfood 证据。
+- 本轮没有完成固定任务验证、Reviewer 或 checkpoint，因此不能评价 Echo Vault 代码改动是否正确。
+- 本轮没有读取、写入或提交真实项目目录，也没有发现凭据进入 Goal、child 或控制产物。
+
+正式裁决：`reject`。
+
+机制附加判断：`fail-closed-partial-work-pass`。这表示 Vega 在最危险的覆盖边界上保持
+保守，但不表示长任务恢复已经达到可选入或无人值守水平。P1 继续保持实验状态，不进入默认
+Runtime，也不增加 daemon、多 checkpoint、自动重试或新的 Agent 框架。
+
+如果未来仍要验证显式重跑，必须新建一份独立预注册协议，先解决 Windows launcher/job
+树导致的故障注入歧义，并在注入时再次确认 Worker 仍处于“无成果”窗口；不得复用 r4、
+不得按结果挑选重跑、不得把本轮 partial diff 当作成功样本。
+
+## Goal P1 显式 Worker 重跑 r5/r6 Dogfood
+
+> 日期：2026-08-09
+> r5 Goal：`20260809-202608-goal`
+> r5 child：`20260809-202649-738344-feature-loop`
+> r5 裁决：`protocol-invalid`
+> r6 Goal：`20260809-203310-goal`
+> r6 child：`20260809-203322-746247-feature-loop`
+> r6 裁决：`candidate-for-opt-in`
+> r6 机制判断：`explicit-worker-rerun-path-pass`
+
+### r5：实验装置无效，不评价产品
+
+r5 把任务缩小为仅修改 `README.md` 的 API 风格说明，固定一个文件、40 行 Diff、两条验证、
+两轮 iteration 和 900 秒 runner timeout。精确注入器先使用独立 sleep owner/child 完成
+演练，证明它只终止登记的 owner PID 与唯一命名 Windows Job。
+
+真实 r5 启动后，监控脚本在 `execution.json` 仍为 `starting`、`child_pid` 尚未持久化时
+过早读取并拒绝注入。真实 Worker 随后继续运行，错过预注册的 5 秒窗口。本轮使用
+`vega stop` 安全停止唯一 child；目标仓库始终 clean，父 Goal 正确归档
+`needs_human/checkpoint_blocked`，所有登记进程均已退出。
+
+因此 r5 没有执行故障注入，没有进入 recover 或 `--rerun-worker`，不能作为产品通过或失败
+证据。r6 只修正监控条件：等待 execution 为 `running` 且 owner/child identity 与 Job
+全部持久化；任务、预算、目标 HEAD、注入器和通过条件保持不变。
+
+### r6：同一 child 显式重跑通过
+
+r6 在可丢弃 LF checkout 副本中执行，prepared HEAD 为
+`f2513bcd9943b2654bd1c12f27c8eed459ccb8e4`，本地
+`core.autocrlf=input`，push URL 被禁用。真实 Echo Vault 未修改。
+
+1. iteration 01 在 execution 启动约 `0.55s` 时满足全部注入条件：
+   `status=running`、trace 已有 `worker_started`、没有 `file_changed`，目标 HEAD、
+   tracked/cached Diff 与非 ignored untracked 均未变化。
+2. 注入器精确终止 owner PID `32020` 与命名 Job
+   `Local\Vega-e0a3ce1c05cd4cfb83ea18c0d65bc65d`；登记 child 同时结束，Job 为空，
+   注入后仓库仍 clean。
+3. `goal reconcile` 进入 `needs_human/child_recovery_required`；child recover 将
+   iteration 01 冻结为 `interrupted/worker`。
+4. 普通 continue 以退出码 `2` 拒绝。前后 `state.json`、`trace.jsonl` SHA256 和
+   iteration 目录清单完全一致，仍只有 `01`。
+5. `--rerun-worker` 在同一 child 创建 iteration 02，trace 写入
+   `auto_worker_rerun_requested` 和新的 `worker_started`，没有替代 child。
+6. 真实 Codex Worker 成功结束，只修改 `README.md`；Diff 为 6 行新增、6 行删除。
+7. 固定句子断言和 `git diff --check` 均通过；三阶段 scope gate 只看到
+   `README.md`；Risk Gate 为 low。
+8. 独立 Reviewer 覆盖唯一变更文件并返回 `approve`，child 为 `success/done`。
+9. 父 Goal 再次 reconcile 后进入 `checkpoint_done`，checkpoint status 为 `done`。
+
+最终检查遍历了 child 下 5 个 execution；所有 owner、child 和命名 Job 均为
+`gone/empty`。凭据扫描最初把 `vega-risk-...` HTML 标记中的子串误识别为 `sk-`；将规则
+收紧为独立 token 边界且至少 20 个 key 字符后，同一批 Goal、child、Reviewer artifacts
+与目标 README 为 0 命中。该误报没有包含真实凭据。
+
+### 阶段结论
+
+r6 证明了这一条窄恢复路径：Worker 无成果中断后，普通 continue 不会静默跳过 Worker；
+人工显式选择后，同一 child 可以在下一 iteration 重跑真实 Worker，并把后续 Diff、验证、
+Gate、Reviewer 与父 Goal checkpoint evidence 绑定到正确 iteration。
+
+因此单 checkpoint Goal P1 可以继续作为显式 opt-in 实验能力使用，r3 暴露的“无成果恢复
+直接浪费验证”缺口已经关闭。
+
+本轮仍不证明外部模型连续数小时或数天稳定运行，也不证明无人值守多 checkpoint 自治。
+文档单文件任务不能代表复杂代码迁移或高风险业务任务；故障注入也不等同于真实供应商断线。
+后续不因本轮结果增加 daemon、数据库、多 checkpoint 自动编排、自动重试或新 Agent 框架。
+下一步只在真实日常任务中观察；只有重复出现同一问题，才评估新的窄改动。
+
+## r6 后代码审阅与 Worker 重跑授权加固
+
+> 日期：2026-08-09
+> 分支：`codex/goal-p1-real-dogfood`
+> 证据类型：r6 后静态审阅、定向恢复测试与 artifact 完整性测试
+> 新真实模型 dogfood：未运行
+
+### 审阅发现
+
+r6 的 clean-workspace 成功样本没有覆盖以下两项 P1：
+
+1. 首轮 Worker 中断恢复只检查 tracked 与非 ignored untracked 路径。若 Worker 写入被
+   `.gitignore` 覆盖的 partial work 后崩溃，旧判断可能错误允许显式重跑。
+2. 后续 iteration 已有可信 tracked diff 时，旧快照只记录路径集合。确认重跑后、Worker
+   启动前若同一路径内容被外部修改，路径集合不变，旧比较可能无法发现。
+
+另有两项证据与交互缺口：
+
+- `auto_worker_rerun_requested` 只存在于 trace，没有与根状态及来源 baseline 绑定。
+- `current_iteration == max_iterations` 时，状态仍可能继续展示重跑建议。
+
+### 最小修复
+
+- 复用现有 `WorkspaceBaselineArtifact`，增加 tracked staged/unstaged diff 的完整内容哈希；
+  旧 v1 artifact 仍可读取，但不能作为缺少 tracked diff 完整性的重跑依据。
+- 每轮 auto Worker 启动前写入 `iterations/<NN>/worker-baseline.json`，并在启动 Worker 前
+  将 iteration、artifact version 与 SHA256 原子保存到根状态。
+- 恢复判断读取中断 iteration 的已绑定 baseline，要求 HEAD、tracked diff、untracked、
+  ignored、Git control 与捕获完整性全部一致。
+- 根状态新增结构化 Worker 重跑授权，绑定重跑轮次、来源中断轮次、recovery ID 和来源
+  baseline SHA256；trace 必须与授权一一对应。
+- loop eval 与 artifact integrity 会复核授权、来源 baseline 和 trace；删除重跑事件、
+  删除 baseline 或篡改 baseline 均产生 FAIL。
+- 达到最大自动迭代数时，不再输出完整 `--rerun-worker` 命令，改为提示人工完成现场后使用
+  普通 continue。
+
+### 验证与边界
+
+本轮定向测试覆盖：
+
+- ignored partial work 后中断时拒绝重跑。
+- 后续轮同路径 tracked 内容变化时拒绝启动 Worker。
+- 来源 baseline 缺失或哈希损坏时 fail-closed。
+- 删除 `auto_worker_rerun_requested` 后，loop eval FAIL 且 artifact integrity invalid。
+- 最大迭代数耗尽后不再建议显式重跑。
+- 旧 workspace baseline artifact 仍可读取。
+
+本条记录不改变 r6 的 `candidate-for-opt-in` 历史裁决，也不新增真实模型收益结论。修复只提高
+显式 Worker 重跑的安全性和证据可验证性；不证明模型能连续数小时或跨天自治，不允许自动
+重试、多 checkpoint 串联、后台 daemon 或绕过人工选择。

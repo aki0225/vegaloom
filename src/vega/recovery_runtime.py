@@ -16,6 +16,11 @@ from .models import (
     SupersededTerminalRecord,
 )
 from .redaction import redact_text, write_redacted_text
+from .recovery_reporting import (
+    render_corrupt_state_recovery_report,
+    render_iteration_interruption_report,
+    render_worker_rerun_prestart_recovery_report,
+)
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 from .trace import (
@@ -23,6 +28,9 @@ from .trace import (
     TraceWriter,
     active_run_finished_indices,
     read_trace_items,
+)
+from .worker_rerun_transaction import (
+    reconcile_worker_rerun_transaction_for_recovery,
 )
 from .workspace_baseline import recovered_initialization_step
 
@@ -75,13 +83,26 @@ class RecoveryRuntime:
                 "state.json 无法解析，已保留现场并生成 recovery-report.md；"
                 "Vega 不会猜测或覆盖损坏状态。"
             ) from exc
-        if state.run_id != run_dir.name:
-            raise ValueError(
-                "loop state.run_id 与 run 目录身份不一致；"
-                "为避免在错误证据链上 recovery，已拒绝接管。"
+        _require_recovery_request(state, run_dir, reason)
+        preflight_inspection = _preflight_recovery_inspection(run_dir, state)
+        rerun_recovery = reconcile_worker_rerun_transaction_for_recovery(
+            run_dir,
+            state,
+            TraceWriter(run_dir / "trace.jsonl"),
+            reason=redact_text(reason.strip()),
+        )
+        if rerun_recovery in {"prestart_pending", "prestart_restored"}:
+            report = render_worker_rerun_prestart_recovery_report(
+                run_id=state.run_id,
+                reason=reason,
+                rerun_recovery=rerun_recovery,
             )
-        if not reason.strip():
-            raise ValueError("recover 必须提供原因，方便后续追溯。")
+            write_redacted_text(run_dir / "recovery-report.md", report)
+            state.artifacts = _dedupe(
+                [*state.artifacts, "recovery-report.md", "state.json", "trace.jsonl"]
+            )
+            state.save(state_path)
+            return run_dir
         transaction = _read_recovery_transaction(run_dir)
         if transaction is not None and _recovery_transaction_applied_to_state(
             state,
@@ -100,7 +121,7 @@ class RecoveryRuntime:
             raise ValueError(
                 f"只能 recover status=running 的 loop，当前状态：{state.status}"
             )
-        inspection = inspect_execution_for_recovery(run_dir)
+        inspection = preflight_inspection or inspect_execution_for_recovery(run_dir)
         if not inspection.can_recover:
             raise ValueError(inspection.summary)
 
@@ -293,33 +314,6 @@ class RecoveryRuntime:
         return run_dir
 
 
-def render_corrupt_state_recovery_report(
-    run_dir: Path,
-    reason: str,
-    error: Exception,
-) -> str:
-    lines = [
-        "# Recovery Report",
-        "",
-        f"- run：`{run_dir.name}`",
-        f"- 恢复时间：`{datetime.now(UTC).isoformat()}`",
-        f"- 请求原因：{reason.strip() or '未提供'}",
-        f"- 状态错误类型：`{type(error).__name__}`",
-        "",
-        "## 结论",
-        "",
-        "- `state.json` 无法通过 schema 校验，自动 recovery 已停止。",
-        "- Vega 不会根据不完整 JSON 猜测当前步骤，也不会覆盖损坏状态。",
-        "- 新状态写入使用原子替换；该诊断主要处理旧 run、外部篡改或存储损坏。",
-        "",
-        "## 建议下一步",
-        "",
-        "- 检查 `trace.jsonl`、各 iteration artifact 和 execution.json，确认最后可信步骤。",
-        "- 保留当前 run 作为证据；如需继续任务，建议创建新 run 并人工引用旧产物。",
-    ]
-    return redact_text("\n".join(lines).rstrip() + "\n")
-
-
 def render_recovery_report(
     *,
     run_id: str,
@@ -456,37 +450,6 @@ def render_inconsistent_trace_recovery_report(
                 "",
                 "- 检查 `trace.jsonl` 中的 run_finished 与 run_terminal_superseded 事件。",
                 "- 保留当前 run 作为损坏证据；确认原因后从新的 run 继续。",
-            ]
-        ).rstrip()
-        + "\n"
-    )
-
-
-def render_iteration_interruption_report(
-    *,
-    run_id: str,
-    iteration: int,
-    previous_step: str,
-    recovered_at: str,
-    inspection: ExecutionRecoveryInspection,
-) -> str:
-    return redact_text(
-        "\n".join(
-            [
-                "# Iteration Interruption Report",
-                "",
-                f"- run：`{run_id}`",
-                f"- 迭代：`{iteration}`",
-                "- 生命周期：`interrupted`",
-                f"- 原步骤：`{previous_step}`",
-                f"- 冻结时间：`{recovered_at}`",
-                f"- execution 判断：{inspection.summary}",
-                "",
-                "## 结论",
-                "",
-                "- 本轮 orchestration 未形成可信终态，不能作为 success、verification 或 reviewer 依据。",
-                "- 已保留本轮现有 execution、输出和工作区 diff，不自动覆盖、回滚或清理。",
-                "- 后续人工确认现场后，`loop continue` 必须使用新的 iteration 编号。",
             ]
         ).rstrip()
         + "\n"
@@ -828,3 +791,29 @@ def _dedupe(items: list[str]) -> list[str]:
             seen.add(item)
             result.append(item)
     return result
+
+
+def _require_recovery_request(
+    state: LoopAutomationState,
+    run_dir: Path,
+    reason: str,
+) -> None:
+    if state.run_id != run_dir.name:
+        raise ValueError(
+            "loop state.run_id 与 run 目录身份不一致；"
+            "为避免在错误证据链上 recovery，已拒绝接管。"
+        )
+    if not reason.strip():
+        raise ValueError("recover 必须提供原因，方便后续追溯。")
+
+
+def _preflight_recovery_inspection(
+    run_dir: Path,
+    state: LoopAutomationState,
+) -> ExecutionRecoveryInspection | None:
+    if state.status != "running":
+        return None
+    inspection = inspect_execution_for_recovery(run_dir)
+    if not inspection.can_recover:
+        raise ValueError(inspection.summary)
+    return inspection

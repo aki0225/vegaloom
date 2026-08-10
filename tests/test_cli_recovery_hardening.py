@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -25,6 +26,8 @@ from vega.run_status import latest_run_dir, render_run_status, run_status_payloa
 from vega.run_utils import resolve_run_dir
 from vega.tools import git_tools
 from vega.verification import run_project_verification
+
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
 def _init_git_repo(path: Path) -> None:
@@ -696,9 +699,9 @@ def test_loop_continue_only_returns_zero_for_success(
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("vega.cli._ensure_git_ready", lambda _: None)
+    monkeypatch.setattr("vega.cli_support.ensure_git_ready", lambda _: None)
     monkeypatch.setattr(
-        "vega.cli.make_loop_runtime",
+        "vega.cli_support.make_loop_runtime",
         lambda _: SimpleNamespace(
             continue_assist=lambda *args, **kwargs: run_dir
         ),
@@ -721,6 +724,202 @@ def test_loop_continue_only_returns_zero_for_success(
 
     assert result.exit_code == expected_exit_code, result.output
     assert f"状态：`{status}`" in result.output
+
+
+def test_loop_continue_forwards_explicit_worker_rerun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "runs" / "continued-loop"
+    run_dir.mkdir(parents=True)
+    payload = _loop_state(repo, run_dir.name).model_dump()
+    payload.update({"status": "success", "current_step": "done"})
+    run_dir.joinpath("state.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+    observed: dict[str, object] = {}
+    readiness_checks: list[tuple[str, str]] = []
+
+    def continue_assist(*args, **kwargs):
+        observed.update(kwargs)
+        return run_dir
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("vega.cli_support.ensure_git_ready", lambda _: None)
+    monkeypatch.setattr(
+        "vega.cli_support.ensure_runner_ready",
+        lambda runner, role: readiness_checks.append((runner, role)),
+    )
+    monkeypatch.setattr(
+        "vega.cli_support.make_loop_runtime",
+        lambda _: SimpleNamespace(continue_assist=continue_assist),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "loop",
+            "continue",
+            "--repo",
+            str(repo),
+            "--run",
+            run_dir.name,
+            "--worker",
+            "none",
+            "--reviewer",
+            "none",
+            "--rerun-worker",
+            "--no-verify",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert observed["worker_name"] == "none"
+    assert observed["reviewer_name"] == "none"
+    assert observed["rerun_worker"] is True
+    assert observed["verify"] is False
+    assert readiness_checks == [("none", "worker"), ("none", "reviewer")]
+
+
+@pytest.mark.parametrize(
+    "conflicting_args",
+    [
+        ["--test-log", "missing.log"],
+        ["--note", "人工补充说明"],
+    ],
+)
+def test_loop_continue_rejects_worker_rerun_conflicts_before_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    conflicting_args: list[str],
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime_created = False
+
+    def make_runtime(_: Path):
+        nonlocal runtime_created
+        runtime_created = True
+        return SimpleNamespace()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("vega.cli_support.make_loop_runtime", make_runtime)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "loop",
+            "continue",
+            "--repo",
+            str(repo),
+            "--run",
+            "recovered-loop",
+            "--rerun-worker",
+            *conflicting_args,
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--rerun-worker 不能与 --test-log 或 --note 同时使用" in (
+        _ANSI_ESCAPE_PATTERN.sub("", result.output)
+    )
+    assert runtime_created is False
+
+
+@pytest.mark.parametrize(
+    ("runner_args", "expected_role"),
+    [
+        (["--worker", "unknown"], "worker"),
+        (["--reviewer", "unknown"], "reviewer"),
+    ],
+)
+def test_loop_continue_rejects_invalid_runner_before_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner_args: list[str],
+    expected_role: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    runtime_created = False
+
+    def make_runtime(_: Path):
+        nonlocal runtime_created
+        runtime_created = True
+        return SimpleNamespace()
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("vega.cli_support.make_loop_runtime", make_runtime)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "loop",
+            "continue",
+            "--repo",
+            str(repo),
+            "--run",
+            "recovered-loop",
+            *runner_args,
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert f"{expected_role} runner 不受支持" in result.output
+    assert runtime_created is False
+
+
+def test_loop_continue_only_preflights_worker_for_explicit_rerun(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "runs" / "continued-loop"
+    run_dir.mkdir(parents=True)
+    payload = _loop_state(repo, run_dir.name).model_dump()
+    payload.update({"status": "success", "current_step": "done"})
+    run_dir.joinpath("state.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+    readiness_checks: list[tuple[str, str]] = []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("vega.cli_support.ensure_git_ready", lambda _: None)
+    monkeypatch.setattr(
+        "vega.cli_support.ensure_runner_ready",
+        lambda runner, role: readiness_checks.append((runner, role)),
+    )
+    monkeypatch.setattr(
+        "vega.cli_support.make_loop_runtime",
+        lambda _: SimpleNamespace(
+            continue_assist=lambda *args, **kwargs: run_dir
+        ),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "loop",
+            "continue",
+            "--repo",
+            str(repo),
+            "--run",
+            run_dir.name,
+            "--worker",
+            "codex-exec",
+            "--reviewer",
+            "none",
+            "--no-verify",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert readiness_checks == [("none", "reviewer")]
 
 
 def test_auto_loop_cli_reports_corrupt_result_state(
@@ -944,6 +1143,80 @@ def test_status_recovered_marks_stale_active_execution_as_history(
     assert "当前 `worker` 仍在运行" not in text
     assert "历史 owned child PID（仅供审计，不表示当前存活）：`24680`" in text
     assert "读取 `" + str((run_dir / "recovery-report.md").resolve()) + "`" in text
+
+
+def test_status_recovered_auto_worker_without_diff_guides_explicit_rerun(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    run_dir = tmp_path / "runs" / "recovered-auto-loop"
+    run_dir.mkdir(parents=True)
+    state = _loop_state(repo, run_dir.name)
+    state.automation_mode = "auto"
+    state.status = "needs_human"
+    state.current_step = "recovered"
+    state.current_iteration = 1
+    state.max_iterations = 2
+    state.iterations = [
+        models.LoopIterationState(
+            iteration=1,
+            lifecycle="interrupted",
+            interrupted_step="worker",
+            interrupted_at="2026-08-09T12:00:00+00:00",
+        )
+    ]
+    state.save(run_dir / "state.json")
+
+    text = render_run_status(tmp_path, run_dir.name)
+
+    assert "如果没有新的 tracked 或非 ignored untracked diff" in text
+    assert (
+        f"vega loop continue --repo <repo> --run {run_dir.name} --rerun-worker"
+        in text
+    )
+    assert "如果已有 partial work，不要使用 `--rerun-worker`" in text
+    assert (
+        f"vega loop continue --repo <repo> --run {run_dir.name}`"
+        in text
+    )
+
+
+def test_status_recovered_auto_worker_at_iteration_limit_hides_rerun(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    run_dir = tmp_path / "runs" / "recovered-auto-loop-at-limit"
+    run_dir.mkdir(parents=True)
+    state = _loop_state(repo, run_dir.name)
+    state.automation_mode = "auto"
+    state.status = "needs_human"
+    state.current_step = "recovered"
+    state.current_iteration = 2
+    state.max_iterations = 2
+    state.iterations = [
+        models.LoopIterationState(iteration=1),
+        models.LoopIterationState(
+            iteration=2,
+            lifecycle="interrupted",
+            interrupted_step="worker",
+            interrupted_at="2026-08-09T12:00:00+00:00",
+        ),
+    ]
+    state.save(run_dir / "state.json")
+
+    text = render_run_status(tmp_path, run_dir.name)
+
+    assert "已达到自动 Worker 迭代上限" in text
+    assert (
+        f"vega loop continue --repo <repo> --run {run_dir.name} --rerun-worker"
+        not in text
+    )
+    assert (
+        f"vega loop continue --repo <repo> --run {run_dir.name}`"
+        in text
+    )
 
 
 def test_status_text_keeps_active_owned_child_pid(tmp_path: Path) -> None:

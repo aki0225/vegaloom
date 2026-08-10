@@ -10,6 +10,7 @@ import pytest
 from vega import workspace_check as workspace_check_module
 from vega import reflect_runtime as reflect_runtime_module
 from vega import review_runtime as review_runtime_module
+from vega import tracked_workspace as tracked_workspace_module
 from vega.brief_runtime import BriefRuntime
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import GateRuntime
@@ -1699,7 +1700,7 @@ def test_scope_gate_rejects_workspace_change_during_git_snapshot(
         encoding="utf-8",
         newline="\n",
     )
-    original_run_git_bytes = workspace_check_module._run_git_bytes
+    original_run_git_bytes = tracked_workspace_module.run_git_bytes
     status_calls = 0
 
     def unstable_run_git_bytes(*args: object, **kwargs: object) -> bytes:
@@ -1717,8 +1718,8 @@ def test_scope_gate_rejects_workspace_change_during_git_snapshot(
         return payload
 
     monkeypatch.setattr(
-        workspace_check_module,
-        "_run_git_bytes",
+        tracked_workspace_module,
+        "run_git_bytes",
         unstable_run_git_bytes,
     )
 

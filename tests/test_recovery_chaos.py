@@ -12,8 +12,11 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import vega.loop_continue_support as loop_continue_support_module
 import vega.loop_runtime as loop_runtime_module
 import vega.recovery_runtime as recovery_runtime_module
+import vega.worker_rerun_planning as worker_rerun_planning_module
+import vega.worker_rerun_transaction as worker_rerun_transaction_module
 from vega.cli import app
 from vega.execution_control import ExecutionLease, is_process_alive
 from vega.experimental.goal_runtime import GoalRuntime
@@ -25,6 +28,7 @@ from vega.run_lock import RunMutationBusyError, RunMutationLock
 from vega.run_status import run_status_payload
 from vega.runner import RunnerResult
 from vega.trace import TraceWriter
+from vega.worker_rerun import worker_rerun_binding_issues
 from vega.workspace_baseline import (
     is_legacy_assist_initialization_unavailable,
     recovered_initialization_step,
@@ -168,6 +172,1418 @@ class TrackedChangeWorker:
             output="worker completed",
             command=["tracked-change-worker"],
         )
+
+
+class CountingTrackedChangeWorker(TrackedChangeWorker):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, *args, **kwargs) -> RunnerResult:
+        self.calls += 1
+        return super().run(*args, **kwargs)
+
+
+class CrashingWorker:
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        del prompt, repo_path, sandbox, timeout_seconds, execution_context
+        raise RuntimeError("simulated worker crash before tracked diff")
+
+
+class PartialChangeCrashingWorker:
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        del prompt, sandbox, timeout_seconds, execution_context
+        repo_path.joinpath("README.md").write_text(
+            "# recovery demo\npartial worker change\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        raise RuntimeError("simulated worker crash after tracked diff")
+
+
+class UntrackedChangeCrashingWorker:
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        del prompt, sandbox, timeout_seconds, execution_context
+        repo_path.joinpath("partial-note.txt").write_text(
+            "partial worker output\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        raise RuntimeError("simulated worker crash after untracked work")
+
+
+class IgnoredChangeCrashingWorker:
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        del prompt, sandbox, timeout_seconds, execution_context
+        repo_path.joinpath("ignored-partial.txt").write_text(
+            "ignored partial worker output\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        raise RuntimeError("simulated worker crash after ignored work")
+
+
+class IteratingWorker:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        del sandbox, timeout_seconds, execution_context
+        self.prompts.append(prompt)
+        call = len(self.prompts)
+        if call == 1:
+            repo_path.joinpath("README.md").write_text(
+                "# recovery demo\nfirst worker change\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+        elif call == 2:
+            raise RuntimeError("simulated second worker crash")
+        else:
+            repo_path.joinpath("README.md").write_text(
+                "# recovery demo\nfinal worker change\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+        return RunnerResult(
+            status="success",
+            output=f"worker call {call} completed",
+            command=["iterating-worker"],
+        )
+
+
+class IteratingReviewer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context=None,
+    ) -> RunnerResult:
+        del prompt, repo_path, sandbox, timeout_seconds, execution_context
+        self.calls += 1
+        if self.calls == 1:
+            verdict = {
+                "verdict": "request_changes",
+                "summary": "首轮改动仍需修正。",
+                "findings": [
+                    {
+                        "severity": "major",
+                        "file": "README.md",
+                        "line": 2,
+                        "title": "替换首轮占位内容",
+                        "evidence": "README 仍包含 first worker change。",
+                        "recommendation": "改为最终内容。",
+                    }
+                ],
+                "reviewed_files": ["README.md"],
+                "checked_items": ["scope", "tests"],
+            }
+        else:
+            verdict = {
+                "verdict": "approve",
+                "summary": "恢复后的修正已完成。",
+                "findings": [],
+                "reviewed_files": ["README.md"],
+                "checked_items": ["scope", "tests", "recovery evidence"],
+            }
+        return RunnerResult(
+            status="success",
+            output=json.dumps(verdict, ensure_ascii=False),
+            command=["iterating-reviewer"],
+        )
+
+
+def test_recovered_auto_worker_without_diff_requires_explicit_rerun(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    state_before = run_dir.joinpath("state.json").read_bytes()
+    trace_before = run_dir.joinpath("trace.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="--rerun-worker"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=TrackedChangeWorker(),
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+        )
+
+    assert run_dir.joinpath("state.json").read_bytes() == state_before
+    assert run_dir.joinpath("trace.jsonl").read_bytes() == trace_before
+    assert not run_dir.joinpath("iterations", "02").exists()
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\n"
+    )
+
+
+def test_recovered_auto_worker_can_explicitly_rerun_same_child(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+
+    resumed = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeWorker(),
+        reviewer_runner=StaticReviewer(),
+    ).continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        rerun_worker=True,
+    )
+
+    state = LoopAutomationState.model_validate_json(
+        resumed.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    events = _read_jsonl(resumed / "trace.jsonl")
+
+    assert resumed == run_dir
+    assert state.status == "success"
+    assert state.current_iteration == 2
+    assert [item.iteration for item in state.iterations] == [1, 2]
+    assert state.iterations[0].lifecycle == "interrupted"
+    assert state.iterations[0].interrupted_step == "worker"
+    assert state.iterations[1].worker_status == "success"
+    assert state.iterations[1].verification_status == "passed"
+    assert state.iterations[1].verdict == "approve"
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\ncompleted worker change\n"
+    )
+    assert state.worker_baseline_artifact_version == 2
+    assert state.worker_baseline_iteration == 2
+    assert state.worker_baseline_sha256
+    assert len(state.worker_rerun_authorizations) == 1
+    authorization = state.worker_rerun_authorizations[0]
+    assert authorization.rerun_iteration == 2
+    assert authorization.source_interrupted_iteration == 1
+    assert authorization.recovery_id == state.last_recovery_id
+    assert any(
+        item.get("event") == "auto_worker_rerun_requested"
+        and item.get("rerun_iteration") == 2
+        and item.get("source_interrupted_iteration") == 1
+        and item.get("source_worker_baseline_sha256")
+        == authorization.source_worker_baseline_sha256
+        for item in events
+    )
+    assert any(
+        item.get("event") == "worker_started" and item.get("iteration") == 2
+        for item in events
+    )
+
+
+def test_recovered_auto_worker_rerun_rejects_partial_tracked_work(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    with pytest.raises(RuntimeError, match="after tracked diff"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=PartialChangeCrashingWorker(),
+        ).start(
+            BriefInput(
+                mode="bug",
+                text="验证 partial tracked work 不被覆盖",
+                source="worker-rerun-partial",
+                repo_path=str(repo),
+            ),
+            "auto",
+            max_iterations=2,
+            verify=True,
+        )
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "模拟 Worker 在形成 tracked diff 后中断",
+    )
+    state_before = run_dir.joinpath("state.json").read_bytes()
+    trace_before = run_dir.joinpath("trace.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="partial work"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=TrackedChangeWorker(),
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert run_dir.joinpath("state.json").read_bytes() == state_before
+    assert run_dir.joinpath("trace.jsonl").read_bytes() == trace_before
+    assert not run_dir.joinpath("iterations", "02").exists()
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\npartial worker change\n"
+    )
+
+
+def test_recovered_auto_worker_rerun_rejects_partial_untracked_work(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    with pytest.raises(RuntimeError, match="after untracked work"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=UntrackedChangeCrashingWorker(),
+        ).start(
+            BriefInput(
+                mode="bug",
+                text="验证 untracked partial work 不被覆盖",
+                source="worker-rerun-untracked-partial",
+                repo_path=str(repo),
+            ),
+            "auto",
+            max_iterations=2,
+            verify=True,
+        )
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "模拟 Worker 在形成 untracked 文件后中断",
+    )
+    state_before = run_dir.joinpath("state.json").read_bytes()
+    trace_before = run_dir.joinpath("trace.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="partial work"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=TrackedChangeWorker(),
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert run_dir.joinpath("state.json").read_bytes() == state_before
+    assert run_dir.joinpath("trace.jsonl").read_bytes() == trace_before
+    assert not run_dir.joinpath("iterations", "02").exists()
+    assert repo.joinpath("partial-note.txt").read_text(encoding="utf-8") == (
+        "partial worker output\n"
+    )
+
+
+def test_recovered_auto_worker_rerun_rejects_partial_ignored_work(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    with pytest.raises(RuntimeError, match="after ignored work"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=IgnoredChangeCrashingWorker(),
+        ).start(
+            BriefInput(
+                mode="bug",
+                text="验证 ignored partial work 不被覆盖",
+                source="worker-rerun-ignored-partial",
+                repo_path=str(repo),
+            ),
+            "auto",
+            max_iterations=2,
+            verify=True,
+        )
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "模拟 Worker 在形成 ignored 文件后中断",
+    )
+    state_before = run_dir.joinpath("state.json").read_bytes()
+    trace_before = run_dir.joinpath("trace.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="partial work"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=TrackedChangeWorker(),
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert run_dir.joinpath("state.json").read_bytes() == state_before
+    assert run_dir.joinpath("trace.jsonl").read_bytes() == trace_before
+    assert not run_dir.joinpath("iterations", "02").exists()
+    assert repo.joinpath("ignored-partial.txt").read_text(encoding="utf-8") == (
+        "ignored partial worker output\n"
+    )
+
+
+@pytest.mark.parametrize("damage_kind", ["missing", "tampered"])
+def test_recovered_auto_worker_rerun_rejects_invalid_source_baseline(
+    tmp_path: Path,
+    damage_kind: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    baseline_path = run_dir / "iterations" / "01" / "worker-baseline.json"
+    if damage_kind == "missing":
+        baseline_path.unlink()
+    else:
+        baseline_path.write_bytes(baseline_path.read_bytes() + b" ")
+    state_before = run_dir.joinpath("state.json").read_bytes()
+    trace_before = run_dir.joinpath("trace.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="partial work"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=TrackedChangeWorker(),
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert run_dir.joinpath("state.json").read_bytes() == state_before
+    assert run_dir.joinpath("trace.jsonl").read_bytes() == trace_before
+    assert not run_dir.joinpath("iterations", "02").exists()
+
+
+def test_recovered_auto_worker_rerun_rechecks_workspace_before_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    state_before = run_dir.joinpath("state.json").read_bytes()
+    trace_before = run_dir.joinpath("trace.jsonl").read_bytes()
+    snapshot_workspace = (
+        loop_continue_support_module.snapshot_worker_workspace
+    )
+    snapshot_calls = 0
+
+    def change_workspace_before_start(*args, **kwargs):
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        if snapshot_calls == 2:
+            repo.joinpath("README.md").write_text(
+                "# recovery demo\nexternal change\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+        return snapshot_workspace(*args, **kwargs)
+
+    monkeypatch.setattr(
+        loop_continue_support_module,
+        "snapshot_worker_workspace",
+        change_workspace_before_start,
+    )
+    monkeypatch.setattr(
+        worker_rerun_planning_module,
+        "snapshot_worker_workspace",
+        change_workspace_before_start,
+    )
+
+    with pytest.raises(ValueError, match="Worker 启动前发生变化"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=TrackedChangeWorker(),
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert run_dir.joinpath("state.json").read_bytes() == state_before
+    assert run_dir.joinpath("trace.jsonl").read_bytes() == trace_before
+    assert not run_dir.joinpath("iterations", "02").exists()
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\nexternal change\n"
+    )
+
+
+def test_recovered_later_worker_rerun_detects_same_path_content_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    runtime = LoopAutomationRuntime(
+        workspace,
+        worker_runner=IteratingWorker(),
+        reviewer_runner=IteratingReviewer(),
+    )
+    with pytest.raises(RuntimeError, match="second worker crash"):
+        runtime.start(
+            BriefInput(
+                mode="bug",
+                text="验证后续 Worker 同路径内容变化不会逃逸",
+                source="later-worker-rerun-content-change",
+                repo_path=str(repo),
+            ),
+            "auto",
+            max_iterations=3,
+            verify=True,
+        )
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "模拟第二轮 Worker 未产生新 diff 时中断",
+    )
+    state_before = run_dir.joinpath("state.json").read_bytes()
+    trace_before = run_dir.joinpath("trace.jsonl").read_bytes()
+    snapshot_workspace = (
+        loop_continue_support_module.snapshot_worker_workspace
+    )
+    snapshot_calls = 0
+
+    def change_same_path_before_start(*args, **kwargs):
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        if snapshot_calls == 2:
+            repo.joinpath("README.md").write_text(
+                "# recovery demo\nexternal replacement\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+        return snapshot_workspace(*args, **kwargs)
+
+    monkeypatch.setattr(
+        loop_continue_support_module,
+        "snapshot_worker_workspace",
+        change_same_path_before_start,
+    )
+    monkeypatch.setattr(
+        worker_rerun_planning_module,
+        "snapshot_worker_workspace",
+        change_same_path_before_start,
+    )
+
+    with pytest.raises(ValueError, match="Worker 启动前发生变化"):
+        runtime.continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert run_dir.joinpath("state.json").read_bytes() == state_before
+    assert run_dir.joinpath("trace.jsonl").read_bytes() == trace_before
+    assert not run_dir.joinpath("iterations", "03").exists()
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\nexternal replacement\n"
+    )
+
+
+def test_recovered_later_worker_reuses_trusted_diff_and_previous_findings(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    worker = IteratingWorker()
+    reviewer = IteratingReviewer()
+    runtime = LoopAutomationRuntime(
+        workspace,
+        worker_runner=worker,
+        reviewer_runner=reviewer,
+    )
+    with pytest.raises(RuntimeError, match="second worker crash"):
+        runtime.start(
+            BriefInput(
+                mode="bug",
+                text="验证后续 Worker 中断恢复",
+                source="later-worker-rerun",
+                repo_path=str(repo),
+            ),
+            "auto",
+            max_iterations=3,
+            verify=True,
+        )
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "模拟第二轮 Worker 未产生新 diff 时中断",
+    )
+
+    resumed = runtime.continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        rerun_worker=True,
+    )
+
+    state = LoopAutomationState.model_validate_json(
+        resumed.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert state.status == "success"
+    assert [item.iteration for item in state.iterations] == [1, 2, 3]
+    assert state.iterations[0].verdict == "request_changes"
+    assert state.iterations[1].lifecycle == "interrupted"
+    assert state.iterations[2].verdict == "approve"
+    assert "替换首轮占位内容" in worker.prompts[2]
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\nfinal worker change\n"
+    )
+
+
+def test_successful_worker_rerun_requires_authorization_trace_binding(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeWorker(),
+        reviewer_runner=StaticReviewer(),
+    ).continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        rerun_worker=True,
+    )
+    state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert validate_loop_artifact_integrity(workspace, repo, run_dir).valid
+    assert not any(
+        item.startswith("FAIL:")
+        for item in run_loop_eval(run_dir, state.artifacts)
+    )
+
+    trace_path = run_dir / "trace.jsonl"
+    trace_items = [
+        item
+        for item in _read_jsonl(trace_path)
+        if item.get("event") != "auto_worker_rerun_requested"
+    ]
+    trace_path.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in trace_items
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    eval_results = run_loop_eval(run_dir, state.artifacts)
+    integrity = validate_loop_artifact_integrity(workspace, repo, run_dir)
+
+    assert any(
+        "worker_rerun_authorization_trace_count_mismatch" in item
+        for item in eval_results
+    )
+    assert not integrity.valid
+    assert "worker_rerun_authorization_trace_count_mismatch" in integrity.issues
+
+
+@pytest.mark.parametrize("damage_kind", ["missing", "duplicate"])
+def test_worker_rerun_rejects_invalid_source_baseline_trace_before_start(
+    tmp_path: Path,
+    damage_kind: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    trace_path = run_dir / "trace.jsonl"
+    items = _read_jsonl(trace_path)
+    baseline = next(
+        item
+        for item in items
+        if item.get("event") == "worker_baseline_captured"
+        and item.get("iteration") == 1
+    )
+    if damage_kind == "missing":
+        items.remove(baseline)
+    else:
+        items.append(dict(baseline))
+    _write_jsonl(trace_path, items)
+    worker = CountingTrackedChangeWorker()
+
+    with pytest.raises(ValueError, match="baseline artifact 或 trace"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert worker.calls == 0
+    assert not run_dir.joinpath("iterations", "02").exists()
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "index_flag",
+    ["--assume-unchanged", "--skip-worktree"],
+)
+def test_worker_rerun_rejects_hidden_tracked_partial_work(
+    tmp_path: Path,
+    index_flag: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    _git(repo, "update-index", index_flag, "README.md")
+    repo.joinpath("README.md").write_text(
+        "# recovery demo\nhidden external change\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    worker = CountingTrackedChangeWorker()
+
+    with pytest.raises(
+        ValueError,
+        match="assume-unchanged/skip-worktree",
+    ):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert worker.calls == 0
+    assert not run_dir.joinpath("iterations", "02").exists()
+    assert "hidden external change" in repo.joinpath("README.md").read_text(
+        encoding="utf-8"
+    )
+
+
+@pytest.mark.parametrize("mutation", ["content", "add", "delete"])
+def test_worker_rerun_rejects_ignored_directory_descendant_changes(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    repo.joinpath(".gitignore").write_text(
+        "ignored-dir/\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(repo, "add", "--", ".gitignore")
+    _git(
+        repo,
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-m",
+        "ignore fixture directory",
+    )
+    ignored_dir = repo / "ignored-dir"
+    ignored_dir.mkdir()
+    payload = ignored_dir / "payload.txt"
+    payload.write_text("AAAA\n", encoding="utf-8", newline="\n")
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    if mutation == "content":
+        payload.write_text("BBBB\n", encoding="utf-8", newline="\n")
+    elif mutation == "add":
+        ignored_dir.joinpath("added.txt").write_text(
+            "added\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    else:
+        payload.unlink()
+    worker = CountingTrackedChangeWorker()
+
+    with pytest.raises(ValueError, match="partial work"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert worker.calls == 0
+    assert not run_dir.joinpath("iterations", "02").exists()
+
+
+def test_worker_baseline_does_not_persist_sensitive_path_names(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    fake_secret = "sk-proj-VEGA-FAKE-SECRET"
+    repo.joinpath(f"{fake_secret}.txt").write_text(
+        "fixture\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+
+    leaked = [
+        path.relative_to(run_dir).as_posix()
+        for path in run_dir.rglob("*")
+        if path.is_file() and fake_secret.encode("utf-8") in path.read_bytes()
+    ]
+
+    assert leaked == []
+    baseline_text = run_dir.joinpath(
+        "iterations",
+        "01",
+        "worker-baseline.json",
+    ).read_text(encoding="utf-8")
+    assert '"artifact_version": 2' in baseline_text
+    assert "tracked_files" not in baseline_text
+    assert "untracked_files" not in baseline_text
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    ["authorization_state", "authorization_trace", "iteration_claim"],
+)
+def test_worker_rerun_transaction_replays_after_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    worker = CountingTrackedChangeWorker()
+    original_state_save = LoopAutomationState.save
+    original_trace_write = TraceWriter.write
+    crashed = False
+
+    def flaky_state_save(state: LoopAutomationState, path: Path) -> None:
+        nonlocal crashed
+        should_crash = (
+            failure_stage == "authorization_state"
+            and state.status == "needs_human"
+            and bool(state.worker_rerun_authorizations)
+        ) or (
+            failure_stage == "iteration_claim"
+            and state.status == "running"
+            and state.current_iteration == 2
+            and bool(state.worker_rerun_authorizations)
+        )
+        if should_crash and not crashed:
+            crashed = True
+            raise RuntimeError(f"simulated {failure_stage} crash")
+        original_state_save(state, path)
+
+    def flaky_trace_write(
+        writer: TraceWriter,
+        event: str,
+        **payload: object,
+    ) -> None:
+        nonlocal crashed
+        if (
+            failure_stage == "authorization_trace"
+            and event == "auto_worker_rerun_requested"
+            and not crashed
+        ):
+            crashed = True
+            raise RuntimeError("simulated authorization_trace crash")
+        original_trace_write(writer, event, **payload)
+
+    monkeypatch.setattr(LoopAutomationState, "save", flaky_state_save)
+    monkeypatch.setattr(TraceWriter, "write", flaky_trace_write)
+
+    with pytest.raises(RuntimeError, match=failure_stage):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert worker.calls == 0
+    monkeypatch.setattr(LoopAutomationState, "save", original_state_save)
+    monkeypatch.setattr(TraceWriter, "write", original_trace_write)
+    resumed = LoopAutomationRuntime(
+        workspace,
+        worker_runner=worker,
+        reviewer_runner=StaticReviewer(),
+    ).continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        rerun_worker=True,
+    )
+
+    final_state = LoopAutomationState.model_validate_json(
+        resumed.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert final_state.status == "success"
+    assert worker.calls == 1
+    assert not run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).exists()
+    assert len(final_state.worker_rerun_authorizations) == 1
+
+
+def test_worker_rerun_reuses_prepared_baseline_after_preclaim_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    worker = CountingTrackedChangeWorker()
+    original_write_transaction = (
+        worker_rerun_transaction_module._write_worker_rerun_transaction
+    )
+    crashed = False
+
+    def crash_after_baseline_prepared(
+        target_run_dir: Path,
+        transaction: worker_rerun_transaction_module.WorkerRerunTransaction,
+    ) -> None:
+        nonlocal crashed
+        if (
+            transaction.rerun_worker_baseline_sha256 is not None
+            and not crashed
+        ):
+            crashed = True
+            raise RuntimeError("simulated baseline prepared crash")
+        original_write_transaction(target_run_dir, transaction)
+
+    monkeypatch.setattr(
+        worker_rerun_transaction_module,
+        "_write_worker_rerun_transaction",
+        crash_after_baseline_prepared,
+    )
+
+    with pytest.raises(RuntimeError, match="baseline prepared"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    crashed_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert crashed_state.status == "needs_human"
+    assert crashed_state.current_step == "recovered"
+    assert crashed_state.current_iteration == 1
+    assert worker.calls == 0
+    assert run_dir.joinpath(
+        "iterations",
+        "02",
+        "worker-baseline.json",
+    ).is_file()
+
+    monkeypatch.setattr(
+        worker_rerun_transaction_module,
+        "_write_worker_rerun_transaction",
+        original_write_transaction,
+    )
+    resumed = LoopAutomationRuntime(
+        workspace,
+        worker_runner=worker,
+        reviewer_runner=StaticReviewer(),
+    ).continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        rerun_worker=True,
+    )
+
+    final_state = LoopAutomationState.model_validate_json(
+        resumed.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert final_state.status == "success"
+    assert worker.calls == 1
+    assert not run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).exists()
+
+
+def test_worker_rerun_recovers_persisted_claim_before_worker_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    worker = CountingTrackedChangeWorker()
+    original_state_save = LoopAutomationState.save
+    crashed = False
+
+    def crash_after_claim_persisted(
+        state: LoopAutomationState,
+        path: Path,
+    ) -> None:
+        nonlocal crashed
+        should_crash = (
+            state.status == "running"
+            and state.current_iteration == 2
+            and state.worker_baseline_iteration == 2
+            and not crashed
+        )
+        original_state_save(state, path)
+        if should_crash:
+            crashed = True
+            raise RuntimeError("simulated persisted claim crash")
+
+    monkeypatch.setattr(
+        LoopAutomationState,
+        "save",
+        crash_after_claim_persisted,
+    )
+
+    with pytest.raises(RuntimeError, match="persisted claim"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    claimed_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert claimed_state.status == "running"
+    assert claimed_state.current_iteration == 2
+    assert claimed_state.worker_baseline_iteration == 2
+    assert worker.calls == 0
+
+    monkeypatch.setattr(
+        LoopAutomationState,
+        "save",
+        original_state_save,
+    )
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "恢复 Worker 启动前已持久化的 iteration claim",
+    )
+    recovered_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert recovered_state.status == "needs_human"
+    assert recovered_state.current_step == "recovered"
+    assert recovered_state.current_iteration == 1
+    assert [item.iteration for item in recovered_state.iterations] == [1]
+    assert run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).is_file()
+
+    resumed = LoopAutomationRuntime(
+        workspace,
+        worker_runner=worker,
+        reviewer_runner=StaticReviewer(),
+    ).continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        rerun_worker=True,
+    )
+    final_state = LoopAutomationState.model_validate_json(
+        resumed.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    events = _read_jsonl(resumed / "trace.jsonl")
+
+    assert final_state.status == "success"
+    assert worker.calls == 1
+    assert len(
+        [
+            item
+            for item in events
+            if item.get("event") == "worker_started"
+            and item.get("iteration") == 2
+        ]
+    ) == 1
+    assert any(
+        item.get("event") == "auto_worker_rerun_claim_recovered"
+        and item.get("rerun_iteration") == 2
+        for item in events
+    )
+
+
+def test_worker_rerun_recovery_clears_transaction_after_started_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    worker = CountingTrackedChangeWorker()
+    original_trace_write = TraceWriter.write
+    crashed = False
+
+    def crash_after_worker_started(
+        writer: TraceWriter,
+        event: str,
+        **payload: object,
+    ) -> None:
+        nonlocal crashed
+        original_trace_write(writer, event, **payload)
+        if (
+            event == "worker_started"
+            and payload.get("iteration") == 2
+            and not crashed
+        ):
+            crashed = True
+            raise RuntimeError("simulated worker_started crash")
+
+    monkeypatch.setattr(TraceWriter, "write", crash_after_worker_started)
+
+    with pytest.raises(RuntimeError, match="worker_started"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    assert worker.calls == 0
+    assert run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).is_file()
+    monkeypatch.setattr(TraceWriter, "write", original_trace_write)
+
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "恢复已经写入 Worker 启动边界的重跑",
+    )
+    recovered_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    events = _read_jsonl(run_dir / "trace.jsonl")
+
+    assert recovered_state.status == "needs_human"
+    assert recovered_state.current_step == "recovered"
+    assert recovered_state.current_iteration == 2
+    assert recovered_state.iterations[-1].lifecycle == "interrupted"
+    assert recovered_state.iterations[-1].interrupted_step == "worker"
+    assert not run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).exists()
+    assert len(
+        [
+            item
+            for item in events
+            if item.get("event") == "worker_started"
+            and item.get("iteration") == 2
+        ]
+    ) == 1
+
+
+def test_worker_rerun_transaction_delete_failure_stops_before_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    worker = CountingTrackedChangeWorker()
+    original_unlink = Path.unlink
+
+    def reject_transaction_delete(path: Path, *args, **kwargs) -> None:
+        if path.name == "worker-rerun-transaction.json":
+            raise PermissionError("simulated transaction lock")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", reject_transaction_delete)
+
+    with pytest.raises(ValueError, match="拒绝启动 Worker"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert worker.calls == 0
+    assert state.status == "running"
+    assert state.current_iteration == 2
+    assert run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).is_file()
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\n"
+    )
+
+    with pytest.raises(ValueError, match="拒绝启动 Worker"):
+        RecoveryRuntime(workspace).recover_loop(
+            run_dir.name,
+            "文件锁仍存在时拒绝完成 Worker 重跑恢复",
+        )
+    locked_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert locked_state.status == "running"
+    assert worker.calls == 0
+    assert run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).is_file()
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "文件锁释放后恢复 Worker 重跑事务",
+    )
+    recovered_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert recovered_state.status == "needs_human"
+    assert recovered_state.current_iteration == 2
+    assert recovered_state.iterations[-1].lifecycle == "interrupted"
+    assert recovered_state.iterations[-1].interrupted_step == "worker"
+    assert not run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).exists()
+
+
+def test_worker_rerun_final_boundary_change_stops_before_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    snapshot_worker_workspace = (
+        loop_continue_support_module.snapshot_worker_workspace
+    )
+    snapshot_calls = 0
+
+    def change_at_final_boundary(*args, **kwargs):
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        if snapshot_calls == 4:
+            repo.joinpath("README.md").write_text(
+                "# recovery demo\nfinal boundary change\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+        return snapshot_worker_workspace(*args, **kwargs)
+
+    monkeypatch.setattr(
+        loop_continue_support_module,
+        "snapshot_worker_workspace",
+        change_at_final_boundary,
+    )
+    monkeypatch.setattr(
+        worker_rerun_planning_module,
+        "snapshot_worker_workspace",
+        change_at_final_boundary,
+    )
+    worker = CountingTrackedChangeWorker()
+
+    result = LoopAutomationRuntime(
+        workspace,
+        worker_runner=worker,
+        reviewer_runner=StaticReviewer(),
+    ).continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        rerun_worker=True,
+    )
+
+    state = LoopAutomationState.model_validate_json(
+        result.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    events = _read_jsonl(result / "trace.jsonl")
+    assert state.status == "needs_human"
+    assert state.current_step == "workspace_changed_before_worker"
+    assert worker.calls == 0
+    assert not [
+        item
+        for item in events
+        if item.get("event") == "worker_started"
+        and item.get("iteration") == 2
+    ]
+
+
+def test_worker_rerun_integrity_derives_missing_authorization_and_order(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeWorker(),
+        reviewer_runner=StaticReviewer(),
+    ).continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        rerun_worker=True,
+    )
+    state_path = run_dir / "state.json"
+    trace_path = run_dir / "trace.jsonl"
+    state_bytes = state_path.read_bytes()
+    trace_items = _read_jsonl(trace_path)
+
+    state_payload = json.loads(state_bytes)
+    state_payload["worker_rerun_authorizations"] = []
+    state_without_authorization = LoopAutomationState.model_validate(
+        state_payload
+    )
+    trace_without_request = [
+        item
+        for item in trace_items
+        if item.get("event") != "auto_worker_rerun_requested"
+    ]
+    issues = worker_rerun_binding_issues(
+        run_dir,
+        state_without_authorization,
+        trace_without_request,
+    )
+    assert "worker_rerun_02_authorization_missing" in issues
+    assert "worker_rerun_02_request_trace_missing" in issues
+
+    duplicated = [*trace_items]
+    request = next(
+        item
+        for item in trace_items
+        if item.get("event") == "auto_worker_rerun_requested"
+    )
+    duplicated.append(dict(request))
+    state = LoopAutomationState.model_validate_json(state_bytes)
+    duplicate_issues = worker_rerun_binding_issues(
+        run_dir,
+        state,
+        duplicated,
+    )
+    assert "worker_rerun_authorization_trace_count_mismatch" in duplicate_issues
+
+    reordered = [
+        item
+        for item in trace_items
+        if item.get("event") != "auto_worker_rerun_requested"
+    ]
+    recovery_index = next(
+        index
+        for index, item in enumerate(reordered)
+        if item.get("event") == "loop_recovered"
+    )
+    reordered.insert(recovery_index, request)
+    order_issues = worker_rerun_binding_issues(
+        run_dir,
+        state,
+        reordered,
+    )
+    assert "worker_rerun_02_causal_order_invalid" in order_issues
 
 
 def test_owner_crash_recovery_preserves_evidence_and_continues(
@@ -1373,7 +2789,12 @@ def _init_git_repo(path: Path, *, with_verification: bool = False) -> None:
         encoding="utf-8",
         newline="\n",
     )
-    tracked_paths = ["README.md"]
+    path.joinpath(".gitignore").write_text(
+        "ignored-partial.txt\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    tracked_paths = ["README.md", ".gitignore"]
     if with_verification:
         path.joinpath(".vega.yaml").write_text(
             "\n".join(
@@ -1409,6 +2830,47 @@ def _init_git_repo(path: Path, *, with_verification: bool = False) -> None:
             "init",
         ],
         cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _create_recovered_worker_crash(workspace: Path, repo: Path) -> Path:
+    with pytest.raises(RuntimeError, match="simulated worker crash"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=CrashingWorker(),
+        ).start(
+            BriefInput(
+                mode="bug",
+                text="验证 Worker 中断后显式重跑",
+                source="worker-rerun-recovery",
+                repo_path=str(repo),
+            ),
+            "auto",
+            max_iterations=2,
+            verify=True,
+        )
+    run_dir = next((workspace / "runs").glob("*-loop"))
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "模拟 Worker 在形成 tracked diff 前中断",
+    )
+    recovered = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert recovered.status == "needs_human"
+    assert recovered.current_step == "recovered"
+    assert recovered.current_iteration == 1
+    assert recovered.iterations[0].interrupted_step == "worker"
+    return run_dir
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
         check=True,
         capture_output=True,
         text=True,
@@ -1497,6 +2959,17 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def _write_jsonl(path: Path, items: list[dict[str, object]]) -> None:
+    path.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in items
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 def _terminate_test_process(pid: int) -> None:

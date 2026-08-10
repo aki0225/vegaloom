@@ -1,11 +1,14 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-08
+> 更新时间：2026-08-09
 > 当前稳定基线：`v0.1.4`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
-> 默认 Runtime 与 Reviewer 保持不变，主线回到真实日常使用观察。
+> 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式恢复已作为实验能力
+> 进入主线；显式 `--rerun-worker` 仍在实验分支。r6 已真实通过该路径，后续代码审阅发现
+> 七项启动前证据与崩溃恢复缺口；当前实验分支已完成对应加固，等待 PR CI 与独立审查。
+> 在验证完成和后续观察前不提升为默认能力，也不自动串联多个 checkpoint。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -33,6 +36,10 @@ v0.1.4 发布（完成）
   -> RCB-01 Reviewer Context Bootstrap 对照实验（完成，insufficient-evidence）
   -> RCB-02 Diff-driven 符号检索离线验证（Phase 0 停止，未运行 Holdout）
   -> RCB-03 有界假设调查（完成，reject-before-holdout）
+  -> Goal P1 单 checkpoint 控制与显式恢复（实验能力已合并）
+  -> 真实控制进程中断 dogfood（r3 reject；r6 显式重跑路径通过）
+  -> r6 后安全审阅与 baseline/授权加固（当前实验分支）
+  -> 保持实验入口，不提升为默认或正式长任务能力
 ```
 
 Phase 3 已完成：
@@ -378,9 +385,15 @@ Stage 3 当前停止条件：
 
 ### Goal P1
 
-- 状态：`planned` / `design-only`
-- Goal P0 人工状态层已实现，P1 有限自动 checkpoint 仍是设计草案。
-- 只有真实长任务反复需要自动 checkpoint，才进入实现评估。
+- 状态：`experimental` / `single-checkpoint implemented`
+- PR `#54` 已将有限自动 checkpoint、唯一 child 绑定、显式 `goal reconcile`、一小时单次
+  runner deadline 和跨进程恢复证据合并到主线。
+- 真实控制进程中断 dogfood 已完成：唯一 child、进程所有权、reconcile 和 fail-closed
+  终态保持正确，但 Worker 无 Diff 时恢复会跳过 Worker，直接验证原始基线。
+- 正式裁决为 `reject`，机制附加判断为 `fail-closed-mechanism-pass`。现有实验入口保留，
+  但不提升为默认能力、正式长任务模式或自动多 checkpoint。
+- 唯一允许的后续代码方向是：`interrupted_step=worker` 且无 tracked diff 时，在昂贵验证前
+  明确重新运行 Worker 或要求人工选择。修复前不继续扩大 Goal 编排。
 - 不与 LangGraph 绑定，先证明 Goal/Handoff 是引擎无关能力。
 - 详细设计见 [`LONG-RUNNING-GOALS.md`](LONG-RUNNING-GOALS.md)。
 
@@ -516,6 +529,102 @@ RCB-03 按固定模型、顺序和六次调用完成，所有样本均可解析�
 正式裁决为 `reject-before-holdout`。不冻结新 Holdout，不修改默认 Reviewer，不继续增加提示层、
 静态关系图、检索服务或第二 Reviewer。主线回到真实日常使用观察；只有新的可重复失败证据才能
 启动另一份独立预注册。
+
+### 2026-08-09：Goal P1 单 checkpoint 实验能力进入主线
+
+PR `#54` 已合并单 checkpoint 自动推进、唯一 child 绑定、显式 reconcile、最长一小时的单次
+runner deadline、跨进程控制器中断恢复和 fail-closed 完成语义。该能力默认不自动运行，不改变
+`vega do`、普通 `vega loop` 或 Reviewer 的成功语义，也不自动创建下一 checkpoint。
+
+当前证据只证明控制状态、进程所有权、进度和 evidence 能跨父 CLI 中断恢复；没有证明真实模型
+连续数小时稳定自治。下一步只进行一次预注册的真实长时间 dogfood，不借此新增 daemon、数据库、
+自动重试、多 checkpoint 编排或新的 Agent 框架。
+
+### 2026-08-09：Goal P1 真实中断 Dogfood 不进入 Opt-in
+
+预注册 dogfood 在可丢弃真实项目副本中中断父控制进程，并恢复同一个 child。唯一 child 绑定、
+进程所有权、显式 reconcile、终态归档和敏感信息保护均保持正确；Worker 未形成 tracked diff
+时，Vega 最终也正确停在 `needs_human`，没有启动 Reviewer 或误报成功。
+
+但恢复后的第 2 轮跳过 Worker，直接对原始基线执行约 13 分钟验证，最后因 `no_diff` 停止。
+因此正式裁决为 `reject`，机制附加判断为 `fail-closed-mechanism-pass`。现有实验入口继续
+保留，默认 Runtime 不变；在“Worker 中断且无 Diff”的恢复决策得到窄范围修复和新 dogfood
+证据前，不提升为正式长任务能力，也不增加多 checkpoint、daemon 或自动重试。
+
+完整追加证据见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
+
+### 2026-08-09：Goal P1 显式 Worker 重跑 r4 未通过协议
+
+本轮完成了窄范围的 `--rerun-worker` 恢复决策：无新成果时普通 continue 不会静默跳过
+Worker；显式参数才允许同一 child 进入下一 iteration；已有 tracked 或非 ignored
+untracked partial work 时禁止覆盖。恢复与 CLI 分片测试全部通过，说明代码边界和
+fail-closed 保护已经落地。
+
+真实 r4 在可丢弃 Echo Vault 副本中只创建一个 Goal 和一个 child。控制层中断后，Windows
+launcher/job tree 使 child owner/Codex 一并结束，且目标副本留下了 12 个文件的 partial
+work。Vega 正确完成 reconcile、recover 和人工风险门禁，没有替代 child、没有误报成功、
+没有启动 Reviewer，也没有把目标改动写回真实项目。
+
+正式裁决为 `reject`，机制附加判断为 `fail-closed-partial-work-pass`。本轮没有证明外部
+Worker 脱离父控制器后仍能独立完成，也没有证明真实模型的显式 `--rerun-worker` 路径；
+因此不把 P1 提升为正式长任务能力，不增加 daemon、多 checkpoint、自动重试或新的 Agent
+框架。若未来继续，只能新建独立预注册 dogfood，先解决 Windows 进程树的故障注入歧义，
+并在确认“无成果”窗口后验证一次显式重跑。
+
+### 2026-08-09：Goal P1 显式 Worker 重跑 r6 通过
+
+r5 因监控脚本在 execution 仍为 `starting` 时过早退出而 `protocol-invalid`；它没有执行
+故障注入，也没有形成产品结论。r6 只修正为等待 identity 完整的 `running` execution，
+其余任务、预算、prepared HEAD、精确 owner/Job 注入器和通过条件保持不变。
+
+r6 在无 Diff 窗口精确中断 iteration 01 后，`goal reconcile` 与 child recover 保留唯一
+child。普通 continue 非零且 state、trace、iteration 目录不变；显式
+`--rerun-worker` 才在同一 child 创建 iteration 02。真实 Codex 只修改 `README.md`，
+固定验证、三阶段 scope gate、low Risk Gate 和独立 Reviewer 全部通过；child 为
+`success/done`，父 Goal 为 `checkpoint_done`。所有 execution 进程和命名 Job 均已退出，
+凭据扫描为 0 命中。
+
+正式裁决为 `candidate-for-opt-in`，机制判断为
+`explicit-worker-rerun-path-pass`。P1 继续保持显式实验入口，不改变默认 `vega do`、
+普通 loop 或 Reviewer 语义。该证据关闭单 checkpoint 的无成果 Worker 恢复缺口，但不证明
+数小时无人值守模型稳定性或自动多 checkpoint 自治。
+
+当前停止新增长任务基础设施。下一步只在真实日常任务中观察 P1；只有重复出现同一缺口时，
+才评估新的窄改动。不得因本轮通过增加 daemon、数据库、自动重试、多 checkpoint 编排或
+新的 Agent 框架。
+
+完整追加证据见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
+
+### 2026-08-09：Goal P1 r6 后安全审阅与加固
+
+r6 之后的代码审阅发现，原显式重跑判断没有完整绑定“中断 Worker 启动前的工作区”：
+
+- ignored partial work 可能不进入首轮 `rerun_safe` 判断。
+- 后续轮相同 tracked 路径的内容变化可能绕过仅按路径比较的快照。
+- 重跑 trace 没有与根状态和来源 baseline 形成可由 eval/Finish 复核的授权记录。
+- 达到最大自动迭代数后，状态仍可能展示重跑建议。
+
+当前实验分支只做与这些缺口直接相关的修复：每轮 Worker baseline、tracked diff 哈希、
+结构化重跑授权、eval/artifact integrity 绑定和迭代上限提示。没有新增 daemon、数据库、
+多 checkpoint 自动串联、后台自动重试或新的 Agent 框架。
+
+该修复不会改写 r6 的历史证据，也没有产生新的真实模型结论。合并前仍需以本地分片、
+仓库卫生检查和 PR CI 验证；通过后也只表示显式恢复路径更可靠，不表示数小时或跨天
+无人值守自治已经成立。
+
+### 2026-08-10：Goal P1 Worker 重跑阻断项已实现
+
+实验分支已经补齐 Worker baseline V2、敏感路径摘要、Git index flag 防护、有界 ignored
+目录后代清单、来源 baseline trace 校验、授权因果链推导、重跑事务和最终启动边界复查。
+baseline 准备、iteration claim 或 `worker_started` 附近崩溃时，Recovery 不会把未启动的
+Worker 误记为普通中断，也不会在同一事务上启动两个 Worker。
+
+本地静态门禁、仓库卫生、44 个 recovery chaos 节点、30 个 workspace snapshot 节点及
+config-assurance-pilot 文件集合已通过。Windows 单进程全量测试因 Git 子进程累计延迟没有
+可信终态，且精确旧 HEAD 对照也出现同类超时；因此当前状态是“推送实验分支并等待 PR CI”，
+不是直接合并。默认命令、成功语义、Reviewer 边界和 r6 历史裁决均未改变。
 
 ## 七、更新规则
 

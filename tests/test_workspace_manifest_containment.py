@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from vega import workspace_inventory as workspace_inventory_module
+from vega import content_manifest as content_manifest_module
 from vega.workspace_inventory import ContentManifestBudget, build_content_manifest
 
 
@@ -50,7 +50,7 @@ def test_cross_platform_absolute_forms_are_rejected(
     repo.mkdir()
 
     assert (
-        workspace_inventory_module._contained_manifest_path(
+        content_manifest_module._contained_manifest_path(
             repo.resolve(),
             relative_path,
         )

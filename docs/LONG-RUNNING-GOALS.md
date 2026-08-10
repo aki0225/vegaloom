@@ -1,9 +1,12 @@
 # 长任务 Goal Loop 设计
 
-> 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进与显式 child reconcile 已在当前
-> 实验分支实现。fake-runner、真实 Codex child 恢复和跨进程控制器中断测试已通过；合并前
-> 仍需通过 PR CI。多 checkpoint 自动串联、真实模型连续运行数小时/跨天的稳定性和收益
-> 仍未证明。
+> 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进与显式 child reconcile 已通过
+> PR `#54` 进入主线。主线仍只包含单 checkpoint 控制；显式 `--rerun-worker` 继续位于
+> 实验分支。r6 已真实通过同一 child 的显式重跑路径，后续代码审阅发现七项启动前证据与
+> 崩溃恢复缺口；当前分支已完成 Worker baseline V2、有界 ignored 后代清单、index flag
+> 防护、来源证据校验、重跑事务和最终启动边界复查。该能力在 PR CI 与独立审查完成前不提升
+> 为默认能力。多 checkpoint 自动
+> 串联、真实模型连续运行数小时/跨天的稳定性和收益仍未证明。
 
 ## 1. 背景
 
@@ -404,7 +407,8 @@ Goal 层不替代这些模块，只是把它们串成可恢复的长任务协议
 2026-08-09 的一次真实 Codex 实验在可丢弃目标仓库中完成了受限代码修改、固定验证、
 Reflect、Risk Gate 和独立 Reviewer。child 首次因 Windows CRLF 的确定性 diff check
 误判停在 `needs_human`；修复后使用 `loop continue` 继续同一 child，最终得到
-`success/approve`。完整追加记录见 `eval/long-task-controller-experiment.md`。
+`success/approve`。完整追加记录见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
 
 该真实运行暴露的父 Goal 重新归档缺口，已经通过显式 `goal reconcile` 修复。该命令不轮询、
 不启动模型、不自动重试，只重新读取 checkpoint 已绑定的 child。跨进程测试已证明：
@@ -412,6 +416,100 @@ Reflect、Risk Gate 和独立 Reviewer。child 首次因 Windows CRLF 的确定�
 父 Goal 能重新验证证据并进入 `checkpoint_done`。
 
 这仍然只证明控制器和证据恢复机制，不证明真实模型可以无人值守稳定工作数小时。
+
+2026-08-09 的真实控制进程中断 dogfood 又验证了一个更严格的场景：父控制进程在真实 Codex
+Worker 尚未形成 tracked diff 时退出。Goal 正确保留唯一 child，Worker 退出后允许 recover，
+并能由 reconcile 归档最终 `needs_human` 证据；没有创建替代 run、误报成功或泄露凭据。
+
+但恢复后的 `loop continue` 跳过 Worker，直接对原始基线运行全部固定验证，最终因 `no_diff`
+停止。该行为安全但无效，也产生了约 13 分钟无必要验证成本。因此本轮正式裁决为
+`reject`，机制附加判断为 `fail-closed-mechanism-pass`。
+
+P1 当前保持实验入口，不提升为默认或正式长任务模式。唯一允许的后续实现是处理
+`interrupted_step=worker` 且无 tracked diff 的恢复决策：明确重新运行 Worker，或者在昂贵
+验证前要求人工选择。完成该窄修复和新 dogfood 前，不进入多 checkpoint、后台 daemon、
+自动重试策略或 P2 扩建。完整记录见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
+
+该窄修复随后增加了显式 `loop continue --rerun-worker`：没有新成果时普通 continue 会先
+拒绝，只有人工明确选择后才在同一 child 的下一 iteration 重跑；已有 tracked 或非 ignored
+untracked partial work 时禁止重跑覆盖。相关恢复与 CLI 分片测试已通过。
+
+同日 r4 真实 dogfood 没有命中“无成果时显式重跑”的理想路径。Goal
+`20260809-191214-goal` 与唯一 child `20260809-191248-657688-feature-loop` 均被保留；
+控制层中断后，Windows launcher/job tree 使 child owner/Codex 一并结束，目标副本留下
+12 个文件的 partial work。Vega 没有覆盖、清理或创建替代 child；reconcile、recover 和
+最终 `checkpoint_blocked` 均按 fail-closed 语义工作。
+
+普通 `loop continue` 在该 partial work 现场返回非零，进入人工风险门禁，不启动新的
+Worker 或 Reviewer。正式裁决为 `reject`，机制附加判断为
+`fail-closed-partial-work-pass`。因此当前长任务能力只应表述为支持 Goal/child 状态、
+进度、证据和人工恢复，并能在单个 checkpoint 的进程故障后安全停下；不应表述为数小时
+或数天无人值守自治。
+
+若未来继续实验，必须新建独立协议验证真实显式重跑路径，先解决 Windows 故障注入的进程
+所有权歧义；在此之前不增加 daemon、多 checkpoint、后台自动重试或新的编排框架。
+
+同日后续 r5 因监控脚本在 execution 仍为 `starting` 时过早裁决而
+`protocol-invalid`，没有执行故障注入，也没有得到产品结论。该 child 使用 `vega stop`
+安全结束，目标副本保持 clean，父 Goal 正确停在 `checkpoint_blocked`。
+
+独立 r6 只修正监控条件，并在同一任务、预算和 prepared HEAD 下命中真实显式重跑路径：
+iteration 01 在 Worker running、工作区 clean 且尚无 `file_changed` 时精确终止本次 owner
+与命名 Job；reconcile 与 recover 后，普通 continue 无副作用拒绝，`--rerun-worker` 在同一
+child 创建 iteration 02。真实 Codex 只修改 `README.md`，固定验证通过，Risk Gate 为 low，
+独立 Reviewer 返回 `approve`，child 为 `success/done`，父 Goal reconcile 后为
+`checkpoint_done`。
+
+r6 正式裁决为 `candidate-for-opt-in`，机制判断为
+`explicit-worker-rerun-path-pass`。这关闭了“Worker 无成果中断后直接跳过 Worker 并浪费
+验证”的窄缺口，证明单 checkpoint 可以通过人工显式选择恢复并完成。
+
+能力边界仍不变：这不是无人值守长任务系统，不证明模型连续数小时或数天稳定运行，也不自动
+恢复、自动重试或创建多个 checkpoint。P1 保持显式实验入口，默认 Runtime 不变；后续只在
+真实日常任务中观察，不因本轮结果增加 daemon、数据库或新的编排框架。完整追加证据见
+[`../eval/long-task-controller-experiment.md`](../eval/long-task-controller-experiment.md)。
+
+### 2026-08-09：r6 后安全审阅与显式重跑加固
+
+r6 的真实成功只证明当时命中的 clean-workspace 路径。随后代码审阅发现两项不能由该样本
+覆盖的 P1：
+
+1. 首轮恢复只检查 tracked 与非 ignored untracked 路径，Worker 留下 ignored partial work
+   时可能错误允许重跑。
+2. 后续 iteration 只比较变更路径集合；同一 tracked 路径内容在确认重跑后被外部修改时，
+   旧快照可能无法发现。
+
+当前实验分支没有增加新的长任务组件，而是复用现有 workspace baseline artifact：
+
+- 每轮 auto Worker 启动前写入 `iterations/<NN>/worker-baseline.json`。
+- baseline 增加 staged/unstaged tracked diff 内容哈希，并保持旧 artifact 可读取。
+- 根状态记录最新 Worker baseline，并以结构化授权绑定来源中断轮次、recovery ID 和 baseline
+  SHA256。
+- eval 与 artifact integrity 要求 `auto_worker_rerun_requested` trace 和授权一一对应；
+  baseline 缺失、篡改或 trace 被删除时 fail-closed。
+- 达到 `max_iterations` 后，状态输出不再建议显式重跑，只保留人工完成现场后的普通 continue。
+
+本轮只修复 r6 后审阅发现的恢复边界，没有运行新的真实模型 dogfood，也没有改变 r6 的历史
+裁决。显式 Worker 重跑仍是实验分支能力；主线、默认 `vega do`、普通 loop 和 Reviewer
+语义均不改变。
+
+### 2026-08-10：七项阻断修复完成，等待 PR CI
+
+本分支已经完成审阅要求的启动前证据加固：
+
+- Worker baseline V2 不保存原始路径列表，并绑定 tracked diff、Git index 标记和有界
+  ignored 后代清单。
+- 来源 baseline artifact、SHA-256 与 trace 在可写 Worker 启动前验证；iteration 生命周期
+  反向要求唯一的 state 授权与 trace 请求。
+- 重跑事务覆盖 baseline 准备、iteration claim 和 `worker_started` 边界；claim 已落盘但
+  Worker 未启动时可恢复到人工状态，并可幂等继续同一 iteration。
+- 最终启动前重新捕获工作区，偏离授权快照时不调用 runner。
+
+本地编译、Ruff、架构增长、仓库卫生、44 个 recovery chaos 节点和 30 个 workspace
+snapshot 节点已通过。单进程 1129 节点全量测试在 Windows 上因 Git 子进程累计延迟没有取得
+可信终态；精确旧 HEAD 的对照节点也出现相同 60 秒超时。当前结论是“实现完成、等待 PR CI
+与独立审查”，不是“可以直接合并”，也没有产生新的真实模型能力结论。
 
 ### P2：更强 eval 和经验沉淀
 

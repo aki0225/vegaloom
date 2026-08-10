@@ -7,10 +7,21 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .brief_runtime import BriefRuntime
-from .execution_control import RunnerExecutionContext, inspect_execution_for_recovery
+from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk, render_gate_report
+from .loop_continue_support import (
+    next_iteration_number,
+    plan_recovered_auto_worker,
+    require_execution_recoverable,
+    require_loop_initialization,
+    require_recovery_trace_binding,
+)
 from .loop_evidence import validate_loop_evidence_snapshot
-from .loop_initialization import loop_initialization_issues
+from .loop_failure_reporting import (
+    write_execution_interruption_report as _write_execution_interruption_report,
+    write_runner_error_report as _write_runner_error_report,
+    write_verification_interruption_report as _write_verification_interruption_report,
+)
 from .loop_integrity import (
     trusted_verification_passed,
     workspace_baseline_eval_results,
@@ -35,6 +46,7 @@ from .models import (
     LoopIterationState,
     ReviewVerdict,
     SupersededTerminalRecord,
+    WorkerRerunAuthorization,
 )
 from .project_config import (
     ProjectConfig,
@@ -70,18 +82,30 @@ from .scope_gate import (
 )
 from .trace import TraceWriter, active_run_finished_indices, read_trace_items
 from .verification import VerificationRunResult, run_project_verification
+from .worker_rerun import worker_rerun_eval_results
+from .worker_rerun_planning import (
+    initialize_auto_worker_rerun,
+    select_worker_workspace_snapshot,
+)
+from .worker_rerun_runtime import (
+    WorkerStartBoundaryChanged,
+    begin_auto_worker_iteration,
+    prepare_auto_worker_start,
+)
+from .worker_rerun_transaction import (
+    cancel_worker_rerun_before_start,
+)
 from .workspace_baseline import (
     ASSIST_BASELINE_BLOCKED_ARTIFACTS,
     ASSIST_INITIALIZATION_ARTIFACTS,
     LEGACY_ASSIST_INITIALIZATION_ARTIFACTS,
-    LEGACY_WORKSPACE_BASELINE_UNAVAILABLE,
     WORKSPACE_BASELINE_ARTIFACT,
     capture_assist_workspace_baseline,
     load_assist_workspace_baseline,
     require_assist_workspace_baseline_continuable,
 )
-from .workspace_check import read_head_sha, run_workspace_check, snapshot_workspace
-from .workspace_inventory import workspace_ignored_path_exclusions
+from .workspace_check import read_head_sha, run_workspace_check
+from .workspace_inventory import WorkspaceSnapshot
 
 LOOP_INITIALIZATION_ARTIFACTS = list(LEGACY_ASSIST_INITIALIZATION_ARTIFACTS)
 LOOP_ARTIFACTS = [
@@ -296,30 +320,38 @@ class LoopAutomationRuntime:
         self,
         run: str,
         repo_path: Path,
+        worker_name: str = "codex-exec",
         reviewer_name: str = "codex-exec",
         test_log: Path | None = None,
         note: str | None = None,
         verify: bool = True,
+        rerun_worker: bool = False,
     ) -> Path:
+        if rerun_worker and (test_log is not None or note is not None):
+            raise ValueError("--rerun-worker 不能与 --test-log 或 --note 同时使用。")
         run_dir = resolve_run_dir(self.workspace, run)
         with RunMutationLock.acquire(run_dir, "loop.continue"):
             return self._continue_assist_locked(
                 run_dir,
                 repo_path,
+                worker_name=worker_name,
                 reviewer_name=reviewer_name,
                 test_log=test_log,
                 note=note,
                 verify=verify,
+                rerun_worker=rerun_worker,
             )
 
     def _continue_assist_locked(
         self,
         run_dir: Path,
         repo_path: Path,
+        worker_name: str = "codex-exec",
         reviewer_name: str = "codex-exec",
         test_log: Path | None = None,
         note: str | None = None,
         verify: bool = True,
+        rerun_worker: bool = False,
     ) -> Path:
         state = LoopAutomationState.model_validate_json(
             run_dir.joinpath("state.json").read_text(encoding="utf-8")
@@ -342,45 +374,34 @@ class LoopAutomationRuntime:
                 f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}"
             )
         require_assist_workspace_baseline_continuable(state)
-        _require_execution_recoverable(run_dir)
-        _require_recovery_trace_binding(run_dir, state)
-        _require_loop_initialization(self.workspace, run_dir, state, repo)
-        if _project_policy_changed(repo, state.project_policy_snapshot):
-            trace = TraceWriter(run_dir / "trace.jsonl")
-            iteration_number = _next_iteration_number(run_dir, state)
-            iteration_dir = _iteration_dir(run_dir, iteration_number)
-            _write_project_policy_change_report(
-                iteration_dir,
-                state.project_policy_snapshot,
-                project_policy_snapshot(repo),
-            )
-            state.current_iteration = iteration_number
-            state.iterations.append(
-                LoopIterationState(
-                    iteration=iteration_number,
-                    worker_status="skipped",
-                )
-            )
-            _write_final_report(
-                run_dir,
-                state,
-                None,
-                "项目策略文件在 loop 启动后发生变化，未继续自动验证和审查。",
-            )
-            trace.write("project_policy_changed", iteration=iteration_number)
-            self._save_loop_done(
-                run_dir,
-                state,
-                "needs_human",
-                trace,
-                current_step="project_policy_changed",
-            )
-            return run_dir
+        require_execution_recoverable(run_dir)
+        require_recovery_trace_binding(run_dir, state)
+        require_loop_initialization(self.workspace, run_dir, state, repo)
         config = load_project_config(repo)
-        _, reviewer_name = _apply_runner_defaults(config, "codex-exec", reviewer_name)
-        workspace_baseline = load_assist_workspace_baseline(run_dir, state)
+        worker_name, reviewer_name = _apply_runner_defaults(
+            config,
+            worker_name,
+            reviewer_name,
+        )
         trace = TraceWriter(run_dir / "trace.jsonl")
-        iteration_number = _next_iteration_number(run_dir, state)
+        early_result = self._prepare_continue(
+            run_dir,
+            state,
+            repo,
+            worker_name,
+            reviewer_name,
+            verify,
+            config,
+            trace,
+            rerun_worker=rerun_worker,
+            has_test_log=test_log is not None,
+            has_note=note is not None,
+        )
+        if early_result is not None:
+            return early_result
+
+        workspace_baseline = load_assist_workspace_baseline(run_dir, state)
+        iteration_number = next_iteration_number(run_dir, state)
         iteration_state = LoopIterationState(
             iteration=iteration_number,
             worker_status="skipped",
@@ -831,6 +852,91 @@ class LoopAutomationRuntime:
         self._finish_or_prepare_next(run_dir, state, verdict, iteration_dir, trace)
         return run_dir
 
+    def _prepare_continue(
+        self,
+        run_dir: Path,
+        state: LoopAutomationState,
+        repo: Path,
+        worker_name: str,
+        reviewer_name: str,
+        verify: bool,
+        config: ProjectConfig,
+        trace: TraceWriter,
+        *,
+        rerun_worker: bool,
+        has_test_log: bool,
+        has_note: bool,
+    ) -> Path | None:
+        if _project_policy_changed(repo, state.project_policy_snapshot):
+            iteration_number = next_iteration_number(run_dir, state)
+            iteration_dir = _iteration_dir(run_dir, iteration_number)
+            _write_project_policy_change_report(
+                iteration_dir,
+                state.project_policy_snapshot,
+                project_policy_snapshot(repo),
+            )
+            state.current_iteration = iteration_number
+            state.iterations.append(
+                LoopIterationState(
+                    iteration=iteration_number,
+                    worker_status="skipped",
+                )
+            )
+            _write_final_report(
+                run_dir,
+                state,
+                None,
+                "项目策略文件在 loop 启动后发生变化，未继续自动验证和审查。",
+            )
+            trace.write("project_policy_changed", iteration=iteration_number)
+            self._save_loop_done(
+                run_dir,
+                state,
+                "needs_human",
+                trace,
+                current_step="project_policy_changed",
+            )
+            return run_dir
+        recovery_plan = plan_recovered_auto_worker(
+            self.workspace,
+            repo,
+            run_dir,
+            state,
+            rerun_requested=rerun_worker,
+            has_test_log=has_test_log,
+            has_note=has_note,
+        )
+        if not recovery_plan.rerun:
+            return None
+        iteration_number = recovery_plan.iteration_number
+        assert iteration_number is not None
+        return self._run_auto_iterations(
+            run_dir,
+            state,
+            BriefInput(
+                mode=state.task_mode,
+                text="恢复原 checkpoint Worker",
+                source=state.input_source,
+                repo_path=state.repo_path,
+            ),
+            worker_name,
+            reviewer_name,
+            verify,
+            config,
+            start_iteration=iteration_number,
+            initial_previous_verdict=recovery_plan.previous_verdict,
+            worker_rerun_requested=True,
+            expected_first_workspace_snapshot=(
+                recovery_plan.expected_workspace_snapshot
+            ),
+            source_interrupted_iteration=(
+                recovery_plan.source_interrupted_iteration
+            ),
+            source_worker_baseline_sha256=(
+                recovery_plan.source_worker_baseline_sha256
+            ),
+        )
+
     def _run_auto_iterations(
         self,
         run_dir: Path,
@@ -840,22 +946,51 @@ class LoopAutomationRuntime:
         reviewer_name: str,
         verify: bool,
         config: ProjectConfig,
+        *,
+        start_iteration: int = 1,
+        initial_previous_verdict: ReviewVerdict | None = None,
+        worker_rerun_requested: bool = False,
+        expected_first_workspace_snapshot: WorkspaceSnapshot | None = None,
+        source_interrupted_iteration: int | None = None,
+        source_worker_baseline_sha256: str | None = None,
     ) -> Path:
         trace = TraceWriter(run_dir / "trace.jsonl")
         repo_path = Path(brief_input.repo_path).resolve()
-        previous_verdict: ReviewVerdict | None = None
+        previous_verdict = initial_previous_verdict
         worker = self.worker_runner or make_runner(
             worker_name,
             options=config.runner.codex_exec.worker,
         )
-        for iteration_number in range(1, state.max_iterations + 1):
+        (
+            recovered_workspace_baseline,
+            rerun_authorization,
+        ) = initialize_auto_worker_rerun(
+            self.workspace,
+            repo_path,
+            state,
+            start_iteration=start_iteration,
+            rerun_requested=worker_rerun_requested,
+            expected_workspace_snapshot=expected_first_workspace_snapshot,
+            source_interrupted_iteration=source_interrupted_iteration,
+            source_worker_baseline_sha256=source_worker_baseline_sha256,
+        )
+        for iteration_number in range(start_iteration, state.max_iterations + 1):
             iteration_state = LoopIterationState(
                 iteration=iteration_number,
                 worker_status="skipped",
             )
-            state.current_iteration = iteration_number
-            state.current_step = "worker"
-            state.save(run_dir / "state.json")
+            (
+                active_rerun_authorization,
+                rerun_authorization,
+            ) = begin_auto_worker_iteration(
+                run_dir,
+                state,
+                trace,
+                iteration=iteration_number,
+                start_iteration=start_iteration,
+                rerun_authorization=rerun_authorization,
+                recovered_workspace_baseline=recovered_workspace_baseline,
+            )
             iteration_dir = _iteration_dir(run_dir, iteration_number)
             prompt, prompt_sections = build_worker_prompt(
                 brief_input,
@@ -878,7 +1013,15 @@ class LoopAutomationRuntime:
             )
             if prompt_metrics.exceeded:
                 write_context_budget_report(iteration_dir, "worker", prompt_metrics)
+                state.current_iteration = iteration_number
+                state.current_step = "worker"
                 state.iterations.append(iteration_state)
+                _write_worker_rerun_cancelled(
+                    run_dir,
+                    trace,
+                    active_rerun_authorization,
+                    reason="worker_context_budget",
+                )
                 _write_final_report(
                     run_dir,
                     state,
@@ -893,12 +1036,15 @@ class LoopAutomationRuntime:
                     current_step="worker_context_budget",
                 )
                 return run_dir
-            workspace_baseline = snapshot_workspace(
+            (
+                workspace_baseline,
+                recovered_workspace_baseline,
+            ) = select_worker_workspace_snapshot(
+                self.workspace,
                 repo_path,
-                ignored_path_exclusions=workspace_ignored_path_exclusions(
-                    self.workspace,
-                    repo_path,
-                ),
+                recovered_workspace_baseline,
+                iteration_number=iteration_number,
+                start_iteration=start_iteration,
             )
             head_changed_before_worker = bool(
                 state.initial_head_sha
@@ -908,6 +1054,8 @@ class LoopAutomationRuntime:
             if not workspace_baseline.capture_complete or (
                 iteration_number == 1 and workspace_baseline.has_tracked_changes
             ) or head_changed_before_worker:
+                state.current_iteration = iteration_number
+                state.current_step = "worker"
                 workspace_check = run_workspace_check(
                     repo_path,
                     iteration_dir,
@@ -921,6 +1069,12 @@ class LoopAutomationRuntime:
                     workspace_new_files_count=workspace_check.new_untracked_count,
                 )
                 state.iterations.append(iteration_state)
+                _write_worker_rerun_cancelled(
+                    run_dir,
+                    trace,
+                    active_rerun_authorization,
+                    reason="workspace_baseline_blocked",
+                )
                 if head_changed_before_worker:
                     _write_text_artifact(
                         iteration_dir / "fix-prompt.md",
@@ -963,7 +1117,49 @@ class LoopAutomationRuntime:
                     current_step=current_step,
                 )
                 return run_dir
-            trace.write("worker_started", iteration=iteration_number, runner=worker_name)
+            try:
+                prepare_auto_worker_start(
+                    self.workspace,
+                    repo_path,
+                    run_dir,
+                    state,
+                    trace,
+                    iteration=iteration_number,
+                    start_iteration=start_iteration,
+                    worker_name=worker_name,
+                    workspace_baseline=workspace_baseline,
+                    recovered_workspace_baseline=recovered_workspace_baseline,
+                    rerun_authorization=active_rerun_authorization,
+                )
+            except WorkerStartBoundaryChanged:
+                state.current_iteration = iteration_number
+                state.current_step = "worker"
+                state.iterations.append(iteration_state)
+                _write_worker_rerun_cancelled(
+                    run_dir,
+                    trace,
+                    active_rerun_authorization,
+                    reason="changed_at_worker_start_boundary",
+                )
+                trace.write(
+                    "workspace_baseline_blocked",
+                    iteration=iteration_number,
+                    reason="changed_at_worker_start_boundary",
+                )
+                _write_final_report(
+                    run_dir,
+                    state,
+                    previous_verdict,
+                    "工作区在最终 baseline 持久化前发生变化，未启动自动 Worker。",
+                )
+                self._save_loop_done(
+                    run_dir,
+                    state,
+                    "needs_human",
+                    trace,
+                    current_step="workspace_changed_before_worker",
+                )
+                return run_dir
             worker_result = worker.run(
                 prompt,
                 repo_path,
@@ -1239,8 +1435,11 @@ class LoopAutomationRuntime:
 
             current_policy = project_policy_snapshot(repo_path)
             if _project_policy_changed(repo_path, state.project_policy_snapshot):
-                if verification_status != "skipped" and verification_log is not None:
-                    _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
+                _copy_verification_summary_if_available(
+                    verification_status,
+                    verification_log,
+                    iteration_dir,
+                )
                 _write_project_policy_change_report(
                     iteration_dir,
                     state.project_policy_snapshot,
@@ -1283,8 +1482,11 @@ class LoopAutomationRuntime:
                 ),
             )
             if not post_scope_evidence.passed:
-                if verification_status != "skipped" and verification_log is not None:
-                    _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
+                _copy_verification_summary_if_available(
+                    verification_status,
+                    verification_log,
+                    iteration_dir,
+                )
                 state.iterations.append(iteration_state)
                 _write_text_artifact(
                     iteration_dir / "fix-prompt.md",
@@ -1985,6 +2187,7 @@ def run_loop_eval(
         results.append("PASS: state.artifacts 与必需 artifact 一致")
     results.extend(project_policy_snapshot_eval_results(run_dir, state))
     results.extend(workspace_baseline_eval_results(run_dir, state))
+    results.extend(worker_rerun_eval_results(run_dir, state))
 
     effective_status = status_for_eval or state.status
     if require_terminal:
@@ -2327,149 +2530,6 @@ def render_eval(results: list[str]) -> str:
     return redact_text("# Eval\n\n" + "\n".join(f"- {item}" for item in results) + "\n")
 
 
-def _next_iteration_number(
-    run_dir: Path,
-    state: LoopAutomationState,
-) -> int:
-    expected = list(range(1, len(state.iterations) + 1))
-    actual = [item.iteration for item in state.iterations]
-    if actual != expected:
-        raise ValueError(
-            f"loop iteration 序列不连续：期望 {expected or '[]'}，实际 {actual or '[]'}"
-        )
-    last_iteration = state.iterations[-1].iteration if state.iterations else 0
-    if state.current_iteration != last_iteration:
-        raise ValueError(
-            "loop current_iteration 与最后已登记 iteration 不一致，"
-            "已拒绝继续以避免覆盖证据。"
-        )
-    next_iteration = last_iteration + 1
-    next_dir = run_dir / "iterations" / f"{next_iteration:02d}"
-    if next_dir.exists():
-        raise ValueError(
-            f"下一 iteration 目录已存在：{next_dir.relative_to(run_dir)}；"
-            "已拒绝复用或覆盖旧证据。"
-        )
-    return next_iteration
-
-
-def _require_loop_initialization(
-    workspace: Path,
-    run_dir: Path,
-    state: LoopAutomationState,
-    repo_path: Path,
-) -> None:
-    issues = loop_initialization_issues(
-        workspace,
-        run_dir,
-        state,
-        repo_path,
-    )
-    if issues:
-        raise ValueError(
-            "loop 初始化未完成或证据不完整，已拒绝 continue："
-            + ", ".join(issues)
-        )
-
-
-def _require_execution_recoverable(run_dir: Path) -> None:
-    inspection = inspect_execution_for_recovery(run_dir)
-    if not inspection.can_recover:
-        raise ValueError(
-            "当前 loop 仍有未安全消失的 execution，已拒绝 continue："
-            f"{inspection.summary}"
-        )
-
-
-def _require_recovery_trace_binding(
-    run_dir: Path,
-    state: LoopAutomationState,
-) -> None:
-    pending_path = run_dir / ".control" / "recovery-transaction.json"
-    if pending_path.exists():
-        raise ValueError(
-            "loop recovery transaction 尚未提交完成；"
-            "请先重新执行 recover，再运行 continue。"
-        )
-    try:
-        items = read_trace_items(run_dir / "trace.jsonl")
-    except (OSError, ValueError) as exc:
-        raise ValueError("loop trace 无法验证，已拒绝 continue。") from exc
-    _, issues = active_run_finished_indices(
-        items,
-        expected_superseded=[
-            record.model_dump()
-            for record in state.superseded_terminal_events
-        ],
-    )
-    if issues:
-        raise ValueError(
-            "loop recovery 终态绑定不完整，已拒绝 continue："
-            + ", ".join(issues)
-        )
-    if state.current_step not in {
-        "recovered",
-        "recovered_initialization_incomplete",
-        LEGACY_WORKSPACE_BASELINE_UNAVAILABLE,
-    }:
-        return
-
-    recovery_id = state.last_recovery_id
-    if recovery_id is None:
-        # 兼容旧 run：旧版没有 last_recovery_id，但必须保留真实 recovery 事件。
-        legacy_recovered = [
-            item for item in items if item.get("event") == "loop_recovered"
-        ]
-        if not legacy_recovered:
-            raise ValueError("loop 缺少 recovery trace，已拒绝 continue。")
-        return
-
-    recovered_matches = [
-        item
-        for item in items
-        if item.get("event") == "loop_recovered"
-        and item.get("recovery_id") == recovery_id
-    ]
-    if len(recovered_matches) != 1:
-        raise ValueError("loop_recovered 与 state.last_recovery_id 不一致。")
-    recovered = recovered_matches[0]
-    continuation_allowed = state.current_step not in {
-        "recovered_initialization_incomplete",
-        LEGACY_WORKSPACE_BASELINE_UNAVAILABLE,
-    }
-    if recovered.get("continuation_allowed") != continuation_allowed:
-        raise ValueError("loop_recovered 的 continuation_allowed 与 state 不一致。")
-    expected_superseded = next(
-        (
-            record.terminal_event_index
-            for record in state.superseded_terminal_events
-            if record.recovery_id == recovery_id
-        ),
-        None,
-    )
-    if recovered.get("superseded_terminal_event") != expected_superseded:
-        raise ValueError("loop_recovered 的 superseded terminal 与 state 不一致。")
-
-    if state.iterations and state.iterations[-1].lifecycle == "interrupted":
-        latest = state.iterations[-1]
-        interruption_matches = [
-            item
-            for item in items
-            if item.get("event") == "loop_iteration_interrupted"
-            and item.get("recovery_id") == recovery_id
-        ]
-        if len(interruption_matches) != 1:
-            raise ValueError(
-                "loop_iteration_interrupted 与 state.last_recovery_id 不一致。"
-            )
-        interruption = interruption_matches[0]
-        if (
-            interruption.get("iteration") != latest.iteration
-            or interruption.get("previous_step") != latest.interrupted_step
-        ):
-            raise ValueError("loop interruption trace 与最新 interrupted state 不一致。")
-
-
 def _interrupted_iteration_evidence_checks(
     iteration_dir: Path,
     iteration: LoopIterationState,
@@ -2504,6 +2564,23 @@ def _iteration_dir(run_dir: Path, iteration: int) -> Path:
     path = run_dir / "iterations" / f"{iteration:02d}"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _write_worker_rerun_cancelled(
+    run_dir: Path,
+    trace: TraceWriter,
+    authorization: WorkerRerunAuthorization | None,
+    *,
+    reason: str,
+) -> None:
+    if authorization is None:
+        return
+    cancel_worker_rerun_before_start(
+        run_dir,
+        trace,
+        authorization=authorization,
+        reason=reason,
+    )
 
 
 def _record_reflect(iteration_dir: Path, reflect_run: Path) -> None:
@@ -2773,157 +2850,6 @@ def _review_run_allows_verdict(status: str, verdict: ReviewVerdict) -> bool:
     }
 
 
-def _write_execution_interruption_report(
-    iteration_dir: Path,
-    *,
-    step: str,
-    status: Literal["timed_out", "stopped"],
-    reason: str | None,
-    command: str | None = None,
-) -> Path:
-    filename = "timeout-report.md" if status == "timed_out" else "stop-report.md"
-    title = "Timeout Report" if status == "timed_out" else "Stop Report"
-    if step == "verification":
-        conclusion = (
-            "当前 verification 命令已超时；本轮不会继续剩余验证、reflect 或 review。"
-            if status == "timed_out"
-            else "当前 verification 已按用户请求停止；本轮不会继续剩余验证、reflect 或 review。"
-        )
-    else:
-        conclusion = (
-            "当前 attempt 已超时；timeout 不等于任务失败，但本轮不会继续 verification/review。"
-            if status == "timed_out"
-            else "当前 attempt 已按用户请求停止，本轮不会继续 verification/review。"
-        )
-    path = iteration_dir / filename
-    details = [
-        f"# {title}",
-        "",
-        f"- 步骤：`{step}`",
-        f"- 状态：`{status}`",
-    ]
-    if command:
-        details.append(f"- 命令：`{command}`")
-    details.extend(
-        [
-            f"- 原因：{reason or '未提供'}",
-            "",
-            "## 结论",
-            "",
-            f"- {conclusion}",
-            "- 目标仓库现场和 execution 证据均保留，交由人工检查。",
-            "- Vega 未自动回滚、清理、提交、推送或发布。",
-        ]
-    )
-    _write_text_artifact(path, "\n".join(details).rstrip() + "\n")
-    return path
-
-
-def _write_verification_interruption_report(
-    iteration_dir: Path,
-    verification: VerificationRunResult,
-) -> Path:
-    status = verification.interruption_status
-    if status in {"timed_out", "stopped"}:
-        return _write_execution_interruption_report(
-            iteration_dir,
-            step="verification",
-            status=status,
-            reason=verification.interruption_reason,
-            command=verification.interruption_command,
-        )
-    if status != "termination-unconfirmed":
-        raise ValueError("verification interruption 缺少可识别状态")
-
-    path = iteration_dir / "runner-error-report.md"
-    _write_text_artifact(
-        path,
-        "\n".join(
-            [
-                "# Verification Termination Report",
-                "",
-                "- 步骤：`verification`",
-                "- 状态：`termination-unconfirmed`",
-                f"- 命令：`{verification.interruption_command or '未知'}`",
-                f"- 原因：{verification.interruption_reason or '未提供'}",
-                "",
-                "## 结论",
-                "",
-                "- owned process tree 的终止未被确认，不能把本轮视为普通命令失败。",
-                "- 剩余验证命令、reflect 和 reviewer 均未继续执行。",
-                "- execution、验证输出和目标仓库现场均已保留，必须人工确认进程与工作区状态。",
-                "- Vega 未自动回滚、清理、提交、推送或发布。",
-            ]
-        ).rstrip()
-        + "\n",
-    )
-    return path
-
-
-def _write_runner_error_report(
-    iteration_dir: Path,
-    *,
-    step: str,
-    reason: str | None,
-    workspace_status: str,
-    termination_unconfirmed: bool = False,
-) -> Path:
-    path = iteration_dir / "runner-error-report.md"
-    if termination_unconfirmed:
-        _write_text_artifact(
-            path,
-            "\n".join(
-                [
-                    "# Runner Termination Report",
-                    "",
-                    f"- 步骤：`{step}`",
-                    "- 状态：`termination-unconfirmed`",
-                    f"- 原因：{reason or '未提供'}",
-                    "",
-                    "## 结论",
-                    "",
-                    "- owned process tree 的终止未被确认，不能按普通 runner error 继续处理。",
-                    "- runner 输出、工作区检查、verification 和 review 均未继续消费。",
-                    "- execution 证据和目标仓库现场已保留，必须人工确认进程与工作区状态。",
-                    "- Vega 未自动回滚、清理、提交、推送或发布。",
-                ]
-            ).rstrip()
-            + "\n",
-        )
-        return path
-    _write_text_artifact(
-        path,
-        "\n".join(
-            [
-                "# Runner Error Report",
-                "",
-                f"- 步骤：`{step}`",
-                f"- 原因：{reason or '未提供'}",
-                "",
-                "## 当前工作区",
-                "",
-                "```text",
-                workspace_status.strip() or "<clean>",
-                "```",
-                "",
-                "## 结论",
-                "",
-                "- 外部 runner 异常不等于工作区没有改动，当前现场必须按部分完成处理。",
-                "- 本轮未继续 verification/review，不能把现有 diff 视为已完成或已通过。",
-                "- Vega 未自动回滚、清理、提交、推送或发布。",
-                "",
-                "## 建议下一步",
-                "",
-                "- 先人工检查 `git status`、当前 diff 和 `worker-output.txt`。",
-                "- 如部分改动可保留，补齐后运行 `vega loop continue` 进入验证和隔离审查。",
-                "- 如改动不可用，人工清理后重开新的 loop。",
-            ]
-        ).rstrip()
-        + "\n",
-    )
-    return path
-
-
 def _write_final_report(
     run_dir: Path,
     state: LoopAutomationState,
@@ -3007,6 +2933,15 @@ def _copy_if_exists(source: Path, target: Path) -> None:
             target,
             source.read_text(encoding="utf-8", errors="replace"),
         )
+
+
+def _copy_verification_summary_if_available(
+    verification_status: str,
+    verification_log: Path | None,
+    iteration_dir: Path,
+) -> None:
+    if verification_status != "skipped" and verification_log is not None:
+        _copy_if_exists(verification_log, iteration_dir / "test-summary.md")
 
 
 def _read_optional_text(path: Path) -> str:

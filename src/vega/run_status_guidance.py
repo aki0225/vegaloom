@@ -90,6 +90,66 @@ def initialization_next_steps(
     return None
 
 
+def recovery_next_steps(
+    run_dir: Path,
+    state: dict[str, Any],
+) -> list[str] | None:
+    if state.get("status") != "needs_human":
+        return None
+    current_step = state.get("current_step")
+    if current_step == "recovered_initialization_incomplete":
+        return [
+            f"读取 `{run_dir / 'recovery-report.md'}`，确认初始化中断位置。",
+            "原始 brief 尚未绑定到 loop state，不能安全 continue。",
+            "保留当前 run 作为中断证据，并从新的 run 重新开始任务。",
+        ]
+    if current_step != "recovered":
+        return None
+
+    interruption = latest_iteration_file(run_dir, "interruption-report.md")
+    steps = [f"读取 `{run_dir / 'recovery-report.md'}`，确认中断原因和现场。"]
+    if interruption.is_file():
+        steps.append(f"读取 `{interruption}`，确认被冻结的 iteration 与原执行步骤。")
+    steps.append("先人工检查目标仓库 `git status`，不要直接覆盖或清理未知文件。")
+    latest = _latest_iteration(state)
+    if (
+        state.get("automation_mode") == "auto"
+        and latest.get("lifecycle") == "interrupted"
+        and latest.get("interrupted_step") == "worker"
+    ):
+        current_iteration = state.get("current_iteration")
+        max_iterations = state.get("max_iterations")
+        if (
+            isinstance(current_iteration, int)
+            and isinstance(max_iterations, int)
+            and current_iteration >= max_iterations
+        ):
+            steps.extend(
+                [
+                    "当前已达到自动 Worker 迭代上限，不能再使用 `--rerun-worker`。",
+                    "如需继续，请人工完成并验证现场修改，再运行："
+                    f"`vega loop continue --repo <repo> --run {run_dir.name}`。",
+                ]
+            )
+            return steps
+        steps.extend(
+            [
+                "如果没有新的 tracked 或非 ignored untracked diff，"
+                "可显式重跑同一 child 的下一轮 Worker："
+                f"`vega loop continue --repo <repo> --run {run_dir.name} --rerun-worker`。",
+                "如果已有 partial work，不要使用 `--rerun-worker` 覆盖现场；"
+                f"人工完成并验证后再运行："
+                f"`vega loop continue --repo <repo> --run {run_dir.name}`。",
+            ]
+        )
+        return steps
+    steps.append(
+        f"如果工作区已有合理修复，再运行："
+        f"`vega loop continue --repo <repo> --run {run_dir.name}`。"
+    )
+    return steps
+
+
 def latest_iteration_file(run_dir: Path, filename: str) -> Path:
     matches = sorted(run_dir.glob(f"iterations/*/{filename}"))
     if not matches:
@@ -122,3 +182,11 @@ def verification_failure_next_steps(
         f"按 `{fix_prompt}` 修复后重新运行："
         f"`vega loop continue --repo <repo> --run {run_dir.name}`。",
     ]
+
+
+def _latest_iteration(state: dict[str, Any]) -> dict[str, Any]:
+    iterations = state.get("iterations")
+    if not isinstance(iterations, list) or not iterations:
+        return {}
+    latest = iterations[-1]
+    return latest if isinstance(latest, dict) else {}
