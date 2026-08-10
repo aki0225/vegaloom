@@ -1373,6 +1373,83 @@ def test_worker_rerun_recovery_clears_transaction_after_started_boundary(
     ) == 1
 
 
+def test_worker_rerun_transaction_delete_failure_stops_before_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_git_repo(repo, with_verification=True)
+    run_dir = _create_recovered_worker_crash(workspace, repo)
+    worker = CountingTrackedChangeWorker()
+    original_unlink = Path.unlink
+
+    def reject_transaction_delete(path: Path, *args, **kwargs) -> None:
+        if path.name == "worker-rerun-transaction.json":
+            raise PermissionError("simulated transaction lock")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", reject_transaction_delete)
+
+    with pytest.raises(ValueError, match="拒绝启动 Worker"):
+        LoopAutomationRuntime(
+            workspace,
+            worker_runner=worker,
+            reviewer_runner=StaticReviewer(),
+        ).continue_assist(
+            run_dir.name,
+            repo,
+            verify=True,
+            rerun_worker=True,
+        )
+
+    state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert worker.calls == 0
+    assert state.status == "running"
+    assert state.current_iteration == 2
+    assert run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).is_file()
+    assert repo.joinpath("README.md").read_text(encoding="utf-8") == (
+        "# recovery demo\n"
+    )
+
+    with pytest.raises(ValueError, match="拒绝启动 Worker"):
+        RecoveryRuntime(workspace).recover_loop(
+            run_dir.name,
+            "文件锁仍存在时拒绝完成 Worker 重跑恢复",
+        )
+    locked_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert locked_state.status == "running"
+    assert worker.calls == 0
+    assert run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).is_file()
+
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+    RecoveryRuntime(workspace).recover_loop(
+        run_dir.name,
+        "文件锁释放后恢复 Worker 重跑事务",
+    )
+    recovered_state = LoopAutomationState.model_validate_json(
+        run_dir.joinpath("state.json").read_text(encoding="utf-8")
+    )
+    assert recovered_state.status == "needs_human"
+    assert recovered_state.current_iteration == 2
+    assert recovered_state.iterations[-1].lifecycle == "interrupted"
+    assert recovered_state.iterations[-1].interrupted_step == "worker"
+    assert not run_dir.joinpath(
+        ".control",
+        "worker-rerun-transaction.json",
+    ).exists()
+
+
 def test_worker_rerun_final_boundary_change_stops_before_runner(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

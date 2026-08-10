@@ -145,7 +145,7 @@ def complete_worker_rerun_start(
     ]
     if len(started) != 1:
         raise ValueError("Worker 重跑缺少唯一 worker_started 启动证据")
-    _delete_worker_rerun_transaction(run_dir)
+    _delete_worker_rerun_transaction(run_dir, strict=True)
 
 
 def cancel_worker_rerun_before_start(
@@ -210,7 +210,7 @@ def reconcile_worker_rerun_transaction_for_recovery(
         raise ValueError("pending Worker 重跑事务存在重复 worker_started")
     if started:
         _validate_claimed_worker_rerun(run_dir, state, transaction)
-        _delete_worker_rerun_transaction(run_dir)
+        _delete_worker_rerun_transaction(run_dir, strict=True)
         return "worker_started"
     if (
         state.status == "needs_human"
@@ -491,9 +491,10 @@ def _write_worker_rerun_transaction(
         temp_path.unlink(missing_ok=True)
 
 
-def _delete_worker_rerun_transaction(run_dir: Path) -> None:
+def _delete_worker_rerun_transaction(run_dir: Path, *, strict: bool = False) -> None:
     try:
         _worker_rerun_transaction_path(run_dir).unlink(missing_ok=True)
-    except OSError:
-        # 已提交授权时残留事务只会在下次显式重跑时被再次验证和清理。
-        pass
+    except OSError as exc:
+        if not strict:
+            return
+        raise ValueError("Worker 重跑事务无法删除，已拒绝启动 Worker") from exc

@@ -31,6 +31,9 @@ daemon、数据库、多 checkpoint、自动重试或新的 Runtime。
    iteration 与事务可以继续，不会启动两个 Worker。
 9. 为通过架构增长门禁，将内容清单、tracked workspace、baseline、重跑规划、重跑事务、失败报告
    和 recovery 报告拆成职责单一模块，没有保留兼容性死代码。
+10. `worker_started` 已写入但重跑事务文件因 Windows 文件锁等原因无法删除时，Runtime 会在调用
+    可写 runner 前抛错并保留事务；锁仍存在时 Recovery 同样拒绝伪装成功，锁释放后再次 Recovery
+    才按已启动边界转为 `needs_human`，不会继续执行 Worker 或丢失恢复依据。
 
 ## 关键验证证据
 
@@ -39,12 +42,13 @@ daemon、数据库、多 checkpoint、自动重试或新的 Runtime。
 ```text
 compileall：通过
 Ruff：通过
-architecture growth：通过（C901 35->35，Python 模块 96->104）
+architecture growth：通过（C901 36->35，Python 模块 94->104）
 repository hygiene --base-ref origin/main：通过
 git diff --check：通过
 
 Worker 重跑三个新增崩溃边界：3 passed
-recovery chaos：44 个节点分成四个独立进程，11 + 11 + 11 + 11 全部通过
+事务删除失败及 started-boundary Recovery 定向回归：2 passed
+recovery chaos：45 个节点分成十个独立进程，6 + 6 + 5 + 5 + 5 + 5 + 4 + 4 + 4 + 1 全部通过
 workspace snapshot budget：30 passed
 workspace manifest containment：11 passed
 config-assurance-pilot：272 passed
