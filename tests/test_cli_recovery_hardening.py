@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -11,7 +12,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from click.utils import strip_ansi
 from typer.testing import CliRunner
 
 from vega import git_read as git_read_module
@@ -26,6 +26,8 @@ from vega.run_status import latest_run_dir, render_run_status, run_status_payloa
 from vega.run_utils import resolve_run_dir
 from vega.tools import git_tools
 from vega.verification import run_project_verification
+
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
 def _init_git_repo(path: Path) -> None:
@@ -821,8 +823,8 @@ def test_loop_continue_rejects_worker_rerun_conflicts_before_runtime(
     )
 
     assert result.exit_code == 2
-    assert "--rerun-worker 不能与 --test-log 或 --note 同时使用" in strip_ansi(
-        result.output
+    assert "--rerun-worker 不能与 --test-log 或 --note 同时使用" in (
+        _ANSI_ESCAPE_PATTERN.sub("", result.output)
     )
     assert runtime_created is False
 

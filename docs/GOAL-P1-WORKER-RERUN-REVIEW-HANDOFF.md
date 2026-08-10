@@ -83,8 +83,9 @@ Assurance 用例中等待 Git 子进程超过 60 秒；多个 Git 密集型大�
    发生。测试现已 patch 实际承载快照逻辑的 `tracked_workspace` 模块；P0 regression 55 个节点
    全部通过。
 5. PR #55 首轮 CI 使用的 Typer/Rich 版本会在参数错误输出中插入 ANSI 控制码。新增冲突测试
-   现在只在断言前去除 ANSI，不改变 CLI 输出或生产行为；CLI recovery hardening 为 50 passed、
-   1 skipped，并在强制颜色环境下复核相关节点。
+   现在只用标准库正则在断言前去除 ANSI，不依赖未直接声明的 `click` 包，也不改变 CLI 输出或
+   生产行为；全仓 1130 个节点收集通过，CLI recovery hardening 为 50 passed、1 skipped，并在
+   强制颜色环境下复核相关节点。
 
 ## 回家后继续
 
