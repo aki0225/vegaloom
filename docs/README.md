@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-08
+> 更新时间：2026-08-11
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -15,6 +15,7 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
+| 审核 Supervisor Agent V1 方向 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | 待审核，不授权实现 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
 | 查看 RCB-02 离线检索结果 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | Phase 0 停止，未运行 Holdout |
@@ -26,6 +27,15 @@
 | 查看工作区规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 当前规范 |
 
 ## 当前工作
+
+### 待审核：Supervisor Agent V1 方向
+
+[`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) 记录下一阶段的候选方向：
+Vega 不重写成通用 Coding Agent，也不缩成只运行测试的工具，而是评估一个负责 Goal、Plan、
+Checkpoint、恢复、Workspace 对账和证据化判断的软件工程 Supervisor Agent。
+
+该文档当前只是审核稿。它进入主线不改变 `v0.1.5` 产品行为，不授权接入 LangGraph、Pi、
+Memory V2 或新的 Runtime，也不替代下方真实日常使用观察和 `ROADMAP.md` 的现行停止条件。
 
 ### 真实日常使用观察
 
