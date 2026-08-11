@@ -29,9 +29,9 @@
 
 ### 真实日常使用观察
 
-`v0.1.4` 发布、CRWP-V1 合同允许验证、Plan-first 协议、Finish 第一屏改进和 Phase 4 真实
-使用验收都已完成。Codex assist、Claude Code assist、`vega do`、Reviewer 打回和 fail-closed
-场景均已有记录。
+`v0.1.5` 已发布。CRWP-V1、Plan-first、Finish 第一屏、Reviewer 覆盖和 Goal P1 显式
+Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist、`vega do`、Reviewer
+打回和 fail-closed 场景均有记录。
 
 当前不再增加新的 Runtime 或基础设施，只在真实日常使用中记录问题并修复影响判断可信度的
 实际缺陷。Finish 第一屏尚有测试名称缺失、空 Scope 展示和 Workspace 汇总不一致等观察项；
@@ -70,6 +70,8 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 
 ### 已完成的当前阶段
 
+- `v0.1.5` annotated Tag 与 GitHub Release 已发布；该版本汇总日常使用协议、Finish 展示、
+  Reviewer 可信度修复和显式 Worker 重跑的恢复边界。
 - `v0.1.4` annotated Tag 与 GitHub Release 已发布；精确 Tag smoke 已登记在
   [`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
 - CRWP-V1 三个 Case 都有合同允许的终态，不再选择性重跑。
@@ -88,8 +90,8 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
   运行前控制登记，不替代 Handoff。
 - [`../eval/real-world-runs.md`](../eval/real-world-runs.md)：
   真实运行证据，只允许追加。
-- [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md)：v0.1.4 详细变更。
-- [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md)：GitHub Release 文案。
+- [`RELEASE-NOTES-0.1.5.md`](RELEASE-NOTES-0.1.5.md)：v0.1.5 详细变更。
+- [`RELEASE-SUMMARY-0.1.5.md`](RELEASE-SUMMARY-0.1.5.md)：GitHub Release 文案。
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)：发布门禁记录。
 
 ## 冻结实验与研究记录
@@ -110,6 +112,7 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 
 | 版本 | 发布说明 | 发布摘要 |
 |---|---|---|
+| `v0.1.5` | [`RELEASE-NOTES-0.1.5.md`](RELEASE-NOTES-0.1.5.md) | [`RELEASE-SUMMARY-0.1.5.md`](RELEASE-SUMMARY-0.1.5.md) |
 | `v0.1.4` | [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md) | [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md) |
 | `v0.1.3` | [`RELEASE-NOTES-0.1.3.md`](RELEASE-NOTES-0.1.3.md) | [`RELEASE-SUMMARY-0.1.3.md`](RELEASE-SUMMARY-0.1.3.md) |
 | `v0.1.2` | [`RELEASE-NOTES-0.1.2.md`](RELEASE-NOTES-0.1.2.md) | [`RELEASE-SUMMARY-0.1.2.md`](RELEASE-SUMMARY-0.1.2.md) |

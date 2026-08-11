@@ -1,14 +1,13 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-09
-> 当前稳定基线：`v0.1.4`
+> 更新时间：2026-08-11
+> 当前稳定基线：`v0.1.5`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
-> 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式恢复已作为实验能力
-> 进入主线；显式 `--rerun-worker` 仍在实验分支。r6 已真实通过该路径，后续代码审阅发现
-> 七项启动前证据与崩溃恢复缺口；当前实验分支已完成对应加固，等待 PR CI 与独立审查。
-> 在验证完成和后续观察前不提升为默认能力，也不自动串联多个 checkpoint。
+> 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式 `--rerun-worker`
+> 已进入主线；r6 真实路径、七项启动前证据加固、崩溃恢复事务及 PR #55 的 9 项 CI 均已
+> 完成。该能力仍只允许人工显式触发，不提升为默认能力，也不自动串联多个 checkpoint。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -27,7 +26,7 @@
 ## 一、当前主线
 
 ```text
-v0.1.4 发布（完成）
+v0.1.5 发布（完成）
   -> CRWP-V1 合同允许终态（完成）
   -> 调查现有入口并固定 Plan 与人工确认协议（完成）
   -> 改进现有 Finish 第一屏（完成）
