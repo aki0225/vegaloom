@@ -123,7 +123,7 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 - 验证失败、证据不足或 reviewer 打回时进入人工处理状态。
 - Vega 不自动 commit、push、release 或写长期 memory。
 
-### v0.1.4 Codex JSONL 验收
+### Codex JSONL 与显式 Worker 重跑验收
 
 涉及 Codex 实时进度和终态解析的发布候选，还必须在最终候选提交上使用 fresh 小型目标仓库
 完成一次真实 auto loop。不得复用较早提交、超时 run 或人工清理后的现场作为通过证据。
@@ -140,6 +140,15 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 - 目标仓库只保留任务允许的变更，Workspace、Scope、Verification、Risk、Reviewer 和 Finish
   均通过，最终 `Finish=ready_to_commit`。
 - run artifacts 的高置信凭据扫描无匹配。
+
+发布候选包含 `--rerun-worker` 变更时，还要在受控仓库中验证：
+
+- 普通 continue 在无新成果的 Worker 中断后无副作用拒绝，不创建下一 iteration。
+- 只有人工显式传入 `--rerun-worker` 才进入同一 child 的下一 iteration。
+- baseline、授权、trace、重跑事务与 `worker_started` 能唯一绑定；证据缺失、冲突或事务文件
+  无法删除时不调用可写 runner。
+- 最新真实 Codex dogfood 与候选提交之间若只有版本和发布文档差异，可以复用该运行解释模型
+  边界，但仍须在候选提交上执行确定性的重跑事务与 package smoke。
 
 如果 Codex CLI 没有及时输出 JSONL、进程超时、终态消息缺失或证据不一致，本次 smoke 必须
 记为未通过并保留现场；不得仅凭单元测试、CI 或安全终止行为创建 Tag。

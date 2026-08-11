@@ -210,6 +210,6 @@ future optional: SQLite + FTS5 memory ledger、replay UI
 当前产品范围以 `docs/PRODUCT-CONTRACT.md` 为准：核心是上下文编译、受控执行、确定性验证、
 隔离审查和证据化恢复；Memory、Goal P0 与 adapter 保持实验状态。
 
-当前稳定版本为 `v0.1.4`。它在 v0.1.3 基线上补充可信 execution 路径与 verification
-临时目录维护修复，
+当前稳定版本为 `v0.1.5`。它在既有核心范围内补齐日常 Plan-first 协议、Finish 第一屏、
+Reviewer 覆盖与显式 Worker 重跑的 fail-closed 恢复边界；Goal P1 仍是人工触发的实验能力，
 不扩大上述范围。
