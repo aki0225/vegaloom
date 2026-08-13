@@ -74,6 +74,9 @@ def test_fake_worker_two_items_route_next_then_finalize(
             machine_summary="第一项文件已落盘",
             workspace_fingerprint="0" * 64,
             work_item_completed=True,
+            verification="passed",
+            risk="passed",
+            review="passed",
         ),
     )
 
@@ -384,6 +387,87 @@ def test_approve_artifact_failure_never_publishes_ready_state(
             )
 
 
+@pytest.mark.parametrize(
+    ("attribute", "label"),
+    [
+        ("write_checkpoint", "checkpoint"),
+        ("write_task_brief", "task brief"),
+    ],
+)
+def test_observe_artifact_failure_keeps_plan_and_state_unpublished(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    attribute: str,
+    label: str,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    plan = AgentPlan(
+        task_id="task-observe-failure",
+        user_goal="验证 Observation 发布顺序",
+        success_conditions=["两个 Work Item 完成"],
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="完成第一项",
+                allowed_paths=["one.txt"],
+                verification=["检查第一项"],
+            ),
+            AgentWorkItem(
+                work_item_id="W2",
+                objective="完成第二项",
+                allowed_paths=["two.txt"],
+                verification=["检查第二项"],
+            ),
+        ],
+    )
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    run = runtime.approve(run.run_dir.name)
+    run = _started_worker(
+        workspace,
+        run.run_dir.name,
+        child_run="attempt-observe-failure",
+        operation_id="operation-observe-failure",
+    )
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    plan_path = run.run_dir / "agent-plan.json"
+    state_path = run.run_dir / "agent-state.json"
+    original_plan = plan_path.read_bytes()
+    original_state = state_path.read_bytes()
+
+    def fail_artifact(*args, **kwargs):
+        raise OSError(f"simulated {label} failure")
+
+    monkeypatch.setattr(agent_runtime_module, attribute, fail_artifact)
+    observation = AgentObservation(
+        observation_id=f"obs-{label.replace(' ', '-')}",
+        work_item_id="W1",
+        child_run="attempt-observe-failure",
+        operation_id="operation-observe-failure",
+        machine_summary="第一项已完成",
+        workspace_fingerprint="0" * 64,
+        work_item_completed=True,
+        verification="passed",
+        risk="passed",
+        review="passed",
+    )
+
+    with pytest.raises(OSError, match=f"simulated {label} failure"):
+        runtime.observe_fake_worker(run.run_dir.name, observation)
+
+    assert plan_path.read_bytes() == original_plan
+    assert state_path.read_bytes() == original_state
+    preserved = load_agent_state(state_path)
+    assert preserved.phase == "acting"
+    assert preserved.active_child_run == "attempt-observe-failure"
+    assert preserved.active_operation_id == "operation-observe-failure"
+    with pytest.raises(ValueError, match="拒绝覆盖历史证据"):
+        runtime.observe_fake_worker(run.run_dir.name, observation)
+
+
 def test_dispatch_rejects_stale_plan_or_task_brief(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -635,6 +719,14 @@ def test_agent_cli_status_card_and_capabilities(
     assert "阶段：等待批准" in started.output
     assert capabilities.exit_code == 0
     assert json.loads(capabilities.output)["langgraph"] is True
+
+
+def test_packaged_cli_entrypoint_preserves_core_commands() -> None:
+    result = CliRunner().invoke(app, ["--help"])
+
+    assert result.exit_code == 0, result.output
+    for command in ("do", "loop", "goal", "agent"):
+        assert command in result.output
 
 
 def test_resume_tracked_task_card_rebuilds_local_run(

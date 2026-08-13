@@ -1,12 +1,13 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2A 本地验证完成`
+> 状态：`approved / Gate 2A 审阅修复待最新 PR CI`
 >
 > 计划日期：2026-08-13
 >
 > 规划基线：`main@8884458` / `v0.1.5`
 >
-> 本文已获批准，并在独立实验分支按 Gate 推进。Gate 2A 完成本地验证后，先等待 PR CI 与代码审查；证据通过前不进入 Gate 2B。
+> 本文已获批准，并在独立实验分支按 Gate 推进。Gate 2A 已完成本地实现和独立代码审查；
+> 审阅修复必须通过最新 PR CI，证据通过前不进入 Gate 2B。
 
 ## 一、产品决定
 
@@ -790,24 +791,30 @@ Gate 1 必须证明不同 Observation 会产生不同合理动作；若所有路
 
 ## 十、CLI 与宿主接入
 
-候选命令保持少量：
+Gate 2A 已实现的命令保持少量：
 
 ```powershell
 vega agent start --repo . --input <task-card-or-text>
 vega agent status --run <agent-run>
-vega agent resume --run <agent-run>
+vega agent resume-local --run <agent-run>
 vega agent resume --repo .                     # 按当前分支发现可恢复 Task Card
-vega agent resume --task <task-card>          # 换机器后创建新本机 run
+vega agent resume --repo . --task <task-card> # 换机器后创建新本机 run
 vega agent steer --run <agent-run> --instruction "新增约束"
-vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"
+vega agent pause --run <agent-run> --reason "等待人工处理"
+vega agent stop --run <agent-run> --reason "人工停止"
 ```
 
-观察与停止复用现有命令：
+低频观察可复用现有命令：
 
 ```powershell
 vega watch --run <agent-run> --follow
-vega stop --run <agent-run> --reason "人工停止"
 ```
+
+`vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"` 是 Gate 3 的候选命令，
+当前尚未实现；跨机器接力仍依赖受版本控制的 Task Card 和人工 Git 操作。
+
+打包后的顶层 CLI 已新增 opt-in `agent` 子命令，但既有 `do / loop / goal` 命令行为和成功语义
+保持不变。Gate 3 通过前不把 `agent` 提升为默认推荐入口。
 
 主会话 Skill 或薄 Adapter 只做三件事：
 

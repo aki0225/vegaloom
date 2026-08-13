@@ -309,6 +309,16 @@ def test_terminal_execution_requires_replan_before_new_dispatch(
 
     assert recovered.state.phase == "needs_human"
     assert recovered.state.active_child_run is None
+    recovery_observation = json.loads(
+        next((run_dir / "observations").glob("recovery-*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "executions/worker/execution.json" in recovery_observation["evidence_refs"]
+    assert any(
+        item.startswith("operations/")
+        for item in recovery_observation["evidence_refs"]
+    )
     with pytest.raises(ValueError, match="当前状态不允许启动 Worker"):
         worker.bind(run_id, child_run="attempt-new", operation_id="operation-new")
 

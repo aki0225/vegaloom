@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from .agent_contract import AgentObservation, AgentPlan, AgentState
+from .agent_contract import AgentObservation, AgentPlan, AgentState, canonical_digest
 from .agent_mutation import agent_mutation
 from .execution_control import inspect_execution_for_recovery
 from .agent_persistence import (
@@ -112,6 +112,16 @@ class SupervisorAgentRecovery:
             )
 
         previous_child = state.active_child_run
+        evidence_refs = [
+            (
+                "operations/"
+                f"{canonical_digest({'operation_id': state.active_operation_id})}.json"
+            )
+        ]
+        if process_inspection.record is not None:
+            evidence_refs.append(
+                process_inspection.record.path.relative_to(run_dir).as_posix()
+            )
         observation = AgentObservation(
             observation_id=f"recovery-{uuid4().hex[:12]}",
             work_item_id=state.current_work_item,
@@ -128,6 +138,7 @@ class SupervisorAgentRecovery:
             workspace_explained=workspace_clear,
             unknown_file_count=len(actual.untracked_files),
             external_side_effects=request.external_side_effects,
+            evidence_refs=evidence_refs,
         )
         observation_path = (
             run_dir / "observations" / f"{observation.observation_id}.json"
@@ -169,7 +180,10 @@ class SupervisorAgentRecovery:
             reason=next_step,
             status="blocked",
             pending_actions=["human"],
-            evidence_refs=[f"observations/{observation.observation_id}.json"],
+            evidence_refs=[
+                f"observations/{observation.observation_id}.json",
+                *observation.evidence_refs,
+            ],
             failed_attempts=[previous_child] if previous_child else [],
             operation_started=state.operation_started,
             external_side_effects=request.external_side_effects,

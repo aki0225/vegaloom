@@ -1,6 +1,6 @@
 # Supervisor Agent V1 状态权威与最小合同 ADR
 
-> 状态：`accepted / Gate 2A 本地验证完成`
+> 状态：`accepted / Gate 2A 审阅修复待最新 PR CI`
 >
 > 日期：2026-08-13
 >
@@ -114,7 +114,7 @@ Core Artifact 对账。不能以恢复 Graph checkpoint 代替恢复执行事实
 - Task Brief 预算和敏感信息测试；
 - Resume Capsule 与分支发现规则；
 - 不同 Observation 至少产生三种不同合法 Decision；
-- 核心默认入口和成功语义没有变化。
+- 既有默认命令行为和成功语义没有变化；顶层 CLI 仅新增 opt-in `agent` 子命令。
 
 ## 9. Gate 1 与 Gate 2A 实施证据
 
@@ -138,8 +138,14 @@ Gate 2A 已补充：
   operation 未开始；
 - 外部 Observation 只能作为 Claim，受信 Observation 必须绑定当前执行身份；重复
   Observation ID 不得覆盖历史证据，Recovery 机器对账也使用 write-once Artifact；
+- Recovery 机器 Observation 引用对应 operation marker，并在存在时引用受信
+  `execution.json`，避免把机器摘要当作无来源事实；
 - Plan revision 写入前先撤销旧批准和 dispatch 权限，防止崩溃窗口继续使用 stale approval；
 - 只有当前 Checkpoint 与 Task Brief 成功落盘后，才发布 `ready` 或下一轮可 dispatch State；
+- 受信 Observation 推进 Plan 时，同样先完成 Checkpoint 与下一轮 Task Brief，再发布新 Plan；
+  State 保持最后的调度安全闩；
+- 中间 Work Item 的 Verification、Risk 或 Reviewer 证据缺失或过期时转人工，不允许自动进入
+  下一 Writer；明确失败或阻断仍按既有 `repair / replan / human` 规则处理；
 - 跨机器 Task Card 恢复在 Checkpoint、Task Brief、Trace 和状态卡完成后，最后发布 State；
   失败重试不会遗留另一个可 dispatch run；
 - dispatch 前校验 State、批准 Plan、safe Checkpoint 与 Task Brief manifest 的 revision、
@@ -148,6 +154,6 @@ Gate 2A 已补充：
 - SQLite Graph checkpoint 丢失不影响从 Agent State、Checkpoint 和真实 Workspace 对账；
 - `pause / resume-local / stop` 保留 Goal、Plan、Diff 和 Artifact，不执行自动回滚。
 
-本地故障注入与状态回归为 58 项通过；架构增长、Ruff、compileall、仓库卫生、CI 分片完整性和
-`git diff --check` 均通过。Python 3.14 环境仍出现 LangChain Core 的 Pydantic V1 兼容警告；
-项目 CI 使用 Python 3.11/3.12，最终结论等待 PR CI。
+本地故障注入与状态回归为 62 项通过；旧代码 HEAD `0faf2a7` 的 PR `#57` 已有 9 项 CI
+全部成功。审阅修复后的最新 HEAD 仍须重新通过架构增长、Ruff、compileall、仓库卫生、
+CI 分片和跨平台测试；最终结论不能复用旧 HEAD 的绿色状态。

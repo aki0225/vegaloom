@@ -15,7 +15,7 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | 已批准，Gate 2A 待 PR CI |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | 已批准，Gate 2A 审阅修复待最新 PR CI |
 | 跨机器继续 Supervisor Agent 实验 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | 当前交接 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -37,9 +37,10 @@ Coding Agent 继续读代码和修改文件；Vega 负责调查、计划批准�
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)。
 
 实施计划已经批准。Gate 0 已冻结状态权威与数据合同，Gate 1 已接入最小 LangGraph 控制循环，
-Gate 2A 已在独立实验分支完成中断、恢复、单 Writer 和故障注入的本地验证。下一步先通过 PR CI
-与代码审查；在证据通过前不进入 Gate 2B 的真实 Codex 接入，也不改变 `v0.1.5` 的默认入口和
-成功语义。
+Gate 2A 已在独立实验分支完成中断、恢复、单 Writer、故障注入和独立代码审查。Draft PR `#57`
+的旧代码 HEAD 已通过 9 项 CI；审阅修复仍须通过最新 HEAD CI。在证据通过前不进入 Gate 2B
+的真实 Codex 接入。打包 CLI 新增 opt-in `agent` 子命令，但 `v0.1.5` 的既有默认命令行为和
+成功语义不变。
 
 ### 真实日常使用观察
 

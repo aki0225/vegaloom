@@ -86,8 +86,24 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
                 workspace_fingerprint=FINGERPRINT,
                 authority="fake_worker",
                 work_item_completed=True,
+                verification="passed",
+                risk="passed",
+                review="passed",
             ),
             "next",
+        ),
+        (
+            AgentObservation(
+                observation_id="obs-next-evidence-missing",
+                work_item_id="W1",
+                child_run="attempt-01",
+                operation_id="operation-01",
+                machine_summary="当前项声称完成，但门禁证据缺失",
+                workspace_fingerprint=FINGERPRINT,
+                authority="fake_worker",
+                work_item_completed=True,
+            ),
+            "human",
         ),
         (
             AgentObservation(

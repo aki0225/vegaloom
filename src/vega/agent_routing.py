@@ -114,6 +114,13 @@ def _route(
         return ["finalize"], "finalize", "全部 Work Item 与完成门禁均已通过"
 
     if observation.work_item_completed:
+        incomplete_gate = _incomplete_final_gate(observation)
+        if incomplete_gate is not None:
+            return (
+                ["human"],
+                "human",
+                f"当前 Work Item 已完成，但 {incomplete_gate} 证据不足或过期",
+            )
         return ["next", "replan", "human"], "next", "当前 Work Item 已完成，可进入下一项"
 
     if observation.repairable_in_scope:

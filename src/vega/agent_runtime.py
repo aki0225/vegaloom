@@ -39,7 +39,7 @@ from .agent_runtime_support import (
     write_status_card,
     write_task_brief,
 )
-from .redaction import write_redacted_json
+from .redaction import write_redacted_json, write_redacted_json_once
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
 from .workspace_check import capture_review_workspace
@@ -265,15 +265,16 @@ class SupervisorAgentRuntime:
         observation_path = (
             run_dir / "observations" / f"{reconciled.observation_id}.json"
         )
-        if observation_path.exists():
+        try:
+            write_redacted_json_once(
+                observation_path,
+                reconciled.model_dump(mode="json"),
+            )
+        except FileExistsError as exc:
             raise ValueError(
                 f"Observation ID 已存在，拒绝覆盖历史证据："
                 f"{reconciled.observation_id}"
-            )
-        write_redacted_json(
-            observation_path,
-            reconciled.model_dump(mode="json"),
-        )
+            ) from exc
         decision = decide_next_action(plan, reconciled)
         write_redacted_json(
             run_dir / "decisions" / f"{decision.decision_id}.json",
@@ -288,7 +289,6 @@ class SupervisorAgentRuntime:
                 workspace_fingerprint=reconciled.workspace_fingerprint,
             )
         plan = apply_work_item_progress(plan, state, reconciled, decision.selected_action)
-        self._save_plan(run_dir, plan)
         state = transition_state(state, plan, reconciled, decision)
         if decision.selected_action == "next":
             next_item = next_pending_work_item(plan, state.current_work_item)
@@ -351,6 +351,9 @@ class SupervisorAgentRuntime:
                 checkpoint,
                 failed_attempts=checkpoint.failed_attempts,
             )
+        # Plan 进度只有在 Checkpoint 与下一轮 Task Brief 均成功后才发布。
+        # State 仍是最后的调度安全闩；此前任一步失败都会保留旧 active Writer。
+        self._save_plan(run_dir, plan)
         save_agent_state(run_dir / "agent-state.json", state)
         append_agent_trace(
             run_dir / "trace.jsonl",
