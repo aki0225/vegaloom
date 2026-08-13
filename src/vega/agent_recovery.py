@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 from .agent_contract import AgentObservation, AgentPlan, AgentState
 from .agent_mutation import agent_mutation
@@ -27,7 +28,7 @@ from .agent_runtime_support import (
     write_status_card,
     write_task_brief,
 )
-from .redaction import write_redacted_json
+from .redaction import write_redacted_json_once
 from .run_utils import resolve_run_dir
 from .workspace_check import ReviewWorkspaceSnapshot
 
@@ -59,19 +60,46 @@ class SupervisorAgentRecovery:
             )
         if not process_inspection.can_recover:
             raise ValueError(process_inspection.summary)
+        if not state.operation_started:
+            return _block_on_execution_issue(
+                run_dir,
+                state,
+                plan,
+                actual,
+                request,
+                (
+                    "旧版 operation_started=false 只表示尚未取得启动确认，"
+                    "不能证明 operation 未启动"
+                ),
+            )
+        if (
+            process_inspection.record is not None
+            and process_inspection.record.lease.execution_id
+            != state.active_operation_id
+        ):
+            return _block_on_execution_issue(
+                run_dir,
+                state,
+                plan,
+                actual,
+                request,
+                "execution 记录与当前 active operation 身份不一致",
+            )
+        if state.operation_started and process_inspection.record is None:
+            return _block_on_execution_issue(
+                run_dir,
+                state,
+                plan,
+                actual,
+                request,
+                "operation 可能已开始，但缺少可验证的 execution 记录",
+            )
         trace_issue = agent_trace_issue(run_dir / "trace.jsonl")
         workspace_unchanged = actual.fingerprint == state.workspace_fingerprint
         workspace_clear = (
             request.workspace_explained
             and not actual.unsafe_index_paths
             and actual.git_control_complete
-        )
-        recoverable = (
-            not request.operation_started
-            and workspace_unchanged
-            and workspace_clear
-            and request.external_side_effects == "none"
-            and trace_issue is None
         )
         if trace_issue is not None:
             return _block_on_trace_issue(
@@ -85,24 +113,37 @@ class SupervisorAgentRecovery:
 
         previous_child = state.active_child_run
         observation = AgentObservation(
-            observation_id=f"recovery-{state.state_version + 1:04d}",
+            observation_id=f"recovery-{uuid4().hex[:12]}",
             work_item_id=state.current_work_item,
+            child_run=state.active_child_run,
+            operation_id=state.active_operation_id,
             machine_summary=(
                 f"{request.reason.strip()}；进程检查：{process_inspection.summary}"
             ),
             workspace_fingerprint=actual.fingerprint,
             changed_files=list(actual.changed_files),
             worker_alive=False,
-            operation_started=request.operation_started,
+            authority="machine_reconcile",
+            operation_started=state.operation_started,
             workspace_explained=workspace_clear,
             unknown_file_count=len(actual.untracked_files),
             external_side_effects=request.external_side_effects,
         )
-        write_redacted_json(
-            run_dir / "observations" / f"{observation.observation_id}.json",
-            observation.model_dump(mode="json"),
+        observation_path = (
+            run_dir / "observations" / f"{observation.observation_id}.json"
         )
-        # 先把未知旧 Writer 解除结果持久化，再允许后续新 dispatch；崩溃在此前只会保守保留旧绑定。
+        try:
+            write_redacted_json_once(
+                observation_path,
+                observation.model_dump(mode="json"),
+            )
+        except FileExistsError as exc:
+            raise ValueError(
+                f"Observation ID 已存在，拒绝覆盖历史证据："
+                f"{observation.observation_id}"
+            ) from exc
+        # 先构造解除结果，但必须在 Checkpoint 成功落盘后再提交 State。
+        # 若 Checkpoint 写入失败，旧 Writer binding 仍保持，禁止错误恢复到 ready。
         releasing_state = update_state(
             state,
             phase="needs_human",
@@ -113,38 +154,24 @@ class SupervisorAgentRecovery:
             workspace_fingerprint=actual.fingerprint,
             allowed_actions=["human"],
         )
-        save_agent_state(run_dir / "agent-state.json", releasing_state)
-        if recoverable:
-            next_state = update_state(
-                releasing_state,
-                phase="ready",
-                state_version=releasing_state.state_version + 1,
-                workspace_fingerprint=actual.fingerprint,
-                allowed_actions=["next", "replan", "human"],
-            )
-            checkpoint_status = "safe"
-            pending_actions = ["next", "replan", "human"]
-            next_step = "原 operation 未开始且 Workspace 未变；可显式派发新的 child attempt"
-        else:
-            next_state = releasing_state
-            checkpoint_status = "blocked"
-            pending_actions = ["human"]
-            next_step = blocked_recovery_reason(
-                request,
-                workspace_unchanged=workspace_unchanged,
-                workspace_clear=workspace_clear,
-            )
+        next_state = releasing_state
+        next_step = blocked_recovery_reason(
+            request,
+            operation_started=state.operation_started,
+            workspace_unchanged=workspace_unchanged,
+            workspace_clear=workspace_clear,
+        )
 
         checkpoint = write_checkpoint(
             run_dir,
             next_state,
             actual,
             reason=next_step,
-            status=checkpoint_status,
-            pending_actions=pending_actions,
+            status="blocked",
+            pending_actions=["human"],
             evidence_refs=[f"observations/{observation.observation_id}.json"],
             failed_attempts=[previous_child] if previous_child else [],
-            operation_started=request.operation_started,
+            operation_started=state.operation_started,
             external_side_effects=request.external_side_effects,
         )
         next_state = update_state(
@@ -155,7 +182,7 @@ class SupervisorAgentRecovery:
         save_agent_state(run_dir / "agent-state.json", next_state)
         append_agent_trace(
             run_dir / "trace.jsonl",
-            event="agent_recovered" if recoverable else "agent_recovery_blocked",
+            event="agent_recovery_blocked",
             state=next_state,
             observation_summary=observation.machine_summary,
             route_reason=next_step,
@@ -164,14 +191,6 @@ class SupervisorAgentRecovery:
                 f"checkpoints/{checkpoint.checkpoint_id}.json",
             ],
         )
-        if recoverable:
-            write_task_brief(
-                run_dir,
-                plan,
-                next_state,
-                checkpoint,
-                failed_attempts=[previous_child] if previous_child else [],
-            )
         write_status_card(
             run_dir,
             next_state,
@@ -219,8 +238,8 @@ class SupervisorAgentRecovery:
             latest_checkpoint_id=resumed.checkpoint_id,
             state_version=next_state.state_version + 1,
         )
-        save_agent_state(run_dir / "agent-state.json", next_state)
         write_task_brief(run_dir, plan, next_state, resumed)
+        save_agent_state(run_dir / "agent-state.json", next_state)
         append_agent_trace(
             run_dir / "trace.jsonl",
             event="agent_resumed",
@@ -379,7 +398,7 @@ def _block_on_trace_issue(
         status="blocked",
         pending_actions=["human"],
         failed_attempts=[],
-        operation_started=request.operation_started,
+        operation_started=state.operation_started,
         external_side_effects=request.external_side_effects,
     )
     next_state = update_state(
@@ -421,7 +440,7 @@ def _block_on_execution_issue(
         reason=f"{issue}；已保留原 Writer binding，禁止自动接管",
         status="blocked",
         pending_actions=["human"],
-        operation_started=request.operation_started,
+        operation_started=state.operation_started,
         external_side_effects=request.external_side_effects,
     )
     next_state = update_state(

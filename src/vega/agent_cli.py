@@ -76,45 +76,18 @@ def agent_dispatch(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
     child_run: str = typer.Option(..., "--child", help="本次 Worker attempt 身份。"),
     operation_id: str = typer.Option(..., "--operation", help="本次写入 operation 身份。"),
-    operation_started: bool = typer.Option(
-        False,
-        "--operation-started/--operation-pending",
-        help="默认只预留 Writer；已确认 operation 开始时显式使用 --operation-started。",
-    ),
 ) -> None:
-    """只绑定唯一 Writer；真正的 Coding Agent 仍由宿主 Adapter 启动。"""
+    """绑定唯一 Writer，并保守进入 operation 可能已开始的边界。"""
 
     try:
         result = _worker().bind(
             run,
             child_run=child_run,
             operation_id=operation_id,
-            operation_started=operation_started,
         )
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("Worker 已绑定。")
-    typer.echo("")
-    typer.echo(_runtime().status(result.run_dir.name))
-
-
-@agent_app.command("worker-started")
-def agent_worker_started(
-    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
-    child_run: str = typer.Option(..., "--child", help="当前 Worker attempt 身份。"),
-    operation_id: str = typer.Option(..., "--operation", help="当前写入 operation 身份。"),
-) -> None:
-    """宿主真正启动 Worker 后，把不可自动重试边界写入 Agent State。"""
-
-    try:
-        result = _worker().confirm_started(
-            run,
-            child_run=child_run,
-            operation_id=operation_id,
-        )
-    except (FileNotFoundError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    typer.echo("Worker operation 已确认开始。")
     typer.echo("")
     typer.echo(_runtime().status(result.run_dir.name))
 
@@ -124,7 +97,7 @@ def agent_recover(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
     input_path: Path = typer.Option(..., "--input", help="结构化 Recovery Request JSON。"),
 ) -> None:
-    """Worker 失去可信终态后，先对账真实现场再决定是否允许新 child。"""
+    """Worker 失去可信终态后，先对账真实现场再决定人工恢复路径。"""
 
     try:
         request = AgentRecoveryRequest.model_validate_json(
@@ -194,7 +167,7 @@ def agent_observe(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
     input_path: Path = typer.Option(..., "--input", help="结构化 Observation JSON。"),
 ) -> None:
-    """对账真实 Workspace，并把 Observation 路由为下一动作。"""
+    """记录外部 Observation Claim；只有受信机器对账才能推进进度。"""
 
     try:
         observation = AgentObservation.model_validate_json(
@@ -203,7 +176,7 @@ def agent_observe(
         result = _runtime().observe(run, observation)
     except (OSError, FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    typer.echo("Observation 已对账。")
+    typer.echo("外部 Observation Claim 已记录，尚未取得机器对账资格。")
     typer.echo("")
     typer.echo(_runtime().status(result.run_dir.name))
 

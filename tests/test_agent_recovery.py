@@ -1,39 +1,48 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from vega import agent_recovery as agent_recovery_module
+from vega import agent_worker as agent_worker_module
 from vega.agent_contract import AgentObservation, AgentPlan, AgentWorkItem
 from vega.agent_persistence import (
     load_agent_checkpoint,
     load_agent_state,
     read_agent_trace,
     save_agent_checkpoint,
+    save_agent_state,
 )
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_recovery_request import AgentRecoveryRequest
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_worker import SupervisorAgentWorker
+from vega.execution_control import ExecutionLease
 
 
 def test_live_worker_blocks_recovery_and_second_writer(tmp_path: Path) -> None:
     repo, workspace, run_id = _approved_run(tmp_path)
     worker = SupervisorAgentWorker(workspace)
     worker.bind(run_id, child_run="attempt-01", operation_id="operation-01")
+    _write_execution(
+        workspace / "runs" / run_id,
+        execution_id="operation-01",
+        status="running",
+    )
 
     with pytest.raises(ValueError, match="当前状态不允许启动 Worker"):
         worker.bind(run_id, child_run="attempt-02", operation_id="operation-02")
-    with pytest.raises(ValueError, match="宿主仍报告 Worker 存活"):
+    with pytest.raises(ValueError, match="active execution"):
         SupervisorAgentRecovery(workspace).recover(
             run_id,
             AgentRecoveryRequest(
                 reason="模拟会话断开但 Worker 仍存活",
-                worker_alive=True,
-                operation_started=False,
             ),
         )
 
@@ -52,15 +61,14 @@ def test_live_worker_observation_keeps_writer_binding(tmp_path: Path) -> None:
         run_id,
         child_run="attempt-live",
         operation_id="operation-live",
-        operation_started=True,
     )
 
     observed = runtime.observe(
         bound.run_dir.name,
         _observation(
             "obs-live",
-            worker_alive=True,
-            operation_started=True,
+            worker_alive=False,
+            operation_started=False,
         ),
     )
 
@@ -68,6 +76,14 @@ def test_live_worker_observation_keeps_writer_binding(tmp_path: Path) -> None:
     assert observed.state.active_child_run == "attempt-live"
     assert observed.state.active_operation_id == "operation-live"
     assert observed.plan.work_items[0].status == "pending"
+    saved = json.loads(
+        (observed.run_dir / "observations" / "obs-live.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert saved["authority"] == "external_claim"
+    assert saved["worker_alive"] is True
+    assert saved["operation_started"] is True
 
 
 def test_observation_without_active_writer_is_rejected(tmp_path: Path) -> None:
@@ -104,7 +120,7 @@ def test_concurrent_dispatch_allows_only_one_writer(tmp_path: Path) -> None:
     assert state.active_child_run in {"attempt-1", "attempt-2"}
 
 
-def test_operation_not_started_and_clean_workspace_allows_new_child(
+def test_dispatch_without_execution_evidence_keeps_original_writer(
     tmp_path: Path,
 ) -> None:
     _, workspace, run_id = _approved_run(tmp_path)
@@ -116,33 +132,75 @@ def test_operation_not_started_and_clean_workspace_allows_new_child(
     recovered = SupervisorAgentRecovery(workspace).recover(
         run_id,
         AgentRecoveryRequest(
-            reason="控制进程在真正启动 Worker 前退出",
-            worker_alive=False,
-            operation_started=False,
+            reason="dispatch 已提交，但 execution 证据尚未落盘",
+            external_side_effects="none",
         ),
     )
-    replacement = worker.bind(
+
+    assert recovered.state.phase == "needs_human"
+    assert recovered.state.active_child_run == "attempt-old"
+    assert recovered.state.active_operation_id == "operation-old"
+    assert not (run_dir / "graph-checkpoints.sqlite").exists()
+    checkpoint = _latest_checkpoint(run_dir)
+    assert checkpoint.status == "blocked"
+    assert checkpoint.operation_started is True
+    assert "缺少可验证的 execution 记录" in checkpoint.reason
+    with pytest.raises(ValueError, match="当前状态不允许启动 Worker"):
+        worker.bind(run_id, child_run="attempt-new", operation_id="operation-new")
+    events = [item["event"] for item in read_agent_trace(run_dir / "trace.jsonl")]
+    assert events[-2:] == [
+        "worker_dispatch_committed",
+        "agent_recovery_execution_blocked",
+    ]
+
+
+def test_legacy_unconfirmed_operation_keeps_original_writer(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    worker = SupervisorAgentWorker(workspace)
+    worker.bind(
         run_id,
-        child_run="attempt-new",
-        operation_id="operation-new",
+        child_run="attempt-legacy",
+        operation_id="operation-legacy",
+    )
+    run_dir = workspace / "runs" / run_id
+    state_path = run_dir / "agent-state.json"
+    legacy_state = load_agent_state(state_path).model_copy(
+        update={"operation_started": False}
+    )
+    save_agent_state(state_path, legacy_state)
+
+    recovered = SupervisorAgentRecovery(workspace).recover(
+        run_id,
+        AgentRecoveryRequest(
+            reason="旧版两阶段 dispatch 尚未写入启动确认",
+            external_side_effects="none",
+        ),
     )
 
-    assert recovered.state.phase == "ready"
-    assert recovered.state.active_child_run is None
-    assert replacement.state.active_child_run == "attempt-new"
-    assert not (run_dir / "graph-checkpoints.sqlite").exists()
-    events = [item["event"] for item in read_agent_trace(run_dir / "trace.jsonl")]
-    assert events[-2:] == ["agent_recovered", "worker_reserved"]
+    assert recovered.state.phase == "needs_human"
+    assert recovered.state.active_child_run == "attempt-legacy"
+    assert recovered.state.active_operation_id == "operation-legacy"
+    checkpoint = _latest_checkpoint(run_dir)
+    assert checkpoint.status == "blocked"
+    assert "不能证明 operation 未启动" in checkpoint.reason
+    with pytest.raises(ValueError, match="当前状态不允许启动 Worker"):
+        worker.bind(run_id, child_run="attempt-new", operation_id="operation-new")
 
 
 def test_partial_diff_after_worker_loss_requires_human(tmp_path: Path) -> None:
     repo, workspace, run_id = _approved_run(tmp_path)
     worker = SupervisorAgentWorker(workspace)
-    bound = worker.bind(run_id, child_run="attempt-partial", operation_id="operation-partial")
-    worker.confirm_started(
-        bound.run_dir.name,
+    worker.bind(
+        run_id,
         child_run="attempt-partial",
         operation_id="operation-partial",
+    )
+    _write_execution(
+        workspace / "runs" / run_id,
+        execution_id="operation-partial",
+        status="failed",
     )
     (repo / "src").mkdir()
     (repo / "src" / "example.py").write_text("partial = True\n", encoding="utf-8")
@@ -151,8 +209,7 @@ def test_partial_diff_after_worker_loss_requires_human(tmp_path: Path) -> None:
         run_id,
         AgentRecoveryRequest(
             reason="Worker 在留下 partial diff 后失联",
-            worker_alive=False,
-            operation_started=True,
+            external_side_effects="none",
         ),
     )
     checkpoint = _latest_checkpoint(recovered.run_dir)
@@ -168,6 +225,205 @@ def test_partial_diff_after_worker_loss_requires_human(tmp_path: Path) -> None:
         worker.bind(run_id, child_run="attempt-new", operation_id="operation-new")
 
 
+def test_mismatched_terminal_execution_keeps_original_writer_binding(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    worker = SupervisorAgentWorker(workspace)
+    worker.bind(
+        run_id,
+        child_run="attempt-current",
+        operation_id="operation-current",
+    )
+    run_dir = workspace / "runs" / run_id
+    _write_execution(
+        run_dir,
+        execution_id="operation-old",
+        status="completed",
+    )
+
+    recovered = SupervisorAgentRecovery(workspace).recover(
+        run_id,
+        AgentRecoveryRequest(
+            reason="历史 execution 不能核销当前 Writer",
+            external_side_effects="none",
+        ),
+    )
+
+    assert recovered.state.phase == "needs_human"
+    assert recovered.state.active_child_run == "attempt-current"
+    assert recovered.state.active_operation_id == "operation-current"
+    checkpoint = _latest_checkpoint(run_dir)
+    assert checkpoint.status == "blocked"
+    assert "active operation 身份不一致" in checkpoint.reason
+    with pytest.raises(ValueError, match="当前状态不允许启动 Worker"):
+        worker.bind(run_id, child_run="attempt-new", operation_id="operation-new")
+
+
+def test_terminal_execution_requires_replan_before_new_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    worker = SupervisorAgentWorker(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    original_append_trace = agent_worker_module.append_agent_trace
+
+    def fail_dispatch_trace(*args, **kwargs):
+        raise OSError("simulated dispatch trace failure")
+
+    monkeypatch.setattr(
+        agent_worker_module,
+        "append_agent_trace",
+        fail_dispatch_trace,
+    )
+    with pytest.raises(OSError, match="simulated dispatch trace failure"):
+        worker.bind(
+            run_id,
+            child_run="attempt-failed",
+            operation_id="operation-failed",
+        )
+    monkeypatch.setattr(
+        agent_worker_module,
+        "append_agent_trace",
+        original_append_trace,
+    )
+    run_dir = workspace / "runs" / run_id
+    state = load_agent_state(run_dir / "agent-state.json")
+    assert state.phase == "acting"
+    assert state.active_operation_id == "operation-failed"
+    assert list((run_dir / "operations").glob("*.json"))
+    _write_execution(
+        run_dir,
+        execution_id="operation-failed",
+        status="failed",
+    )
+
+    recovered = SupervisorAgentRecovery(workspace).recover(
+        run_id,
+        AgentRecoveryRequest(
+            reason="Worker 已失败且未留下变更",
+            external_side_effects="none",
+        ),
+    )
+
+    assert recovered.state.phase == "needs_human"
+    assert recovered.state.active_child_run is None
+    with pytest.raises(ValueError, match="当前状态不允许启动 Worker"):
+        worker.bind(run_id, child_run="attempt-new", operation_id="operation-new")
+
+    draft = AgentPlan(
+        task_id=recovered.plan.task_id,
+        user_goal=recovered.plan.user_goal,
+        success_conditions=list(recovered.plan.success_conditions),
+        work_items=[
+            item.model_copy(update={"status": "pending"})
+            for item in recovered.plan.work_items
+        ],
+    )
+    revised = runtime.update_plan(run_id, draft)
+    approved = runtime.approve(revised.run_dir.name)
+    with pytest.raises(ValueError, match="operation_id 已在当前 Agent run 使用"):
+        worker.bind(
+            approved.run_dir.name,
+            child_run="attempt-reused",
+            operation_id="operation-failed",
+        )
+    replacement = worker.bind(
+        approved.run_dir.name,
+        child_run="attempt-new",
+        operation_id="operation-new",
+    )
+
+    assert replacement.state.phase == "acting"
+    assert replacement.state.active_child_run == "attempt-new"
+
+
+def test_recovery_checkpoint_failure_keeps_original_writer_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    worker = SupervisorAgentWorker(workspace)
+    worker.bind(
+        run_id,
+        child_run="attempt-checkpoint",
+        operation_id="operation-checkpoint",
+    )
+    run_dir = workspace / "runs" / run_id
+    _write_execution(
+        run_dir,
+        execution_id="operation-checkpoint",
+        status="failed",
+    )
+    original_write_checkpoint = agent_recovery_module.write_checkpoint
+    original_uuid4 = agent_recovery_module.uuid4
+
+    class FixedUuid:
+        hex = "a" * 32
+
+    monkeypatch.setattr(agent_recovery_module, "uuid4", lambda: FixedUuid())
+
+    def fail_checkpoint(*args, **kwargs):
+        raise OSError("simulated checkpoint failure")
+
+    monkeypatch.setattr(
+        agent_recovery_module,
+        "write_checkpoint",
+        fail_checkpoint,
+    )
+    with pytest.raises(OSError, match="simulated checkpoint failure"):
+        SupervisorAgentRecovery(workspace).recover(
+            run_id,
+            AgentRecoveryRequest(
+                reason="模拟终态对账后写 Checkpoint 失败",
+                external_side_effects="unknown",
+            ),
+        )
+
+    state = load_agent_state(run_dir / "agent-state.json")
+    assert state.phase == "acting"
+    assert state.active_child_run == "attempt-checkpoint"
+    assert state.active_operation_id == "operation-checkpoint"
+    assert state.operation_started is True
+    first_observations = sorted((run_dir / "observations").glob("recovery-*.json"))
+    assert len(first_observations) == 1
+    first_observation = first_observations[0]
+    first_payload = first_observation.read_bytes()
+
+    monkeypatch.setattr(
+        agent_recovery_module,
+        "write_checkpoint",
+        original_write_checkpoint,
+    )
+    with pytest.raises(ValueError, match="Observation ID 已存在"):
+        SupervisorAgentRecovery(workspace).recover(
+            run_id,
+            AgentRecoveryRequest(
+                reason="重复恢复不能覆盖第一次机器对账",
+                external_side_effects="unknown",
+            ),
+        )
+    assert first_observation.read_bytes() == first_payload
+    monkeypatch.setattr(agent_recovery_module, "uuid4", original_uuid4)
+    with pytest.raises(ValueError, match="只有已暂停且没有 active Writer"):
+        SupervisorAgentRecovery(workspace).resume_local(run_id)
+
+    recovered = SupervisorAgentRecovery(workspace).recover(
+        run_id,
+        AgentRecoveryRequest(
+            reason="Checkpoint 写入恢复后重新执行现场对账",
+            external_side_effects="unknown",
+        ),
+    )
+    observations = sorted((run_dir / "observations").glob("recovery-*.json"))
+
+    assert recovered.state.phase == "needs_human"
+    assert recovered.state.active_child_run is None
+    assert len(observations) == 2
+    assert first_observation.read_bytes() == first_payload
+
+
 @pytest.mark.parametrize(
     "domain",
     ["数据库迁移", "支付请求", "部署动作", "外部 API"],
@@ -178,23 +434,21 @@ def test_unknown_external_side_effect_never_auto_retries(
 ) -> None:
     _, workspace, run_id = _approved_run(tmp_path)
     worker = SupervisorAgentWorker(workspace)
-    bound = worker.bind(
+    worker.bind(
         run_id,
         child_run=f"attempt-{domain}",
         operation_id=f"operation-{domain}",
     )
-    worker.confirm_started(
-        bound.run_dir.name,
-        child_run=f"attempt-{domain}",
-        operation_id=f"operation-{domain}",
+    _write_execution(
+        workspace / "runs" / run_id,
+        execution_id=f"operation-{domain}",
+        status="failed",
     )
 
     recovered = SupervisorAgentRecovery(workspace).recover(
         run_id,
         AgentRecoveryRequest(
             reason=f"{domain}终态未知",
-            worker_alive=False,
-            operation_started=True,
             external_side_effects="unknown",
         ),
     )
@@ -216,13 +470,16 @@ def test_known_external_side_effect_never_auto_retries(
         child_run="attempt-known-side-effect",
         operation_id="operation-known-side-effect",
     )
+    _write_execution(
+        workspace / "runs" / run_id,
+        execution_id="operation-known-side-effect",
+        status="completed",
+    )
 
     recovered = SupervisorAgentRecovery(workspace).recover(
         run_id,
         AgentRecoveryRequest(
             reason="宿主确认已经产生外部副作用",
-            worker_alive=False,
-            operation_started=False,
             external_side_effects="known",
         ),
     )
@@ -249,8 +506,6 @@ def test_corrupt_execution_record_blocks_recovery_without_releasing_writer(
         run_id,
         AgentRecoveryRequest(
             reason="execution 记录损坏",
-            worker_alive=False,
-            operation_started=False,
         ),
     )
 
@@ -267,6 +522,11 @@ def test_truncated_trace_keeps_original_writer_binding(tmp_path: Path) -> None:
     worker = SupervisorAgentWorker(workspace)
     worker.bind(run_id, child_run="attempt-trace", operation_id="operation-trace")
     run_dir = workspace / "runs" / run_id
+    _write_execution(
+        run_dir,
+        execution_id="operation-trace",
+        status="failed",
+    )
     with (run_dir / "trace.jsonl").open("a", encoding="utf-8") as stream:
         stream.write('{"event":"truncated"')
 
@@ -274,8 +534,6 @@ def test_truncated_trace_keeps_original_writer_binding(tmp_path: Path) -> None:
         run_id,
         AgentRecoveryRequest(
             reason="模拟写 Trace 时突然断电",
-            worker_alive=False,
-            operation_started=False,
         ),
     )
 
@@ -311,8 +569,6 @@ def test_corrupt_state_and_unknown_schema_write_diagnostic_without_overwrite(
                 run_id,
                 AgentRecoveryRequest(
                     reason="模拟状态损坏",
-                    worker_alive=False,
-                    operation_started=False,
                 ),
             )
 
@@ -416,6 +672,7 @@ def _repo(path: Path) -> Path:
     _git(path, "init")
     _git(path, "config", "user.name", "Vega Test")
     _git(path, "config", "user.email", "vega@example.invalid")
+    _git(path, "config", "core.autocrlf", "false")
     (path / "README.md").write_text("fixture\n", encoding="utf-8")
     _git(path, "add", "README.md")
     _git(path, "commit", "-m", "测试：初始化仓库")
@@ -432,3 +689,37 @@ def _git(repo: Path, *args: str) -> None:
         encoding="utf-8",
     )
     assert process.returncode == 0, process.stderr
+
+
+def _write_execution(
+    run_dir: Path,
+    *,
+    execution_id: str,
+    status: str,
+) -> None:
+    now = datetime.now(UTC)
+    execution_dir = run_dir / "executions" / "worker"
+    execution_dir.mkdir(parents=True, exist_ok=True)
+    lease = ExecutionLease(
+        run_id=run_dir.name,
+        execution_id=execution_id,
+        step="worker",
+        owner_pid=os.getpid(),
+        command=["fake-worker"],
+        started_at=(now - timedelta(seconds=2)).isoformat(),
+        last_heartbeat=now.isoformat(),
+        lease_expires_at=(now + timedelta(seconds=30)).isoformat(),
+        deadline=(now + timedelta(seconds=60)).isoformat(),
+        status=status,
+        returncode=0 if status == "completed" else 1 if status == "failed" else None,
+        finished_at=(
+            now.isoformat()
+            if status in {"stopped", "timed_out", "completed", "failed"}
+            else None
+        ),
+    )
+    (execution_dir / "execution.json").write_text(
+        lease.model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )

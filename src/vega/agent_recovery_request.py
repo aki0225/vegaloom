@@ -12,7 +12,5 @@ class AgentRecoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str
-    worker_alive: bool
-    operation_started: bool
     workspace_explained: bool = True
-    external_side_effects: Literal["none", "known", "unknown"] = "none"
+    external_side_effects: Literal["none", "known", "unknown"] = "unknown"

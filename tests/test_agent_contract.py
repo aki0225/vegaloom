@@ -44,6 +44,25 @@ def test_unknown_schema_and_absolute_path_fail_closed() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "observation_id",
+    [
+        "../agent-state",
+        "obs/child",
+        r"C:\temp\claim",  # repo-path-policy: allow-test-fixture
+        ".",
+        "obs.json",
+    ],
+)
+def test_observation_id_rejects_path_like_values(observation_id: str) -> None:
+    with pytest.raises(ValidationError, match="observation_id"):
+        AgentObservation(
+            observation_id=observation_id,
+            machine_summary="拒绝路径型 ID",
+            workspace_fingerprint=FINGERPRINT,
+        )
+
+
 def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
     approved = _approved_plan()
 
@@ -61,8 +80,11 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
             AgentObservation(
                 observation_id="obs-next",
                 work_item_id="W1",
+                child_run="attempt-01",
+                operation_id="operation-01",
                 machine_summary="当前现场可解释",
                 workspace_fingerprint=FINGERPRINT,
+                authority="fake_worker",
                 work_item_completed=True,
             ),
             "next",
@@ -71,8 +93,11 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
             AgentObservation(
                 observation_id="obs-repair",
                 work_item_id="W1",
+                child_run="attempt-01",
+                operation_id="operation-01",
                 machine_summary="测试失败且可在范围内修复",
                 workspace_fingerprint=FINGERPRINT,
+                authority="fake_worker",
                 verification="failed",
                 repairable_in_scope=True,
             ),
@@ -82,8 +107,11 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
             AgentObservation(
                 observation_id="obs-human",
                 work_item_id="W1",
+                child_run="attempt-01",
+                operation_id="operation-01",
                 machine_summary="外部副作用无法确认",
                 workspace_fingerprint=FINGERPRINT,
+                authority="fake_worker",
                 external_side_effects="unknown",
             ),
             "human",
@@ -92,8 +120,11 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
             AgentObservation(
                 observation_id="obs-finalize",
                 work_item_id="W1",
+                child_run="attempt-01",
+                operation_id="operation-01",
                 machine_summary="全部工作和门禁完成",
                 workspace_fingerprint=FINGERPRINT,
+                authority="fake_worker",
                 verification="passed",
                 risk="passed",
                 review="passed",
@@ -119,8 +150,11 @@ def test_finalize_is_rejected_when_verification_failed() -> None:
     observation = AgentObservation(
         observation_id="obs-failed",
         work_item_id="W1",
+        child_run="attempt-01",
+        operation_id="operation-01",
         machine_summary="实现结束但验证失败",
         workspace_fingerprint=FINGERPRINT,
+        authority="fake_worker",
         verification="failed",
         risk="passed",
         review="passed",
@@ -146,6 +180,56 @@ def test_finalize_is_rejected_when_verification_failed() -> None:
 
     with pytest.raises(ValueError, match="确定性规则拒绝"):
         transition_state(state, plan, observation, forced_finalize)
+
+
+def test_external_observation_cannot_promote_claim_to_progress() -> None:
+    observation = AgentObservation(
+        observation_id="obs-forged",
+        work_item_id="W1",
+        machine_summary="外部调用者声称全部完成",
+        workspace_fingerprint=FINGERPRINT,
+        verification="passed",
+        risk="passed",
+        review="passed",
+        work_item_completed=True,
+        all_work_items_completed=True,
+    )
+
+    decision = decide_next_action(_approved_plan(), observation)
+
+    assert decision.selected_action == "human"
+    assert "只作为 Claim" in decision.reason
+
+
+def test_finalize_claim_cannot_skip_pending_work_item() -> None:
+    plan = AgentPlan(
+        task_id="task-two-items",
+        user_goal="完成两项工作",
+        work_items=[
+            AgentWorkItem(work_item_id="W1", objective="第一项"),
+            AgentWorkItem(work_item_id="W2", objective="第二项"),
+        ],
+    )
+    plan = approve_plan(plan, actor="user")
+    observation = AgentObservation(
+        observation_id="obs-skip",
+        work_item_id="W1",
+        child_run="attempt-01",
+        operation_id="operation-01",
+        machine_summary="错误声称全部完成",
+        workspace_fingerprint=FINGERPRINT,
+        authority="fake_worker",
+        work_item_completed=True,
+        all_work_items_completed=True,
+        verification="passed",
+        risk="passed",
+        review="passed",
+    )
+
+    decision = decide_next_action(plan, observation)
+
+    assert decision.selected_action == "human"
+    assert "仍有未完成 Work Item" in decision.reason
 
 
 def test_task_brief_has_no_lower_bound_and_redacts_secret() -> None:

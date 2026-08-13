@@ -21,11 +21,12 @@ def agent_trace_issue(trace_path: Path) -> str | None:
 def blocked_recovery_reason(
     request: AgentRecoveryRequest,
     *,
+    operation_started: bool,
     workspace_unchanged: bool,
     workspace_clear: bool,
 ) -> str:
     reasons: list[str] = []
-    if request.operation_started:
+    if operation_started:
         reasons.append("operation 已开始或无法证明未开始")
     if not workspace_unchanged:
         reasons.append("Workspace 已产生 partial diff 或其他变化")
@@ -48,10 +49,6 @@ def require_recovery_request(
         raise ValueError(f"当前阶段不需要 Worker recovery：{state.phase}")
     if not state.active_child_run or not state.active_operation_id:
         raise ValueError("当前 run 没有可对账的 Writer binding")
-    if request.operation_started != state.operation_started:
-        raise ValueError("恢复请求与持久化 operation_started 不一致")
-    if request.worker_alive:
-        raise ValueError("宿主仍报告 Worker 存活；禁止释放当前 Writer binding")
 
 
 def latest_checkpoint(run_dir: Path, state: AgentState) -> AgentCheckpoint:

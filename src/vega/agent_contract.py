@@ -32,6 +32,11 @@ AgentPhase = Literal[
     "stopped",
 ]
 AgentAction = Literal["next", "repair", "replan", "human", "finalize"]
+ObservationAuthority = Literal[
+    "external_claim",
+    "fake_worker",
+    "machine_reconcile",
+]
 WorkItemStatus = Literal[
     "pending",
     "active",
@@ -46,6 +51,15 @@ GateStatus = Literal["not_run", "passed", "failed", "blocked", "stale"]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 RelativePathText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Sha256Text = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+ArtifactIdText = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
+    ),
+]
 
 
 def utc_now() -> str:
@@ -189,16 +203,19 @@ class AgentPlan(StrictAgentModel):
 
 
 class AgentObservation(StrictAgentModel):
-    observation_id: NonEmptyText
+    observation_id: ArtifactIdText
     work_item_id: NonEmptyText | None = None
+    child_run: NonEmptyText | None = None
+    operation_id: NonEmptyText | None = None
     worker_claim: NonEmptyText | None = None
     machine_summary: NonEmptyText
     workspace_fingerprint: Sha256Text
     changed_files: list[RelativePathText] = Field(default_factory=list)
     evidence_refs: list[RelativePathText] = Field(default_factory=list)
+    authority: ObservationAuthority = "external_claim"
     work_item_completed: bool = False
     worker_alive: bool = False
-    # `dispatch` 只代表已登记 Writer；恢复时必须另外确认 operation 是否真的开始。
+    # 该值只接受持久化状态或受信机器对账；外部 Claim 会在 Runtime 内被覆盖。
     operation_started: bool = True
     workspace_explained: bool = True
     unknown_file_count: int = Field(default=0, ge=0)
@@ -217,6 +234,14 @@ class AgentObservation(StrictAgentModel):
 
     @model_validator(mode="after")
     def validate_observation(self) -> AgentObservation:
+        if (self.child_run is None) != (self.operation_id is None):
+            raise ValueError("Observation 的 child_run 与 operation_id 必须同时存在或同时为空")
+        if self.authority != "external_claim" and (
+            self.work_item_id is None
+            or self.child_run is None
+            or self.operation_id is None
+        ):
+            raise ValueError("受信 Observation 必须绑定 Work Item、child 和 operation")
         if self.worker_alive and self.all_work_items_completed:
             raise ValueError("Worker 仍存活时不能声明全部 Work Item 已完成")
         if self.all_work_items_completed and not self.work_item_completed:
@@ -322,7 +347,7 @@ class AgentState(StrictAgentModel):
     current_work_item: NonEmptyText | None = None
     active_child_run: NonEmptyText | None = None
     active_operation_id: NonEmptyText | None = None
-    # 绑定 Writer 不等于实际副作用已经开始；恢复时这两个事实必须分开记录。
+    # dispatch 落盘后即保守视为 operation 可能已开始，直到受信执行证据完成对账。
     operation_started: bool = False
     workspace_fingerprint: Sha256Text | None = None
     latest_checkpoint_id: NonEmptyText | None = None

@@ -655,10 +655,11 @@ Agent Graph 不拥有 Git、Workspace、Verification、Risk、Reviewer 或成功
 默认入口、自动 commit/push/release 边界或 fail-closed 语义。完整计划见
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)。
 
-Gate 2A 当前证据：并发 dispatch、Worker 仍存活、operation 未开始、partial diff、数据库/支付/
-部署/外部 API 未知副作用、损坏 state、未知 schema、Trace 尾部截断、SQLite 丢失以及
-pause/resume/stop 均有定向回归；本地 49 项状态与锁测试通过。最终结论等待 PR CI，未连接真实
-Codex，也未改变默认入口。
+Gate 2A 当前证据：并发 dispatch、外部 Observation Claim 不得升级为完成事实、dispatch 后缺少
+execution 证据时保留旧 Writer、Worker 仍存活、partial diff、数据库/支付/部署/外部 API
+未知副作用、operation identity 不可复用、Observation write-once、Task Card 恢复最后发布
+State、损坏 state、未知 schema、Trace 尾部截断、SQLite 丢失以及 pause/resume/stop 均有
+定向回归。最终测试计数以本次 PR CI 为准；当前未连接真实 Codex，也未改变默认入口。
 
 ## 七、更新规则
 

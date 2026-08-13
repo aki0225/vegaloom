@@ -125,13 +125,29 @@ Gate 1 已实现 Fake Worker 可见控制循环、Plan 批准、Task Brief、状
 Gate 2A 已补充：
 
 - run mutation 锁，确保并发 dispatch 只有一个 Writer 能取得绑定；
-- `worker_reserved` 与 `worker_started` 两阶段边界，区分“已登记”与“副作用已开始”；
-- Worker 仍存活时保留 child/operation binding，禁止第二 Writer；
-- operation 未开始且 Workspace 未变时，允许人工显式派发新 child；
+- dispatch 提交时原子持久化唯一 child/operation binding，并保守标记 operation 可能已经开始；
+  该标记是不可自动重试安全闩，不是实际进程启动证明；
+- dispatch 在发布 `acting` State 前写入 run-local operation identity marker；同一 run 的
+  `operation_id` 不得复用，避免旧 execution 终态核销新 Writer；
+- 当前正常流程没有可持久依赖的 `worker_reserved` 中间态或第二次 `confirm_started`；
+- 旧版 `operation_started=false` 只表示未取得启动确认，不能证明 operation 未启动；
+  升级后恢复保留原 Writer binding 并交由人工；
+- 旧 binding 尚未被受信 execution、进程、Trace、Workspace 与外部副作用证据可靠核销时，
+  保留 child/operation binding 并禁止第二 Writer；
+- dispatch 后缺少 execution 证据时 fail-closed，不把“尚未看到进程记录”推断为
+  operation 未开始；
+- 外部 Observation 只能作为 Claim，受信 Observation 必须绑定当前执行身份；重复
+  Observation ID 不得覆盖历史证据，Recovery 机器对账也使用 write-once Artifact；
+- Plan revision 写入前先撤销旧批准和 dispatch 权限，防止崩溃窗口继续使用 stale approval；
+- 只有当前 Checkpoint 与 Task Brief 成功落盘后，才发布 `ready` 或下一轮可 dispatch State；
+- 跨机器 Task Card 恢复在 Checkpoint、Task Brief、Trace 和状态卡完成后，最后发布 State；
+  失败重试不会遗留另一个可 dispatch run；
+- dispatch 前校验 State、批准 Plan、safe Checkpoint 与 Task Brief manifest 的 revision、
+  Work Item 和 Workspace binding；
 - partial diff、未知外部副作用、Trace 损坏和状态损坏进入人工处理；
 - SQLite Graph checkpoint 丢失不影响从 Agent State、Checkpoint 和真实 Workspace 对账；
 - `pause / resume-local / stop` 保留 Goal、Plan、Diff 和 Artifact，不执行自动回滚。
 
-本地故障注入与状态回归为 49 项通过；架构增长、Ruff、compileall、仓库卫生、CI 分片完整性和
+本地故障注入与状态回归为 58 项通过；架构增长、Ruff、compileall、仓库卫生、CI 分片完整性和
 `git diff --check` 均通过。Python 3.14 环境仍出现 LangChain Core 的 Pydantic V1 兼容警告；
 项目 CI 使用 Python 3.11/3.12，最终结论等待 PR CI。

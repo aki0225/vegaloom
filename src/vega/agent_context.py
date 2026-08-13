@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Mapping, Sequence
 
-from .agent_contract import AgentCheckpoint, AgentPlan, canonical_digest
+from .agent_contract import (
+    AgentCheckpoint,
+    AgentPlan,
+    AgentState,
+    canonical_digest,
+)
 from .redaction import redact_text
 
 
@@ -97,12 +102,24 @@ def compile_task_brief(
     )
 
 
-def task_brief_manifest(brief: TaskBrief) -> dict[str, object]:
+def task_brief_manifest(
+    brief: TaskBrief,
+    *,
+    plan: AgentPlan,
+    state: AgentState,
+    checkpoint: AgentCheckpoint,
+) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "utf8_bytes": brief.utf8_bytes,
         "sha256": brief.sha256,
         "artifact_refs": list(brief.artifact_refs),
+        "goal_revision": plan.goal_revision,
+        "plan_revision": plan.plan_revision,
+        "approved_plan_digest": plan.approved_digest,
+        "current_work_item": state.current_work_item,
+        "checkpoint_id": checkpoint.checkpoint_id,
+        "workspace_fingerprint": checkpoint.workspace_fingerprint,
     }
 
 

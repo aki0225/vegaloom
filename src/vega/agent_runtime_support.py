@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -19,22 +20,28 @@ from .agent_contract import (
     AgentPlan,
     AgentState,
     AgentStatusCard,
+    canonical_digest,
 )
 from .agent_persistence import (
     AgentArtifactError,
+    append_agent_trace,
     load_agent_checkpoint,
     load_agent_state,
+    save_agent_state,
     save_agent_checkpoint,
 )
+from .agent_run import AgentRun
+from .agent_runtime_logic import update_state
 from .agent_task_card import (
     AgentTaskCard,
     compute_handoff_workspace_digest,
     discover_handoff_task_cards,
+    load_task_card,
 )
 from .agent_visibility import render_agent_status_card
 from .redaction import write_redacted_json, write_redacted_text
-from .repository_identity import repository_scope
-from .run_utils import resolve_run_dir
+from .repository_identity import repository_scope, resolve_git_revision
+from .run_utils import create_run_dir, resolve_run_dir
 from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
 
 
@@ -116,6 +123,14 @@ def load_agent_bundle(
         raise ValueError(f"Agent run 无法恢复：{run_dir.name}") from exc
     if state.run_id != run_dir.name or plan.task_id != state.task_id:
         raise ValueError("Agent run 身份绑定不一致")
+    if state.phase not in {"planning", "awaiting_approval"}:
+        if (
+            state.goal_revision != plan.goal_revision
+            or state.plan_revision != plan.plan_revision
+            or state.approved_plan_digest != plan.approved_digest
+            or not plan.approval_is_current()
+        ):
+            raise ValueError("Agent State 与当前批准 Plan 不一致")
     if not isinstance(metadata, dict) or not isinstance(metadata.get("repo_path"), str):
         raise ValueError("Agent run 缺少 repo binding")
     return run_dir, state, plan, metadata
@@ -147,6 +162,67 @@ def write_run_metadata(
             "task_card": task_card,
         },
     )
+
+
+def resume_agent_task_card(
+    workspace: Path,
+    repo: Path,
+    task_path: Path | None = None,
+) -> AgentRun:
+    repo_root = require_git_root(repo)
+    resolved_task, relative_task = resolve_resume_task(repo_root, task_path)
+    card = load_task_card(resolved_task)
+    snapshot = validate_resume_workspace(repo_root, card)
+    revision = resolve_git_revision(repo_root)
+    assert revision is not None
+    run_id, run_dir = create_run_dir(
+        workspace,
+        f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent-resume",
+    )
+    state = state_from_task_card(run_id, repo_root, card, snapshot)
+    write_run_metadata(run_dir, repo_root, revision.commit, task_card=relative_task)
+    save_agent_plan(run_dir, card.plan)
+    checkpoint = write_checkpoint(
+        run_dir,
+        state,
+        snapshot,
+        reason="已从 Git 跟踪的 Resume Capsule 建立新本机 run",
+        status="safe" if card.handoff_status == "handoff_ready" else "blocked",
+        pending_actions=list(state.allowed_actions),
+        evidence_refs=[relative_task],
+    )
+    state = update_state(
+        state,
+        latest_checkpoint_id=checkpoint.checkpoint_id,
+        state_version=state.state_version + 1,
+    )
+    capsule = card.resume_capsule
+    write_task_brief(
+        run_dir,
+        card.plan,
+        state,
+        checkpoint,
+        confirmed_facts=capsule.confirmed_facts if capsule else [],
+        failed_attempts=capsule.failed_attempts if capsule else [],
+    )
+    append_agent_trace(
+        run_dir / "trace.jsonl",
+        event="task_card_resumed",
+        state=state,
+        observation_summary="旧门禁已作为历史证据，当前现场已重新对账",
+        artifact_refs=[relative_task, "task-brief.md"],
+    )
+    write_status_card(
+        run_dir,
+        state,
+        card.plan,
+        checkpoint=checkpoint,
+        next_step=(
+            capsule.next_step if capsule is not None else "人工确认当前 Work Item 后继续"
+        ),
+    )
+    save_agent_state(run_dir / "agent-state.json", state)
+    return AgentRun(run_dir=run_dir, state=state, plan=card.plan)
 
 
 def write_checkpoint(
@@ -214,9 +290,69 @@ def write_task_brief(
     write_redacted_text(run_dir / "task-brief.md", brief.content)
     write_redacted_json(
         run_dir / "task-brief-manifest.json",
-        task_brief_manifest(brief),
+        task_brief_manifest(
+            brief,
+            plan=plan,
+            state=state,
+            checkpoint=checkpoint,
+        ),
     )
     return brief
+
+
+def validate_dispatch_artifacts(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+) -> None:
+    """dispatch 前复核批准、Checkpoint 与 Task Brief 属于同一现场。"""
+
+    if (
+        not plan.approval_is_current()
+        or state.goal_revision != plan.goal_revision
+        or state.plan_revision != plan.plan_revision
+        or state.approved_plan_digest != plan.approved_digest
+    ):
+        raise ValueError("当前 Plan 批准已过期或与 Agent State 不一致")
+    if state.latest_checkpoint_id is None:
+        raise ValueError("当前 ready State 缺少可验证 Checkpoint")
+    checkpoint = load_agent_checkpoint(
+        run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
+    )
+    if (
+        checkpoint.run_id != state.run_id
+        or checkpoint.status != "safe"
+        or checkpoint.phase != "ready"
+        or checkpoint.current_work_item != state.current_work_item
+        or checkpoint.workspace_fingerprint != state.workspace_fingerprint
+        or checkpoint.operation_started
+        or checkpoint.external_side_effects != "none"
+        or checkpoint.state_version + 1 != state.state_version
+        or not {"next", "repair"}.intersection(checkpoint.pending_actions)
+    ):
+        raise ValueError("当前 ready State 没有匹配的 safe Checkpoint")
+    try:
+        brief = (run_dir / "task-brief.md").read_text(encoding="utf-8")
+        manifest = json.loads(
+            (run_dir / "task-brief-manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("当前 ready State 缺少可验证 Task Brief") from exc
+    expected = {
+        "schema_version": 2,
+        "utf8_bytes": len(brief.encode("utf-8")),
+        "sha256": canonical_digest({"content": brief}),
+        "goal_revision": plan.goal_revision,
+        "plan_revision": plan.plan_revision,
+        "approved_plan_digest": plan.approved_digest,
+        "current_work_item": state.current_work_item,
+        "checkpoint_id": checkpoint.checkpoint_id,
+        "workspace_fingerprint": checkpoint.workspace_fingerprint,
+    }
+    if not isinstance(manifest, dict) or any(
+        manifest.get(key) != value for key, value in expected.items()
+    ):
+        raise ValueError("Task Brief 与当前 Plan、Checkpoint 或内容摘要不一致")
 
 
 def write_status_card(

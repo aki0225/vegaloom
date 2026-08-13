@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .agent_contract import AgentObservation, AgentPlan, AgentState, AgentWorkItem, approve_plan
+from .agent_contract import (
+    AgentObservation,
+    AgentPlan,
+    AgentState,
+    AgentWorkItem,
+    ObservationAuthority,
+    approve_plan,
+)
 from .agent_persistence import (
     append_agent_trace,
     save_agent_state,
@@ -17,18 +24,17 @@ from .agent_runtime_logic import (
     invalidate_plan_for_steer,
     new_task_id,
     next_pending_work_item,
+    reconcile_observation,
     update_state,
+    validate_observation_binding,
 )
-from .agent_task_card import load_task_card
 from .agent_runtime_support import (
     capture_bound_workspace,
-    require_git_root,
-    resolve_resume_task,
-    state_from_task_card,
-    validate_resume_workspace,
-    write_checkpoint,
     load_agent_bundle,
+    require_git_root,
+    resume_agent_task_card,
     save_agent_plan,
+    write_checkpoint,
     write_run_metadata,
     write_status_card,
     write_task_brief,
@@ -108,40 +114,46 @@ class SupervisorAgentRuntime:
             raise ValueError("Plan 仍有未解决决策，不能批准")
         approved = approve_plan(plan, actor=actor)
         snapshot = capture_bound_workspace(run_dir)
-        state = update_state(
+        ready_state = update_state(
             state,
             phase="ready",
             state_version=state.state_version + 1,
+            goal_revision=approved.goal_revision,
+            plan_revision=approved.plan_revision,
             approved_plan_digest=approved.approved_digest,
             workspace_fingerprint=snapshot.fingerprint,
             allowed_actions=["next", "replan", "human"],
         )
         self._save_plan(run_dir, approved)
-        save_agent_state(run_dir / "agent-state.json", state)
         checkpoint = write_checkpoint(
             run_dir,
-            state,
+            ready_state,
             snapshot,
             reason="Plan 已批准",
             status="safe",
             pending_actions=["next", "replan", "human"],
         )
-        state = update_state(
-            state,
+        ready_state = update_state(
+            ready_state,
             latest_checkpoint_id=checkpoint.checkpoint_id,
-            state_version=state.state_version + 1,
+            state_version=ready_state.state_version + 1,
         )
-        save_agent_state(run_dir / "agent-state.json", state)
-        task_brief = write_task_brief(run_dir, approved, state, checkpoint)
+        task_brief = write_task_brief(
+            run_dir,
+            approved,
+            ready_state,
+            checkpoint,
+        )
+        save_agent_state(run_dir / "agent-state.json", ready_state)
         append_agent_trace(
             run_dir / "trace.jsonl",
             event="plan_approved",
-            state=state,
+            state=ready_state,
             observation_summary=f"Task Brief {task_brief.utf8_bytes} bytes",
             artifact_refs=["agent-plan.json", "task-brief.md", "task-brief-manifest.json"],
         )
-        write_status_card(run_dir, state, approved)
-        return AgentRun(run_dir=run_dir, state=state, plan=approved)
+        write_status_card(run_dir, ready_state, approved)
+        return AgentRun(run_dir=run_dir, state=ready_state, plan=approved)
 
     @agent_mutation("agent.plan")
     def update_plan(self, run: str, draft: AgentPlan) -> AgentRun:
@@ -161,47 +173,51 @@ class SupervisorAgentRuntime:
         revised = AgentPlan.model_validate(revised.model_dump(mode="json"))
         first_item = revised.work_items[0]
         snapshot = capture_bound_workspace(run_dir)
-        state = update_state(
+        guarded_state = update_state(
             state,
             phase="awaiting_approval",
             state_version=state.state_version + 1,
-            plan_revision=revised.plan_revision,
             approved_plan_digest=None,
-            current_work_item=first_item.work_item_id,
             workspace_fingerprint=snapshot.fingerprint,
             allowed_actions=["replan", "human"],
         )
+        save_agent_state(run_dir / "agent-state.json", guarded_state)
         self._save_plan(run_dir, revised)
-        save_agent_state(run_dir / "agent-state.json", state)
+        revised_state = update_state(
+            guarded_state,
+            goal_revision=revised.goal_revision,
+            plan_revision=revised.plan_revision,
+            current_work_item=first_item.work_item_id,
+        )
         checkpoint = write_checkpoint(
             run_dir,
-            state,
+            revised_state,
             snapshot,
             reason="主会话提交新的 Plan revision，等待人工批准",
             status="blocked",
             pending_actions=["replan", "human"],
         )
-        state = update_state(
-            state,
+        revised_state = update_state(
+            revised_state,
             latest_checkpoint_id=checkpoint.checkpoint_id,
-            state_version=state.state_version + 1,
+            state_version=revised_state.state_version + 1,
         )
-        save_agent_state(run_dir / "agent-state.json", state)
+        save_agent_state(run_dir / "agent-state.json", revised_state)
         append_agent_trace(
             run_dir / "trace.jsonl",
             event="plan_revised",
-            state=state,
+            state=revised_state,
             observation_summary=f"Plan revision {revised.plan_revision} 已写入",
             artifact_refs=["agent-plan.json", f"checkpoints/{checkpoint.checkpoint_id}.json"],
         )
         write_status_card(
             run_dir,
-            state,
+            revised_state,
             revised,
             checkpoint=checkpoint,
             next_step="人工审查新 Plan revision；未批准前不能启动 Worker",
         )
-        return AgentRun(run_dir=run_dir, state=state, plan=revised)
+        return AgentRun(run_dir=run_dir, state=revised_state, plan=revised)
 
     @agent_mutation("agent.observe")
     def observe(
@@ -209,38 +225,53 @@ class SupervisorAgentRuntime:
         run: str,
         observation: AgentObservation,
     ) -> AgentRun:
+        return self._observe_locked(
+            run,
+            observation,
+            authority="external_claim",
+        )
+
+    @agent_mutation("agent.observe")
+    def observe_fake_worker(
+        self,
+        run: str,
+        observation: AgentObservation,
+    ) -> AgentRun:
+        """Gate 1 可控 Fake Worker 的内部观测入口，不暴露给 CLI。"""
+
+        return self._observe_locked(
+            run,
+            observation,
+            authority="fake_worker",
+        )
+
+    def _observe_locked(
+        self,
+        run: str,
+        observation: AgentObservation,
+        *,
+        authority: ObservationAuthority,
+    ) -> AgentRun:
         run_dir, state, plan, _ = self._load_run(run)
-        if not state.active_child_run or not state.active_operation_id:
-            raise ValueError("Observation 必须绑定当前 active Writer，不能从空闲状态伪造完成")
-        if state.phase not in {"acting", "observing", "needs_human"}:
-            raise ValueError(f"当前阶段不能接受 Observation：{state.phase}")
-        if (
-            state.active_child_run
-            and observation.worker_alive
-            and observation.work_item_completed
-        ):
-            raise ValueError("Worker 仍存活时不能接受 Work Item 完成 Observation")
-        if (
-            state.active_child_run
-            and observation.operation_started != state.operation_started
-        ):
-            raise ValueError("Observation 与持久化 operation_started 不一致")
+        validate_observation_binding(state, observation, authority)
         attempt = state.active_child_run
         actual = capture_bound_workspace(run_dir)
-        reconciled = observation.model_copy(
-            update={
-                "workspace_fingerprint": actual.fingerprint,
-                "changed_files": list(actual.changed_files),
-                "unknown_file_count": len(actual.untracked_files),
-                "workspace_explained": (
-                    observation.workspace_explained
-                    and not actual.unsafe_index_paths
-                    and actual.git_control_complete
-                ),
-            }
+        reconciled = reconcile_observation(
+            state,
+            observation,
+            authority,
+            actual,
         )
+        observation_path = (
+            run_dir / "observations" / f"{reconciled.observation_id}.json"
+        )
+        if observation_path.exists():
+            raise ValueError(
+                f"Observation ID 已存在，拒绝覆盖历史证据："
+                f"{reconciled.observation_id}"
+            )
         write_redacted_json(
-            run_dir / "observations" / f"{reconciled.observation_id}.json",
+            observation_path,
             reconciled.model_dump(mode="json"),
         )
         decision = decide_next_action(plan, reconciled)
@@ -300,7 +331,11 @@ class SupervisorAgentRuntime:
                 and decision.selected_action in {"repair", "replan", "human"}
                 else []
             ),
-            operation_started=reconciled.operation_started,
+            operation_started=(
+                False
+                if checkpoint_status == "safe"
+                else reconciled.operation_started
+            ),
             external_side_effects=reconciled.external_side_effects,
         )
         state = update_state(
@@ -308,6 +343,14 @@ class SupervisorAgentRuntime:
             latest_checkpoint_id=checkpoint.checkpoint_id,
             state_version=state.state_version + 1,
         )
+        if decision.selected_action in {"next", "repair"}:
+            write_task_brief(
+                run_dir,
+                plan,
+                state,
+                checkpoint,
+                failed_attempts=checkpoint.failed_attempts,
+            )
         save_agent_state(run_dir / "agent-state.json", state)
         append_agent_trace(
             run_dir / "trace.jsonl",
@@ -344,48 +387,51 @@ class SupervisorAgentRuntime:
             raise ValueError("Writer 仍在运行，先停止并对账后才能修改 Plan")
         snapshot = capture_bound_workspace(run_dir)
         revised = invalidate_plan_for_steer(plan, instruction)
-        state = update_state(
+        guarded_state = update_state(
             state,
             phase="awaiting_approval",
             state_version=state.state_version + 1,
-            goal_revision=revised.goal_revision,
-            plan_revision=revised.plan_revision,
             approved_plan_digest=None,
-            workspace_fingerprint=snapshot.fingerprint,
             allowed_actions=["replan", "human"],
         )
+        save_agent_state(run_dir / "agent-state.json", guarded_state)
         self._save_plan(run_dir, revised)
-        save_agent_state(run_dir / "agent-state.json", state)
+        revised_state = update_state(
+            guarded_state,
+            goal_revision=revised.goal_revision,
+            plan_revision=revised.plan_revision,
+            workspace_fingerprint=snapshot.fingerprint,
+        )
         checkpoint = write_checkpoint(
             run_dir,
-            state,
+            revised_state,
             snapshot,
             reason="人工 steer 改变约束，旧 Plan 批准已失效",
             status="blocked",
             pending_actions=["replan", "human"],
         )
-        state = update_state(
-            state,
+        revised_state = update_state(
+            revised_state,
             latest_checkpoint_id=checkpoint.checkpoint_id,
-            state_version=state.state_version + 1,
+            state_version=revised_state.state_version + 1,
         )
-        save_agent_state(run_dir / "agent-state.json", state)
+        save_agent_state(run_dir / "agent-state.json", revised_state)
         append_agent_trace(
             run_dir / "trace.jsonl",
             event="plan_invalidated_by_steer",
-            state=state,
+            state=revised_state,
             observation_summary="新增人工约束，等待新 Plan revision 批准",
             route_reason=instruction.strip(),
             artifact_refs=["agent-plan.json", f"checkpoints/{checkpoint.checkpoint_id}.json"],
         )
         write_status_card(
             run_dir,
-            state,
+            revised_state,
             revised,
             checkpoint=checkpoint,
             next_step="根据新增约束修订 Plan，并重新请求人工批准",
         )
-        return AgentRun(run_dir=run_dir, state=state, plan=revised)
+        return AgentRun(run_dir=run_dir, state=revised_state, plan=revised)
 
     def status(self, run: str) -> str:
         run_dir, state, plan, _ = self._load_run(run)
@@ -399,61 +445,7 @@ class SupervisorAgentRuntime:
         return run_dir / "agent-state.json"
 
     def resume_task_card(self, repo: Path, task_path: Path | None = None) -> AgentRun:
-        repo_root = require_git_root(repo)
-        resolved_task, relative_task = resolve_resume_task(repo_root, task_path)
-        card = load_task_card(resolved_task)
-        snapshot = validate_resume_workspace(repo_root, card)
-        revision = resolve_git_revision(repo_root)
-        assert revision is not None
-        run_id, run_dir = create_run_dir(
-            self.workspace,
-            f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent-resume",
-        )
-        state = state_from_task_card(run_id, repo_root, card, snapshot)
-        write_run_metadata(run_dir, repo_root, revision.commit, task_card=relative_task)
-        self._save_plan(run_dir, card.plan)
-        save_agent_state(run_dir / "agent-state.json", state)
-        checkpoint = write_checkpoint(
-            run_dir,
-            state,
-            snapshot,
-            reason="已从 Git 跟踪的 Resume Capsule 建立新本机 run",
-            status="safe" if card.handoff_status == "handoff_ready" else "blocked",
-            pending_actions=list(state.allowed_actions),
-            evidence_refs=[relative_task],
-        )
-        state = update_state(
-            state,
-            latest_checkpoint_id=checkpoint.checkpoint_id,
-            state_version=state.state_version + 1,
-        )
-        save_agent_state(run_dir / "agent-state.json", state)
-        capsule = card.resume_capsule
-        write_task_brief(
-            run_dir,
-            card.plan,
-            state,
-            checkpoint,
-            confirmed_facts=capsule.confirmed_facts if capsule else [],
-            failed_attempts=capsule.failed_attempts if capsule else [],
-        )
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="task_card_resumed",
-            state=state,
-            observation_summary="旧门禁已作为历史证据，当前现场已重新对账",
-            artifact_refs=[relative_task, "task-brief.md"],
-        )
-        write_status_card(
-            run_dir,
-            state,
-            card.plan,
-            checkpoint=checkpoint,
-            next_step=(
-                capsule.next_step if capsule is not None else "人工确认当前 Work Item 后继续"
-            ),
-        )
-        return AgentRun(run_dir=run_dir, state=state, plan=card.plan)
+        return resume_agent_task_card(self.workspace, repo, task_path)
 
     def _load_run(self, run: str) -> tuple[Path, AgentState, AgentPlan, dict[str, str]]:
         return load_agent_bundle(self.workspace, run)

@@ -68,7 +68,7 @@ def transition_state(
             "updated_at": utc_now(),
         }
     )
-    if not observation.worker_alive:
+    if observation.authority != "external_claim" and not observation.worker_alive:
         payload.update(
             {
                 "active_child_run": None,
@@ -132,8 +132,25 @@ def _precondition_route(
 ) -> tuple[list[AgentAction], AgentAction, str] | None:
     checks = (
         (
+            observation.authority == "external_claim",
+            (
+                ["human"],
+                "human",
+                "外部 Observation 只作为 Claim 记录，不能授予进度或门禁通过资格",
+            ),
+        ),
+        (
             not plan.approval_is_current(),
             (["replan", "human"], "replan", "Plan 未批准或批准摘要已过期"),
+        ),
+        (
+            observation.all_work_items_completed
+            and not _finalization_claim_matches_plan(plan, observation),
+            (
+                ["human"],
+                "human",
+                "Observation 声称全部完成，但 Plan 仍有未完成 Work Item",
+            ),
         ),
         (
             observation.worker_alive,
@@ -153,6 +170,19 @@ def _precondition_route(
         ),
     )
     return next((route for matched, route in checks if matched), None)
+
+
+def _finalization_claim_matches_plan(
+    plan: AgentPlan,
+    observation: AgentObservation,
+) -> bool:
+    if not observation.work_item_completed or observation.work_item_id is None:
+        return False
+    return all(
+        item.work_item_id == observation.work_item_id
+        or item.status in {"completed", "superseded"}
+        for item in plan.work_items
+    )
 
 
 def _blocking_gate(observation: AgentObservation) -> str | None:
