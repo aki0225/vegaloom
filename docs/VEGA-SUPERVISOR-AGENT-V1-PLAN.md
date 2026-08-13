@@ -1,12 +1,12 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`rewritten / awaiting-owner-approval`
+> 状态：`approved / Gate 2A 本地验证完成`
 >
 > 计划日期：2026-08-13
 >
 > 规划基线：`main@8884458` / `v0.1.5`
 >
-> 本文确定 Vega 下一阶段的 Agent 主线，但不授权立即修改 Runtime。审核通过后才进入 Gate 0。
+> 本文已获批准，并在独立实验分支按 Gate 推进。Gate 2A 完成本地验证后，先等待 PR CI 与代码审查；证据通过前不进入 Gate 2B。
 
 ## 一、产品决定
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Literal
+
+from pydantic import ValidationError
 
 from .agent_context import (
     DEFAULT_TASK_BRIEF_MAX_BYTES,
@@ -17,7 +20,12 @@ from .agent_contract import (
     AgentState,
     AgentStatusCard,
 )
-from .agent_persistence import load_agent_checkpoint, save_agent_checkpoint
+from .agent_persistence import (
+    AgentArtifactError,
+    load_agent_checkpoint,
+    load_agent_state,
+    save_agent_checkpoint,
+)
 from .agent_task_card import (
     AgentTaskCard,
     compute_handoff_workspace_digest,
@@ -26,6 +34,7 @@ from .agent_task_card import (
 from .agent_visibility import render_agent_status_card
 from .redaction import write_redacted_json, write_redacted_text
 from .repository_identity import repository_scope
+from .run_utils import resolve_run_dir
 from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
 
 
@@ -90,6 +99,32 @@ def capture_bound_workspace(run_dir: Path) -> ReviewWorkspaceSnapshot:
     return capture_review_workspace(repo)
 
 
+def load_agent_bundle(
+    workspace: Path,
+    run: str,
+) -> tuple[Path, AgentState, AgentPlan, dict[str, str]]:
+    """读取 Agent 的三个权威本机 Artifact，并统一执行身份校验。"""
+
+    run_dir = resolve_run_dir(workspace, run)
+    try:
+        state = load_agent_state(run_dir / "agent-state.json")
+        plan = AgentPlan.model_validate_json(
+            (run_dir / "agent-plan.json").read_text(encoding="utf-8")
+        )
+        metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
+    except (OSError, ValidationError, json.JSONDecodeError, AgentArtifactError) as exc:
+        raise ValueError(f"Agent run 无法恢复：{run_dir.name}") from exc
+    if state.run_id != run_dir.name or plan.task_id != state.task_id:
+        raise ValueError("Agent run 身份绑定不一致")
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("repo_path"), str):
+        raise ValueError("Agent run 缺少 repo binding")
+    return run_dir, state, plan, metadata
+
+
+def save_agent_plan(run_dir: Path, plan: AgentPlan) -> None:
+    write_redacted_json(run_dir / "agent-plan.json", plan.model_dump(mode="json"))
+
+
 def bound_repo(run_dir: Path) -> Path:
     metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
     return Path(metadata["repo_path"]).resolve(strict=True)
@@ -123,6 +158,10 @@ def write_checkpoint(
     status: str,
     pending_actions: list[str],
     evidence_refs: list[str] | None = None,
+    completed_attempts: list[str] | None = None,
+    failed_attempts: list[str] | None = None,
+    operation_started: bool | None = None,
+    external_side_effects: Literal["none", "known", "unknown"] | None = None,
 ) -> AgentCheckpoint:
     checkpoints = sorted((run_dir / "checkpoints").glob("checkpoint-*.json"))
     checkpoint_id = f"checkpoint-{len(checkpoints) + 1:03d}"
@@ -135,8 +174,14 @@ def write_checkpoint(
         phase=state.phase,
         current_work_item=state.current_work_item,
         active_child_run=state.active_child_run,
+        operation_started=(
+            state.operation_started if operation_started is None else operation_started
+        ),
+        external_side_effects=external_side_effects or "none",
         workspace_fingerprint=snapshot.fingerprint,
         changed_files=list(snapshot.changed_files),
+        completed_attempts=completed_attempts or [],
+        failed_attempts=failed_attempts or [],
         pending_actions=pending_actions,
         evidence_refs=evidence_refs or [],
     )

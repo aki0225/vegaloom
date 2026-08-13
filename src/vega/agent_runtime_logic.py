@@ -21,6 +21,9 @@ def apply_work_item_progress(
     current = next(
         item for item in updated.work_items if item.work_item_id == state.current_work_item
     )
+    if observation.worker_alive:
+        # 等待人工不等于当前 attempt 已失败；仍存活的 Writer 必须保留原 Work Item 状态。
+        return plan
     if action == "next" and observation.work_item_completed:
         current.status = "completed"
     elif action == "repair":

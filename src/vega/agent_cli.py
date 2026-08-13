@@ -7,7 +7,10 @@ import typer
 
 from .agent_contract import AgentObservation, AgentPlan
 from .agent_graph import langgraph_available
+from .agent_recovery import SupervisorAgentRecovery
+from .agent_recovery_request import AgentRecoveryRequest
 from .agent_runtime import SupervisorAgentRuntime
+from .agent_worker import SupervisorAgentWorker
 from .cli_support import load_brief_input, require_repo_directory
 
 
@@ -73,18 +76,115 @@ def agent_dispatch(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
     child_run: str = typer.Option(..., "--child", help="本次 Worker attempt 身份。"),
     operation_id: str = typer.Option(..., "--operation", help="本次写入 operation 身份。"),
+    operation_started: bool = typer.Option(
+        False,
+        "--operation-started/--operation-pending",
+        help="默认只预留 Writer；已确认 operation 开始时显式使用 --operation-started。",
+    ),
 ) -> None:
-    """绑定唯一 Writer；Gate 1 由 Fake Worker 或宿主负责实际执行。"""
+    """只绑定唯一 Writer；真正的 Coding Agent 仍由宿主 Adapter 启动。"""
 
     try:
-        result = _runtime().start_work_item(
+        result = _worker().bind(
+            run,
+            child_run=child_run,
+            operation_id=operation_id,
+            operation_started=operation_started,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo("Worker 已绑定。")
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
+@agent_app.command("worker-started")
+def agent_worker_started(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+    child_run: str = typer.Option(..., "--child", help="当前 Worker attempt 身份。"),
+    operation_id: str = typer.Option(..., "--operation", help="当前写入 operation 身份。"),
+) -> None:
+    """宿主真正启动 Worker 后，把不可自动重试边界写入 Agent State。"""
+
+    try:
+        result = _worker().confirm_started(
             run,
             child_run=child_run,
             operation_id=operation_id,
         )
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    typer.echo("Worker 已绑定。")
+    typer.echo("Worker operation 已确认开始。")
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
+@agent_app.command("recover")
+def agent_recover(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+    input_path: Path = typer.Option(..., "--input", help="结构化 Recovery Request JSON。"),
+) -> None:
+    """Worker 失去可信终态后，先对账真实现场再决定是否允许新 child。"""
+
+    try:
+        request = AgentRecoveryRequest.model_validate_json(
+            input_path.read_text(encoding="utf-8")
+        )
+        result = _recovery().recover(run, request)
+    except (OSError, FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo("Worker 现场已重新对账。")
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
+@agent_app.command("pause")
+def agent_pause(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+    reason: str = typer.Option(..., "--reason", help="暂停原因。"),
+) -> None:
+    """在没有 active Writer 时保留现场并暂停调度。"""
+
+    try:
+        result = _recovery().pause(run, reason=reason)
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo("Agent 已暂停。")
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
+@agent_app.command("stop")
+def agent_stop(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+    reason: str = typer.Option(..., "--reason", help="停止原因。"),
+) -> None:
+    """停止自动调度，但保留 Goal、Plan、Diff 和全部 Artifact。"""
+
+    try:
+        result = _recovery().stop(run, reason=reason)
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(
+        "Agent 已停止，现场未回滚。"
+        if result.state.phase == "stopped"
+        else "停止请求未取得安全终态，现场已保留并等待人工处理。"
+    )
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
+@agent_app.command("resume-local")
+def agent_resume_local(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+) -> None:
+    """从本机 safe Checkpoint 重新采集 Workspace 并恢复调度。"""
+
+    try:
+        result = _recovery().resume_local(run)
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo("Agent 已从本机 Checkpoint 恢复。")
     typer.echo("")
     typer.echo(_runtime().status(result.run_dir.name))
 
@@ -178,6 +278,14 @@ def agent_capabilities() -> None:
 
 def _runtime() -> SupervisorAgentRuntime:
     return SupervisorAgentRuntime(Path.cwd())
+
+
+def _recovery() -> SupervisorAgentRecovery:
+    return SupervisorAgentRecovery(Path.cwd())
+
+
+def _worker() -> SupervisorAgentWorker:
+    return SupervisorAgentWorker(Path.cwd())
 
 
 def _load_plan(path: Path) -> AgentPlan:

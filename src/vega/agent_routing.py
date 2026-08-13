@@ -58,18 +58,27 @@ def transition_state(
     ):
         raise ValueError("Workspace 已漂移且尚未完成解释")
 
-    next_state = state.model_copy(deep=True)
-    next_state.phase = _TRANSITION_PHASES[decision.selected_action]
-    next_state.state_version += 1
-    next_state.workspace_fingerprint = observation.workspace_fingerprint
-    next_state.allowed_actions = list(expected.allowed_actions)
-    next_state.updated_at = utc_now()
-    if decision.selected_action in {"next", "repair", "replan", "human"}:
-        next_state.active_child_run = None
-        next_state.active_operation_id = None
+    payload = state.model_dump(mode="json")
+    payload.update(
+        {
+            "phase": _TRANSITION_PHASES[decision.selected_action],
+            "state_version": state.state_version + 1,
+            "workspace_fingerprint": observation.workspace_fingerprint,
+            "allowed_actions": list(expected.allowed_actions),
+            "updated_at": utc_now(),
+        }
+    )
+    if not observation.worker_alive:
+        payload.update(
+            {
+                "active_child_run": None,
+                "active_operation_id": None,
+                "operation_started": False,
+            }
+        )
     if decision.selected_action == "replan":
-        next_state.approved_plan_digest = None
-    return AgentState.model_validate(next_state.model_dump(mode="json"))
+        payload["approved_plan_digest"] = None
+    return AgentState.model_validate(payload)
 
 
 def _route(

@@ -15,6 +15,7 @@ from vega.agent_contract import (
 from vega.agent_graph import compile_gate1_graph
 from vega.agent_persistence import read_agent_trace
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_worker import SupervisorAgentWorker
 from vega.agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
@@ -54,7 +55,8 @@ def test_fake_worker_two_items_route_next_then_finalize(
     monkeypatch.chdir(workspace)
     run = runtime.start(repo, goal=plan.user_goal, plan=plan)
     approved = runtime.approve(run.run_dir.name)
-    first = runtime.start_work_item(
+    first = _started_worker(
+        workspace,
         approved.run_dir.name,
         child_run="attempt-01",
         operation_id="operation-01",
@@ -75,7 +77,8 @@ def test_fake_worker_two_items_route_next_then_finalize(
     assert first_result.state.current_work_item == "W2"
     assert first_result.plan.work_items[0].status == "completed"
 
-    second = runtime.start_work_item(
+    second = _started_worker(
+        workspace,
         first_result.run_dir.name,
         child_run="attempt-02",
         operation_id="operation-02",
@@ -121,7 +124,8 @@ def test_fake_worker_failure_routes_repair_and_unknown_side_effect_routes_human(
     runtime = SupervisorAgentRuntime(workspace)
     run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
     run = runtime.approve(run.run_dir.name)
-    run = runtime.start_work_item(
+    run = _started_worker(
+        workspace,
         run.run_dir.name,
         child_run="attempt-repair",
         operation_id="operation-repair",
@@ -141,7 +145,8 @@ def test_fake_worker_failure_routes_repair_and_unknown_side_effect_routes_human(
     assert repair.state.phase == "ready"
     assert repair.plan.work_items[0].status == "active"
 
-    run = runtime.start_work_item(
+    run = _started_worker(
+        workspace,
         repair.run_dir.name,
         child_run="attempt-human",
         operation_id="operation-human",
@@ -171,14 +176,15 @@ def test_duplicate_writer_and_workspace_drift_are_rejected(
     runtime = SupervisorAgentRuntime(workspace)
     run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
     run = runtime.approve(run.run_dir.name)
-    run = runtime.start_work_item(
+    run = _started_worker(
+        workspace,
         run.run_dir.name,
         child_run="attempt-01",
         operation_id="operation-01",
     )
 
     with pytest.raises(ValueError, match="当前状态不允许启动 Worker"):
-        runtime.start_work_item(
+        SupervisorAgentWorker(workspace).bind(
             run.run_dir.name,
             child_run="attempt-02",
             operation_id="operation-02",
@@ -189,7 +195,7 @@ def test_duplicate_writer_and_workspace_drift_are_rejected(
     second_run = runtime.approve(second_run.run_dir.name)
     (repo / "drift.txt").write_text("drift\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Workspace 已漂移"):
-        runtime.start_work_item(
+        SupervisorAgentWorker(workspace).bind(
             second_run.run_dir.name,
             child_run="attempt-drift",
             operation_id="operation-drift",
@@ -389,6 +395,21 @@ def _single_item_plan() -> AgentPlan:
                 verification=["运行定向测试"],
             )
         ],
+    )
+
+
+def _started_worker(
+    workspace: Path,
+    run: str,
+    *,
+    child_run: str,
+    operation_id: str,
+):
+    return SupervisorAgentWorker(workspace).bind(
+        run,
+        child_run=child_run,
+        operation_id=operation_id,
+        operation_started=True,
     )
 
 

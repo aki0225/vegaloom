@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from .agent_contract import AgentObservation, AgentPlan, AgentState, AgentWorkItem, approve_plan
 from .agent_persistence import (
-    AgentArtifactError,
     append_agent_trace,
-    load_agent_state,
     save_agent_state,
 )
 from .agent_graph import langgraph_available, record_supervisor_route
+from .agent_mutation import agent_mutation
+from .agent_run import AgentRun
 from .agent_routing import decide_next_action, transition_state
 from .agent_runtime_logic import (
     apply_work_item_progress,
@@ -31,21 +27,16 @@ from .agent_runtime_support import (
     state_from_task_card,
     validate_resume_workspace,
     write_checkpoint,
+    load_agent_bundle,
+    save_agent_plan,
     write_run_metadata,
     write_status_card,
     write_task_brief,
 )
 from .redaction import write_redacted_json
 from .repository_identity import repository_scope, resolve_git_revision
-from .run_utils import create_run_dir, resolve_run_dir
+from .run_utils import create_run_dir
 from .workspace_check import capture_review_workspace
-
-
-@dataclass(frozen=True)
-class AgentRun:
-    run_dir: Path
-    state: AgentState
-    plan: AgentPlan
 
 
 class SupervisorAgentRuntime:
@@ -108,6 +99,7 @@ class SupervisorAgentRuntime:
         write_status_card(run_dir, state, base_plan)
         return AgentRun(run_dir=run_dir, state=state, plan=base_plan)
 
+    @agent_mutation("agent.approve")
     def approve(self, run: str, *, actor: str = "human") -> AgentRun:
         run_dir, state, plan, _ = self._load_run(run)
         if state.phase != "awaiting_approval" or state.active_child_run:
@@ -151,6 +143,7 @@ class SupervisorAgentRuntime:
         write_status_card(run_dir, state, approved)
         return AgentRun(run_dir=run_dir, state=state, plan=approved)
 
+    @agent_mutation("agent.plan")
     def update_plan(self, run: str, draft: AgentPlan) -> AgentRun:
         run_dir, state, current, _ = self._load_run(run)
         if state.active_child_run:
@@ -210,54 +203,16 @@ class SupervisorAgentRuntime:
         )
         return AgentRun(run_dir=run_dir, state=state, plan=revised)
 
-    def start_work_item(
-        self,
-        run: str,
-        *,
-        child_run: str,
-        operation_id: str,
-    ) -> AgentRun:
-        run_dir, state, plan, _ = self._load_run(run)
-        if state.phase != "ready" or not {"next", "repair"}.intersection(
-            state.allowed_actions
-        ):
-            raise ValueError("当前状态不允许启动 Worker")
-        if state.active_child_run or state.active_operation_id:
-            raise ValueError("当前 run 已绑定 Writer，禁止启动第二 Writer")
-        snapshot = capture_bound_workspace(run_dir)
-        if snapshot.fingerprint != state.workspace_fingerprint:
-            raise ValueError("Worker 启动前 Workspace 已漂移，必须先重新对账")
-        state = update_state(
-            state,
-            phase="acting",
-            state_version=state.state_version + 1,
-            active_child_run=child_run,
-            active_operation_id=operation_id,
-            allowed_actions=["human"],
-        )
-        save_agent_state(run_dir / "agent-state.json", state)
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="worker_started",
-            state=state,
-            observation_summary="已绑定单一 Writer；Worker Claim 尚不是完成证据",
-            artifact_refs=["task-brief.md"],
-        )
-        write_status_card(
-            run_dir,
-            state,
-            plan,
-            next_step="等待 Worker 终态；失去终态时先检查进程并对账 Workspace",
-        )
-        return AgentRun(run_dir=run_dir, state=state, plan=plan)
-
+    @agent_mutation("agent.observe")
     def observe(
         self,
         run: str,
         observation: AgentObservation,
     ) -> AgentRun:
         run_dir, state, plan, _ = self._load_run(run)
-        if state.phase not in {"acting", "observing", "ready", "needs_human"}:
+        if not state.active_child_run or not state.active_operation_id:
+            raise ValueError("Observation 必须绑定当前 active Writer，不能从空闲状态伪造完成")
+        if state.phase not in {"acting", "observing", "needs_human"}:
             raise ValueError(f"当前阶段不能接受 Observation：{state.phase}")
         if (
             state.active_child_run
@@ -265,6 +220,12 @@ class SupervisorAgentRuntime:
             and observation.work_item_completed
         ):
             raise ValueError("Worker 仍存活时不能接受 Work Item 完成 Observation")
+        if (
+            state.active_child_run
+            and observation.operation_started != state.operation_started
+        ):
+            raise ValueError("Observation 与持久化 operation_started 不一致")
+        attempt = state.active_child_run
         actual = capture_bound_workspace(run_dir)
         reconciled = observation.model_copy(
             update={
@@ -326,6 +287,21 @@ class SupervisorAgentRuntime:
                 f"observations/{reconciled.observation_id}.json",
                 f"decisions/{decision.decision_id}.json",
             ],
+            completed_attempts=(
+                [attempt]
+                if attempt and reconciled.work_item_completed
+                else []
+            ),
+            failed_attempts=(
+                [attempt]
+                if attempt
+                and not reconciled.work_item_completed
+                and not reconciled.worker_alive
+                and decision.selected_action in {"repair", "replan", "human"}
+                else []
+            ),
+            operation_started=reconciled.operation_started,
+            external_side_effects=reconciled.external_side_effects,
         )
         state = update_state(
             state,
@@ -359,6 +335,7 @@ class SupervisorAgentRuntime:
         )
         return AgentRun(run_dir=run_dir, state=state, plan=plan)
 
+    @agent_mutation("agent.steer")
     def steer(self, run: str, *, instruction: str) -> AgentRun:
         if not instruction.strip():
             raise ValueError("steer instruction 不能为空")
@@ -479,22 +456,7 @@ class SupervisorAgentRuntime:
         return AgentRun(run_dir=run_dir, state=state, plan=card.plan)
 
     def _load_run(self, run: str) -> tuple[Path, AgentState, AgentPlan, dict[str, str]]:
-        run_dir = resolve_run_dir(self.workspace, run)
-        try:
-            state = load_agent_state(run_dir / "agent-state.json")
-            plan = AgentPlan.model_validate_json(
-                (run_dir / "agent-plan.json").read_text(encoding="utf-8")
-            )
-            metadata = json.loads(
-                (run_dir / "agent-run.json").read_text(encoding="utf-8")
-            )
-        except (OSError, ValidationError, json.JSONDecodeError, AgentArtifactError) as exc:
-            raise ValueError(f"Agent run 无法恢复：{run_dir.name}") from exc
-        if state.run_id != run_dir.name or plan.task_id != state.task_id:
-            raise ValueError("Agent run 身份绑定不一致")
-        if not isinstance(metadata, dict) or not isinstance(metadata.get("repo_path"), str):
-            raise ValueError("Agent run 缺少 repo binding")
-        return run_dir, state, plan, metadata
+        return load_agent_bundle(self.workspace, run)
 
     def _save_plan(self, run_dir: Path, plan: AgentPlan) -> None:
-        write_redacted_json(run_dir / "agent-plan.json", plan.model_dump(mode="json"))
+        save_agent_plan(run_dir, plan)

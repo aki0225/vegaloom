@@ -15,7 +15,8 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 审核 Supervisor Agent V1 方向 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | 待审核，不授权实现 |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | 已批准，Gate 2A 待 PR CI |
+| 跨机器继续 Supervisor Agent 实验 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | 当前交接 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
 | 查看 RCB-02 离线检索结果 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | Phase 0 停止，未运行 Holdout |
@@ -28,15 +29,17 @@
 
 ## 当前工作
 
-### 待审核：Supervisor Agent V1 实施计划
+### 进行中：Supervisor Agent V1 实验
 
 Vega 下一阶段的主线方向是一个轻量但完整的软件工程 Supervisor Agent：Codex、Claude Code 等
 Coding Agent 继续读代码和修改文件；Vega 负责调查、计划批准、派发、Workspace 对账、检查点、
 恢复、主会话进度展示，以及最终可信完成判断。完整链路和范围见
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)。
 
-方向已经明确，具体实施计划仍等待审核。审核稿不会改变 `v0.1.5` 的现有行为，也不授权立即接入
-LangGraph 或新 Runtime；通过后将先更新 `ROADMAP.md` 并从 Gate 0 的状态权威合同开始。
+实施计划已经批准。Gate 0 已冻结状态权威与数据合同，Gate 1 已接入最小 LangGraph 控制循环，
+Gate 2A 已在独立实验分支完成中断、恢复、单 Writer 和故障注入的本地验证。下一步先通过 PR CI
+与代码审查；在证据通过前不进入 Gate 2B 的真实 Codex 接入，也不改变 `v0.1.5` 的默认入口和
+成功语义。
 
 ### 真实日常使用观察
 
@@ -44,8 +47,8 @@ LangGraph 或新 Runtime；通过后将先更新 `ROADMAP.md` 并从 Gate 0 的�
 Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist、`vega do`、Reviewer
 打回和 fail-closed 场景均有记录。
 
-在 Supervisor Agent V1 计划获批并进入独立实验分支前，`v0.1.5` 继续按现有日常使用合同维护，
-不零散增加 Runtime 或基础设施。Finish 第一屏尚有测试名称缺失、空 Scope 展示和 Workspace
+Supervisor Agent V1 只在独立实验分支按 Gate 推进；`v0.1.5` 继续按现有日常使用合同维护，
+不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、空 Scope 展示和 Workspace
 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。当前状态与历史停止条件见：
 
 - [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：已完成阶段与验收记录。

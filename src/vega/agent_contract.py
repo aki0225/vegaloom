@@ -198,6 +198,8 @@ class AgentObservation(StrictAgentModel):
     evidence_refs: list[RelativePathText] = Field(default_factory=list)
     work_item_completed: bool = False
     worker_alive: bool = False
+    # `dispatch` 只代表已登记 Writer；恢复时必须另外确认 operation 是否真的开始。
+    operation_started: bool = True
     workspace_explained: bool = True
     unknown_file_count: int = Field(default=0, ge=0)
     external_side_effects: Literal["none", "known", "unknown"] = "none"
@@ -219,6 +221,10 @@ class AgentObservation(StrictAgentModel):
             raise ValueError("Worker 仍存活时不能声明全部 Work Item 已完成")
         if self.all_work_items_completed and not self.work_item_completed:
             raise ValueError("全部 Work Item 已完成时，当前 Work Item 也必须完成")
+        if not self.operation_started and (
+            self.work_item_completed or self.all_work_items_completed
+        ):
+            raise ValueError("operation 尚未开始时不能声明 Work Item 已完成")
         return self
 
 
@@ -249,6 +255,8 @@ class AgentCheckpoint(StrictAgentModel):
     phase: AgentPhase
     current_work_item: NonEmptyText | None = None
     active_child_run: NonEmptyText | None = None
+    operation_started: bool = False
+    external_side_effects: Literal["none", "known", "unknown"] = "none"
     workspace_fingerprint: Sha256Text
     changed_files: list[RelativePathText] = Field(default_factory=list)
     completed_attempts: list[NonEmptyText] = Field(default_factory=list)
@@ -264,7 +272,13 @@ class AgentCheckpoint(StrictAgentModel):
 
     @model_validator(mode="after")
     def validate_checkpoint_status(self) -> AgentCheckpoint:
-        if self.status == "safe" and not self.pending_actions:
+        if self.phase == "stopped" and self.active_child_run is not None:
+            raise ValueError("stopped Checkpoint 不能保留 active child")
+        if (
+            self.status == "safe"
+            and not self.pending_actions
+            and self.phase != "stopped"
+        ):
             raise ValueError("safe Checkpoint 必须声明后续允许动作")
         if self.status != "safe" and any(
             action in {"next", "repair", "finalize"} for action in self.pending_actions
@@ -308,6 +322,8 @@ class AgentState(StrictAgentModel):
     current_work_item: NonEmptyText | None = None
     active_child_run: NonEmptyText | None = None
     active_operation_id: NonEmptyText | None = None
+    # 绑定 Writer 不等于实际副作用已经开始；恢复时这两个事实必须分开记录。
+    operation_started: bool = False
     workspace_fingerprint: Sha256Text | None = None
     latest_checkpoint_id: NonEmptyText | None = None
     allowed_actions: list[AgentAction] = Field(default_factory=list)
@@ -317,8 +333,16 @@ class AgentState(StrictAgentModel):
 
     @model_validator(mode="after")
     def validate_phase_bindings(self) -> AgentState:
-        if self.phase == "acting" and not self.active_child_run:
-            raise ValueError("acting 阶段必须绑定 active_child_run")
+        has_child = self.active_child_run is not None
+        has_operation = self.active_operation_id is not None
+        if has_child != has_operation:
+            raise ValueError("active_child_run 与 active_operation_id 必须同时存在或同时为空")
+        if self.phase == "acting" and not has_child:
+            raise ValueError("acting 阶段必须绑定 active child 与 operation")
+        if self.operation_started and not has_child:
+            raise ValueError("没有 active Writer 时 operation_started 必须为 false")
+        if self.phase in {"completed", "stopped"} and has_child:
+            raise ValueError("终止阶段不能保留 active Writer")
         if self.phase == "completed" and self.terminal_status is None:
             raise ValueError("completed 阶段必须包含 terminal_status")
         if self.phase != "completed" and self.terminal_status is not None:

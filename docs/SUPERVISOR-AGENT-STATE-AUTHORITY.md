@@ -1,6 +1,6 @@
 # Supervisor Agent V1 状态权威与最小合同 ADR
 
-> 状态：`accepted / Gate 0`
+> 状态：`accepted / Gate 2A 本地验证完成`
 >
 > 日期：2026-08-13
 >
@@ -115,3 +115,23 @@ Core Artifact 对账。不能以恢复 Graph checkpoint 代替恢复执行事实
 - Resume Capsule 与分支发现规则；
 - 不同 Observation 至少产生三种不同合法 Decision；
 - 核心默认入口和成功语义没有变化。
+
+## 9. Gate 1 与 Gate 2A 实施证据
+
+Gate 1 已实现 Fake Worker 可见控制循环、Plan 批准、Task Brief、状态卡、LangGraph 条件路由和
+`next / repair / replan / human / finalize` 决策。Graph 只能进入 `finalizing`，不能写入
+`ready_to_commit`。
+
+Gate 2A 已补充：
+
+- run mutation 锁，确保并发 dispatch 只有一个 Writer 能取得绑定；
+- `worker_reserved` 与 `worker_started` 两阶段边界，区分“已登记”与“副作用已开始”；
+- Worker 仍存活时保留 child/operation binding，禁止第二 Writer；
+- operation 未开始且 Workspace 未变时，允许人工显式派发新 child；
+- partial diff、未知外部副作用、Trace 损坏和状态损坏进入人工处理；
+- SQLite Graph checkpoint 丢失不影响从 Agent State、Checkpoint 和真实 Workspace 对账；
+- `pause / resume-local / stop` 保留 Goal、Plan、Diff 和 Artifact，不执行自动回滚。
+
+本地故障注入与状态回归为 49 项通过；架构增长、Ruff、compileall、仓库卫生、CI 分片完整性和
+`git diff --check` 均通过。Python 3.14 环境仍出现 LangChain Core 的 Pydantic V1 兼容警告；
+项目 CI 使用 Python 3.11/3.12，最终结论等待 PR CI。
