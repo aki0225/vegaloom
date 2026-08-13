@@ -6,14 +6,15 @@
 >
 > 主线基线：`origin/main@706286d`
 >
-> 状态：`Gate 2A 审阅修复完成 / 最新 HEAD 待 PR CI`
+> 状态：`Gate 2A 代码与审阅通过 / 状态文档 HEAD 待 CI`
 
 ## 当前结论
 
-Gate 0、Gate 1 与 Gate 2A 已在同一个实验分支实现，Draft PR `#57` 已建立。旧代码 HEAD
-`0faf2a7` 的 9 项 CI 全部通过；独立审阅发现并修复了 Observation 发布、Plan 发布顺序、
-Recovery 证据引用和中间 Work Item 门禁四类问题。审阅修复仍须通过最新 HEAD 的 PR CI，
-因此当前**不应直接合并到 `main`，也不应开始 Gate 2B 的真实 Codex 接入**。
+Gate 0、Gate 1 与 Gate 2A 已在同一个实验分支实现，Draft PR `#57` 已建立。独立审阅发现并
+修复了 Observation 发布、Plan 发布顺序、Recovery 证据引用和中间 Work Item 门禁四类问题。
+修复后的代码 HEAD `4180e7e` 已通过 workflow `31718078414` 的 9 项 CI，最终差异复核没有
+阻断项。本次只更新状态文档；该纯文档 HEAD 通过自身 CI 后可把 PR 转为 Ready，但仍
+**不应自动合并到 `main`，也不应开始 Gate 2B 的真实 Codex 接入**。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 新增了 opt-in `vega agent` 子命令。`vega agent` 仍是实验入口；
@@ -66,6 +67,8 @@ Agent 状态、恢复、Task Card 与锁定向回归：62 passed
 审阅修复后完整测试节点收集：1192 collected
 旧代码 HEAD 完整测试节点收集：1188 collected
 旧代码 HEAD PR #57 CI：9/9 success
+审阅修复代码 HEAD 4180e7e PR #57 CI：9/9 success
+workflow：31718078414
 Ruff：通过
 compileall：通过
 architecture growth：通过（C901 35->35，Python 模块 104->122）
@@ -80,9 +83,9 @@ Recovery 20、Runtime 19、Task Card 4，共 `62 passed`。Runtime 拆为 10/9 �
 34.62 秒与 30.49 秒；Recovery 拆为 10/10 节点，分别用时 33.18 秒与 33.65 秒。整文件 Runtime
 和 Recovery 的首次命令超过 60 秒，只能记录为超时未验证，不能计为失败或通过。
 
-旧代码 HEAD `0faf2a7` 已完成 9 项 PR CI；审阅修复后的最新 HEAD 尚未取得跨平台 CI 终态。
-当前完整节点收集为 `1192 collected`，比旧代码 HEAD 增加 4 个审阅回归。全仓最终结论必须
-等待最新 PR CI，不能复用旧 HEAD 的绿色状态。
+审阅修复代码 HEAD `4180e7e` 已完成 workflow `31718078414` 的 9 项 PR CI。当前完整节点
+收集为 `1192 collected`，比旧代码 HEAD 增加 4 个审阅回归。本次状态文档提交不修改代码、
+测试或成功语义；其自身 CI 通过后不再追加 post-CI 文档提交，直接把 PR 转为 Ready。
 
 ## 回家后继续
 
@@ -97,11 +100,12 @@ Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
 建议顺序：
 
 1. 确认本地 HEAD 与远端实验分支一致，Workspace 干净。
-2. 查看 Draft PR `#57` 最新 HEAD 的全部 CI，不能复用 `0faf2a7` 的成功结果。
+2. 查看 Draft PR `#57` 状态文档 HEAD 的全部 CI，代码证据固定为 `4180e7e` /
+   workflow `31718078414`。
 3. CI 失败时只修复能够复现的失败，不降低 fail-closed、单 Writer 或 60 秒测试上限。
 4. CI 通过后再做一次最终 diff 审查，重点检查 Observation/Plan 发布顺序、Writer binding
    核销条件、损坏 Artifact 和 partial diff 的恢复路径。
-5. 审查没有阻断项后，再决定是否把 Draft 转为 Ready；Gate 2B 仍需单独获得实施决定。
+5. 状态文档 HEAD 的 CI 通过后把 Draft 转为 Ready；Gate 2B 仍需单独获得实施决定。
 
 ## 下一 Gate 的边界
 
@@ -119,7 +123,7 @@ Gate 2B 不新增多 Worker、Provider 平台、服务端、自动重试、自�
 
 ## 未完成事项
 
-- Draft PR `#57` 的旧代码 HEAD 已通过 9 项 CI；审阅修复后的最新 HEAD 尚待 CI。
+- Draft PR `#57` 的审阅修复代码 HEAD `4180e7e` 已通过 9 项 CI；本次状态文档 HEAD 尚待 CI。
 - 尚未连接真实 Codex Worker。
 - 尚未执行两个冻结真实案例。
 - 尚未验证跨机器 Task Card 接力和 Claude Code 薄 Adapter；它们属于 Gate 3。

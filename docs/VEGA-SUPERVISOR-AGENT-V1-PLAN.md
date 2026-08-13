@@ -1,13 +1,14 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2A 审阅修复待最新 PR CI`
+> 状态：`approved / Gate 2A 代码与审阅通过 / 状态文档 HEAD 待 CI`
 >
 > 计划日期：2026-08-13
 >
 > 规划基线：`main@8884458` / `v0.1.5`
 >
-> 本文已获批准，并在独立实验分支按 Gate 推进。Gate 2A 已完成本地实现和独立代码审查；
-> 审阅修复必须通过最新 PR CI，证据通过前不进入 Gate 2B。
+> 本文已获批准，并在独立实验分支按 Gate 推进。Gate 2A 代码 HEAD `4180e7e` 已完成本地验证、
+> 独立代码审查和 workflow `31718078414` 的 9 项 CI；本次状态文档 HEAD 通过自身 CI 后即可把
+> PR 转为 Ready，证据通过前不进入 Gate 2B。
 
 ## 一、产品决定
 

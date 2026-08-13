@@ -8,8 +8,9 @@
 > 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式 `--rerun-worker`
 > 已进入主线；r6 真实路径、七项启动前证据加固、崩溃恢复事务及 PR #55 的 9 项 CI 均已
 > 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已在
-> 独立实验分支完成本地实现和独立审查。Draft PR `#57` 的旧代码 HEAD 已通过 9 项 CI，
-> 审阅修复仍须通过最新 HEAD CI，再决定是否进入 Gate 2B 真实 Codex 接入。既有
+> 独立实验分支完成本地实现和独立审查。Draft PR `#57` 的审阅修复代码 HEAD `4180e7e`
+> 已通过 workflow `31718078414` 的 9 项 CI；状态文档 HEAD 通过自身 CI 后可转为 Ready，
+> Gate 2B 仍需单独决定。既有
 > `vega do / loop / goal`、Reviewer 和成功语义保持不变，顶层 CLI 仅新增 opt-in `agent`。
 
 本文是 Vega 当前路线的统一入口，只回答：
@@ -42,7 +43,7 @@ v0.1.5 发布（完成）
   -> 真实控制进程中断 dogfood（r3 reject；r6 显式重跑路径通过）
   -> r6 后安全审阅与 baseline/授权加固（完成并进入主线）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
-  -> Gate 2A 中断恢复（审阅修复完成，等待最新 PR CI）
+  -> Gate 2A 中断恢复（代码与审阅通过，状态文档 HEAD 待 CI）
   -> Gate 2B 真实 Codex → Gate 3 跨机器/Claude Code
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
@@ -648,7 +649,7 @@ Checkpoint、Task Brief、主会话控制、恢复和现有 Core 的可信完成
 1. Gate 0：冻结状态权威、Task Card、Resume Capsule、Task Brief、Checkpoint、Trace 与 Decision Contract；
 2. Gate 1：Fake Worker 证明主会话可见、人工批准和 `next/repair/replan/human/finalize` 条件路由；
 3. Gate 2A：验证重复 Writer、partial diff、未知副作用和损坏状态恢复
-   （审阅修复完成，等待最新 PR CI）；
+   （代码 HEAD `4180e7e` 的 9 项 CI 与独立审查通过，状态文档 HEAD 待 CI）；
 4. Gate 2B：接入真实 Codex；
 5. Gate 3：验证未完成 WIP 经任务分支 commit/push 后的跨机器恢复，并完成 Claude Code 薄接入。
 
@@ -663,7 +664,8 @@ execution 证据时保留旧 Writer、Worker 仍存活、partial diff、数据�
 未知副作用、operation identity 不可复用、Observation write-once、Recovery 证据引用、
 Task Card 与 Observation 推进的安全发布顺序、中间 Work Item 门禁、损坏 state、未知 schema、
 Trace 尾部截断、SQLite 丢失以及 pause/resume/stop 均有定向回归。本地 Agent 回归为
-`62 passed`；最终测试计数以最新 PR CI 为准。当前未连接真实 Codex，既有默认命令行为未改变。
+`62 passed`；代码 HEAD `4180e7e` 的 workflow `31718078414` 为 9/9 success。当前未连接
+真实 Codex，既有默认命令行为未改变。
 
 ## 七、更新规则
 
