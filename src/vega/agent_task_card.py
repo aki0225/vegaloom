@@ -312,6 +312,45 @@ def task_card_content_digest(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def compute_handoff_workspace_digest(
+    repo: Path,
+    changed_files: list[str],
+) -> str:
+    """绑定准备交接的 WIP 文件内容；Task Card 自身不参与，避免自引用摘要。"""
+
+    root = repo.resolve(strict=True)
+    entries: list[dict[str, object]] = []
+    for relative in _normalize_relative_paths(changed_files):
+        path = (root / PurePosixPath(relative)).resolve(strict=False)
+        if not path.is_relative_to(root):
+            raise TaskCardError(f"交接文件越过仓库边界：{relative}")
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            entries.append({"path": relative, "kind": "missing"})
+            continue
+        if path.is_symlink():
+            entries.append(
+                {
+                    "path": relative,
+                    "kind": "symlink",
+                    "target": os.readlink(path),
+                }
+            )
+            continue
+        if not path.is_file():
+            raise TaskCardError(f"交接文件不是普通文件：{relative}")
+        entries.append(
+            {
+                "path": relative,
+                "kind": "file",
+                "size": metadata.st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    return canonical_digest({"changed_files": entries})
+
+
 def _current_branch(repo: Path) -> str:
     process = subprocess.run(
         ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],

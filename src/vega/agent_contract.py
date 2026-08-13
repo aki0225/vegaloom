@@ -166,10 +166,16 @@ class AgentPlan(StrictAgentModel):
         return self
 
     def content_for_approval(self) -> dict[str, object]:
-        return self.model_dump(
+        payload = self.model_dump(
             mode="json",
             exclude={"approved", "approved_at", "approved_by", "approved_digest"},
         )
+        # Work Item 进度是运行状态，不属于人工批准的计划内容；推进状态不能让批准自行失效。
+        payload["work_items"] = [
+            item.model_dump(mode="json", exclude={"status"})
+            for item in self.work_items
+        ]
+        return payload
 
     def expected_approval_digest(self) -> str:
         return canonical_digest(self.content_for_approval())
@@ -190,8 +196,10 @@ class AgentObservation(StrictAgentModel):
     workspace_fingerprint: Sha256Text
     changed_files: list[RelativePathText] = Field(default_factory=list)
     evidence_refs: list[RelativePathText] = Field(default_factory=list)
+    work_item_completed: bool = False
     worker_alive: bool = False
     workspace_explained: bool = True
+    unknown_file_count: int = Field(default=0, ge=0)
     external_side_effects: Literal["none", "known", "unknown"] = "none"
     plan_contradicted: bool = False
     repairable_in_scope: bool = False
@@ -209,6 +217,8 @@ class AgentObservation(StrictAgentModel):
     def validate_observation(self) -> AgentObservation:
         if self.worker_alive and self.all_work_items_completed:
             raise ValueError("Worker 仍存活时不能声明全部 Work Item 已完成")
+        if self.all_work_items_completed and not self.work_item_completed:
+            raise ValueError("全部 Work Item 已完成时，当前 Work Item 也必须完成")
         return self
 
 
@@ -248,6 +258,39 @@ class AgentCheckpoint(StrictAgentModel):
     created_at: str = Field(default_factory=utc_now)
 
     @field_validator("changed_files", "evidence_refs")
+    @classmethod
+    def validate_paths(cls, values: list[str]) -> list[str]:
+        return _normalize_relative_paths(values)
+
+    @model_validator(mode="after")
+    def validate_checkpoint_status(self) -> AgentCheckpoint:
+        if self.status == "safe" and not self.pending_actions:
+            raise ValueError("safe Checkpoint 必须声明后续允许动作")
+        if self.status != "safe" and any(
+            action in {"next", "repair", "finalize"} for action in self.pending_actions
+        ):
+            raise ValueError("uncertain/blocked Checkpoint 不能允许自动写入或 finalize")
+        return self
+
+
+class AgentStatusCard(StrictAgentModel):
+    run_id: NonEmptyText
+    task_id: NonEmptyText
+    phase: AgentPhase
+    task_goal: NonEmptyText
+    work_item_label: NonEmptyText
+    worker_label: NonEmptyText
+    changed_files: list[RelativePathText] = Field(default_factory=list)
+    unknown_file_count: int = Field(default=0, ge=0)
+    latest_checkpoint: NonEmptyText | None = None
+    checkpoint_status: CheckpointStatus | None = None
+    verification: GateStatus = "not_run"
+    risk: GateStatus = "not_run"
+    review: GateStatus = "not_run"
+    allowed_actions: list[AgentAction] = Field(default_factory=list)
+    next_step: NonEmptyText
+
+    @field_validator("changed_files")
     @classmethod
     def validate_paths(cls, values: list[str]) -> list[str]:
         return _normalize_relative_paths(values)

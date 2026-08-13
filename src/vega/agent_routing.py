@@ -67,6 +67,8 @@ def transition_state(
     if decision.selected_action in {"next", "repair", "replan", "human"}:
         next_state.active_child_run = None
         next_state.active_operation_id = None
+    if decision.selected_action == "replan":
+        next_state.approved_plan_digest = None
     return AgentState.model_validate(next_state.model_dump(mode="json"))
 
 
@@ -74,20 +76,9 @@ def _route(
     plan: AgentPlan,
     observation: AgentObservation,
 ) -> tuple[list[AgentAction], AgentAction, str]:
-    if not plan.approval_is_current():
-        return ["replan", "human"], "replan", "Plan 未批准或批准摘要已过期"
-
-    if observation.worker_alive:
-        return ["human"], "human", "旧 Worker 仍存活，禁止启动第二 Writer"
-
-    if not observation.workspace_explained:
-        return ["human"], "human", "Workspace 变化尚未完成机器对账"
-
-    if observation.external_side_effects == "unknown":
-        return ["human"], "human", "外部副作用未知，禁止自动重试"
-
-    if observation.plan_contradicted:
-        return ["replan", "human"], "replan", "新证据推翻已批准 Plan"
+    precondition = _precondition_route(plan, observation)
+    if precondition is not None:
+        return precondition
 
     blocking_gate = _blocking_gate(observation)
     if blocking_gate is not None:
@@ -113,7 +104,46 @@ def _route(
             )
         return ["finalize"], "finalize", "全部 Work Item 与完成门禁均已通过"
 
-    return ["next", "replan", "human"], "next", "当前现场可解释，可进入下一 Work Item"
+    if observation.work_item_completed:
+        return ["next", "replan", "human"], "next", "当前 Work Item 已完成，可进入下一项"
+
+    if observation.repairable_in_scope:
+        return (
+            ["repair", "replan", "human"],
+            "repair",
+            "当前 Work Item 尚未完成，问题仍可在批准范围内修复",
+        )
+
+    return ["human"], "human", "当前 Work Item 没有可信完成或可修复证据"
+
+
+def _precondition_route(
+    plan: AgentPlan,
+    observation: AgentObservation,
+) -> tuple[list[AgentAction], AgentAction, str] | None:
+    checks = (
+        (
+            not plan.approval_is_current(),
+            (["replan", "human"], "replan", "Plan 未批准或批准摘要已过期"),
+        ),
+        (
+            observation.worker_alive,
+            (["human"], "human", "旧 Worker 仍存活，禁止启动第二 Writer"),
+        ),
+        (
+            not observation.workspace_explained,
+            (["human"], "human", "Workspace 变化尚未完成机器对账"),
+        ),
+        (
+            observation.external_side_effects == "unknown",
+            (["human"], "human", "外部副作用未知，禁止自动重试"),
+        ),
+        (
+            observation.plan_contradicted,
+            (["replan", "human"], "replan", "新证据推翻已批准 Plan"),
+        ),
+    )
+    return next((route for matched, route in checks if matched), None)
 
 
 def _blocking_gate(observation: AgentObservation) -> str | None:

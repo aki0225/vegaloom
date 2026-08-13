@@ -63,6 +63,7 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
                 work_item_id="W1",
                 machine_summary="当前现场可解释",
                 workspace_fingerprint=FINGERPRINT,
+                work_item_completed=True,
             ),
             "next",
         ),
@@ -96,6 +97,7 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
                 verification="passed",
                 risk="passed",
                 review="passed",
+                work_item_completed=True,
                 all_work_items_completed=True,
             ),
             "finalize",
@@ -122,6 +124,7 @@ def test_finalize_is_rejected_when_verification_failed() -> None:
         verification="failed",
         risk="passed",
         review="passed",
+        work_item_completed=True,
         all_work_items_completed=True,
     )
     routed = decide_next_action(plan, observation)
@@ -230,6 +233,7 @@ def test_checkpoint_rejects_non_relative_evidence_ref() -> None:
             status="safe",
             phase="ready",
             workspace_fingerprint=FINGERPRINT,
+            pending_actions=["next"],
             evidence_refs=["../outside.json"],
         )
 
