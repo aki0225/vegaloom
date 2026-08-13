@@ -1,701 +1,990 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`revised / awaiting-owner-approval`
+> 状态：`rewritten / awaiting-owner-approval`
 >
-> 计划日期：2026-08-11
+> 计划日期：2026-08-13
 >
-> 规划基线：`main@40a273d` / `v0.1.5`
+> 规划基线：`main@8884458` / `v0.1.5`
 >
-> 本文只定义下一阶段 Agent 实验。它不改变当前 `vega do / loop / goal` 的默认行为，
-> 也不代表主线已经具备本文描述的 Agent 能力。
+> 本文确定 Vega 下一阶段的 Agent 主线，但不授权立即修改 Runtime。审核通过后才进入 Gate 0。
 
 ## 一、产品决定
 
-Vega 下一阶段候选方向是：
+Vega 下一阶段要做成一个**轻量但完整的软件工程 Supervisor Agent**。
 
-> **一个本地优先、可恢复、证据驱动的软件工程 Supervisor Agent。**
+它不替代 Codex、Claude Code 的读代码、调用工具和修改能力，也不与它们竞争通用 Coding Agent；
+它负责把一个可能很模糊、可能持续数天的工程任务组织成可以调查、批准、执行、观察、恢复和验收的过程。
 
-外部 Coding Agent 继续负责读代码、调用工具和修改文件；Vega 负责把模糊或长程工程目标组织为
-可恢复的 Goal、WorkPlan、Context、Working Memory、Observation 和 Decision；现有 Vega Core
-继续裁决 Workspace、Scope、Verification、Risk、Reviewer 和 Finish。
+一句话说明这条链路：
+
+> 用户提出目标，Vega 先调查并固定计划；Coding Agent 分步修改；Vega 持续核对真实 Workspace、
+> 验证证据和风险，主会话随时看得到进度，也能暂停、改计划或接管；最后仍由现有 Vega Core
+> 判断任务能不能交付。
 
 ```text
 用户目标
-  → Supervisor 只读调查
-  → 生成多步骤 WorkPlan
-  → 人工批准范围、风险和预算
-  → 为当前 Work Item 编译最小必要上下文
-  → 外部 Coding Agent 执行一个有界 child loop
-  → 对账 Workspace、验证、风险和独立 Reviewer
-  → 更新工作记忆
-  → 继续下一项 / Replan / Human / Finish
+  → 只读调查
+  → Plan 与人工批准
+  → 编译当前 Task Brief
+  → 派发一个可写 Worker
+  → 对账进程、Workspace 和 Artifact
+  → Verification / Risk / 独立 Reviewer
+  → next / repair / replan / human / finalize
+  → Checkpoint、恢复与 Finish
 ```
 
-### 1.1 Agent 的验收定义
+### 1.1 为什么它是 Agent，而不只是换名后的流水线
 
-V1 必须同时满足：
+V1 必须具备以下完整能力：
 
-1. 持久化 Goal、Non-goals、约束、成功条件和预算；
-2. 面对模糊目标时先使用只读工具调查；
-3. 生成可批准、可分步执行的 WorkPlan，并区分事实与假设；
-4. 根据最新 Observation 动态选择下一动作，而不是只跑固定流水线；
-5. 用户新指令形成 Goal/Plan revision，不静默覆盖旧目标；
-6. 关键事实、失败尝试和开放子目标形成有来源、可失效的 run-local 工作记忆；
-7. 每次模型调用从持久状态重新编译上下文，不依赖完整聊天历史；
-8. 控制进程或模型会话中断后，先对账原 child 和 Workspace 再继续；
-9. 未知副作用不自动重放，过期批准不继续使用；
-10. 最终成功仍由现有确定性门禁裁决。
+1. 保存目标、边界、成功条件和人工决定；
+2. 面对未知 Bug 位置时主动进行只读调查；
+3. 根据调查结果制定可批准的多步骤计划；
+4. 派发外部 Coding Agent 执行当前 Work Item；
+5. 把 Worker 的自述与机器观察到的事实分开；
+6. 根据不同 Observation 选择不同下一动作；
+7. 在会话压缩、429、断网、进程退出或换机器后恢复；
+8. 允许用户从主会话查询、批准、纠偏、暂停和接管；
+9. 对失败尝试和当前进度保留可追溯记录；
+10. 继续使用确定性验证、风险门禁、隔离 Reviewer 和 Finish 裁决。
 
-核心循环是：
+Agent 的关键不是角色数量，而是形成以下循环：
 
 ```text
-Goal → Compile Context → Observe → Decide → Act → Reconcile
-     → Update Working Memory → Continue / Replan / Human / Finish
+Goal → Observe → Decide → Act → Reconcile
+  ↑                              ↓
+  └──── Checkpoint / Human ──────┘
 ```
 
-如果最终只是把当前 `brief → worker → verify → review → finish` 顺序放入 `StateGraph`，
-没有真实的上下文重建、条件路由、工作记忆和恢复价值，则实验失败，Vega 继续保持 Harness 定位。
+如果某个 LangGraph 节点、数据结构或 Adapter 没有带来实际价值，应替换或删除该实现；
+**这不等于放弃 Supervisor Agent 主线**。Vega 保持 Agent 方向，只限制外围范围，避免变成通用平台。
 
-### 1.2 与当前主线的关系
+### 1.2 与 Codex、Claude Code 和 Vega Core 的边界
 
-- `vega do`、`vega loop` 和 `vega goal` 保持 Linear Runtime 和现有成功语义；
-- 新入口 `vega agent` 必须显式 opt-in；
-- Agent 编排现有 Core，不复制 Verification、Risk、Reviewer 或 Finish；
-- Gate 3 没有证明真实增量价值前，不成为默认入口；
-- 小改动、纯探索和临时原型继续直接使用宿主 Agent，不必经过 Vega Agent。
+- Codex、Claude Code 继续负责理解代码、使用工具和修改文件；
+- Vega Supervisor 负责任务状态、计划批准、派发、观察、路由、检查点和恢复；
+- Vega Core 继续拥有 Workspace、Scope、Verification、Risk、Reviewer 和 Finish 的成功语义；
+- Reviewer 保持独立只读会话，不继承 Worker 的完整对话和中间推理；
+- 人工继续负责批准计划、高风险确认、提交、推送和发布；
+- `vega do / loop / goal` 在 V1 验证完成前保持现有行为。
 
-## 二、设计原则、参考与角色边界
+## 二、责任主体与事实权威
 
-### 2.1 五条固定原则
+### 2.1 五个责任主体
 
-1. **文件状态优先于聊天历史**：会话可以压缩或消失，持久文件必须能重建下一步。
-2. **上下文按角色编译**：Supervisor、Worker、Reviewer 不共享一整包聊天。
-3. **工具输出先成为 Observation**：不可信正文不能直接改 Goal、Plan 或 Memory。
-4. **模型提出，规则裁决**：模型选择下一步；确定性代码决定能否执行和成功。
-5. **单一业务状态权威**：LangGraph checkpoint 只保存图游标，不拥有业务成功事实。
-
-### 2.2 吸收开源项目的优点
-
-| 来源 | 吸收 | 不照搬 |
+| 主体 | 职责 | 明确不做 |
 |---|---|---|
-| LangGraph | `StateGraph`、checkpoint、interrupt/resume、streaming | Store、Agent Server 和第二套业务状态 |
-| mini-SWE-agent | 极小循环、透明轨迹、明确预算 | 任意 Bash 作为全部安全边界 |
-| Aider | 预算化上下文和 Diff 可见性 | Repo Map、自动 commit |
-| Pi | 生命周期事件、steer、恢复思想 | TUI、Provider/OAuth 平台和会话树 |
-| OpenHands | Agent、Workspace、Action/Observation 分层 | 远程平台、队列和 Canvas |
-| Codex / Claude Code / Goose | 通过稳定合同接入成熟 Coding Agent | 重写模型工具循环或绑定唯一厂商 |
+| 主会话 | 接收用户目标、展示计划与状态、转发人工决定 | 不凭聊天文本宣称任务成功 |
+| Supervisor | 调查、编译计划与上下文、派发、观察、选择下一动作 | 不直接修改业务代码，不绕过 Core |
+| Worker | 完成一个有界 Work Item，返回 Claim 和执行 Artifact | 不决定任务是否完成 |
+| Reviewer | 在独立只读会话中审查 Diff、规则和验证证据 | 不接受 Worker 完整聊天，不覆盖确定性 Gate |
+| 人工 | 批准、纠偏、处理高风险和最终 Git 操作 | 不需要通读每一行日志才能知道当前状态 |
 
-旧 `experiment/langgraph-comparison` 已证明 checkpoint、HITL 和副作用对账值得保留，也证明默认
-替换 Linear Runtime、默认多 Reviewer、同时建设 FastAPI/SSE/Memory 平台不值得继续。V1 只
-选择性参考结论，不整体迁移旧分支。
+主会话既是用户入口，也是 Vega 的控制台；Supervisor 的持久状态不依赖主会话是否还保留完整聊天。
 
-### 2.3 四个责任主体
+### 2.2 两类权威顺序
 
-**Supervisor**：版本化 Goal，使用只读工具调查，形成 Plan，编译上下文，维护工作记忆，发起
-HITL，并在受限动作集合中决定下一步；它不直接写业务代码。
+任务意图的权威顺序：
 
-**Agent Host Adapter**：连接 Codex、未来的 Claude Code 或 Pi，传递有界请求，启动/检查/停止
-外部 Agent，并输出结构化结果和安全事件。它不是通用 Provider SDK。
+```text
+用户当前指令、AGENTS.md、.vega.yaml
+  > 已批准 Plan
+  > Worker 建议和历史 Memory
+```
 
-**Vega Core**：继续拥有 Workspace Baseline、Scope Gate、Verification、Risk Gate、独立
-Reviewer、Finish、Stop、Timeout、Recover、Run Lock 和进程所有权。
+执行事实的权威顺序：
 
-**人类**：批准 Plan，处理高风险、状态冲突和最终提交。Vega 仍不自动 commit、push 或 release。
+```text
+存活进程、Git 与真实 Workspace
+  > 当前结构化 Artifact 和新鲜度校验
+  > Task Card / Checkpoint 中已核对的历史
+  > Worker Claim、模型摘要和聊天文本
+```
 
-Reviewer 继续与 Worker 会话隔离。它可以读取批准的 Goal/Plan、项目规则、完整 changed files、
-Diff 和门禁证据，但不接收 Worker transcript、Supervisor 内部推理或未经验证的 Memory。
+Worker 说“已经改好”只是一项 `Claim`。只有 Workspace、Artifact 和门禁能够形成 `Observation`；
+只有 Supervisor 或现有 Core 根据受信任 Observation 才能形成 `Decision`。
 
-## 三、Goal、WorkPlan 与 LangGraph
+## 三、完整运行链路
 
-### 3.1 Goal 和 WorkPlan
+### 3.1 接收目标
 
-Goal 是用户意图的版本化权威记录，至少包含：
+Vega 首先记录：
 
-- objective、non-goals、constraints 和 success conditions；
-- 必须人工处理的 checkpoint；
-- Work Item、Replan、Worker attempt、时间和 Token 总预算；
-- 用户原始指令的 artifact ref。
+- 用户原始要求；
+- Non-goals；
+- 成功条件；
+- 目标仓库、分支和 Workspace；
+- 已知风险与人工必须确认的节点；
+- 时间、Worker attempt 和 Replan 预算。
 
-用户增加限制时产生新 revision。若变化影响范围、风险或验证，当前 Plan 自动失效并重新批准。
+默认先形成 Plan。只有用户已给出精确范围、验证方式和成功条件时，调查可以缩短为快速核实，
+不能因为任务看起来很小就直接跳过边界确认。
 
-WorkPlan 由少量串行 Work Item 组成，每项包含：
+主会话显示：目标已登记、当前 Workspace、下一步是快速核实还是完整调查。
+
+### 3.2 只读调查
+
+Supervisor 只读检查：
+
+- `AGENTS.md`、`.vega.yaml` 和项目规则；
+- 相关源码、调用链、测试、配置和历史证据；
+- 用户提供的错误、堆栈、复现步骤或 Issue；
+- 当前分支、HEAD、工作区状态和已有运行产物。
+
+调查结果必须分成：
+
+- `Observed Facts`：有文件、命令或 Artifact 来源的事实；
+- `Hypotheses`：尚未证明的根因或影响判断；
+- `Unresolved Decisions`：进入修改前仍需用户决定的问题。
+
+支付、数据库与迁移、并发与异步、权限、敏感数据、部署和外部 API 副作用应在计划前标记，
+不能等到 Finish 才第一次披露。
+
+主会话显示“调查完成”以及少量关键事实、假设和未决问题，不倾倒全部搜索日志。
+
+### 3.3 制定 Plan
+
+Plan 拆成 2～4 个粗粒度 Work Item。每项至少说明：
 
 ```yaml
-id: "WI-01"
-objective: "可独立检查的结果"
-depends_on: []
+id: WI-01
+objective: 可独立检查的结果
 allowed_paths: []
+forbidden_paths: []
 verification: []
 risk_notes: []
-requires_human_before_start: false
-status: "pending | active | passed | failed | blocked | superseded"
+depends_on: []
+status: pending
 ```
 
-Plan 还保存 observed facts、hypotheses、unresolved decisions、Goal revision 和 `plan_sha256`。
-V1 同一时间只有一个 active child。只有上一个 child 已产生可校验终态、Workspace/策略未漂移、
-下一项仍在批准范围且预算有余量时，Agent 才能自动进入下一 Work Item。
+整份 Plan 还必须包含：
 
-为减少人工 Review 的重新搜索成本，WorkPlan 或后续 Observation 可以携带少量可选
-`impact_hypotheses`，每项只记录 category、statement、evidence refs 和 required checks。它们只是
-待核实假设，不新建独立 Impact Ledger，不宣称完整召回，也不参与成功门禁。Finish 若展示，
-必须附代码或 artifact 来源；证据尚不足的项目只能进入“未核实”，不能写成“已确认影响”。
+- Goal 与 Non-goals；
+- 已观察事实与根因假设；
+- 允许读取和修改的范围；
+- 验证命令和人工检查项；
+- 失败、中断和 Replan 的处理方式；
+- 总预算和停止条件。
 
-候选默认上限是四个 Work Item、每个 child 最多两次现有 Worker iteration、最多一次 Replan，
-总 deadline 四小时；Gate 0 冻结最终值。该上限足以验证数小时任务，但不会变成无限自治。
+Plan 不是模型对未来的保证，而是当前证据下的执行合同。
 
-### 3.2 最小 Graph
+### 3.4 人工批准
+
+主会话展示 Plan，用户可以：
+
+- 批准；
+- 修改；
+- 缩小范围；
+- 要求补充调查；
+- 拒绝或停止任务。
+
+批准绑定：
+
+- Goal revision；
+- Plan revision 与 digest；
+- Workspace baseline；
+- 范围、风险、验证和预算。
+
+用户改变目标、范围、风险、验证或成功条件时，旧批准立即失效。Supervisor 生成新 revision，
+再次展示并等待批准；不会把“用户说继续”解释成对未知扩大范围的默认同意。
+
+### 3.5 准备 Task Brief
+
+每次准备派发 Worker 或恢复新会话前，Vega 从持久材料重新生成短 `Task Brief`：
 
 ```text
-START
-  ↓
-reconcile
-  ├─ no_plan ───────────────→ investigate_plan
-  ├─ approval_required ─────→ await_approval
-  ├─ ready_work_item ───────→ dispatch_child
-  ├─ child_terminal ────────→ reduce_and_route
-  ├─ all_items_done ────────→ finalize
-  └─ conflict / unknown ────→ request_human
-
-investigate_plan → await_approval
-await_approval   → reconcile | investigate_plan | END(rejected)
-dispatch_child   → reconcile
-
-reduce_and_route
-  ├─ deterministic_continue ─→ reconcile
-  ├─ deterministic_human ────→ request_human
-  ├─ deterministic_finish ───→ finalize → END
-  └─ ambiguous ──────────────→ supervisor_decide
-
-supervisor_decide
-  ├─ continue_plan ──────────→ reconcile
-  ├─ replan ─────────────────→ investigate_plan
-  ├─ request_human ──────────→ request_human
-  └─ finish ─────────────────→ finalize → END
-
-request_human → reconcile | investigate_plan | END(stopped)
+Task Card
++ 当前 Git / Workspace
++ 当前 Work Item
++ 最近 Checkpoint
++ 最新 Verification / Risk / Review
++ 相关 Artifact 引用
++ 可验证的 accepted memory
 ```
 
-节点保持窄：
+它只回答：现在要做什么、已经确认什么、哪里失败过、当前 Workspace 是什么、下一步允许做什么。
+完整聊天、内部推理和完整历史日志不属于恢复依赖。
 
-- `reconcile` 读取真实 Goal、Plan、child、Workspace、进程和 artifact，校验 identity、integrity
-  与 freshness；
-- `investigate_plan` 编译规划上下文，调用一次只读 Supervisor operation；
-- `await_approval` 使用 LangGraph `interrupt()`；
-- `dispatch_child` 只启动当前 Work Item 对应的现有 child loop；
-- `reduce_and_route` 归一化 Observation、更新 Memory，并优先按确定性规则继续、结束或交还人工；
-- `supervisor_decide` 只处理新证据推翻 Plan、失败原因无法机械分类或用户改变目标等歧义；
-- `request_human` 保存阻断原因、可选动作和恢复命令后 interrupt；
-- `finalize` 调用现有确定性 Finish，Graph `END` 本身不表示成功。
+### 3.6 派发 Worker
 
-Repair 留在现有 child loop。父 Agent 不拆开 Core iteration，也不绕过 child 直接修改文件。
+- 同一 Workspace 同时只能存在一个可写 Worker；
+- 一个 Task 只绑定一个任务 Workspace，不为每个 Work Item 再创建分支或 Worktree；
+- Assist 模式可以绑定用户已授权的当前 Workspace；需要隔离或并行处理其他任务时，再为整个 Task
+  使用一个任务分支和一个 Worktree；
+- 每次 Worker 执行是一个不可覆盖的 child attempt；
+- Worker 必须接收当前 Work Item、允许范围、禁止项、验证、风险和 Task Brief；
+- Worker Claim 单独记录，不直接升级为事实或完成状态。
 
-### 3.3 确定性预路由与 Supervisor 决策
+主会话显示 Worker attempt、Work Item、开始时间、绑定 Workspace 和最近安全事件。
 
-child 结束后先执行确定性预路由：
+### 3.7 观察与现场对账
 
-| 条件 | 动作 |
+Worker 正常结束、异常消失或用户打断后，Supervisor 先检查：
+
+- owned process 是否仍存活；
+- HEAD、tracked/untracked Diff 和 changed files；
+- Workspace fingerprint；
+- operation、child 与 run binding；
+- 执行 Artifact 是否完整、匹配且仍新鲜；
+- 是否出现未知外部副作用。
+
+然后分别记录：
+
+```text
+Worker Claim       Worker 声称完成了什么
+Machine Observation 机器实际看到什么
+Supervisor Decision 允许进入哪一步
+```
+
+现场可以解释后才能写 `safe` Checkpoint。`safe` 只表示“下一步可判断”，不表示代码正确。
+
+### 3.8 确定性验证与风险检查
+
+继续复用现有 Vega Core：
+
+- Workspace 与 Scope Gate；
+- 项目验证命令；
+- Evidence freshness；
+- Risk Gate；
+- 高风险逐类披露。
+
+验证失败不能被 Worker 自述、Supervisor 建议或 Reviewer approve 覆盖。数据库、支付、并发、权限等
+高风险命中后，主会话必须显示命中文件、行为影响、当前证据、未证明事项和人工检查位置。
+
+### 3.9 独立 Reviewer
+
+Reviewer 读取：
+
+- 当前 Goal 与已批准 Plan；
+- 项目规则；
+- 完整 changed files 和 Diff；
+- 当前验证与风险证据；
+- 必要的只读源码。
+
+Reviewer 不读取 Worker 完整聊天、内部推理、未核实 Claim 或未经验证的长期 Memory。Reviewer 结果
+是重要审查材料，但不能替代确定性 Gate，也不能自动确认高风险变更安全。
+
+### 3.10 Supervisor 决策
+
+确定性规则先过滤不允许的动作，再由 Supervisor 在剩余动作中选择：
+
+| 动作 | 使用条件 |
 |---|---|
-| child 通过、下一项已批准且现场未漂移 | `continue_plan` |
-| child 内仍有现有 Repair 预算 | 继续由 child loop 处理，不返回父层决策 |
-| Workspace/operation 未知、Scope/Risk 阻断或预算耗尽 | `request_human` |
-| 全部 Work Item 完成且 Finish 前置条件满足 | `finish` |
-| 新证据与 Plan 冲突、失败无法分类或用户改变目标 | 调用 Supervisor |
+| `next` | 当前 Work Item 已满足条件，下一项仍在已批准范围内 |
+| `repair` | 问题明确且修复仍在原范围内；复用现有 child repair 或创建新的串行 attempt |
+| `replan` | 新证据推翻假设、范围或依赖，需要新 Plan revision 和人工批准 |
+| `human` | 现场不明、未知副作用、高风险确认、状态冲突或证据不足 |
+| `finalize` | 所有 Work Item 完成，允许进入现有 Finish |
 
-只有最后一类情况才编译 Decision Context 并调用模型：
+每次选择必须记录 Observation、允许动作、实际动作、理由、证据引用和剩余预算。相同流程面对不同
+Observation 必须能产生不同路由；这是 Gate 1 判断它是否真正形成 Agent 控制循环的核心测试。
 
-```json
-{
-  "action": "continue_plan | replan | request_human | finish",
-  "reason": "...",
-  "evidence_refs": [],
-  "memory_delta": {"add": [], "update": [], "invalidate": []},
-  "plan_change_reason": null
-}
+### 3.11 Finish
+
+`finalize` 只调用现有 Finish，不自行创造第二套成功状态。主会话第一屏展示：
+
+- 当前裁决；
+- 重要 Diff 和 changed files；
+- 实际执行的验证及结果；
+- Risk 命中；
+- Reviewer finding；
+- 尚未证明的事项；
+- 人工下一步。
+
+LangGraph `END`、Worker `completed` 或 Reviewer `approve` 都不等于 `ready_to_commit`。
+
+### 3.12 可选 Memory
+
+任务进度、当前事实和失败尝试属于 Task Card 与 Checkpoint，不直接写成长期 Memory。
+
+任务结束后可以生成 Memory Proposal，由人工选择接受、修改或拒绝。Memory 永远不能作为：
+
+- 当前测试通过证据；
+- 当前 Reviewer 结论；
+- 当前 Plan 审批；
+- 降低风险等级或绕过 Gate 的理由。
+
+## 四、主会话必须看得到什么
+
+Vega 不建设独立 Web UI 或 TUI。Codex、Claude Code 等宿主主会话就是控制台，通过稳定的状态卡、
+低频事件和人工控制协议展示过程。
+
+### 4.1 默认状态卡
+
+主会话在开始、状态变化、用户查询和恢复时显示：
+
+```text
+Vega Agent
+阶段：observe
+任务：修复高频输出拖慢 timeout
+Work Item：WI-02 / 3
+Worker：attempt-02，已运行 06:42
+Workspace：7 个 changed files，0 个未知文件
+最近 Checkpoint：cp-004 / safe
+Verification：2 passed，1 pending
+Risk：concurrency
+Reviewer：尚未启动
+下一步：完成 Workspace 对账后决定 repair 或 human
 ```
 
-模型结果仍受确定性规则否决：Verification 失败、Scope/Risk 阻断、Artifact 不一致、仍有 pending
-item、child 状态未知或预算耗尽时，模型不能选择 `finish` 或重试未知 operation。
+状态卡只使用结构化状态和 Observation，不由模型自由总结成“基本完成”。
 
-### 3.4 LangGraph 的限定职责
+### 4.2 关键事件流
 
-V1 必须真实使用：
+默认只显示低频事件：
 
-- `StateGraph` 和条件边；
-- run-local SQLite checkpointer；
-- `interrupt()` / `Command(resume=...)`；
-- 节点和安全自定义事件 streaming。
+```text
+调查完成
+Plan 已生成 / 已批准 / 已失效
+Worker 启动 / 正常结束 / 失去可信终态
+Workspace 对账完成
+Checkpoint 已写入
+验证通过 / 失败 / 超时
+Risk 命中
+Reviewer request_changes / approve / needs_human
+Supervisor 选择 next / repair / replan / human / finalize
+任务暂停 / 停止 / 完成
+```
 
-Graph State 只保存 `agent_run_id`、Agent state version/hash 和 pending interrupt。Git、进程、
-Workspace、验证结果、Memory 正文和成功状态都不由 checkpoint 拥有。
+不在主会话刷每条工具调用、Token 统计和完整命令输出。需要时再按 Artifact 引用查看。
 
-## 四、上下文怎样编译、注入和维护
+### 4.3 按需证据
 
-上下文是 V1 的核心能力，不是把所有历史拼成超长 Prompt。
+用户可以从主会话要求查看：
 
-### 4.1 七层来源
+- 当前修改文件和重要 Diff；
+- 失败测试和验证日志引用；
+- Worker Claim；
+- Machine Observation；
+- Reviewer finding；
+- 最近 Checkpoint 或 Trace；
+- 高风险命中；
+- Supervisor 的路由理由。
 
-| 层 | 内容 | 处理 |
+### 4.4 人工控制
+
+主会话允许：
+
+- `approve`：批准当前 Plan revision；
+- `query`：只查询状态，不改变运行；
+- `steer`：增加或修改约束，必要时使旧 Plan 失效；
+- `pause` / `stop`：停止继续调度并保留现场；
+- `resume_with_new_worker`：保留当前 Diff，由新 attempt 接手；
+- `verify_current_work`：不再写代码，直接验证现有现场；
+- `stop_and_preserve`：停止并保留全部文件；
+- `abandon_task`：记录放弃，不自动回滚或删除。
+
+主会话能看进度，不代表 Worker 与 Reviewer 的完整上下文被打通。Reviewer 仍只读取明确编译的
+Review Pack 和只读仓库视图。
+
+## 五、Task Card、本机状态、Checkpoint 与 Trace
+
+四类材料各自只管一件事：
+
+| 材料 | 唯一职责 | 是否跨机器 |
 |---|---|---|
-| L0 系统合同 | 角色、动作枚举、安全规则、输出 schema | 每次必注入 |
-| L1 用户意图 | 当前 Goal、约束、成功条件、人工决定 | 版本化、每次必注入 |
-| L2 项目规则 | 相关 `AGENTS.md`、`.vega.yaml`、Project Profile | 按路径选择 |
-| L3 当前 Plan | 当前 Work Item、范围、预算和依赖 | 每次必注入 |
-| L4 实时现场 | HEAD、Workspace fingerprint、Diff 路径、child/进程 | 调用前重算 |
-| L5 Working Memory | 已确认事实、失败尝试、开放问题 | 选择性注入 |
-| L6 深层证据 | 文件片段、日志、验证和 Reviewer artifact | 默认摘要加 ref |
+| Task Card | 目标、批准 Plan、粗粒度进度与最后一次人工交接 | 是，人工 commit/push |
+| `state.json` | 当前节点、active child、Workspace binding 和允许动作 | 否 |
+| Checkpoint | 某个已对账时刻的不可变现场快照 | 否 |
+| `trace.jsonl` | 解释发生了什么、为何选择下一动作 | 默认否 |
 
-完整聊天、Worker transcript、内部思维和所有历史日志不属于可依赖上下文。
+详细 Diff、测试日志、Reviewer 结果和原始执行输出继续留在现有 run Artifact，不在 Agent 层复制。
 
-### 4.2 Context Pack
+### 5.1 Task Card
 
-V1 只定义一个 Context Pack schema，`planning / worker / decision / resume` 是同一 schema 的四种
-`purpose`，区别只在编译策略。每次外部 Agent 调用前，Context Compiler 生成 manifest，至少记录：
-
-- `purpose = planning | worker | decision | resume`；
-- Goal/Plan/Memory revision；
-- 当前 Work Item、Workspace fingerprint 和 policy digest；
-- 每个 section 的 source refs、required 标记和内容 digest；
-- 因预算未内联但仍可读取的 `omitted_refs`；
-- 最终 rendered digest。
-
-manifest 只证明“本次调用看到了哪些来源”，不复制第二套业务事实。run 内可保存脱敏 rendered
-pack 便于复盘；密钥、Authorization、绝对本机路径和未脱敏工具正文不得写入。
-
-### 4.3 按角色注入
-
-**规划 Supervisor**：Goal、项目规则、Project Profile、实时 Workspace、相关 Memory、开放问题
-和只读工具合同。它不获得旧 Worker transcript。
-
-**Worker**：唯一 Work Item、精确范围、禁止项、验证、风险、相关事实/失败尝试、项目规则和
-Workspace baseline。需要更多代码时由 Worker 使用自身工具读取，不预塞整个仓库。
-
-**决策 Supervisor**：Goal/Plan、child Observation、完整 changed files、Diff 摘要、Verification、
-Risk、Reviewer、相关 Memory、预算余量和动作枚举。
-
-**Reviewer**：继续使用现有独立 Review Pack，只补批准的 Goal/Plan 和项目规则，不注入 Worker
-对话或未经验证的 Memory。
-
-**Resume**：不用模型总结。它从状态确定性生成已完成项、当前项、最后安全 checkpoint、未知
-现场、阻断原因、下一条允许命令和深层证据引用。
-
-### 4.4 编译算法和预算
-
-固定优先级是 L0 → L1 → L3 → L4 → 相关 L2 → 相关 L5 → L6。系统合同、Goal、当前 Work Item
-和安全阻断不得截断。可选内容超预算时依次降级：
+建议路径：
 
 ```text
-完整片段 → 相关片段 → 结构化摘要 + artifact ref → 只保留 ref
+.vega/tasks/YYYY-MM/YYYY-MM-DD-task-slug.md
 ```
 
-V1 不用向量检索或全仓 Repo Map。相关性先依据 Work Item、路径范围、符号/关键词、Plan
-revision、risk domain 和显式 evidence ref。必需上下文本身超预算时进入
-`context_budget_exceeded`，不能静默丢掉约束。
-
-只在规划、Plan/Decision 变化、Work Item 派发、child 终态、用户 steer、Workspace/策略变化和
-恢复对账后重新编译；不在每个 Tool Call 后重建整包，也不重复注入完整历史。模型会话可以是
-短生命周期，会话压缩或消失不影响下一次重建。
-
-## 五、工具调用和 Adapter
-
-### 5.1 两类工具
-
-**Vega 确定性工具**由 Core 直接执行：Repo Identity、Git/Workspace 对账、项目规则与 scope
-解析、artifact 校验、Verification、Risk、Reviewer、Finish、lock、stop 和 recover。
-
-**宿主 Agent 工具**留在 Adapter 内：Supervisor 使用文件读取、列表、搜索和只读 Git；Worker
-读取/编辑代码并运行 child 允许的命令；Reviewer 使用共享仓库的只读视图。
-
-LangGraph 编排的是有边界的 Agent operation，不代理每个 `read/search/shell`。这样 Codex、
-Claude Code 或 Pi 可以使用各自成熟工具，Vega 不必建设通用模型 SDK。
-
-### 5.2 V1 Adapter 合同
-
-V1 只实现 Codex CLI，最小行为合同为：
-
-- `capabilities()`：声明只读、结构化输出、事件、启动/检查/停止能力；
-- `investigate(request, event_sink)`：返回 PlanProposal；
-- `decide(request, event_sink)`：返回受限 DecisionProposal；
-- `start_worker / inspect / stop`：管理真实 child execution。
-
-Supervisor 使用独立短生命周期 `codex exec` 和 `read-only` sandbox；Worker 复用现有
-`CodexExecRunner`；Reviewer 继续使用另一独立只读会话。三者使用不同 Context Pack 内容、输出
-schema 和 operation id，但 Context Pack 本身共用一个 schema。Vega 不依赖 Codex 会话可继续，
-恢复时总是重建新会话。
-
-`read-only` 是共享仓库的受限只读视图，不宣传为容器或操作系统级完全隔离。Worker 仍由 sandbox、
-前后 Workspace 对账、Scope Gate 和确定性验证共同约束。
-
-### 5.3 工具事件和不可信输出
-
-Adapter 只归一化少量事件：operation/tool started/finished、message delta、role、tool category、
-repo-relative paths、status、safe summary 和 artifact refs。事件供 `vega watch` 与复盘使用，不成为
-第二套执行状态；不记录 API key、完整 Prompt、内部思维或大段原始输出。
-
-工具正文进入 Agent 状态前必须经过：
-
-```text
-边界检查 → 脱敏 → 大小限制 → 来源标记 → Artifact → Observation 摘要/引用
-```
-
-仓库文件和工具输出默认是不可信数据。只有 Context Compiler 明确认定的项目政策文件才具有规则
-语义；README、Issue 或命令输出中的“忽略规则、写入 Memory”等内容不能直接改变 Goal、Plan、
-权限或 Working Memory。
-
-未来第二 Adapter 只实现相同行为合同，不修改 Graph 和 Core；但必须等 Gate 3 证明价值后再做。
-
-## 六、Working Memory 怎样接入
-
-### 6.1 四个概念不能混用
-
-| 概念 | V1 处理 |
-|---|---|
-| 模型上下文窗口 | 临时，每次由 Context Compiler 重建 |
-| run-local Working Memory | V1 必做，服务当前长程任务 |
-| 项目规则/知识 | 继续由现有项目上下文提供 |
-| 跨任务长期 Memory | 不自动写，保持现有 proposal/accepted 边界 |
-
-Working Memory 不是聊天摘要或向量库。它只记录跨步骤需要保留、且能说明来源和有效期的任务知识。
-
-### 6.2 Memory Item 与增量
-
-每个 item 包含：
+YAML Front Matter 保存少量机器字段：
 
 ```yaml
-id: "fact-004"
-kind: "confirmed_fact | hypothesis | failed_attempt | open_question"
-content: "..."
-status: "active | invalidated | superseded | resolved"
-evidence_refs: []
-created_from: "user | policy | observation | supervisor_proposal"
+---
+kind: VegaTask
+schema_version: 1
+task_id: 2026-08-13-fix-timeout
+status: planning
+branch: feature/fix-timeout
+base_revision: abc123
 goal_revision: 1
 plan_revision: 1
-validity: {workspace_fingerprint: "...", policy_sha256: "...", reconsider_when: []}
+approved_plan_digest: null
+current_work_item: null
+handoff_sequence: 0
+handoff_status: none
+handoff_base_revision: null
+handoff_workspace_digest: null
+last_handoff_checkpoint: null
+---
 ```
 
-Goal 约束、人工批准和终态不复制进 Memory。Supervisor 在 Plan/Decision 输出中只提出
-`add/update/invalidate` 增量，确定性 Memory Reducer 校验后追加：
+正文固定为：
 
-`open_subgoal` 由 WorkPlan 持有，环境现场由 Observation 持有，避免同一事实出现第二份状态。
+```markdown
+## Goal and Non-goals
+## Success Conditions
+## Observed Facts and Hypotheses
+## Approved Plan
+## Progress and Failed Attempts
+## Risks and Verification
+## Last Handoff
+## Next Step
+```
 
-- `confirmed_fact` 必须有当前可读 evidence ref；
-- `failed_attempt` 必须绑定 child、Verification 或工具失败 artifact；
-- `hypothesis` 不能无证据升级为事实；
-- 工具正文不能直接写 Memory；
-- Goal/Workspace/策略变化时重新验证 validity，不直接删除旧 item；
-- 环境恢复后可以重新考虑失败方案，但必须记录失效原因；
-- invalidate/supersede 保留历史，不能原地抹掉。
+规则：
 
-Core 可以直接产生确定性 item，例如“WI-01 验证失败”，仍必须绑定 artifact，不额外调用模型。
+- 事实必须附仓库相对路径、命令或 Artifact 来源；
+- 假设不能写成事实；
+- 只记录 Work Item 级进度，不写逐条工具日志；
+- Plan 批准、显式暂停、交接和终态时才同步；
+- Vega 可以生成和校验 Task Card，但不自动 commit 或 push；
+- 未完成任务也可以形成合法的 Task Card 交接状态，不能把 WIP 提交写成验证通过或可合并；
+- Worker 开始前必须将 Task Card 作为 control artifact 绑定到 Workspace baseline，不能把它误归因成
+  Worker 代码变更。
 
-### 6.3 Selective Recall 与容量
+### 5.2 本机 Run
 
-注入顺序是：当前 Work Item 显式引用 → 路径/符号/risk/动作匹配 → 未解决问题 → 可防止
-重复失败或目标漂移的 failed attempt。其余 item 只保留 artifact ref。
-
-同一提醒最近三个决策边界已经注入时默认不重复，除非风险为高或现场已变化。Context Manifest
-记录实际使用的 memory id，便于判断它是否减少重复调查，而不是只统计 Memory 数量。
-
-Gate 0 冻结小型上限；V1 候选值为所有类型合计最多 32 个 active item。超限时拒绝低价值
-proposal，保留已确认事实、失败尝试和阻断问题并发出容量告警，不让模型生成一份“大总结”
-覆盖历史。
-
-run 结束时可以生成长期 Memory proposal，但不得自动 accepted、跨 repo 回填、替代当前测试或
-改变 Finish。Agent V1 的成功不依赖长期 Memory。
-
-## 七、状态权威、HITL 与恢复
-
-### 7.1 状态所有者
-
-| 所有者 | 唯一职责 |
-|---|---|
-| Git / Workspace / OS 进程 | 当前外部事实 |
-| child state/execution/artifacts | Worker、验证、风险和 Reviewer 执行事实 |
-| Agent `state.json` | 当前 Goal/Plan/Work Item、child binding、operation、预算、next action 和终态 |
-| Goal / Plan | 用户意图和批准方案的版本化事实 |
-| Working Memory ledger/snapshot | run-local 知识、来源、版本和失效状态 |
-| Decision Ledger | 对指定 Plan/interrupt 的一次性人工决定 |
-| LangGraph SQLite | 图游标、Agent state version/hash 和 pending interrupt |
-| Finish artifacts | 是否允许 `ready_to_commit` |
-
-冲突优先级：
+候选目录：
 
 ```text
-实时 Workspace / Git / 进程
-  > 可校验 child artifacts
-  > Goal / Plan / Agent state / Decision / Memory ledger
-  > LangGraph checkpoint
-  > Resume Brief
-  > 模型自述
+runs/<agent-run>/
+  state.json
+  trace.jsonl
+  task-brief.md
+  task-brief-manifest.json
+  checkpoints/
+  observations/
+  graph-checkpoints.sqlite
 ```
 
-Agent state 使用现有 `RunMutationLock` 和单调 `state_version` 做 compare-and-swap；它引用当前
-Goal/Plan/Memory digest、active Work Item、operation、bound child、Workspace/policy digest、预算
-和 pending interrupt。Graph checkpoint 不复制这些正文。
+`state.json` 只保存当前控制状态：Task Card digest、Goal/Plan revision、当前节点与 Work Item、
+operation/child binding、Workspace fingerprint、最近 Checkpoint、预算、允许动作和终态。
 
-### 7.2 Artifact 布局
+LangGraph SQLite 只保存图游标和 pending interrupt。它丢失后可以根据 Task Card、本机状态、Checkpoint
+和真实 Workspace 重建；不能凭 SQLite checkpoint 宣称代码正确或任务成功。
+
+所有持久对象带 `schema_version`。损坏、未知版本或 digest 不一致时 fail-closed。V1 只处理当前版本，
+不提前建设通用迁移平台。
+
+### 5.3 未完成任务的跨机器接力
+
+“任务还没做完，但需要先提交到任务分支，换一台机器或换一个新会话继续”是 V1 必须支持的正常
+场景，不是异常补救。
+
+Task Card 在 `Last Handoff` 中保存一份可直接重建 Task Brief 的 **Resume Capsule**：
+
+- Goal、Non-goals 和成功条件；
+- 已批准 Plan revision、digest 和各 Work Item 状态；
+- 当前 Work Item 与停下的位置；
+- 已确认事实、仍未确认的假设和失败尝试；
+- 禁止项、风险约束和人工必须检查的位置；
+- 本次 WIP 的 changed files 与内容摘要；
+- 最近 Verification、Risk 和 Reviewer 的状态、来源 revision 与时间；
+- 已知或未知的外部副作用；
+- 下一步允许动作和推荐的第一条命令。
+
+这里保存的是恢复所需的关键节点，不复制完整聊天、内部推理、Trace 和长日志。旧验证与 Reviewer
+结论必须明确标记为 `historical`，不能因为被写进 Task Card 就继续算作当前证据。
+
+准备跨机器接力时固定执行：
 
 ```text
-runs/<agent_run>/
-  state.json                 goal.json / goal.md
-  trace.jsonl                progress.jsonl
-  plans/                     decisions.jsonl
-  context/manifests/         context/rendered/
-  working-memory.json        memory-deltas.jsonl
-  operations/                observations/
-  repo-identity.json         agent-checkpoints.sqlite
-  resume-brief.md            final-report.md / eval.md
+暂停继续调度
+→ 确认旧 Worker 和 owned process 已停止，或将现场标记为 blocked
+→ 对账 Git、Workspace、partial diff 和 Artifact
+→ 写本机 Handoff Checkpoint
+→ 把 Resume Capsule 同步到 Task Card
+→ 计算排除 Task Card 与 runs/ 后的 Workspace 内容摘要
+→ 检查私密文件、绝对路径和意外运行产物
+→ 输出待提交文件、WIP 提交说明和 push 检查清单
+→ 人工明确授权 commit / push
 ```
 
-不创建 `.vega/tasks`、第二份 journal 或数据库服务。Memory snapshot 由 append-only delta 派生；
-详细代码、日志和 child 证据留在原 artifact，只用 ref 关联。
+Task Card 的交接状态只有两种：
 
-### 7.3 Checkpoint 与 HITL
+- `handoff_ready`：旧 Writer 已停止，现场能够解释，可以在新机器继续；
+- `handoff_blocked`：代码可以提交保存，但存在未知进程、副作用、状态冲突或证据缺口，新机器只能先
+  调查或人工处理，不能自动启动 Worker。
 
-只在 Goal/Plan/Decision 变化、Work Item 开始、operation 准备/绑定/终态、child 和门禁新证据、
-Memory delta、Supervisor 决策、用户 pause/stop 及 Finish 前后改变业务 checkpoint。不在每个 token
-或 Tool Call 后 checkpoint；高频进度只追加 event。
+WIP 代码、对应测试和 Task Card 可以一起提交到**任务分支**。测试尚未通过、Reviewer 尚未执行或
+当前代码不可合并都不是禁止交接的理由，但必须原样写进 Resume Capsule；提交信息和 Task Card 状态
+不得暗示 `ready_to_commit`。`runs/`、本机 Trace、SQLite、凭据和无关临时文件不得进入 Git。
 
-`interrupt()` payload 绑定 Goal/Plan revision、Plan digest、范围、风险、验证、预算、Workspace
-fingerprint 和 policy digest。恢复使用 `Command(resume={decision_id: ...})`，而不是裸布尔值。
-任一 binding 变化都使旧批准失效。Decision Ledger 追加 recorded/consumed 事件，重复摘要幂等复用，
-冲突进入 `state_conflict`。
+Task Card 不保存“包含它自己的最终提交 SHA”，避免形成自引用摘要。`handoff_base_revision` 记录
+生成交接时的旧 HEAD，`handoff_workspace_digest` 绑定即将提交的 WIP 内容；恢复时再以 Git 找到包含
+该 Task Card 的实际提交，并校验当前 HEAD 与内容摘要。
 
-LangGraph 恢复 interrupt 会从节点开头重跑，因此 interrupt 前禁止启动 Worker 或执行其他
-非幂等副作用。
+Vega 本身仍不自动 commit 或 push。用户可以在主会话明确授权宿主执行 Git 操作，或者自行执行；
+无论由谁执行，都必须使用 Vega 生成的文件清单并在 push 后核对远端分支 HEAD。
 
-### 7.4 Operation ID 与 child
+新会话不要求用户记住 Task Card 路径。`vega agent resume --repo .` 使用确定性发现规则：
 
-`dispatch_child` 是父 Graph 唯一主动产生 Workspace 副作用的节点。父 Agent 先保存包含 Plan、
-Work Item、Workspace baseline 和预分配 child id 的 `operation prepared`，再执行：
+1. 只扫描 Git 已跟踪的 `.vega/tasks/**/*.md`；
+2. 只选择 `branch` 与当前分支一致、任务状态尚未终止且 `handoff_status` 不为 `none` 的 Task Card；
+3. 恰好命中一个时显示摘要并等待人工确认；
+4. 命中零个时报告没有可恢复任务；
+5. 命中多个时列出任务，不自行猜测，由用户通过 `--task <path>` 选择。
+
+新机器或新会话恢复时固定执行：
 
 ```text
-parent prepared
-  → child 初始 state 写入 parent/operation/work-item binding
-  → parent child_bound
-  → child Worker execution started
-  → child terminal evidence
-  → parent operation terminal
+fetch / pull --ff-only 指定任务分支
+→ 按当前分支发现 Task Card，或使用显式 --task
+→ 定位包含该 Task Card 的实际 Git 提交
+→ 校验仓库身份、分支、Plan digest 和 Workspace 内容摘要
+→ 确认本机没有额外 Diff 和 active Writer
+→ 创建新的本机 agent run
+→ 将旧验证与 Reviewer 降级为历史证据
+→ 从 Resume Capsule 和真实 Workspace 重新生成 Task Brief
+→ 在主会话展示恢复状态卡
+→ 人工确认后继续当前 Work Item
 ```
 
-稳定双向 identity 用于恢复，但不声称数据库事务或 exactly-once：
+换机器本身不会使 Plan approval 失效。只有 Goal/Plan digest、项目规则、风险、预期 Workspace 或
+成功条件发生变化时，旧批准才失效并进入 `replan`。本机 Checkpoint ID 只作为历史引用；新会话真正
+依赖的是 Git 中的 Resume Capsule 和重新计算的现场。
+
+V1 不引入服务端分布式锁。跨机器单 Writer 依靠以下轻量协议保证：
+
+1. 只有旧 Writer 已停止的 Task Card 才能标记为 `handoff_ready`；
+2. 新机器开始写入前必须重新拉取远端并确认 HEAD 仍是该交接提交；
+3. 旧机器若再次恢复，也必须先拉取远端并检查 Task Card 状态；
+4. 分支发生分叉或远端 HEAD 已变化时进入 `state_conflict`，不得强推或静默覆盖。
+
+这不能阻止用户绕过 Vega 在两台离线机器上同时手工修改，但能覆盖 Vega 控制范围内最常见的换机接力，
+而不为此建设中心化 Lease 服务。
+
+## 六、Checkpoint 与异常恢复
+
+### 6.1 什么时候写 Checkpoint
+
+只在粗粒度边界写入：
+
+- Plan 批准或 revision 改变；
+- Work Item 开始或结束；
+- Worker 正常结束，或失去可信终态后完成现场对账；
+- 用户 steer、pause、stop；
+- Verification、Risk、Reviewer 改变下一动作；
+- 本机恢复、显式交接或换机器；
+- Finish 前。
+
+不在每次 Tool Call 后写 Checkpoint，也不依赖猜测宿主何时进行上下文压缩。
+
+### 6.2 Checkpoint 最小内容
+
+```yaml
+checkpoint_id: cp-004
+reason: worker_terminal
+status: safe | uncertain | blocked
+task_digest: sha256:...
+goal_revision: 1
+plan_revision: 1
+work_item: WI-02
+child_run: child-02
+workspace_fingerprint: sha256:...
+changed_files: []
+evidence_refs: []
+completed: []
+pending: []
+failed_attempts: []
+allowed_next_actions: []
+created_at: ...
+```
+
+- `safe`：现场足以解释并选择下一步，不表示验证通过；
+- `uncertain`：仍有进程、Diff 或 Artifact 无法解释；
+- `blocked`：已确认存在冲突、未知副作用或必须人工处理的风险。
+
+写入顺序：
+
+```text
+采集实时现场
+→ 写临时 Checkpoint 并校验引用与 digest
+→ 原子替换 Checkpoint
+→ 原子更新 state.json
+→ 追加 checkpoint_committed Trace
+→ 仅在交接边界更新 Task Card
+```
+
+V1 不追求 Git、文件系统、外部进程和 SQLite 之间的分布式事务；恢复时始终回到真实 Workspace 对账。
+
+### 6.3 Worker 异常统一处理
+
+上下文压缩、429、网络断开、Provider 5xx、终端关闭、控制进程退出和突然关机统一进入：
+
+```text
+失去可信 Worker 终态
+→ 检查旧进程
+→ 对账 Workspace 和 Artifact
+→ 写 safe / uncertain / blocked Checkpoint
+→ 决定继续、替换 Worker、验证当前现场或交还人工
+```
 
 | 现场 | 动作 |
 |---|---|
-| prepared、child 不存在、Workspace 未变 | 用原 child id 启动原 operation |
-| child 已初始化且 binding 一致 | 只恢复原 child |
-| child/owned process 仍存活 | 等待、显示进度或人工停止 |
-| child 已终态且证据一致 | 复用结果 |
-| Workspace 前进但 child 不完整 | `workspace_ahead`，交给人工 |
-| operation started 但无可靠终态 | `operation_unknown`，禁止重试 |
-| Graph、Agent、child 或 Workspace 冲突 | `state_conflict`，禁止继续 |
+| 只是宿主压缩，会话和 owned process 仍健康 | 继续原 Worker，不启动新 Writer |
+| 旧 Worker 或 owned process tree 仍存活 | 继续观察或请求停止，禁止第二 Writer |
+| 能证明 operation 未开始且 Workspace 未变 | 允许创建新 child attempt |
+| Worker 消失但存在可解释的 partial diff | 等待人工选择新 Worker 接手或直接验证 |
+| 存在未知外部副作用 | `human`，不得自动重放 |
+| child 已有可信终态 | 复用 Artifact，但重新检查 freshness |
+| Task、Plan、child 或 Workspace binding 冲突 | `state_conflict`，停止自动执行 |
 
-### 7.5 Resume 算法和长程能力
+数据库迁移、支付、部署、外部 API 和其他非幂等操作只要终态未知，就不能自动重试。
 
-`vega agent resume` 固定执行：
+新 Worker 不是恢复旧模型的思维，而是读取 Goal、批准 Plan、当前 Diff、失败尝试和证据后重新判断。
+旧 child 永远保留，不覆盖；Vega 不自动 stash、reset、回滚或删除。
 
-1. 获取 controller lease 和 run lock；
-2. 读取 Agent、Goal、Plan、Memory、Decision 和 Graph checkpoint；
-3. 重算 repo identity、HEAD、Workspace、policy 和存活进程；
-4. 校验 active operation 与 bound child；
-5. 将旧 Verification/Reviewer 按 freshness 降级；
-6. 重放 Memory delta 并核对 snapshot hash；
-7. 确定性生成 Resume Brief 和新 Context Manifest；
-8. 状态可解释时才 `Command(resume=...)`，否则请求人工。
+## 七、上下文生成、压缩与注入
 
-因此模型会话或控制进程结束后，Agent 仍知道已完成哪些 Work Item、当前 child 是否真实执行过、
-哪些事实仍有效和下一步是否仍被批准。V1 不引入 daemon：无人值守运行时前台 controller 必须存活；
-controller 中断后的承诺是安全恢复，不是后台继续。
+### 7.1 不保存完整聊天，只保存可重建材料
 
-## 八、CLI、可见性与宿主体验
+Vega 不接管 Codex、Claude Code 自带的上下文压缩，也不尝试保存模型内部思维。它保存能够确定性重建
+下一步的结构化材料，并按需引用长 Artifact。
 
-```powershell
-vega agent start --repo . --input task.md
-vega agent status --run <agent_run>
-vega agent resume --run <agent_run> --decision approve
-vega agent resume --run <agent_run> --instruction "新增约束，重新生成 Plan"
-vega watch --run <agent_run> --follow
-vega stop --run <agent_run> --reason "人工停止"
+宿主自身的压缩仍然有价值，它可以帮助原会话延续一般对话和近期操作；但压缩内容由宿主生成，
+具体保留了什么、何时更新以及是否遗漏批准边界，对 Vega 来说都不是可验证事实。因此：
+
+- Vega 不解析或复用宿主压缩摘要作为任务状态；
+- 宿主摘要不能替代 Goal/Plan revision、人工批准、Workspace 对账和当前验证证据；
+- Task Brief 只补充恢复和决策必需的关键内容，不复制完整对话，也不重复生成一份聊天总结；
+- 原会话仍可用时，继续利用其自身上下文；换会话或恢复时，新 Worker 依靠同一份可重建 Task Brief
+  接手。
+
+Task Brief 固定结构：
+
+```markdown
+# Current Task
+## Goal and Boundaries
+## Approved Plan
+## Current Work Item
+## Confirmed Facts
+## Failed Attempts
+## Workspace Now
+## Latest Verification and Risks
+## Required Next Action
+## Evidence References
 ```
 
-V1 不增加专属 `pause/stop` 或独立 planner、researcher、memory、handoff、task 命令组；停止和观察
-复用现有 `vega stop`、`vega watch`。前台和 `watch` 至少显示：
+### 7.2 三层压缩策略
 
-- 当前 Graph node、Work Item、耗时、预算和 deadline；
-- 调查、等待批准、Worker、heartbeat、工具类别和终态；
-- 完整 changed files 列表；
-- Verification、Risk、Reviewer 和 Finish；
-- interrupt 原因、已知/未知现场和下一条允许命令。
+Task Brief 不设置下限，也不要求为了填满预算而增加内容。V1 使用**默认 `32 KiB` 软上限**，
+按最终渲染结果的 UTF-8 字节数计算；Gate 0 可以根据冻结案例调低该上限，但不得在运行时按模型
+偏好任意放大。能用更少内容说清楚时，就只生成实际需要的内容。
 
-不显示内部思维、未脱敏 Prompt、凭据或完整工具正文。复用现有 `RunProgressLog`、Codex JSONL
-安全事件和 `vega watch`，不建第二套事件总线。
+内容按三层处理：
 
-未来 Codex/Claude/Pi 可以提供薄 Skill，只负责启动 CLI、转发安全进度和提交用户选择；状态始终
-由 Vega run 持有。即使宿主对话压缩，Vega 仍能从 run 恢复。
+1. **必须完整保留**：Goal、Non-goals、当前批准、当前 Work Item、禁止项、成功条件、高风险和下一动作；
+2. **结构化压缩**：已确认事实、失败尝试、changed files、最近验证和 Reviewer 状态；
+3. **只保留引用**：旧 attempt、长日志、完整代码、历史报告和低相关细节。
 
-## 九、V1 范围
+接近软上限时，先去重并把长内容降为 Artifact 引用。必需内容仍超过上限时，进入 `needs_human`、
+要求拆分 Work Item 或重新规划，不能静默截断约束。模型生成的自由文本摘要若保留，只能标记为
+Claim；恢复所需内容必须能从结构化状态和 Artifact 重新生成。
 
-必须实现：
+### 7.3 尽量保留宿主 Prompt Cache
 
-1. LangGraph StateGraph、条件边和 SQLite checkpoint；
-2. Goal、多步骤 WorkPlan 和绑定摘要的 HITL；
-3. Context Compiler、一个 Context Pack schema、四种 purpose 和 manifest；
-4. run-local Working Memory、增量 reducer、失效和 selective recall；
-5. 一个 Codex Adapter、只读调查和安全事件；
-6. 单 active child、operation identity 和恢复对账；
-7. child 内 Repair，父层 continue/replan/human/finish；
-8. 可见进度、Resume Brief 和三个真实案例。
+Vega 只能控制自己提供给宿主的内容，不能承诺 Codex 或 Claude Code 内部缓存命中率。V1 采用：
 
-明确不实现：
+- 稳定的角色合同、项目规则和工具说明放在输入前部；
+- 章节顺序稳定，未变化内容保持字节一致；
+- 动态 Task Brief 放在当前请求尾部；
+- 代码和长日志通过引用按需读取，不反复重写稳定前缀；
+- manifest 记录 section digest，便于判断哪些段落真的变化。
 
-- 多 Worker 并行、多 Reviewer fan-out 或角色群聊；
-- 独立 Planner/Researcher/Memory Agent；
-- Claude、Pi、OpenHands 第二 Adapter；
-- 通用 Provider SDK、模型路由、Agent Server 或远程平台；
-- Web UI、TUI、daemon、队列、FastAPI 或 SSE 服务；
-- 向量数据库、Embedding、知识图谱或全仓 Repo Map；
-- 独立 Impact Ledger 或未经新证据验证的影响面检索 Runtime；
-- 跨任务自动长期 Memory、跨机器自动迁移；
-- 自动 stash、commit、push、release、回滚、删除或部署；
-- 重写 Linear Runtime、Verification、Risk、Reviewer 或 Finish。
+不会把 Vega 摘要插到宿主压缩摘要之前，也不会在运行中的会话里频繁注入新摘要。只有创建新 Worker、
+Work Item 边界、恢复或人工 steer 后，才向动态尾部注入最新 Task Brief。
 
-## 十、实施 Gate 0-3
+### 7.4 Task Brief 刷新节点
 
-原有四个 Gate 保留。每个 Gate 形成明确结论后再进入下一 Gate，不并行扩建后续能力。
+- 调查完成；
+- Plan 批准或 revision 改变；
+- Work Item 开始；
+- Worker 终态或异常对账完成；
+- 用户 steer、pause、stop；
+- Verification、Risk、Reviewer 改变路由；
+- 本机恢复、交接或换机器；
+- Finish 前。
 
-### Gate 0：合同冻结
+`task-brief-manifest.json` 只记录 Task Card digest、Workspace fingerprint、Artifact 引用、各节 digest
+和生成时间，用于说明这次 Worker 看到了哪些来源；它不成为第二份任务状态。
 
-只做设计、ADR 和测试清单：
+## 八、Memory 的召回与写入时机
 
-- 冻结 Goal、WorkPlan、Agent State、Context Manifest、Observation、Memory、Decision 和 Operation；
-- 冻结 Context 优先级、必需项、预算不足和敏感信息规则；
-- 冻结 Memory 写入、升级、失效、容量和 selective recall；
-- 冻结 Agent state、LangGraph checkpoint、interrupt 和 child dispatch 的故障窗口；
-- 冻结 Codex Adapter 行为与安全事件；
-- 冻结三个真实案例、基线、模型、预算、指标和停止条件。
+V1 不建设新的 Memory Agent、向量库或自动长期记忆。复用现有 accepted memory，并收紧使用方式。
 
-只需要三份小 ADR：状态权威；Context/Memory；Adapter/副作用恢复。不要写成通用 Agent 规范库。
+### 8.1 召回节点
 
-### Gate 1：最小真实 LangGraph
+只在以下节点检索：
 
-使用 Fake Supervisor、Fake Adapter 和临时仓库实现：
+1. Goal 已绑定到具体仓库后，供只读调查参考；
+2. Plan 批准后、编译当前 Work Item 的 Task Brief 时；
+3. steer 或 replan 使目标、路径或风险发生变化后；
+4. Finish 时决定是否生成新的 Memory Proposal。
 
-- StateGraph、SQLite 跨进程恢复和 Plan approval interrupt；
-- 两个串行 Fake Work Item，证明不是单次流水线；
-- 同一 schema 下 planning/worker/decision/resume 四种 Context purpose；
-- Memory delta、证据升级、失效、去重和容量保护；
-- 确定性预路由，以及歧义场景下的 continue/replan/human/finish 条件边；
-- Fake child 内一次现有 Core Repair；
-- dispatch、child binding 和 state/checkpoint 故障注入；
-- 未知副作用不重放、过期批准不接受、Graph END 不绕过 Finish；
-- 密钥、绝对路径和 Prompt Injection 不进入可信 Memory 或公开 artifact。
+不在每次 Tool Call 后召回，也不因为某条 Worker 输出包含相似关键词就立即改写当前上下文。
 
-Gate 1 不接真实 Codex，不新增第二 Adapter，也不复制旧实验的完整测试矩阵。
+### 8.2 使用规则
 
-### Gate 2：真实 Codex 与长程恢复
+- 只使用人工 `accepted` 且仓库身份匹配的条目；
+- 路径、适用条件或来源已经明显失效时跳过，并记录 `stale` 原因；
+- 缺少可复核来源的旧条目只能作为 `historical_hint`，不能进入 `Confirmed Facts`；
+- 当前代码、测试、项目规则和用户指令始终优先；
+- Memory 不能替代当前验证、Reviewer、批准或风险确认。
 
-正式案例前先运行一次不计入结论的 Vega 自身纵向 integration smoke，只用于发现 Adapter、Context、
-Memory 和 Graph 的接线缺陷。三个正式案例及门槛仍在 Gate 0 冻结；smoke 后若必须修改合同，应退回
-Gate 0 追加 amendment，不能根据 smoke 结果事后调整正式案例。
+任务完成后的经验仍先生成 Proposal；只有人工 accept 后，才可能在后续任务被召回。
 
-完成三个冻结案例：
+## 九、LangGraph 的位置
 
-1. **模糊跨模块 Bug**：Supervisor 使用只读工具调查，Plan 有至少两个依赖 Work Item，并由真实
-   新证据触发一次 `continue` 或 `replan`；
-2. **多步骤长任务**：至少两个 child，在安全故障窗口中断 controller；新进程找回原 child、
-   Work Item 和 Memory，不重复启动；
-3. **目标变化或风险接管**：用户增加约束或新证据使旧方案失效；旧批准失效，失败方案被正确
-   提醒，必要时交还人工。
-
-每个案例冻结任务、repo revision、模型、推理强度、顺序、验证、timeout 和成本。至少一个是
-运行前尚未解决的真实日常任务。失败、超时和 `needs_human` 原样保留。
-
-还必须证明进度可见、宿主会话全部丢失后可恢复、Context 不线性复制完整历史、Memory 能解释
-已确认事实/失败方案/未完成事项，且 Reviewer 仍不继承 Worker transcript。
-
-### Gate 3：真实增量价值
-
-比较：
+LangGraph 只作为 Supervisor 的控制面，不接管 Vega Core 的业务事实。
 
 ```text
-同一 Codex Worker + 当前 Vega Harness
-vs
-同一 Codex Worker + Vega Supervisor Agent
+prepare
+  → await_approval
+  → dispatch
+  → reconcile
+  → decide
+      ├─ next / repair → dispatch
+      ├─ replan        → prepare → await_approval
+      ├─ human         → interrupt
+      └─ finalize      → Vega Finish
 ```
 
-A/D 从同一 commit 创建独立 worktree，固定配置、模型、验证、timeout 和 Worker 预算，运行前冻结
-顺序。Agent 组至少在两个案例中提供当前 Harness 没有稳定提供的价值：更正确的调查范围、合理
-Replan、避免重复 Worker、拒绝过期批准、减少重复失败/目标漂移，或降低长任务恢复解释成本。
+业务上的十二个节点被归并到少量 Graph node，避免把每个工具调用建成状态节点。
 
-人工 Review 减负只作为 Gate 3 实验指标，不新增 Runtime 状态。至少记录
-`human_review_minutes`、`human_opened_files` 和 `unsupported_impact_count`；只有事先独立
-冻结了 Golden impact 的案例才计算 `impact_golden_recall`。可选 impact hypothesis 未被代码或
-artifact 支持时必须计入 unsupported，不能因结构化输出而视为已验证。
+V1 必须真实使用：
 
-无增量价值的案例，Token、耗时或人工步骤任一项超过基线 `1.5x`，判定为不值得使用，不能由
-其他成功案例抵消。
+- `StateGraph` 条件边；
+- run-local checkpointer；
+- `interrupt()` 与人工 resume；
+- 安全、低频的节点事件流。
 
-## 十一、指标、停止条件与下一步
+Graph State 只引用 `agent_run_id`、`state_version` 和 pending interrupt。Git、Workspace、进程、Plan、
+Verification、Reviewer 和成功状态仍由现有文件与 Core 持有。
 
-### 11.1 硬门槛
+`interrupt()` 前禁止启动非幂等副作用。LangGraph 从节点开头重跑时，节点必须先读取 operation/child
+binding 并对账，不能重复启动 Writer。
 
-- `false_success = 0`；
-- `duplicate_worker_start = 0`；
-- `unknown_side_effect_auto_retry = 0`；
-- `stale_approval_accepted = 0`；
-- `untrusted_tool_output_promoted_to_fact = 0`；
-- `goal_constraint_silently_dropped = 0`；
-- 至少一次跨进程 Resume；
-- 至少一个两项以上 WorkPlan 完成或正确中止；
-- 三个案例都产生合同允许、可解释的终态。
+Decision Contract 至少包含：
 
-同时记录 Context/Memory token、omitted refs、上下文增长斜率、重复失败、stale reminder、人工重新
-解释次数、`human_review_minutes`、`human_opened_files`、`unsupported_impact_count`、
-Supervisor/Worker/Reviewer 分项成本、无进度最长时间和用户是否愿意再次使用。人工指标由冻结的
-实验协议记录，不为此增加常驻产品 telemetry。
+```yaml
+observations: []
+evidence_refs: []
+allowed_actions: []
+selected_action: human
+reason: "存在无法解释的外部副作用"
+budget_remaining: {}
+decision_source: deterministic | supervisor | human
+```
 
-三个案例只能证明机制和项目案例，不包装成通用成功率；需要成功率结论时另做独立 holdout，
-V1 不建设 benchmark 平台。
+Gate 1 必须证明不同 Observation 会产生不同合理动作；若所有路径最终都是固定顺序，就说明具体 Graph
+设计失败，需要简化或重做，而不是继续叠加节点。
 
-### 11.2 停止扩大 V1 的条件
+## 十、CLI 与宿主接入
 
-出现任一情况时保留当前 Harness，不继续增加 Agent 能力：
+候选命令保持少量：
 
-1. 条件路由最终仍是固定顺序；
-2. LangGraph 形成第二套业务状态；
-3. Context 必须依赖向量库/Repo Map 才能工作；
-4. Working Memory 变成不断增长的聊天摘要；
-5. 恢复可能重复未知 Worker；
-6. 必须重写现有 Core；
-7. 第一个 Adapter 不稳定却开始做第二个；
-8. 测试数量接近旧实验量级但没有对应真实风险；
-9. 真实任务没有降低恢复、目标漂移或人工判断成本；
-10. 为展示框架而加入多 Agent、长期 Memory、服务端、UI 或自动发布；
-11. Agent 模式降低 fail-closed 约束。
+```powershell
+vega agent start --repo . --input <task-card-or-text>
+vega agent status --run <agent-run>
+vega agent resume --run <agent-run>
+vega agent resume --repo .                     # 按当前分支发现可恢复 Task Card
+vega agent resume --task <task-card>          # 换机器后创建新本机 run
+vega agent steer --run <agent-run> --instruction "新增约束"
+vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"
+```
 
-### 11.3 对外表述门槛
+观察与停止复用现有命令：
 
-Gate 2 前仍表述为“本地优先的 AI 编码验证与独立评审 Harness”。Gate 2 通过后可称为实验性
-Supervisor Agent 模式。只有 Gate 3 通过，才能表述为：
+```powershell
+vega watch --run <agent-run> --follow
+vega stop --run <agent-run> --reason "人工停止"
+```
 
-> Vega 是一个本地优先、可恢复、证据驱动的软件工程 Supervisor Agent。它把长程目标编译为
-> 有界 WorkPlan，以选择性上下文和 run-local Working Memory 驱动外部 Coding Agent，并由
-> 确定性工程门禁裁决结果。
+主会话 Skill 或薄 Adapter 只做三件事：
 
-### 11.4 文档关系和审核后第一步
+1. 调用上述 CLI；
+2. 把状态卡、关键事件和人工选项显示在当前会话；
+3. 将用户选择提交给同一个 agent run。
 
-- [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md)：当前行为和红线；
-- [`ARCHITECTURE.md`](ARCHITECTURE.md)：当前 Linear Runtime 与 Core；
-- [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md)：调查和修改前批准；
-- [`LONG-RUNNING-GOALS.md`](LONG-RUNNING-GOALS.md)：当前 Goal P0/P1 边界；
-- [`ROADMAP.md`](ROADMAP.md)：历史实验结论和进入门槛。
+状态不保存在 Skill 或聊天里。Codex 作为第一个真实 Adapter；核心合同稳定后再接 Claude Code 的薄
+Adapter，两者复用同一 Task Card、Task Brief、Checkpoint、Trace 和 Vega Core，不建设通用 Provider SDK。
 
-本文与当前代码或产品契约冲突时，以已发布代码、`PRODUCT-CONTRACT.md` 和真实证据为准。
+## 十一、实施 Gate
 
-审核通过后的实现顺序：
+每个 Gate 形成可审查结论后再进入下一 Gate。实现使用一个长期实验分支和一个专用 Worktree，
+不为每个 Gate 或 Work Item 反复创建分支；合并前再根据实际 Diff 决定是否拆成少量原子 PR。
 
-1. 在一个长期实验分支完成 Gate 1，不为每个小步骤创建分支；
-2. 先写三份 ADR 和合同测试；
-3. 按 `contracts → context compiler → memory reducer → graph/recovery → fake adapter` 实现；
-4. Gate 1 通过后才连接 `CodexExecRunner`；
-5. Gate 2 完成后再讨论 README、第二 Adapter 或版本号；
-6. 不修改 Selective Memory、Multi-Agent 或其他冻结实验分支。
+### Gate 0：冻结最小合同
+
+只做 ADR、Schema 和测试清单，不接真实 Worker：
+
+- Task Card、Run State、Task Brief、Checkpoint、Trace；
+- Goal/Plan revision 与 approval digest；
+- Resume Capsule、Task Card 分支发现与 WIP 内容摘要；
+- 单 Writer、operation/child identity 和替代 Worker规则；
+- Decision Contract 与允许动作；
+- Checkpoint 触发边界、Task Brief 默认 `32 KiB` 软上限和敏感信息规则；
+- 主会话状态卡和事件格式；
+- 两个真实案例、模型、预算、timeout、验证和停止条件。
+
+退出条件：没有重复事实源，没有仅因“以后可能需要”而存在的对象，所有异常都有明确人工路径。
+
+### Gate 1：Fake Worker 与可见 Agent 循环
+
+在临时仓库完成：
+
+- 两个串行 Work Item；
+- Plan approval 与 steer 后失效；
+- Task Brief 生成、分层压缩和 manifest；
+- 状态卡、低频事件、按需 Observation；
+- `next / repair / replan / human / finalize` 条件路由；
+- Worker 启动前、partial diff 后和验证失败后的 Checkpoint；
+- Graph `END` 不能绕过 Finish；
+- Task Brief 与 Trace 不含密钥、本机绝对路径、完整聊天或内部推理。
+
+关键验收：至少三种不同 Observation 产生三种不同 Decision，且路由理由可由 Trace 和 Artifact 复核。
+
+### Gate 2A：中断、对账和恢复
+
+使用可控 Worker 做故障注入：
+
+- 旧 Worker 存活时拒绝第二 Writer；
+- operation 未开始且 Workspace 未变时允许新 child；
+- partial diff 后失去 Worker，必须人工选择；
+- 未知数据库、支付、部署或外部 API 副作用禁止重放；
+- state 损坏、Trace 尾部截断、SQLite 丢失和未知 schema；
+- 控制进程退出后从真实 Workspace 恢复；
+- 主会话 steer、pause、stop 不丢失 Goal。
+
+退出条件：`duplicate_writer_start = 0`、`unknown_side_effect_auto_retry = 0`，所有恢复都先对账再动作。
+
+### Gate 2B：真实 Codex 与主会话控制
+
+冻结两个案例：
+
+1. **模糊 Bug**：用户不知道根因位置；Supervisor 先调查，人工批准两个以上 Work Item，新证据触发
+   一次合理 `next`、`repair` 或 `replan`；
+2. **长任务中断**：真实 Worker 留下 partial diff 后中断，主会话看到现场并由人工选择新 Worker
+   接手或验证当前工作。
+
+必须证明：
+
+- 主会话能看到阶段、Work Item、Worker、changed files、风险、Checkpoint 和下一步；
+- 用户可以查询、steer、暂停和恢复；
+- 新 Worker 不依赖旧 Worker 完整聊天；
+- Reviewer 仍与 Worker 会话隔离；
+- 最终 Finish 继续 fail-closed。
+
+### Gate 3：换机器、Claude Code 薄接入与真实价值
+
+完成一次真实接力：
+
+```text
+机器 A：Handoff Checkpoint + Task Card + 人工 commit/push
+机器 B：pull + 按分支发现 Task Card + 重新对账 + 继续执行
+```
+
+Task Card 必须包含未完成 Work Item、失败尝试、约束、风险、WIP changed files 和准确的下一步；
+新会话不得依赖旧聊天就能解释当前任务。旧验证和 Reviewer 结果必须被识别为历史证据，重新验证后
+才能进入 Finish。
+
+随后用同一控制合同做一次 Claude Code 主会话 smoke；不要求新的原生 Runner，只验证状态卡、人工控制
+和外部 Worker 接手方式兼容。
+
+价值对照：
+
+```text
+同一 Coding Agent + 当前 Vega Harness
+vs
+同一 Coding Agent + Vega Supervisor Agent V1
+```
+
+记录：恢复后重新解释时间、重复调查次数、重复 Worker、范围漂移、人工打开文件数、Token、总耗时、
+人工介入次数和用户是否愿意再次使用。
+
+Gate 3 通过后再讨论 `v0.2.0`、README 对外表述和是否让 `vega agent` 成为推荐的长任务入口；
+清晰小任务仍可直接使用当前入口。
+
+## 十二、V1 范围与硬门槛
+
+### 12.1 必须实现
+
+- 一个 Supervisor；
+- Goal、Plan、人工批准和 revision；
+- 一个 Task Card、一个本机状态、一条 Trace；
+- 粗粒度 Checkpoint 与 Task Brief；
+- 主会话状态卡、事件和人工控制；
+- 最小 LangGraph 控制面；
+- 单 Writer、operation/child 对账；
+- 一个真实 Codex Adapter；
+- 本机恢复和一次跨机器接力；
+- 现有 Verification、Risk、Reviewer 和 Finish 集成；
+- 人工选择性 Memory Proposal。
+
+### 12.2 V1 不做
+
+- 多 Worker 并行、群聊或多 Reviewer fan-out；
+- Planner、Researcher、Memory 等额外角色；
+- Web UI、TUI、服务端、队列或 daemon；
+- Provider SDK、模型托管或重写 Codex/Claude Code；
+- 向量库、Embedding、Repo Map、知识图谱；
+- Worktree 管理平台或每个 Work Item 独立分支；
+- 自动 commit、push、release、部署、回滚或删除；
+- 自动接受长期 Memory；
+- 重写 Vega Core 或放松 fail-closed。
+
+### 12.3 硬门槛
+
+```text
+false_success = 0
+duplicate_writer_start = 0
+unknown_side_effect_auto_retry = 0
+stale_approval_accepted = 0
+cross_machine_stale_evidence_accepted = 0
+goal_constraint_silently_dropped = 0
+untrusted_output_promoted_to_fact = 0
+reviewer_worker_context_leak = 0
+```
+
+### 12.4 控制复杂度的规则
+
+出现以下情况时，先删减或替换具体实现，不向外围扩张：
+
+1. Task Card、State、Checkpoint 出现竞争的当前事实；
+2. LangGraph 形成第二套成功状态；
+3. 每个 Tool Call 都需要 Checkpoint；
+4. 恢复必须保存完整聊天或建设向量库；
+5. 中断后仍无法阻止重复 Writer 或未知副作用重放；
+6. 第一个 Adapter 尚不稳定就开始建设 Provider 平台；
+7. 主会话为了“可见”而刷出大量工具日志；
+8. 测试和 Schema 数量快速增长，却没有对应真实故障；
+9. 为了简历展示增加多 Agent、服务端或 UI，而真实日常任务没有受益；
+10. 任何设计放松现有成功语义、写审隔离或人工 Git 边界。
+
+## 十三、审核通过后的实际顺序
+
+1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
+2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；
+3. 按 `Task Card / State → Checkpoint / Trace → Task Brief / 状态卡 → LangGraph` 实现 Gate 1；
+4. Gate 1 独立审查通过后做 Gate 2A 故障注入；
+5. Gate 2A 通过后才连接真实 Codex；
+6. Gate 2B 通过后做一次换机器恢复和 Claude Code 薄接入；
+7. Gate 3 结束后给出发布或继续修改的明确结论；
+8. 每个 Gate 都先给用户看证据和下一步，不一次性跨过全部阶段。
+
+## 十四、本次需要确认的决定
+
+审核本文时只需要确认以下五点：
+
+1. Vega 的主线定位为轻量、可恢复、主会话可控的软件工程 Supervisor Agent；
+2. Task Card 进入 Git，运行状态、Checkpoint 和 Trace 默认留在本机；
+3. Task Brief 使用分层压缩，不设下限，默认软上限为 `32 KiB`；
+4. V1 先支持 Codex，合同稳定后再做 Claude Code 薄接入；
+5. 实现只使用一个长期实验分支，不为每个小步骤创建新分支，并把未完成任务的 WIP Task Card
+   跨机器接力作为 Gate 3 必过场景。
+
+本文与当前代码或产品契约冲突时，在新版本发布前仍以已发布代码、
+[`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 和真实运行证据为准。

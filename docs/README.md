@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-11
+> 更新时间：2026-08-13
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -28,14 +28,15 @@
 
 ## 当前工作
 
-### 待审核：Supervisor Agent V1 方向
+### 待审核：Supervisor Agent V1 实施计划
 
-[`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) 记录下一阶段的候选方向：
-Vega 不重写成通用 Coding Agent，也不缩成只运行测试的工具，而是评估一个负责 Goal、Plan、
-Checkpoint、恢复、Workspace 对账和证据化判断的软件工程 Supervisor Agent。
+Vega 下一阶段的主线方向是一个轻量但完整的软件工程 Supervisor Agent：Codex、Claude Code 等
+Coding Agent 继续读代码和修改文件；Vega 负责调查、计划批准、派发、Workspace 对账、检查点、
+恢复、主会话进度展示，以及最终可信完成判断。完整链路和范围见
+[`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)。
 
-该文档当前只是审核稿。它进入主线不改变 `v0.1.5` 产品行为，不授权接入 LangGraph、Pi、
-Memory V2 或新的 Runtime，也不替代下方真实日常使用观察和 `ROADMAP.md` 的现行停止条件。
+方向已经明确，具体实施计划仍等待审核。审核稿不会改变 `v0.1.5` 的现有行为，也不授权立即接入
+LangGraph 或新 Runtime；通过后将先更新 `ROADMAP.md` 并从 Gate 0 的状态权威合同开始。
 
 ### 真实日常使用观察
 
@@ -43,9 +44,9 @@ Memory V2 或新的 Runtime，也不替代下方真实日常使用观察和 `ROA
 Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist、`vega do`、Reviewer
 打回和 fail-closed 场景均有记录。
 
-当前不再增加新的 Runtime 或基础设施，只在真实日常使用中记录问题并修复影响判断可信度的
-实际缺陷。Finish 第一屏尚有测试名称缺失、空 Scope 展示和 Workspace 汇总不一致等观察项；
-只有这些问题重复造成误判时才做最小修正。当前状态与停止条件见：
+在 Supervisor Agent V1 计划获批并进入独立实验分支前，`v0.1.5` 继续按现有日常使用合同维护，
+不零散增加 Runtime 或基础设施。Finish 第一屏尚有测试名称缺失、空 Scope 展示和 Workspace
+汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。当前状态与历史停止条件见：
 
 - [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：已完成阶段与验收记录。
 - [`ROADMAP.md`](ROADMAP.md)：当前观察期和冻结方向。
