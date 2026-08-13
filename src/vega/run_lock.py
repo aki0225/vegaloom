@@ -12,6 +12,15 @@ from uuid import uuid4
 
 
 _ALLOWED_OPERATIONS = {
+    "agent.approve",
+    "agent.dispatch",
+    "agent.observe",
+    "agent.pause",
+    "agent.plan",
+    "agent.recover",
+    "agent.resume",
+    "agent.steer",
+    "agent.stop",
     "decision.append",
     "goal.attach",
     "goal.checkpoint_done",

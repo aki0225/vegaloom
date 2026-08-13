@@ -199,6 +199,10 @@ jobs:
               tests/test_long_task_controller.py
               tests/test_run_mutation_lock.py
               tests/test_redaction.py
+              tests/test_agent_contract.py
+              tests/test_agent_recovery.py
+              tests/test_agent_runtime.py
+              tests/test_agent_task_card.py
           - name: execution-artifacts
             test_timeout: 58
             files: >-

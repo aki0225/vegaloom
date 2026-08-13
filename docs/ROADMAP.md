@@ -1,13 +1,17 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-11
+> 更新时间：2026-08-13
 > 当前稳定基线：`v0.1.5`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
 > 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式 `--rerun-worker`
 > 已进入主线；r6 真实路径、七项启动前证据加固、崩溃恢复事务及 PR #55 的 9 项 CI 均已
-> 完成。该能力仍只允许人工显式触发，不提升为默认能力，也不自动串联多个 checkpoint。
+> 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已在
+> 独立实验分支完成本地实现和独立审查。Draft PR `#57` 的审阅修复代码 HEAD `4180e7e`
+> 已通过 workflow `31718078414` 的 9 项 CI；状态文档 HEAD 通过自身 CI 后可转为 Ready，
+> Gate 2B 仍需单独决定。既有
+> `vega do / loop / goal`、Reviewer 和成功语义保持不变，顶层 CLI 仅新增 opt-in `agent`。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -37,8 +41,11 @@ v0.1.5 发布（完成）
   -> RCB-03 有界假设调查（完成，reject-before-holdout）
   -> Goal P1 单 checkpoint 控制与显式恢复（实验能力已合并）
   -> 真实控制进程中断 dogfood（r3 reject；r6 显式重跑路径通过）
-  -> r6 后安全审阅与 baseline/授权加固（当前实验分支）
-  -> 保持实验入口，不提升为默认或正式长任务能力
+  -> r6 后安全审阅与 baseline/授权加固（完成并进入主线）
+  -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
+  -> Gate 2A 中断恢复（代码与审阅通过，状态文档 HEAD 待 CI）
+  -> Gate 2B 真实 Codex → Gate 3 跨机器/Claude Code
+  -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
 
 Phase 3 已完成：
@@ -624,6 +631,41 @@ Worker 误记为普通中断，也不会在同一事务上启动两个 Worker。
 config-assurance-pilot 文件集合已通过。Windows 单进程全量测试因 Git 子进程累计延迟没有
 可信终态，且精确旧 HEAD 对照也出现同类超时；因此当前状态是“推送实验分支并等待 PR CI”，
 不是直接合并。默认命令、成功语义、Reviewer 边界和 r6 历史裁决均未改变。
+
+### 2026-08-13：确定 Supervisor Agent V1 主线并进入 Gate 0
+
+经过日常闭环、Goal P1、LangGraph 历史实验和跨机器接力需求复盘，Vega 下一阶段确定为
+轻量但完整的软件工程 Supervisor Agent。Codex、Claude Code 等 Coding Agent 继续负责读代码、
+使用工具和修改文件；Vega 负责任务调查、Plan 批准、单 Writer 派发、Workspace 对账、
+Checkpoint、Task Brief、主会话控制、恢复和现有 Core 的可信完成判断。
+
+本决策替代 2026-08-05“主线停止新增产品能力”及 Goal P1 记录中“不得建设新的 Agent 框架”
+对未来路线的限制；这些旧记录仍保留为当时的历史约束，不再阻止本次已批准的独立实验。
+它不推翻此前失败实验结论：不恢复默认 LangGraph Loop、多 Reviewer、服务端控制面或自动 Memory。
+
+实施只使用 `experiment/supervisor-agent-v1` 一个长期实验分支和一个专用 Worktree，按以下 Gate
+串行推进：
+
+1. Gate 0：冻结状态权威、Task Card、Resume Capsule、Task Brief、Checkpoint、Trace 与 Decision Contract；
+2. Gate 1：Fake Worker 证明主会话可见、人工批准和 `next/repair/replan/human/finalize` 条件路由；
+3. Gate 2A：验证重复 Writer、partial diff、未知副作用和损坏状态恢复
+   （代码 HEAD `4180e7e` 的 9 项 CI 与独立审查通过，状态文档 HEAD 待 CI）；
+4. Gate 2B：接入真实 Codex；
+5. Gate 3：验证未完成 WIP 经任务分支 commit/push 后的跨机器恢复，并完成 Claude Code 薄接入。
+
+Agent Graph 不拥有 Git、Workspace、Verification、Risk、Reviewer 或成功状态。LangGraph 只在 Gate 1
+用于图游标、条件边和人工 interrupt/resume；Gate 0 先实现引擎无关合同。顶层 CLI 可以提供
+opt-in 实验子命令，但任何 Gate 均不得改变既有默认命令行为、自动 commit/push/release 边界
+或 fail-closed 语义。完整计划见
+[`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)。
+
+Gate 2A 当前证据：并发 dispatch、外部 Observation Claim 不得升级为完成事实、dispatch 后缺少
+execution 证据时保留旧 Writer、Worker 仍存活、partial diff、数据库/支付/部署/外部 API
+未知副作用、operation identity 不可复用、Observation write-once、Recovery 证据引用、
+Task Card 与 Observation 推进的安全发布顺序、中间 Work Item 门禁、损坏 state、未知 schema、
+Trace 尾部截断、SQLite 丢失以及 pause/resume/stop 均有定向回归。本地 Agent 回归为
+`62 passed`；代码 HEAD `4180e7e` 的 workflow `31718078414` 为 9/9 success。当前未连接
+真实 Codex，既有默认命令行为未改变。
 
 ## 七、更新规则
 

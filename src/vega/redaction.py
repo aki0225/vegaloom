@@ -298,6 +298,16 @@ def write_redacted_json(path: Path, payload: Any, *, indent: int = 2) -> None:
     )
 
 
+def write_redacted_json_once(path: Path, payload: Any, *, indent: int = 2) -> None:
+    """独占创建 JSON artifact，避免重试覆盖既有证据。"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8", newline="\n") as stream:
+        stream.write(
+            json.dumps(redact_value(payload), ensure_ascii=False, indent=indent) + "\n"
+        )
+
+
 def append_redacted_jsonl(path: Path, payload: Any) -> None:
     """统一 JSONL artifact 追加边界。"""
     path.parent.mkdir(parents=True, exist_ok=True)

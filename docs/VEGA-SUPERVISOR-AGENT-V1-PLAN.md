@@ -1,12 +1,14 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`rewritten / awaiting-owner-approval`
+> 状态：`approved / Gate 2A 代码与审阅通过 / 状态文档 HEAD 待 CI`
 >
 > 计划日期：2026-08-13
 >
 > 规划基线：`main@8884458` / `v0.1.5`
 >
-> 本文确定 Vega 下一阶段的 Agent 主线，但不授权立即修改 Runtime。审核通过后才进入 Gate 0。
+> 本文已获批准，并在独立实验分支按 Gate 推进。Gate 2A 代码 HEAD `4180e7e` 已完成本地验证、
+> 独立代码审查和 workflow `31718078414` 的 9 项 CI；本次状态文档 HEAD 通过自身 CI 后即可把
+> PR 转为 Ready，证据通过前不进入 Gate 2B。
 
 ## 一、产品决定
 
@@ -603,10 +605,15 @@ created_at: ...
 采集实时现场
 → 写临时 Checkpoint 并校验引用与 digest
 → 原子替换 Checkpoint
+→ 若下一状态允许 dispatch，先写入匹配的 Task Brief 与 manifest
 → 原子更新 state.json
-→ 追加 checkpoint_committed Trace
+→ 由后续生命周期 Trace 引用该 Checkpoint
 → 仅在交接边界更新 Task Card
 ```
+
+State 与 Checkpoint 是恢复权威；Trace 只提供追加式审计线索，不额外承担一次
+`checkpoint_committed` 提交协议。崩溃发生在 State 更新前时，新 Checkpoint 可以作为未发布
+Artifact 保留，但不能据此启动 Writer。
 
 V1 不追求 Git、文件系统、外部进程和 SQLite 之间的分布式事务；恢复时始终回到真实 Workspace 对账。
 
@@ -626,7 +633,8 @@ V1 不追求 Git、文件系统、外部进程和 SQLite 之间的分布式事�
 |---|---|
 | 只是宿主压缩，会话和 owned process 仍健康 | 继续原 Worker，不启动新 Writer |
 | 旧 Worker 或 owned process tree 仍存活 | 继续观察或请求停止，禁止第二 Writer |
-| 能证明 operation 未开始且 Workspace 未变 | 允许创建新 child attempt |
+| 受信 Adapter 在 dispatch 的同一原子边界内证明 operation 未启动，且 Workspace 未变 | 可评估创建新 child attempt |
+| dispatch 已提交但缺少可信 execution / process 证据 | 保留旧 binding，`human` |
 | Worker 消失但存在可解释的 partial diff | 等待人工选择新 Worker 接手或直接验证 |
 | 存在未知外部副作用 | `human`，不得自动重放 |
 | child 已有可信终态 | 复用 Artifact，但重新检查 freshness |
@@ -784,24 +792,30 @@ Gate 1 必须证明不同 Observation 会产生不同合理动作；若所有路
 
 ## 十、CLI 与宿主接入
 
-候选命令保持少量：
+Gate 2A 已实现的命令保持少量：
 
 ```powershell
 vega agent start --repo . --input <task-card-or-text>
 vega agent status --run <agent-run>
-vega agent resume --run <agent-run>
+vega agent resume-local --run <agent-run>
 vega agent resume --repo .                     # 按当前分支发现可恢复 Task Card
-vega agent resume --task <task-card>          # 换机器后创建新本机 run
+vega agent resume --repo . --task <task-card> # 换机器后创建新本机 run
 vega agent steer --run <agent-run> --instruction "新增约束"
-vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"
+vega agent pause --run <agent-run> --reason "等待人工处理"
+vega agent stop --run <agent-run> --reason "人工停止"
 ```
 
-观察与停止复用现有命令：
+低频观察可复用现有命令：
 
 ```powershell
 vega watch --run <agent-run> --follow
-vega stop --run <agent-run> --reason "人工停止"
 ```
+
+`vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"` 是 Gate 3 的候选命令，
+当前尚未实现；跨机器接力仍依赖受版本控制的 Task Card 和人工 Git 操作。
+
+打包后的顶层 CLI 已新增 opt-in `agent` 子命令，但既有 `do / loop / goal` 命令行为和成功语义
+保持不变。Gate 3 通过前不把 `agent` 提升为默认推荐入口。
 
 主会话 Skill 或薄 Adapter 只做三件事：
 
@@ -852,10 +866,16 @@ Adapter，两者复用同一 Task Card、Task Brief、Checkpoint、Trace 和 Veg
 使用可控 Worker 做故障注入：
 
 - 旧 Worker 存活时拒绝第二 Writer；
-- operation 未开始且 Workspace 未变时允许新 child；
+- dispatch 在发布 `acting` State 前登记 run-local write-once operation identity，同一 run
+  禁止复用旧 `operation_id`；
+- dispatch 提交时即原子绑定 Writer，并保守跨过不可自动重试边界；
+- dispatch 后缺少可信 execution / process 证据时保留旧 binding；
+- 只有未来受信 Adapter 能在同一原子边界内证明 operation 未启动时，才允许评估新 child；
 - partial diff 后失去 Worker，必须人工选择；
 - 未知数据库、支付、部署或外部 API 副作用禁止重放；
 - state 损坏、Trace 尾部截断、SQLite 丢失和未知 schema；
+- Recovery 机器 Observation 不得覆盖历史证据；
+- Task Card 恢复写入失败时不得发布可 dispatch State；
 - 控制进程退出后从真实 Workspace 恢复；
 - 主会话 steer、pause、stop 不丢失 Goal。
 

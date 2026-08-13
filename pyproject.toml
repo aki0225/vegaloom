@@ -18,10 +18,16 @@ dependencies = [
 dev = [
   "pytest>=8.0",
   "ruff>=0.5",
+  "langgraph>=1.0,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
+]
+agent = [
+  "langgraph>=1.0,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
 ]
 
 [project.scripts]
-vega = "vega.cli:app"
+vega = "vega.cli_entrypoint:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
