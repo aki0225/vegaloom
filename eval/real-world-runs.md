@@ -679,3 +679,29 @@ SAG2C-01 判定为 `invalid-harness`：不计为 Gate 通过，也不计为模�
 修正验证入口、禁用运行缓存并使用全新目标的 SAG2C-02 由
 [`../docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](../docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md)
 单独冻结。
+
+## 2026-08-14 Supervisor Agent Gate 2C：SAG2C-02 完整成功路径
+
+本条记录修正验证入口后的全新正式运行，不覆盖或重跑 SAG2C-01。运行使用
+`pypa/packaging` 的冻结基线和单一 Work Item，目标仓库只作为项目内隔离现场使用。
+
+- Agent run：`20260814-235155-agent`；
+- child：`20260814-235220-433171-bug-loop`；
+- operation：`e05b1abb7bb4414d8f484b1f6d2207a7`；
+- 目标 HEAD：`a2ac3ee0d68da64bdc765e5189911b206d9ebd91`；
+- Worker：`gpt-5.6-terra / xhigh`；Reviewer：`gpt-5.6-sol / xhigh`；
+- Worker 只修改 `CHANGELOG.rst`、`src/packaging/requirements.py` 和
+  `tests/test_requirements.py`，没有越出批准路径；
+- 缺陷复现、目标完整需求测试、Ruff 和 `git diff --check` 均通过；目标完整需求测试结果为
+  `5308 passed`；
+- Workspace、Scope Gate、Artifact integrity、Evidence freshness 和 Risk Gate 均通过；
+- Reviewer 返回 `approve`，findings 为 `0`，覆盖 `3/3` 个变更文件；
+- Finish 为 `ready_to_commit / success`，Supervisor 根据机器 Observation 进入
+  `finalize`；
+- Worker、Reviewer 和 Vega owner 进程均已退出；目标仓库 HEAD 未变化，未执行自动
+  commit、push、release 或长期 Memory 写入。
+
+SAG2C-02 判定为 `gate-exit-pass`。这条证据证明当前主线在一个低风险、单 Work Item、
+可重建真实案例中，能够完整通过 Worker、Verification、Risk、独立 Reviewer、Finish 和
+Supervisor 裁决；不证明目标补丁已被人工合并，也不证明多 Work Item、跨机器恢复、Claude
+Code Adapter、Memory 或通用修复成功率。

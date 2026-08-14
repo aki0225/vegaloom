@@ -12,7 +12,8 @@
 > `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同、
 > 两个冻结真实案例、最终 PR CI 和合并前审阅，当前状态为 `gate-exit-pass`。2026-08-14
 > 路线复核后，Gate 2C 用于补一条当前主线真实完整成功路径。SAG2C-01 因验证入口加载了
-> 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 Gate 2C R2 已批准待执行。
+> 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 SAG2C-02 已完成并判定为
+> `gate-exit-pass`。
 > Gate 3 已拆分但仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
@@ -49,7 +50,7 @@ v0.1.5 发布（完成）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
-  -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；R2 已批准待执行）
+  -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
   -> Gate 3A Handoff 机械生产与本地往返（冻结）
   -> Gate 3B 单 Work Item 跨机器接力（冻结）
   -> Gate 3C 小规模日常价值观察（冻结）
@@ -758,6 +759,18 @@ Gate 2C R2 只把验证入口改为在导入 pytest 前显式插入目标 `src`�
 和 Ruff 的运行缓存。新基线已证明目标缺陷稳定失败，而完整需求测试为 `5307 passed`；
 任务、允许路径、模型、预算、成功标准和 Core 门禁保持不变。R2 协议见
 [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md)。
+
+### 2026-08-14：Gate 2C R2 完成
+
+SAG2C-02 使用修正后的验证入口和全新隔离目标完成一次真实完整成功路径。Worker 只修改三条
+批准路径，缺陷复现、`tests/test_requirements.py`（`5308 passed`）、Ruff 和
+`git diff --check` 均通过；Workspace、Scope、Artifact integrity、Evidence freshness、
+Risk、独立 Reviewer 和 Finish 均形成有效证据，Supervisor 根据机器 Observation 进入
+`finalize`。本次结果判定为 `gate-exit-pass`。
+
+这条证据只覆盖单 Work Item、低风险、可重建案例，不证明目标补丁已被人工合并，也不证明
+多 Work Item、跨机器恢复、Claude Code Adapter、Memory 或通用修复成功率。Gate 3A～3C
+继续冻结，下一步必须先单独批准 Handoff 范围，再开始 Gate 3A。
 
 ## 七、更新规则
 

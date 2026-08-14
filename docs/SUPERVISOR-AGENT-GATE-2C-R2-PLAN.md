@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 2C R2 真实完整路径协议
 
-> 状态：`approved / awaiting execution`
+> 状态：`executed / gate-exit-pass`
 >
 > 日期：2026-08-14
 >
@@ -149,3 +149,24 @@ eval/real-world-runs.md
 
 记录 Case、目标提交、模型、run_id、关键 Artifact、最终 Decision、是否完整经过四个 Gate，以及本
 协议的通过或不通过结论。失败和 fail-closed 现场不得删除或润色。
+
+### SAG2C-02 实际结果（2026-08-14）
+
+- Agent run：`20260814-235155-agent`；
+- child：`20260814-235220-433171-bug-loop`；
+- operation：`e05b1abb7bb4414d8f484b1f6d2207a7`；
+- Worker：`gpt-5.6-terra / xhigh`；Reviewer：`gpt-5.6-sol / xhigh`；
+- Worker 只修改批准路径 `CHANGELOG.rst`、
+  `src/packaging/requirements.py` 和 `tests/test_requirements.py`；
+- 缺陷复现通过，目标 `tests/test_requirements.py` 为 `5308 passed`，Ruff 和
+  `git diff --check` 均通过；
+- Workspace、三阶段 Scope Gate、Artifact integrity、Evidence freshness 和 Risk Gate
+  均通过；Reviewer 返回 `approve`，findings 为 `0`，覆盖 `3/3` 个变更文件；
+- Finish 形成 `ready_to_commit / success`，Supervisor 根据机器 Observation 选择
+  `finalize`；
+- Worker、Reviewer 和 Vega owner 进程均已退出；目标仓库 HEAD 未变化，补丁仍保留为未提交的
+  人工检查材料，没有自动 commit、push、release 或长期 Memory 写入。
+
+本次结果满足 Gate 2C 的冻结退出条件，判定为 `gate-exit-pass`。它证明的是当前主线在一个
+单 Work Item、低风险、可重建案例中的完整控制链，不证明目标补丁已经被人工合并，也不证明
+多 Work Item、跨机器恢复、Claude Code Adapter、Memory 或通用修复成功率。

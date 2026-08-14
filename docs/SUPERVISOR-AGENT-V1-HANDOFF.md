@@ -6,7 +6,7 @@
 >
 > 实施基线：`main@e126aa2`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 3 冻结`
+> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3 冻结`
 
 ## 当前结论
 
@@ -32,6 +32,13 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
 真实案例、最终 PR CI 与合并前审阅已经满足冻结退出条件，Gate 2B 判定为
 `gate-exit-pass`。Gate 3 仍保持冻结，需另行批准；本阶段不再重跑案例或增加 Adapter 能力。
 
+Gate 2C 的 SAG2C-02 已在修正验证入口后完成真实完整成功路径。Worker 只修改三条批准路径，
+缺陷复现、`tests/test_requirements.py`（`5308 passed`）、Ruff 和 `git diff --check` 均通过；
+Workspace、Scope、Artifact integrity、Evidence freshness、Risk、独立 Reviewer 和 Finish
+均形成有效证据，Supervisor 根据机器 Observation 进入 `finalize`。这条结果只证明单
+Work Item、低风险、可重建案例的完整控制链，不证明目标补丁已被人工合并、跨机器恢复、
+Claude Code Adapter、Memory 或通用修复成功率。Gate 3A～3C 继续冻结。
+
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
 `finalizing`，不能自行写入 `ready_to_commit`。
@@ -54,7 +61,7 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
 6. Finish 的 `verification_passed=true` 原先可能先于 Artifact 完整性和新鲜度判定；现在
    不可信证据一律为 `blocked`，通过标记不能覆盖 fail-closed 门禁。
 
-当前状态文档已同步为 `gate-exit-pass`，同时明确 Gate 3 仍冻结。
+当前状态文档已同步为 Gate 2C `gate-exit-pass`，同时明确 Gate 3 仍冻结。
 
 本地验证：
 

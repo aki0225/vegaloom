@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C R2 已批准待执行 / Gate 3 冻结`
+> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3 冻结`
 >
 > 计划日期：2026-08-13
 >
@@ -11,7 +11,8 @@
 > 单一实验分支完成机械合同、两个冻结真实案例、最终 PR CI 与合并前审阅，当前状态为
 > `gate-exit-pass`。2026-08-14 路线复核后增加 Gate 2C，用当前主线补一条真实完整成功路径。
 > SAG2C-01 因 pytest 提前导入控制环境中的 `packaging` 而记为 `invalid-harness`；修正验证入口的
-> Gate 2C R2 已批准待执行。原 Gate 3 拆成机械交接、真实跨机器和价值观察，仍需按阶段批准。
+> SAG2C-02 已于 2026-08-14 通过 Gate 2C。原 Gate 3 拆成机械交接、真实跨机器和价值观察，
+> 仍需按阶段批准。
 
 ## 一、产品决定
 
@@ -922,7 +923,9 @@ Gate 2B 证明了真实 Worker 的 Claim 不会越过门禁，以及 partial Dif
 当前 `main` 完成一个单 Work Item、低风险、可重建的真实 Codex 案例。
 
 SAG2C-01 已证明失败验证不能被 Worker Claim 或 Reviewer 覆盖，但其 pytest 命令验证了错误的
-Python 包来源，因此不计为 Gate 通过或模型失败。原协议与无效结果见
+Python 包来源，因此不计为 Gate 通过或模型失败。修正后的 SAG2C-02 已使用全新目标和正确的
+验证入口，完整经过 Verification、Risk、独立 Reviewer、Finish 和 Supervisor `finalize`，
+结果为 `gate-exit-pass`。原协议与无效结果见
 [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md)，修正后的冻结协议见
 [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md)。
 
@@ -935,6 +938,7 @@ Python 包来源，因此不计为 Gate 通过或模型失败。原协议与无�
 - 任务、模型和预算不因结果而替换。
 
 Gate 2C 只验证当前主线的完整可用路径，不新增 Handoff、Claude、Memory、多 Work Item 或默认入口。
+Gate 2C 已完成；Gate 3A～3C 仍冻结，进入下一阶段前必须单独批准 Handoff 范围和停止条件。
 
 ### Gate 3A：Handoff 机械生产与本地往返
 
@@ -1045,17 +1049,16 @@ reviewer_worker_context_leak = 0
 
 ## 十三、审核通过后的实际顺序
 
-当前执行进度：第 1～5 项已完成。第 6 项 Gate 2C 的首次运行记为 `invalid-harness`；
-Gate 2C R2 已批准，继续验证当前主线真实完整成功路径。Gate 3A～3C 在 Gate 2C
-形成有效结论前保持冻结。
+当前执行进度：第 1～6 项已完成。第 6 项的首次运行记为 `invalid-harness`，修正后的
+SAG2C-02 已完成并判定为 `gate-exit-pass`。Gate 3A～3C 在获得单独批准前保持冻结。
 
 1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
 2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；
 3. 按 `Task Card / State → Checkpoint / Trace → Task Brief / 状态卡 → LangGraph` 实现 Gate 1；
 4. Gate 1 独立审查通过后做 Gate 2A 故障注入；
 5. Gate 2A 通过后才连接真实 Codex；
-6. Gate 2B 通过后先完成 Gate 2C 当前主线真实完整成功路径；
-7. Gate 2C 通过后实现 Gate 3A Handoff 生产端并完成本地往返；
+6. Gate 2B 通过后先完成 Gate 2C 当前主线真实完整成功路径（已完成，`gate-exit-pass`）；
+7. 获得单独批准后实现 Gate 3A Handoff 生产端并完成本地往返；
 8. Gate 3A 通过后做 Gate 3B 单 Work Item 跨机器接力；
 9. Gate 3B 通过后做 Gate 3C 小规模日常价值观察；
 10. 每个 Gate 都先给用户看证据和下一步，不一次性跨过全部阶段。
