@@ -713,6 +713,49 @@ def test_recover_reads_sibling_assist_child_execution(
     )
 
 
+def test_recover_uses_bound_worker_when_child_has_newer_core_execution(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    child_run = "assist-child-core-finished"
+    SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id="operation-worker",
+    )
+    child_dir = _write_assist_child(workspace, repo, child_run)
+    _write_execution(
+        child_dir,
+        execution_id="operation-worker",
+        status="completed",
+    )
+    _write_execution(
+        child_dir,
+        execution_id="reviewer-execution",
+        status="completed",
+        step="reviewer",
+        heartbeat_offset_seconds=5,
+    )
+
+    recovered = SupervisorAgentRecovery(workspace).recover(
+        run_id,
+        AgentRecoveryRequest(
+            reason="Core 已结束但主控制进程在机器 Observation 前中断",
+            external_side_effects="none",
+        ),
+    )
+
+    assert recovered.state.phase == "needs_human"
+    assert recovered.state.active_child_run is None
+    summary = json.loads(
+        next((recovered.run_dir / "recovery-executions").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert summary["execution_id"] == "operation-worker"
+    assert summary["execution_artifact"].startswith("executions/worker/")
+
+
 def test_resume_rejects_safe_checkpoint_with_known_side_effect(
     tmp_path: Path,
 ) -> None:
@@ -808,14 +851,16 @@ def _write_execution(
     *,
     execution_id: str,
     status: str,
+    step: str = "worker",
+    heartbeat_offset_seconds: int = 0,
 ) -> None:
-    now = datetime.now(UTC)
-    execution_dir = run_dir / "executions" / "worker"
+    now = datetime.now(UTC) + timedelta(seconds=heartbeat_offset_seconds)
+    execution_dir = run_dir / "executions" / step
     execution_dir.mkdir(parents=True, exist_ok=True)
     lease = ExecutionLease(
         run_id=run_dir.name,
         execution_id=execution_id,
-        step="worker",
+        step=step,
         owner_pid=os.getpid(),
         command=["fake-worker"],
         started_at=(now - timedelta(seconds=2)).isoformat(),

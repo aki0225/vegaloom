@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 2B 实施与验证记录
 
-> 状态：`已批准 / 机械合同已实现 / 两个真实案例已执行 / 合并前审阅修复已本地验证 / 最终 PR CI 待完成`
+> 状态：`gate-exit-pass / Gate 3 冻结`
 >
 > 日期：2026-08-14
 >
@@ -457,8 +457,8 @@ Gate 2B 预计只修改：
 当前代码已经覆盖上述 1～9 项机械合同，并增加“Worker 或 Core 产生的 Plan 外路径不得进入成功
 路由”“repair 复用同一 child 且保留两次 execution”“repair 无新变化不得复用旧 Diff”的回归。
 两个真实 Codex Case 已执行：`SAG2B-01` 证明真实 Worker 的成功 Claim 不会越过未跟踪文件门禁，
-`SAG2B-02` 证明 partial Diff 可以通过身份绑定的 stop request 保留并交由人工。包含运行中三项
-集成修复和结果文档的最终分支 HEAD 仍需通过 PR CI 与合并前审阅。
+`SAG2B-02` 证明 partial Diff 可以通过身份绑定的 stop request 保留并交由人工。最终 PR CI 与
+合并前审阅已经完成，Gate 2B 不再追加案例或扩大 Adapter 范围。
 
 ## 九、Gate 2B 退出条件
 
@@ -479,9 +479,9 @@ stop_targets_only_owned_child = true
 `SAG2B-01` 必须形成一个可解释的 Supervisor Decision；`SAG2B-02` 必须形成一次带 partial diff 的
 人工接管现场，否则 Gate 2B 不通过。
 
-2026-08-14 的实际结果满足上述两个真实案例条件。当前判定为
-`real-case-pass / merge-pending`：真实运行合同已经满足，但在最终分支 HEAD 的 CI 和审阅完成前，
-PR 保持 Draft，不合并到主线，也不进入 Gate 3。
+2026-08-14 的实际结果满足上述真实案例、机械合同、最终 PR CI 和合并前审阅条件。当前判定为
+`gate-exit-pass`。Gate 3 仍冻结，必须另行批准后再制定跨机器恢复和 Claude Code 薄 Adapter
+验证，不在本阶段顺带实现。
 
 ## 十、立即停止条件
 
@@ -496,5 +496,5 @@ PR 保持 Draft，不合并到主线，也不进入 Gate 3。
 7. 为解决第一个 Adapter 开始建设 Provider 平台；
 8. 真实案例需要修改冻结目标、模型或预算才能得到更好结果。
 
-本文已获人工批准，并只创建一个 Gate 2B 短生命周期实验分支和一个专用 Worktree。当前实现
-继续停留在实验分支；两个冻结真实案例已经完成，但最终 PR CI 与合并前审阅完成前仍不得合并。
+本文已获人工批准，并只使用一个 Gate 2B 短生命周期实验分支和一个专用 Worktree。两个冻结
+真实案例、最终 PR CI 与合并前审阅均已完成；Gate 2B 到此停止扩展，Gate 3 需单独批准。

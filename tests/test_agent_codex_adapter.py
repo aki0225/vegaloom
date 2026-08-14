@@ -257,6 +257,17 @@ def test_verification_failure_takes_precedence_over_passed_finish_flag() -> None
     assert _verification_status(failed_iteration, trusted_finish) == "failed"
 
 
+def test_untrusted_finish_evidence_blocks_passed_verification_flag() -> None:
+    untrusted_finish = {
+        "verification_passed": True,
+        "latest_verification_failed": False,
+        "artifact_integrity": {"valid": False},
+        "evidence_freshness": {"fresh": True},
+    }
+
+    assert _verification_status(None, untrusted_finish) == "blocked"
+
+
 class _FakeWorkerRunner:
     def __init__(
         self,

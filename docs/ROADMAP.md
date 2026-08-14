@@ -9,9 +9,8 @@
 > 已进入主线；r6 真实路径、七项启动前证据加固、崩溃恢复事务及 PR #55 的 9 项 CI 均已
 > 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已完成。
 > PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以
-> `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同；
-> 代码 HEAD `799bb29` 已通过 PR `#58` 的 9 项 CI，两个冻结真实案例也已执行。当前等待包含
-> 运行中集成修复和结果文档的最终分支 HEAD 完成 PR CI 与合并前审阅。既有
+> `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同、
+> 两个冻结真实案例、最终 PR CI 和合并前审阅，当前状态为 `gate-exit-pass`。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
@@ -46,8 +45,8 @@ v0.1.5 发布（完成）
   -> r6 后安全审阅与 baseline/授权加固（完成并进入主线）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
-  -> Gate 2B 真实 Codex（两个真实案例已执行，最终 PR CI 与审阅待完成）
-  -> Gate 3 跨机器/Claude Code
+  -> Gate 2B 真实 Codex（完成，gate-exit-pass）
+  -> Gate 3 跨机器/Claude Code（冻结，需单独批准）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
 
@@ -703,7 +702,7 @@ Adapter 机械合同，没有证明真实 Codex 案例通过。下一步严格�
 `SAG2B-01 → SAG2B-02` 串行执行；SAG2B-01 必须形成可解释 Decision，SAG2B-02 必须保留
 partial diff 并进入人工接管。两项完成前不进入 Gate 3，也不发布新版本。
 
-### 2026-08-14：Gate 2B 两个真实案例完成，等待最终 CI 与审阅
+### 2026-08-14：Gate 2B 两个真实案例与合并前审阅完成
 
 真实运行先暴露三项 Adapter 集成问题：首个 assist child 创建受控运行目录后造成批准
 Checkpoint 漂移、带前缀的 operation identity 不满足 Windows Job 约束，以及目标项目 Codex
@@ -721,9 +720,9 @@ owned execution 写入停止请求。最终 execution 为 `stopped`，
 `termination_unconfirmed=false`，partial Diff 保留，Verification、Risk 和 Reviewer 均未启动，
 Supervisor 进入 `needs_human`。没有直接 kill PID、第二 Writer、自动重试、提交或推送。
 
-两个真实案例已经满足 Gate 2B 冻结退出条件，当前判定为
-`real-case-pass / merge-pending`。PR `#58` 继续保持 Draft；包含三项集成修复和结果文档的
-最终 HEAD 取得完整 CI 与合并前审阅结论前，不合并到主线，也不进入 Gate 3。
+两个真实案例、最终 PR CI 与合并前审阅已经满足 Gate 2B 冻结退出条件，当前判定为
+`gate-exit-pass`。Gate 3 仍保持冻结，必须另行批准；本阶段没有改变默认 Runtime、Reviewer、
+成功语义或人工 Git 边界。
 
 ## 七、更新规则
 

@@ -416,10 +416,10 @@ def _verification_status(
         return "failed"
     if latest is not None and latest.verification_status == "failed":
         return "failed"
-    if finish_summary.get("verification_passed") is True:
-        return "passed"
     if _finish_evidence_untrusted(finish_summary):
         return "blocked"
+    if finish_summary.get("verification_passed") is True:
+        return "passed"
     return "not_run"
 
 

@@ -4,10 +4,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from .agent_contract import AgentObservation, AgentPlan, AgentState, canonical_digest
-from .agent_execution_bridge import resolve_bound_execution_run_dir, stop_active_child
-from .agent_execution_bridge import write_execution_evidence_ref
+from .agent_execution_bridge import (
+    resolve_bound_execution_run_dir,
+    resolve_bound_worker_execution,
+    stop_active_child,
+    write_execution_evidence_ref,
+)
 from .agent_mutation import agent_mutation
-from .execution_control import inspect_execution_for_recovery
 from .agent_persistence import (
     append_agent_trace,
     save_agent_state,
@@ -30,6 +33,7 @@ from .agent_runtime_support import (
     write_status_card,
     write_task_brief,
 )
+from .execution_control import inspect_execution_for_recovery
 from .redaction import write_redacted_json_once
 from .run_utils import resolve_run_dir
 from .workspace_check import ReviewWorkspaceSnapshot
@@ -80,27 +84,20 @@ class SupervisorAgentRecovery:
                     "不能证明 operation 未启动"
                 ),
             )
-        if (
-            process_inspection.record is not None
-            and process_inspection.record.lease.execution_id
-            != state.active_operation_id
-        ):
-            return _block_on_execution_issue(
-                run_dir,
-                state,
-                plan,
-                actual,
-                request,
-                "execution 记录与当前 active operation 身份不一致",
+        assert state.active_operation_id is not None
+        try:
+            bound_record = resolve_bound_worker_execution(
+                execution_run_dir,
+                state.active_operation_id,
             )
-        if state.operation_started and process_inspection.record is None:
+        except ValueError as exc:
             return _block_on_execution_issue(
                 run_dir,
                 state,
                 plan,
                 actual,
                 request,
-                "operation 可能已开始，但缺少可验证的 execution 记录",
+                f"Worker execution 证据无法安全解析：{exc}",
             )
         trace_issue = agent_trace_issue(run_dir / "trace.jsonl")
         workspace_unchanged = actual.fingerprint == state.workspace_fingerprint
@@ -126,15 +123,14 @@ class SupervisorAgentRecovery:
                 f"{canonical_digest({'operation_id': state.active_operation_id})}.json"
             )
         ]
-        if process_inspection.record is not None:
-            evidence_refs.append(
-                write_execution_evidence_ref(
-                    run_dir,
-                    state,
-                    execution_run_dir,
-                    process_inspection.record,
-                )
+        evidence_refs.append(
+            write_execution_evidence_ref(
+                run_dir,
+                state,
+                execution_run_dir,
+                bound_record,
             )
+        )
         observation = AgentObservation(
             observation_id=f"recovery-{uuid4().hex[:12]}",
             work_item_id=state.current_work_item,

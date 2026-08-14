@@ -8,7 +8,11 @@ from .agent_contract import AgentPlan, AgentState, canonical_digest
 from .agent_persistence import append_agent_trace
 from .agent_run import AgentRun
 from .agent_runtime_support import write_status_card
-from .execution_control import ExecutionRecord, request_stop_for_run
+from .execution_control import (
+    ExecutionRecord,
+    find_execution_records,
+    request_stop_for_run,
+)
 from .models import LoopAutomationState
 from .redaction import write_redacted_json_once
 from .run_utils import resolve_run_dir
@@ -71,6 +75,26 @@ def write_execution_evidence_ref(
         },
     )
     return relative
+
+
+def resolve_bound_worker_execution(
+    run_dir: Path,
+    operation_id: str,
+) -> ExecutionRecord:
+    records = find_execution_records(run_dir)
+    bound = [
+        record
+        for record in records
+        if record.lease.execution_id == operation_id
+        and record.lease.step == "worker"
+    ]
+    if not bound:
+        if records:
+            raise ValueError("execution 记录与当前 active operation 身份不一致")
+        raise ValueError("operation 可能已开始，但缺少可验证的 execution 记录")
+    if len(bound) > 1:
+        raise ValueError("当前 active operation 对应多个 Worker execution 记录")
+    return bound[0]
 
 
 def operation_ref(operation_id: str) -> str:

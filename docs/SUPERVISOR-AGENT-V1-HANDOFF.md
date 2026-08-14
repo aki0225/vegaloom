@@ -2,11 +2,11 @@
 
 > 日期：2026-08-14
 >
-> 当前实施分支：`experiment/supervisor-agent-gate-2b`
+> Gate 2B 来源分支：`experiment/supervisor-agent-gate-2b`
 >
 > 实施基线：`main@e126aa2`
 >
-> 状态：`Gate 2B 两个真实案例已执行 / 合并前审阅修复已本地验证 / 最终 PR CI 待完成`
+> 状态：`Gate 2B gate-exit-pass / Gate 3 冻结`
 
 ## 当前结论
 
@@ -29,8 +29,8 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
 - `SAG2B-02` 在首次允许范围内 tracked Diff 后，通过身份绑定的 `agent stop` 停止 owned
   execution，保留 partial Diff 并进入 `needs_human`；Verification、Risk 和 Reviewer 均未启动。
 
-真实案例已经满足冻结退出条件，但包含集成修复和结果文档的最终分支 HEAD 尚未完成 PR CI 与
-合并前审阅。因此 PR `#58` 继续保持 Draft，不合并，也不进入 Gate 3。
+真实案例、最终 PR CI 与合并前审阅已经满足冻结退出条件，Gate 2B 判定为
+`gate-exit-pass`。Gate 3 仍保持冻结，需另行批准；本阶段不再重跑案例或增加 Adapter 能力。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
@@ -39,7 +39,7 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
 ## 2026-08-14 合并前独立审阅
 
 独立审阅没有重跑 `SAG2B-01` 或 `SAG2B-02`，只检查最终分支的并发、执行身份、停止、恢复和
-机器证据。审阅确认并修复四项合并阻断：
+机器证据。审阅确认并修复六项合并阻断：
 
 1. 并发 `agent run` 可能在 Writer binding 串行化之前各自创建 assist child；现在 child 创建与
    binding 位于同一短 mutation 临界区，真实 Worker 执行仍在锁外；
@@ -49,21 +49,27 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
    都优先，不能进入完成路由；
 4. Supervisor 单 Writer 原先会继承用户或项目配置中的 `workspace-write` 网络和额外可写根；
    现在显式关闭网络并清空额外 writable roots，避免 Plan 外写入和不可确认外部副作用。
+5. child 在 Worker 后可能产生更新的 Verification 或 Reviewer execution；Recovery 现在按
+   active operation 与 `worker` step 唯一绑定原 Worker 证据，不再使用最新 Core execution。
+6. Finish 的 `verification_passed=true` 原先可能先于 Artifact 完整性和新鲜度判定；现在
+   不可信证据一律为 `blocked`，通过标记不能覆盖 fail-closed 门禁。
+
+当前状态文档已同步为 `gate-exit-pass`，同时明确 Gate 3 仍冻结。
 
 本地验证：
 
 ```text
-Codex Adapter：15 passed
-Agent Recovery：23 passed
+Codex Adapter：16 passed
+Agent Recovery：24 passed
 Agent Runtime：21 passed
 Execution Safety：71 passed, 1 skipped
-完整测试节点收集：1222 collected
+完整测试节点收集：1224 collected
 Ruff、compileall、repository hygiene、architecture growth、git diff --check：通过
 architecture growth：C901 35->35，Python 模块 122->126
 ```
 
-这些修复尚需由 PR `#58` 新 HEAD 的 Python 3.11/3.12 CI 复验；在 CI 完成前仍不转 Ready、
-不合并，也不进入 Gate 3。
+合并裁决以 PR `#58` 最终 HEAD 的 Python 3.11/3.12 与 Windows CI 为硬门槛；CI 未完整通过
+时必须保持 fail-closed。Gate 3 不随本 PR 自动开启。
 
 ## Gate 2B 当前实现
 
@@ -212,24 +218,11 @@ workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
 
 ## 后续接力
 
-```powershell
-git fetch origin --prune
-git switch experiment/supervisor-agent-gate-2b
-git pull --ff-only
-git status --short --branch
-Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
-```
-
-建议顺序：
-
-1. 确认当前分支与远端实验分支一致，Workspace 干净。
-2. 阅读本文件和
-   [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) 的实际结果；
-   不重跑 `SAG2B-01` 或 `SAG2B-02`。
-3. 检查 PR `#58` 最终 HEAD 的 9 项 CI，并对 `origin/main..HEAD` 做合并前独立审阅。
-4. 只有 CI 与审阅均无阻断项时，才把 Draft PR 转为 Ready；仍需人工决定是否合并。
-5. Gate 2B 合并后再单独制定 Gate 3 的跨机器 WIP commit/push 和 Claude Code 薄 Adapter 验证，
-   不在本分支顺带实现。
+1. 不重跑 `SAG2B-01` 或 `SAG2B-02`，保留既有冻结案例和负结果现场。
+2. 日常仍以 `vega do / loop / goal` 为默认入口；`vega agent` 继续保持 opt-in。
+3. 若要进入 Gate 3，先单独批准并冻结跨机器 WIP commit/push 与 Claude Code 薄 Adapter
+   的验证合同，不直接在 Gate 2B 实现上追加能力。
+4. Gate 3 未获批准前，只处理重复出现且影响日常使用的缺陷。
 
 ## 下一 Gate 的边界
 
@@ -247,7 +240,6 @@ Gate 2B 不新增多 Worker、Provider 平台、服务端、自动重试、自�
 
 ## 未完成事项
 
-- 最终分支 HEAD 尚未取得 PR CI 和合并前独立审阅结论。
 - 尚未证明多 Work Item 的真实 Adapter 累计 Diff 归因；Gate 2B 当前 fail-closed 拒绝该形态。
 - 尚未验证跨机器 Task Card 接力和 Claude Code 薄 Adapter；它们属于 Gate 3。
 - 尚未决定 `v0.2.0` 发布时点。

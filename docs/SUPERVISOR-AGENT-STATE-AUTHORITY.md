@@ -1,6 +1,6 @@
 # Supervisor Agent V1 状态权威与最小合同 ADR
 
-> 状态：`accepted / Gate 2A 已合并 / Gate 2B 代码 HEAD CI 通过`
+> 状态：`accepted / Gate 2A 已合并 / Gate 2B gate-exit-pass`
 >
 > 日期：2026-08-13
 >
@@ -159,5 +159,6 @@ Gate 2A 已补充：
 本地故障注入与状态回归为 62 项通过；审阅修复代码 HEAD `4180e7e` 已通过 workflow
 `31718078414` 的 9 项 CI，最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，
 并以 `6a5c927` 合并到 `main`。Gate 2A 退出条件已经满足；这些证据不代表 Gate 2B 已实现或
-通过。Gate 2B 后续已在独立实验分支完成机械合同；代码 HEAD `799bb29` 已通过 PR `#58`
-的 9 项 CI，两个冻结真实案例仍待执行。状态权威顺序和本 ADR 的 fail-closed 决定没有改变。
+通过。Gate 2B 后续已在独立实验分支完成机械合同、两个冻结真实案例、最终 PR CI 与合并前
+审阅，当前状态为 `gate-exit-pass`。状态权威顺序和本 ADR 的 fail-closed 决定没有改变；
+Gate 3 仍需单独批准。
