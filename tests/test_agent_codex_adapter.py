@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
+from vega.agent_codex_evidence import _verification_status
 from vega.agent_contract import AgentPlan, AgentWorkItem
 from vega.agent_persistence import append_agent_trace, load_agent_state
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.execution_control import ExecutionController, RunnerExecutionContext
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
-from vega.runner import RunnerResult
+from vega.runner import CodexExecRunner, RunnerResult
 from vega.workspace_inventory import prepare_verification_temp_root
 
 
@@ -169,6 +173,88 @@ class _FakeFinishRuntime:
             encoding="utf-8",
         )
         return self.loop.child_dir
+
+
+def test_adapter_serializes_child_creation_before_writer_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    run_dir = workspace / "runs" / "agent-run"
+    run_dir.mkdir(parents=True)
+    adapter = SupervisorAgentCodexAdapter(workspace)
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    child_count = 0
+    child_count_lock = threading.Lock()
+    prepared = SimpleNamespace(run_dir=run_dir)
+
+    monkeypatch.setattr(
+        adapter,
+        "_prepare_attempt",
+        lambda run, timeout_seconds: prepared,
+    )
+
+    def prepare_child(_prepared):
+        nonlocal child_count
+        with child_count_lock:
+            child_count += 1
+            current = child_count
+        if current == 1:
+            first_entered.set()
+            assert release_first.wait(5)
+        return workspace / "runs" / f"child-{current}", "prompt"
+
+    monkeypatch.setattr(adapter, "_prepare_child", prepare_child)
+    monkeypatch.setattr(
+        adapter.worker,
+        "_bind_locked",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_execute_worker",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(adapter, "_reconcile_attempt", lambda executed: executed)
+
+    def invoke() -> str:
+        try:
+            adapter.run(run_dir.name, timeout_seconds=60)
+        except ValueError as exc:
+            return f"blocked:{exc}"
+        return "completed"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(invoke)
+        assert first_entered.wait(2)
+        second = pool.submit(invoke)
+        second_outcome = second.result(timeout=2)
+        release_first.set()
+        first_outcome = first.result(timeout=2)
+
+    assert sorted([first_outcome, second_outcome]) == [
+        "blocked:run 正由当前进程修改：run=agent-run，operation=agent.dispatch",
+        "completed",
+    ]
+    assert child_count == 1
+
+
+def test_verification_failure_takes_precedence_over_passed_finish_flag() -> None:
+    trusted_finish = {
+        "verification_passed": True,
+        "latest_verification_failed": True,
+        "artifact_integrity": {"valid": True},
+        "evidence_freshness": {"fresh": True},
+    }
+    failed_iteration = LoopIterationState(
+        iteration=1,
+        verification_status="failed",
+    )
+
+    assert _verification_status(None, trusted_finish) == "failed"
+    trusted_finish["latest_verification_failed"] = False
+    assert _verification_status(failed_iteration, trusted_finish) == "failed"
 
 
 class _FakeWorkerRunner:
@@ -335,6 +421,36 @@ def test_worker_timeout_preserves_partial_diff_and_skips_core(
     assert observation["external_side_effects"] == "unknown"
     assert observation["verification"] == "not_run"
     assert observation["review"] == "not_run"
+
+
+def test_missing_codex_preflight_failure_releases_writer_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: None)
+    loop = _FakeLoopRuntime(workspace)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=CodexExecRunner(executable="missing-codex"),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    result = adapter.run(run_id, timeout_seconds=60)
+
+    assert result.state.phase == "needs_human"
+    assert result.state.active_child_run is None
+    assert result.state.active_operation_id is None
+    assert loop.continued is False
+    assert loop.child_dir is not None
+    execution_path = next(
+        (loop.child_dir / "executions" / "worker").glob("*/execution.json")
+    )
+    execution = json.loads(execution_path.read_text(encoding="utf-8"))
+    assert execution["status"] == "failed"
+    assert execution["child_pid"] is None
 
 
 def test_invalid_worker_claim_skips_core_and_routes_human(

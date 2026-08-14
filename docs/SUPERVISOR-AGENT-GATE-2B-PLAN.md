@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 2B 实施与验证记录
 
-> 状态：`已批准 / 机械合同已实现 / 两个真实案例已执行 / 最终 PR CI 与审阅待完成`
+> 状态：`已批准 / 机械合同已实现 / 两个真实案例已执行 / 合并前审阅修复已本地验证 / 最终 PR CI 待完成`
 >
 > 日期：2026-08-14
 >
@@ -149,6 +149,9 @@ Adapter 复用 `CodexExecRunner`，固定：
 
 - `codex exec`；
 - `--sandbox workspace-write`；
+- Supervisor 单 Writer 调用显式覆盖
+  `sandbox_workspace_write.network_access=false` 与
+  `sandbox_workspace_write.writable_roots=[]`，不继承目标项目或用户配置中的额外网络和写目录；
 - `--json` 与最终输出 Schema；
 - 禁用 hooks、memories、plugins 和 notify；
 - 不使用 `danger-full-access` 或任何 bypass 参数；

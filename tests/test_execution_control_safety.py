@@ -240,6 +240,38 @@ def test_codex_exec_runner_propagates_termination_unconfirmed(
     assert result.termination_unconfirmed is True
 
 
+def test_codex_exec_runner_records_terminal_preflight_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "missing-codex" / "executions" / "worker",
+        run_id="missing-codex",
+        step="worker",
+        execution_id="a" * 32,
+    )
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: None)
+
+    result = CodexExecRunner(executable="missing-codex").run(
+        "test prompt",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=60,
+        execution_context=context,
+    )
+
+    lease = ExecutionLease.model_validate_json(
+        (context.execution_dir / "execution.json").read_text(encoding="utf-8")
+    )
+    assert result.status == "error"
+    assert lease.execution_id == context.execution_id
+    assert lease.status == "failed"
+    assert lease.child_pid is None
+
+
 def test_codex_exec_runner_writes_output_schema_inside_execution_dir(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -350,6 +382,13 @@ def test_codex_exec_runner_single_writer_disables_target_multi_agent(
         "multi_agent",
         "multi_agent_v2",
     ]
+    config_values = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--config"
+    ]
+    assert "sandbox_workspace_write.network_access=false" in config_values
+    assert "sandbox_workspace_write.writable_roots=[]" in config_values
 
 
 def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(

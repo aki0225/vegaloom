@@ -6,7 +6,7 @@
 >
 > 实施基线：`main@e126aa2`
 >
-> 状态：`Gate 2B 两个真实案例已执行 / 最终 PR CI 与审阅待完成`
+> 状态：`Gate 2B 两个真实案例已执行 / 合并前审阅修复已本地验证 / 最终 PR CI 待完成`
 
 ## 当前结论
 
@@ -35,6 +35,35 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
 `finalizing`，不能自行写入 `ready_to_commit`。
+
+## 2026-08-14 合并前独立审阅
+
+独立审阅没有重跑 `SAG2B-01` 或 `SAG2B-02`，只检查最终分支的并发、执行身份、停止、恢复和
+机器证据。审阅确认并修复四项合并阻断：
+
+1. 并发 `agent run` 可能在 Writer binding 串行化之前各自创建 assist child；现在 child 创建与
+   binding 位于同一短 mutation 临界区，真实 Worker 执行仍在锁外；
+2. 找不到 `codex` 或 output schema 写入失败时原先没有 terminal `execution.json`，会让已发布
+   binding 永久无法对账；现在启动前失败也保存匹配 operation 的失败终态；
+3. Finish 摘要同时出现 Verification 通过与失败事实时原先优先采用通过；现在任何明确失败事实
+   都优先，不能进入完成路由；
+4. Supervisor 单 Writer 原先会继承用户或项目配置中的 `workspace-write` 网络和额外可写根；
+   现在显式关闭网络并清空额外 writable roots，避免 Plan 外写入和不可确认外部副作用。
+
+本地验证：
+
+```text
+Codex Adapter：15 passed
+Agent Recovery：23 passed
+Agent Runtime：21 passed
+Execution Safety：71 passed, 1 skipped
+完整测试节点收集：1222 collected
+Ruff、compileall、repository hygiene、architecture growth、git diff --check：通过
+architecture growth：C901 35->35，Python 模块 122->126
+```
+
+这些修复尚需由 PR `#58` 新 HEAD 的 Python 3.11/3.12 CI 复验；在 CI 完成前仍不转 Ready、
+不合并，也不进入 Gate 3。
 
 ## Gate 2B 当前实现
 
@@ -65,7 +94,14 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
 13. Agent operation 使用与 Windows Job 兼容的 UUID 十六进制身份，并与
     `execution.json.execution_id` 保持一致。
 14. Supervisor Adapter 固定单 Writer，真实 Codex Worker 显式禁用目标项目可能启用的
-    `multi_agent` 与 `multi_agent_v2`；其他 `CodexExecRunner` 调用保持原行为。
+    `multi_agent` 与 `multi_agent_v2`，关闭 `workspace-write` 出站网络并清空额外可写根目录；
+    其他 `CodexExecRunner` 调用保持原行为。
+15. 创建 assist child 与提交 Writer binding 位于同一个 Agent run mutation 临界区，避免并发
+    `agent run` 先创建多个孤立 child；真实 Worker 启动前已释放该锁，`stop / recover` 不会被
+    整段模型执行阻塞。
+16. `CodexExecRunner` 在找不到可执行文件或 output schema 写入失败时也写入匹配 operation 的
+    terminal `execution.json`；Adapter 可以形成机器 Observation 并释放 binding，而不是留下
+    永久无法对账的 Writer。Finish 摘要与 iteration 出现矛盾时，Verification 失败证据优先。
 
 ## Gate 2A 已进入主线的能力
 

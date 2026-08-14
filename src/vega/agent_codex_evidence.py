@@ -148,6 +148,18 @@ def write_plan_scope_evidence(
     return relative
 
 
+def plan_scope_failure(result: ScopeGateResult) -> str:
+    if result.violations:
+        changed = "、".join(
+            f"{violation.path}（{violation.code}）"
+            for violation in result.violations[:5]
+        )
+        suffix = " 等" if len(result.violations) > 5 else ""
+        return f"批准 Plan 范围门禁未通过：{changed}{suffix}"
+    detail = result.diagnostic or result.failure_code or "无法确认变更范围"
+    return f"批准 Plan 范围门禁未通过：{detail}"
+
+
 def require_repair_child(
     workspace: Path,
     run_dir: Path,
@@ -400,12 +412,12 @@ def _verification_status(
     latest: LoopIterationState | None,
     finish_summary: dict[str, object],
 ) -> GateStatus:
-    if finish_summary.get("verification_passed") is True:
-        return "passed"
     if finish_summary.get("latest_verification_failed") is True:
         return "failed"
     if latest is not None and latest.verification_status == "failed":
         return "failed"
+    if finish_summary.get("verification_passed") is True:
+        return "passed"
     if _finish_evidence_untrusted(finish_summary):
         return "blocked"
     return "not_run"

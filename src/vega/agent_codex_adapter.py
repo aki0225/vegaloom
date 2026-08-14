@@ -18,6 +18,7 @@ from .agent_codex_evidence import (
     load_finish_summary,
     observation_from_child,
     operation_ref,
+    plan_scope_failure,
     require_child_quiescent,
     require_repair_child,
     require_single_executable_work_item,
@@ -45,8 +46,9 @@ from .finish_runtime import FinishRuntime
 from .loop_runtime import LoopAutomationRuntime
 from .models import BriefInput, LoopAutomationState
 from .project_config import load_project_config
+from .run_lock import RunMutationLock
+from .run_utils import resolve_run_dir
 from .runner import CodexExecRunner, Runner, RunnerResult
-from .scope_gate import ScopeGateResult
 
 
 class SupervisorAgentCodexAdapter:
@@ -75,15 +77,38 @@ class SupervisorAgentCodexAdapter:
         self.worker = SupervisorAgentWorker(self.workspace)
 
     def run(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
-        prepared = self._prepare_attempt(run, timeout_seconds)
-        child_dir, prompt = self._prepare_child(prepared)
+        prepared, child_dir, prompt, operation_id, bound = self._prepare_and_bind(
+            run,
+            timeout_seconds,
+        )
         executed = self._execute_worker(
             prepared,
             child_dir,
             prompt,
             timeout_seconds,
+            operation_id,
+            bound,
         )
         return self._reconcile_attempt(executed)
+
+    def _prepare_and_bind(
+        self,
+        run: str,
+        timeout_seconds: int,
+    ) -> tuple[PreparedCodexAttempt, Path, str, str, AgentRun]:
+        run_dir = resolve_run_dir(self.workspace, run)
+        # 只串行化创建 child 与发布 Writer binding。真实 Worker 启动后立即释放
+        # mutation lock，确保另一个 CLI 仍可执行 stop 或 recover。
+        with RunMutationLock.acquire(run_dir, "agent.dispatch"):
+            prepared = self._prepare_attempt(run, timeout_seconds)
+            child_dir, prompt = self._prepare_child(prepared)
+            operation_id = uuid4().hex
+            bound = self.worker._bind_locked(
+                prepared.run_dir.name,
+                child_run=child_dir.name,
+                operation_id=operation_id,
+            )
+        return prepared, child_dir, prompt, operation_id, bound
 
     def _prepare_attempt(
         self,
@@ -112,7 +137,7 @@ class SupervisorAgentCodexAdapter:
             iteration=attempt_number,
         )
         if initial_plan_scope.status == "failed":
-            raise ValueError(_plan_scope_failure(initial_plan_scope))
+            raise ValueError(plan_scope_failure(initial_plan_scope))
         task_brief = _read_task_brief(run_dir)
         config = load_project_config(repo)
         runner = self.worker_runner or CodexExecRunner(
@@ -169,16 +194,10 @@ class SupervisorAgentCodexAdapter:
         child_dir: Path,
         prompt: str,
         timeout_seconds: int,
+        operation_id: str,
+        bound: AgentRun,
     ) -> ExecutedCodexAttempt:
         child_run = child_dir.name
-        # Windows Job 名称直接绑定 execution_id；沿用 UUID 十六进制格式，
-        # 不添加人类可读前缀，避免真实 Runner 在创建 owned process 前拒绝身份。
-        operation_id = uuid4().hex
-        bound = self.worker.bind(
-            prepared.run_dir.name,
-            child_run=child_run,
-            operation_id=operation_id,
-        )
 
         execution_context = RunnerExecutionContext(
             execution_root=child_dir,
@@ -247,7 +266,7 @@ class SupervisorAgentCodexAdapter:
                 operation_id,
                 worker_record,
                 result,
-                reason=_plan_scope_failure(plan_scope),
+                reason=plan_scope_failure(plan_scope),
                 external_side_effects=(
                     "none" if result.status == "success" else "unknown"
                 ),
@@ -347,7 +366,7 @@ class SupervisorAgentCodexAdapter:
                 result,
                 reason=(
                     "现有 Core 执行后，"
-                    f"{_plan_scope_failure(final_plan_scope)}"
+                    f"{plan_scope_failure(final_plan_scope)}"
                 ),
                 external_side_effects="none",
                 claim=claim,
@@ -474,15 +493,3 @@ def _next_attempt_number(run_dir: Path, state: AgentState) -> int:
             "必须由人工修改 Plan 或停止任务"
         )
     return attempts + 1
-
-
-def _plan_scope_failure(result: ScopeGateResult) -> str:
-    if result.violations:
-        changed = "、".join(
-            f"{violation.path}（{violation.code}）"
-            for violation in result.violations[:5]
-        )
-        suffix = " 等" if len(result.violations) > 5 else ""
-        return f"批准 Plan 范围门禁未通过：{changed}{suffix}"
-    detail = result.diagnostic or result.failure_code or "无法确认变更范围"
-    return f"批准 Plan 范围门禁未通过：{detail}"

@@ -30,6 +30,21 @@ class SupervisorAgentWorker:
         child_run: str,
         operation_id: str,
     ) -> AgentRun:
+        return self._bind_locked(
+            run,
+            child_run=child_run,
+            operation_id=operation_id,
+        )
+
+    def _bind_locked(
+        self,
+        run: str,
+        *,
+        child_run: str,
+        operation_id: str,
+    ) -> AgentRun:
+        """在调用方已经持有当前 Agent run mutation lock 时提交 Writer binding。"""
+
         run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
         if state.phase != "ready" or not {"next", "repair"}.intersection(
             state.allowed_actions
