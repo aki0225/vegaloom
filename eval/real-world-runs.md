@@ -549,3 +549,91 @@ assist、高风险修改、任意仓库成功率或生产安全。
 Verification、Risk、独立 Reviewer 和 Finish 判断链。证据只覆盖一个低风险前端任务；导航
 测试使用 mock，不等同于真实浏览器与后端端到端验证，也不能外推为任意任务成功率、跨仓库
 泛化能力或生产安全。Finish 暴露的展示问题先作为观察项保留，不在本次验收中顺势扩建 Runtime。
+
+## 2026-08-14 Supervisor Agent Gate 2B：真实 Codex Adapter
+
+本条追加 Gate 2B 两个冻结案例的唯一正式结果，不改写此前 Goal P1、CRWP 或日常使用记录。
+两个目标都使用无 remote 的隔离副本；Vega 没有自动 commit、push、release、清理目标 Diff
+或写入长期 Memory。完整合同、预算、Amendment 和退出条件见
+[`../docs/SUPERVISOR-AGENT-GATE-2B-PLAN.md`](../docs/SUPERVISOR-AGENT-GATE-2B-PLAN.md)。
+
+### SAG2B-01：Echo Vault 历史会话重新打开
+
+正式 R4 之前的三个登记现场均保留：
+
+1. 首次运行在 Worker 启动前发现 assist child 创建的受控运行目录没有进入批准 Checkpoint，
+   导致 Workspace 指纹漂移；目标没有 Diff；
+2. R2 在 owned process 创建前发现带前缀的 operation identity 不满足 Windows Job 十六进制
+   约束；目标没有 Diff；
+3. R3 启动了 Codex 进程，但目标项目启用的 `multi_agent_v2` 配置在当前 CLI 下启动失败，
+   模型 turn 尚未开始，目标没有 Diff；Supervisor 保守进入 `human`。
+
+对应修复分别为 `a213f0e`、`fa99682` 和 `9ed0b62`。每次后续执行均经人工确认，使用新的
+Agent run 和全新隔离目标，没有覆盖旧 Artifact，也没有按结果更换冻结模型。
+
+最终 R4 使用 Agent run `20260814-163054-agent`、child
+`20260814-163130-576570-bug-loop`，operation 与 execution 均为
+`4665591800dc466ab95043cf837d10c3`。真实 Worker 正常退出并形成窄 Claim，execution 为
+`completed`、`termination_unconfirmed=false`。
+
+机器重新采集到两个变更文件：`frontend/src/ui/pages/HistoryPage.tsx` 是 tracked 修改，
+`frontend/src/ui/pages/HistoryPage.test.tsx` 是新增未跟踪文件。现有 Core 在 Verification
+前按既有规则阻断未跟踪文件，Verification 为 `blocked`，Risk 和 Reviewer 为 `not_run`。
+Supervisor 没有把 Worker Claim 当作完成事实，而是确定性选择 `human`，写入 blocked
+Checkpoint 并解除 active Writer binding。没有执行 repair、replan 或自动重试。
+
+R4 tracked Diff SHA-256 为
+`d9ec27bc03d707eb2157f5adb4ca63ce2e291b2b292969b13be8749b33d72355`，未跟踪测试文件
+SHA-256 为 `d67710bc61a82edd71536ce46e3a5892078b07aec43ee78036f322aed04d9bf1`。
+Agent State、Trace、Observation、Decision 和 execution 的 SHA-256 分别为
+`656b3e348b4c2059aae4f1e6d45ee5b1594ff80b5d7cbcb09d7579f8de0fe52a`、
+`f1ec9c9c91b5ad0d7584a831e6aaf3858847e1fe454b9f9d6de2fe74e2b1cca6`、
+`fc1c29eddefe2d5d53700d6c59667372eba7bd268725782d505bc94a490afe5d`、
+`4642d465e67b76394f09e49e0bd7f04c307b37b7f58f24d482f6c85acbe63e13` 和
+`b89b1aacde9a14bc49fe3fdaa85387701b03569450289840f5573b7c1b074190`。
+
+### SAG2B-02：packaging `Requirement` 哈希中断
+
+原冻结准备对象已随旧本地副本丢失。该 Case 在 Agent、Worker、Verification 和 Reviewer
+启动前取得人工 Amendment，改为从同一上游缺陷基线重建固定 tree 和准备提交。正式执行使用
+准备提交 `26dc3e4982c5e8738553384abb1c85dd019a2e01`；目标对象库不含公开修复对象。
+
+Agent run `20260814-173144-agent` 启动 child
+`20260814-173736-094408-bug-loop`，operation 与 execution 均为
+`0ac99dd93b6743a4bda15cf8dd67d101`。约 `75.112` 秒后，控制端首次检测到允许范围内的
+tracked Diff：`src/packaging/requirements.py`。随后约 `0.7` 秒内调用
+`vega agent stop`；停止命令验证当前 binding 与 owned execution 后，写入包含相同 execution
+ID 和启动时间的 stop request，没有直接 kill PID。
+
+最终 execution 为 `stopped`，`termination_unconfirmed=false`，owned process tree 已静止，
+active Writer binding 已解除。partial Diff 原样保留，目标没有未跟踪文件；Plan 路径门禁通过，
+Verification、Risk、Reviewer 和 child Core 均为 `not_run`。Supervisor 根据机器 Observation
+确定性选择 `human`，Agent 进入 `needs_human`，`checkpoint-002` 保存 blocked 现场。
+没有启动第二 Worker、恢复、重试或评价补丁正确性。
+
+外部轮询脚本检测 Diff 时读取了 Agent State envelope，却没有进入 `data` 字段，因此停止原因
+使用了“Writer 活性无法同时确认”的保守措辞。Vega 自身的停止命令仍只对活动且身份匹配的
+execution 返回成功；stop request、operation marker 和最终 lease 使用同一 ID。该记录偏差
+不影响停止身份边界，也没有通过补跑改写。
+
+保留 Diff SHA-256 为
+`aa6b0c3e0b8e2e830e3aa5fb14ff7878052404d66b826d8183353b60b14f5270`。
+Agent State、Checkpoint、Observation、Decision、execution、stop request 和 Trace 的
+SHA-256 分别为
+`dd973a834da237df518d8a334d91b15d05f5a8ee0cb28417b3fbbab7853e060d`、
+`36f58e889112dc674b7e875406611f9fda4d1e8d90dd766efac270d94687f079`、
+`0fb5cc461bef4030f99852f79353562d39fb3497bf030c1f043b5f3c7629c288`、
+`404e871717a3c1fb94743413f8ed87aeff1858f13c9bb2b19db6f2a0e29da74b`、
+`1f5d708f37d86af4748a2f74e329db2d57be72b68f5737e5ca410cc93c3de2d4`、
+`1db3ee4e664a63d158405676a5cf0e2e74d5ef6dfbd014f373d474a07e68d0df` 和
+`73ec847a02ce89232d484fc134de89142de7d92664c6e654fcd860b05d77cdcb`。
+
+### Gate 2B 判定
+
+两个案例均形成冻结合同允许的 Supervisor Decision：SAG2B-01 证明真实 Worker 的成功 Claim
+不能越过未跟踪文件门禁；SAG2B-02 证明身份绑定的 stop request 能保留 partial Diff 并交还
+人工。真实案例退出条件已满足，判定为 `real-case-pass / merge-pending`。
+
+该结果不证明两个目标补丁正确、Codex 通用修复成功率、任意仓库泛化能力、多 Work Item
+累计归因、跨机器未完成 WIP 恢复或 Claude Code Adapter。包含运行中三项集成修复和本结果文档的
+最终分支 HEAD 仍需通过 PR CI 与合并前审阅；完成前 PR 保持 Draft，不进入 Gate 3。

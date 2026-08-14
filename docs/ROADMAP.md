@@ -10,7 +10,8 @@
 > 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已完成。
 > PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以
 > `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同；
-> 代码 HEAD `799bb29` 已通过 PR `#58` 的 9 项 CI，当前等待两个冻结真实案例。既有
+> 代码 HEAD `799bb29` 已通过 PR `#58` 的 9 项 CI，两个冻结真实案例也已执行。当前等待包含
+> 运行中集成修复和结果文档的最终分支 HEAD 完成 PR CI 与合并前审阅。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
@@ -45,7 +46,7 @@ v0.1.5 发布（完成）
   -> r6 后安全审阅与 baseline/授权加固（完成并进入主线）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
-  -> Gate 2B 真实 Codex（代码 HEAD CI 通过，真实案例待执行）
+  -> Gate 2B 真实 Codex（两个真实案例已执行，最终 PR CI 与审阅待完成）
   -> Gate 3 跨机器/Claude Code
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
@@ -701,6 +702,28 @@ Plan 外 tracked 变更后仍进入成功路由。
 Adapter 机械合同，没有证明真实 Codex 案例通过。下一步严格按
 `SAG2B-01 → SAG2B-02` 串行执行；SAG2B-01 必须形成可解释 Decision，SAG2B-02 必须保留
 partial diff 并进入人工接管。两项完成前不进入 Gate 3，也不发布新版本。
+
+### 2026-08-14：Gate 2B 两个真实案例完成，等待最终 CI 与审阅
+
+真实运行先暴露三项 Adapter 集成问题：首个 assist child 创建受控运行目录后造成批准
+Checkpoint 漂移、带前缀的 operation identity 不满足 Windows Job 约束，以及目标项目 Codex
+多代理配置破坏 Supervisor 单 Writer。三个现场均保留；前两次没有启动真实 Worker，第三次
+启动 Codex 进程但模型 turn 尚未开始。对应修复分别为 `a213f0e`、`fa99682` 和 `9ed0b62`，
+没有放宽 Workspace、Verification、Risk、Reviewer 或 Finish。
+
+`SAG2B-01` 最终 R4 的真实 Worker 正常退出并留下历史页实现和一个新增测试。新增测试仍是
+未跟踪文件，现有 Core 在 Verification 前 fail-closed；Supervisor 依据机器 Observation
+选择 `human`，没有把 Worker Claim 提升为完成事实，也没有启动 Reviewer。
+
+`SAG2B-02` 使用可跨机器重建的准备提交 `26dc3e4`。Worker 启动约 `75.112` 秒后首次产生
+允许范围内的 tracked partial Diff；控制端随后通过 `vega agent stop` 向当前 child 的匹配
+owned execution 写入停止请求。最终 execution 为 `stopped`，
+`termination_unconfirmed=false`，partial Diff 保留，Verification、Risk 和 Reviewer 均未启动，
+Supervisor 进入 `needs_human`。没有直接 kill PID、第二 Writer、自动重试、提交或推送。
+
+两个真实案例已经满足 Gate 2B 冻结退出条件，当前判定为
+`real-case-pass / merge-pending`。PR `#58` 继续保持 Draft；包含三项集成修复和结果文档的
+最终 HEAD 取得完整 CI 与合并前审阅结论前，不合并到主线，也不进入 Gate 3。
 
 ## 七、更新规则
 

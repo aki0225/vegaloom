@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 2B 实施与验证记录
 
-> 状态：`已批准 / 机械合同已实现 / 代码 HEAD CI 9/9 / 真实案例待执行`
+> 状态：`已批准 / 机械合同已实现 / 两个真实案例已执行 / 最终 PR CI 与审阅待完成`
 >
 > 日期：2026-08-14
 >
@@ -34,8 +34,11 @@
 首次真实 Worker 还要求 Workspace 干净；repair Worker 必须相对上一 attempt 产生新的 Workspace
 变化，不能把旧 Diff 再次当作新修复证据。
 
-代码 HEAD `799bb29` 已通过 PR `#58` workflow `31775697034` 的 9 项 CI。这只说明 Adapter
-机械合同已经形成；Gate 2B 仍需 `SAG2B-01 → SAG2B-02` 两个真实案例，才能判定通过。
+代码 HEAD `799bb29` 已通过 PR `#58` workflow `31775697034` 的 9 项 CI。随后真实运行依次
+暴露并修复首个 assist child 运行目录漂移、Windows operation identity 格式，以及目标项目
+Codex 多代理配置破坏单 Writer 三个集成问题。`SAG2B-01` 最终使用 `9ed0b62`，`SAG2B-02`
+使用 `905b242`；两个案例均已形成冻结合同允许的真实终态。当前还需让包含这些修复和结果文档的
+最终分支 HEAD 通过 PR CI，并完成合并前审阅。
 
 ## 一、Gate 2B 要证明什么
 
@@ -269,6 +272,38 @@ git diff --check
 
 这是历史受控重放，不作为“模型从未见过修复”的盲测或成功率样本。
 
+#### 2026-08-14 实际执行结果
+
+前三次登记运行均保留，没有用最终 R4 覆盖：
+
+1. 首次运行在 Worker 启动前发现 assist 受控运行目录没有进入批准 Checkpoint，创建 child 后
+   Workspace 指纹变化。目标没有 Diff，随后在 `a213f0e` 中让批准和跨机器恢复先建立
+   `vega-verification` 运行根目录；
+2. R2 在 owned process 创建前发现带 `operation-` 前缀的身份不满足 Windows Job 十六进制约束。
+   目标仍没有 Diff，随后在 `fa99682` 中统一 operation 与 execution 的 UUID 十六进制格式；
+3. R3 已启动 Codex 进程，但目标项目的 `multi_agent_v2` 配置在当前 CLI 下启动失败，模型 turn
+   尚未开始，目标没有 Diff。Supervisor 保守进入 `human`，随后在 `9ed0b62` 中为该 Adapter
+   固定单 Writer，并显式禁用 `multi_agent` 与 `multi_agent_v2`。
+
+人工确认后的 R4 使用全新隔离目标和相同冻结任务：
+
+- Agent run：`20260814-163054-agent`；
+- child：`20260814-163130-576570-bug-loop`；
+- operation / execution：`4665591800dc466ab95043cf837d10c3`；
+- Worker 正常退出并形成窄 Claim，owned execution 为 `completed`，终止确认完整；
+- Workspace 实际修改
+  `frontend/src/ui/pages/HistoryPage.tsx`，并新增未跟踪的
+  `frontend/src/ui/pages/HistoryPage.test.tsx`；
+- 现有 Core 在 Verification 前按既有规则拒绝未跟踪文件，Verification 记为 `blocked`，
+  Risk 与 Reviewer 未启动；
+- 机器 Observation 没有把 Worker Claim 当作完成事实。Supervisor 确定性选择 `human`，
+  写入 blocked Checkpoint 并解除 active Writer binding；
+- 没有执行 repair、replan、自动重试、提交、推送或目标补丁清理。
+
+该结果证明真实 Worker、Workspace 对账和 Supervisor 路由已经接通，也暴露了当前边界：Worker
+新增文件时，现有 Core 会要求人工先处理未跟踪文件，不能自动进入验证和 Reviewer。Gate 2B
+不在本轮放宽这项门禁。
+
 ### 6.2 `SAG2B-02`：packaging `Requirement` 哈希中断
 
 目标仓库：`pypa/packaging`
@@ -353,6 +388,30 @@ message: 实验：准备 SAG2B-02 可恢复中断目标
 依赖某台机器的 dangling Git object。该修订不改变用户目标、允许路径、模型、预算、中断时机、
 零重试和人工接管判定，也不引入公开修复内容。
 
+#### 2026-08-14 实际执行结果
+
+本 Case 按修订后的可重建准备提交执行一次，没有选择性重跑：
+
+- Agent run：`20260814-173144-agent`；
+- child：`20260814-173736-094408-bug-loop`；
+- operation / execution：`0ac99dd93b6743a4bda15cf8dd67d101`；
+- 启动后约 `75.112` 秒首次检测到允许范围内的 tracked Diff：
+  `src/packaging/requirements.py`；
+- 控制端随后约 `0.7` 秒内调用 `vega agent stop`。停止命令验证当前 child 与 owned execution
+  的身份后，写入包含相同 execution ID 和启动时间的 stop request；没有直接 kill PID；
+- execution 最终为 `stopped`，`termination_unconfirmed=false`，operation 与 execution 身份
+  一致，进程树已静止，active Writer binding 已解除；
+- partial Diff 原样保留，目标没有未跟踪文件；Plan 路径范围检查通过；
+- Verification、Risk、Reviewer 和 child Core 均为 `not_run`；
+- Supervisor 根据机器 Observation 确定性选择 `human`，Agent 进入 `needs_human`，
+  `checkpoint-002` 记录 blocked 现场和唯一 changed file；
+- 没有启动第二 Worker，没有执行恢复、重试、提交、推送或补丁正确性验证。
+
+外部轮询脚本在检测 Diff 时读取了 `agent-state.json` 的 envelope，却没有进入 `data` 字段，
+因此停止原因采用了“Writer 活性无法同时确认”的保守措辞。该脚本缺陷不影响停止身份校验：
+`vega agent stop` 本身只在活动 binding 与 execution 匹配时返回成功，保存的停止请求、
+execution 和最终 lease 使用同一 ID。此偏差按原样记录，不通过补跑改写。
+
 ## 七、代码变更上限
 
 Gate 2B 预计只修改：
@@ -394,7 +453,9 @@ Gate 2B 预计只修改：
 
 当前代码已经覆盖上述 1～9 项机械合同，并增加“Worker 或 Core 产生的 Plan 外路径不得进入成功
 路由”“repair 复用同一 child 且保留两次 execution”“repair 无新变化不得复用旧 Diff”的回归。
-真实 Codex Case 尚未执行，因此本文状态仍不是 Gate 2B 通过。
+两个真实 Codex Case 已执行：`SAG2B-01` 证明真实 Worker 的成功 Claim 不会越过未跟踪文件门禁，
+`SAG2B-02` 证明 partial Diff 可以通过身份绑定的 stop request 保留并交由人工。包含运行中三项
+集成修复和结果文档的最终分支 HEAD 仍需通过 PR CI 与合并前审阅。
 
 ## 九、Gate 2B 退出条件
 
@@ -415,6 +476,10 @@ stop_targets_only_owned_child = true
 `SAG2B-01` 必须形成一个可解释的 Supervisor Decision；`SAG2B-02` 必须形成一次带 partial diff 的
 人工接管现场，否则 Gate 2B 不通过。
 
+2026-08-14 的实际结果满足上述两个真实案例条件。当前判定为
+`real-case-pass / merge-pending`：真实运行合同已经满足，但在最终分支 HEAD 的 CI 和审阅完成前，
+PR 保持 Draft，不合并到主线，也不进入 Gate 3。
+
 ## 十、立即停止条件
 
 出现任一情况即停止实现或运行：
@@ -429,4 +494,4 @@ stop_targets_only_owned_child = true
 8. 真实案例需要修改冻结目标、模型或预算才能得到更好结果。
 
 本文已获人工批准，并只创建一个 Gate 2B 短生命周期实验分支和一个专用 Worktree。当前实现
-继续停留在实验分支；两个冻结真实案例完成前不得合并，也不得把本轮结果写成 Gate 2B 通过。
+继续停留在实验分支；两个冻结真实案例已经完成，但最终 PR CI 与合并前审阅完成前仍不得合并。

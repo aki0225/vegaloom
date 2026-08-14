@@ -6,7 +6,7 @@
 >
 > 实施基线：`main@e126aa2`
 >
-> 状态：`Gate 2B 代码 HEAD CI 9/9 / 真实案例待执行`
+> 状态：`Gate 2B 两个真实案例已执行 / 最终 PR CI 与审阅待完成`
 
 ## 当前结论
 
@@ -17,9 +17,20 @@ Plan 发布顺序、Recovery 证据引用和中间 Work Item 门禁四类问题�
 
 Gate 2B 已获人工批准，并在单一实验分支和专用 Worktree 完成机械合同。真实 Codex Adapter 的
 信任边界、两个冻结案例、预算、超时和停止条件见
-[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。当前仍不能写成
-Gate 2B 通过：代码 HEAD `799bb29` 已通过 PR `#58` workflow `31775697034` 的 9 项 CI，但
-`SAG2B-01` 与 `SAG2B-02` 尚未执行。
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。代码 HEAD
+`799bb29` 已通过 PR `#58` workflow `31775697034` 的 9 项 CI。随后真实运行暴露的三项
+Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；可跨机器重建的
+`SAG2B-02` 合同记录在 `905b242`。
+
+两个冻结真实案例已经执行：
+
+- `SAG2B-01` 的最终 R4 接通真实 Worker，但新增测试仍是未跟踪文件，现有 Core 在 Verification
+  前 fail-closed；Supervisor 形成 `human` 决策，没有启动 Reviewer；
+- `SAG2B-02` 在首次允许范围内 tracked Diff 后，通过身份绑定的 `agent stop` 停止 owned
+  execution，保留 partial Diff 并进入 `needs_human`；Verification、Risk 和 Reviewer 均未启动。
+
+真实案例已经满足冻结退出条件，但包含集成修复和结果文档的最终分支 HEAD 尚未完成 PR CI 与
+合并前审阅。因此 PR `#58` 继续保持 Draft，不合并，也不进入 Gate 3。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
@@ -49,6 +60,12 @@ Gate 2B 通过：代码 HEAD `799bb29` 已通过 PR `#58` workflow `31775697034`
     而放宽该门禁。
 11. 首次真实 Worker 要求干净 Workspace；repair Worker 如果没有产生新的 Workspace 变化，
     不运行 Core，也不把上一 attempt 的 Diff 重记为当前修复证据。
+12. 批准 Plan 和跨机器恢复会在冻结 Workspace 前准备 Vega 自己的
+    `.tmp/vega-verification` 根目录，避免首个 assist child 把受控运行目录误判为用户漂移。
+13. Agent operation 使用与 Windows Job 兼容的 UUID 十六进制身份，并与
+    `execution.json.execution_id` 保持一致。
+14. Supervisor Adapter 固定单 Writer，真实 Codex Worker 显式禁用目标项目可能启用的
+    `multi_agent` 与 `multi_agent_v2`；其他 `CodexExecRunner` 调用保持原行为。
 
 ## Gate 2A 已进入主线的能力
 
@@ -105,13 +122,25 @@ repository hygiene --base-ref origin/main：通过
 git diff --check：通过
 PR #58 代码 HEAD 799bb29 CI：9/9 success
 workflow：31775697034
+SAG2B-01 R4：真实 Worker completed；Workspace Gate 因 1 个未跟踪测试文件阻断；
+Verification=blocked，Risk/Reviewer=not_run，Supervisor=human
+SAG2B-02：75.112 秒出现 tracked partial Diff；身份绑定 stop 成功；
+execution=stopped，termination_unconfirmed=false，Verification/Risk/Reviewer=not_run，
+Supervisor=human
 ```
 
 当前本机使用 Python 3.14，首次加载 LangGraph/LangChain 依赖较慢，并出现其已知 Pydantic V1
 兼容性警告；定向测试按小集合串行执行。项目 PR CI 使用 Python 3.11/3.12，仍是本轮合并前
 必须取得的权威自动化证据。
 
-上述结果不包含真实 Codex Case，不得写成 `SAG2B-01` 或 `SAG2B-02` 已通过。
+SAG2B-01 前三次登记运行也保留在本机证据中：首个 child 运行目录漂移、Windows operation
+identity 格式错误，以及目标项目 Codex 多代理配置冲突。前三个现场分别发生在真实 Worker
+启动前、owned process 创建前和模型 turn 开始前；均没有目标 Diff。每次后续执行都使用新
+Agent run 和新隔离目标，没有覆盖旧记录。
+
+SAG2B-02 的外部轮询脚本读取 Agent State envelope 时漏取 `data` 字段，因此停止原因使用了
+更保守的“Writer 活性无法同时确认”。Vega 自身的停止命令仍在活动 binding 上验证并写入相同
+execution ID，最终 lease 为 `stopped`；该偏差不需要补跑，已写入正式结果说明。
 
 ## 已有 Gate 2A 证据
 
@@ -158,9 +187,13 @@ Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
 建议顺序：
 
 1. 确认当前分支与远端实验分支一致，Workspace 干净。
-2. 准备隔离目标副本，先运行 `SAG2B-01`。
-3. `SAG2B-01` 形成合同允许终态后，才运行 `SAG2B-02` 的 stop/partial-diff 场景。
-4. 两个真实案例和独立审查完成后，再决定是否把 Draft PR 转为 Ready、合并或继续修改。
+2. 阅读本文件和
+   [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) 的实际结果；
+   不重跑 `SAG2B-01` 或 `SAG2B-02`。
+3. 检查 PR `#58` 最终 HEAD 的 9 项 CI，并对 `origin/main..HEAD` 做合并前独立审阅。
+4. 只有 CI 与审阅均无阻断项时，才把 Draft PR 转为 Ready；仍需人工决定是否合并。
+5. Gate 2B 合并后再单独制定 Gate 3 的跨机器 WIP commit/push 和 Claude Code 薄 Adapter 验证，
+   不在本分支顺带实现。
 
 ## 下一 Gate 的边界
 
@@ -178,7 +211,7 @@ Gate 2B 不新增多 Worker、Provider 平台、服务端、自动重试、自�
 
 ## 未完成事项
 
-- 尚未执行两个冻结真实案例。
+- 最终分支 HEAD 尚未取得 PR CI 和合并前独立审阅结论。
 - 尚未证明多 Work Item 的真实 Adapter 累计 Diff 归因；Gate 2B 当前 fail-closed 拒绝该形态。
 - 尚未验证跨机器 Task Card 接力和 Claude Code 薄 Adapter；它们属于 Gate 3。
 - 尚未决定 `v0.2.0` 发布时点。
