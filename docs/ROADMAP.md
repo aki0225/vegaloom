@@ -9,8 +9,9 @@
 > 已进入主线；r6 真实路径、七项启动前证据加固、崩溃恢复事务及 PR #55 的 9 项 CI 均已
 > 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已完成。
 > PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以
-> `6a5c927` 合并到 `main`。当前进入 Gate 2B 准备阶段，真实 Codex Adapter 尚未开始实现。既有
-> `vega do / loop / goal`、Reviewer 和成功语义保持不变，顶层 CLI 仅新增 opt-in `agent`。
+> `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同，
+> 当前等待 PR CI 与两个冻结真实案例。既有 `vega do / loop / goal`、Reviewer 和成功语义
+> 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -43,7 +44,8 @@ v0.1.5 发布（完成）
   -> r6 后安全审阅与 baseline/授权加固（完成并进入主线）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
-  -> Gate 2B 真实 Codex（准备阶段，尚未实现）→ Gate 3 跨机器/Claude Code
+  -> Gate 2B 真实 Codex（机械合同已实现，PR CI 与真实案例待执行）
+  -> Gate 3 跨机器/Claude Code
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
 
@@ -673,9 +675,30 @@ PR `#57` 已完成最终 CI 和合并，Gate 0、Gate 1 与 Gate 2A 的实现进
 `main@6a5c927` 的文件树一致，不再保留为后续开发入口。
 
 真实 Codex Adapter 的信任边界、两个冻结案例、预算、超时、停止条件和代码变更上限已经整理到
-[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。该计划尚待人工批准，
-当前没有开始 Gate 2B 代码，也不发布新版本；既有 opt-in `agent` 入口、默认命令行为和成功
-语义保持不变。
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。本条记录形成时计划
+尚待人工批准、Gate 2B 代码尚未开始；后续状态以紧接着的实施记录为准。既有 opt-in `agent`
+入口、默认命令行为和成功语义保持不变。
+
+### 2026-08-14：Gate 2B 机械合同完成，等待 CI 与真实案例
+
+人工批准冻结计划后，只创建了 `experiment/supervisor-agent-gate-2b` 和一个专用 Worktree。
+当前代码已经连接 `CodexExecRunner`、现有 assist child Core 与 Supervisor 机器 Observation，
+并补齐显式 operation/execution 身份、批准 Plan 路径门禁、active child 精确 stop 和 sibling
+execution recover。`loop_runtime.py`、Verification、Risk、Reviewer、Finish 与默认
+`do / loop / goal` 均未修改。
+
+批准 Plan 的路径门禁在 Worker 后和 Core 后各执行一次，避免验证命令或其他 Core 步骤写出
+Plan 外 tracked 变更后仍进入成功路由。
+
+实施中确认：现有 assist child 会拒绝把旧 tracked diff 当作新 child baseline。Gate 2B 因此
+只接受一个未完成 Work Item；同一 Work Item 的 repair 复用原 child 并保留独立 execution。
+多 Work Item 累计 Diff 归因仍未证明，不能通过放宽 baseline、自动 commit 或把旧 Diff 当成
+新 Worker 证据来绕过。首次 Worker 还要求干净 Workspace；repair 没有产生新变化时直接交还
+人工。
+
+本地机械验证只证明 Adapter 合同，没有证明真实 Codex 案例通过。下一步先取得 PR CI，再严格按
+`SAG2B-01 → SAG2B-02` 串行执行；SAG2B-01 必须形成可解释 Decision，SAG2B-02 必须保留
+partial diff 并进入人工接管。两项完成前不进入 Gate 3，也不发布新版本。
 
 ## 七、更新规则
 

@@ -5,13 +5,19 @@ from pathlib import Path
 
 import typer
 
+from .agent_codex_adapter import SupervisorAgentCodexAdapter
 from .agent_contract import AgentObservation, AgentPlan
 from .agent_graph import langgraph_available
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_recovery_request import AgentRecoveryRequest
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_worker import SupervisorAgentWorker
-from .cli_support import load_brief_input, require_repo_directory
+from .cli_support import (
+    ensure_runner_ready,
+    load_brief_input,
+    report_execution_progress,
+    require_repo_directory,
+)
 
 
 agent_app = typer.Typer(help="运行轻量 Supervisor Agent 控制层。")
@@ -92,6 +98,28 @@ def agent_dispatch(
     typer.echo(_runtime().status(result.run_dir.name))
 
 
+@agent_app.command("run")
+def agent_run(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+    timeout_seconds: int = typer.Option(
+        900,
+        "--timeout",
+        min=60,
+        max=3600,
+        help="真实 Codex Worker 超时秒数。",
+    ),
+) -> None:
+    """执行当前已批准 Work Item，并复用现有 Core 完成验证与独立评审。"""
+
+    ensure_runner_ready("codex-exec", "worker")
+    try:
+        result = _adapter().run(run, timeout_seconds=timeout_seconds)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
 @agent_app.command("recover")
 def agent_recover(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
@@ -141,7 +169,11 @@ def agent_stop(
     typer.echo(
         "Agent 已停止，现场未回滚。"
         if result.state.phase == "stopped"
-        else "停止请求未取得安全终态，现场已保留并等待人工处理。"
+        else (
+            "停止请求已发送；等待当前 Worker 返回终态后完成对账。"
+            if result.state.active_child_run
+            else "停止请求未取得安全终态，现场已保留并等待人工处理。"
+        )
     )
     typer.echo("")
     typer.echo(_runtime().status(result.run_dir.name))
@@ -240,7 +272,7 @@ def agent_capabilities() -> None:
                 "schema_version": 1,
                 "supervisor_runtime": True,
                 "langgraph": langgraph_available(),
-                "worker": "fake-or-host",
+                "worker": "codex-exec",
                 "finish_owned_by_core": True,
             },
             ensure_ascii=False,
@@ -259,6 +291,14 @@ def _recovery() -> SupervisorAgentRecovery:
 
 def _worker() -> SupervisorAgentWorker:
     return SupervisorAgentWorker(Path.cwd())
+
+
+def _adapter() -> SupervisorAgentCodexAdapter:
+    return SupervisorAgentCodexAdapter(
+        Path.cwd(),
+        progress_reporter=report_execution_progress,
+        event_reporter=lambda message: typer.echo(f"[vega] {message}", err=True),
+    )
 
 
 def _load_plan(path: Path) -> AgentPlan:

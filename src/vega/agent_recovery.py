@@ -4,6 +4,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from .agent_contract import AgentObservation, AgentPlan, AgentState, canonical_digest
+from .agent_execution_bridge import resolve_bound_execution_run_dir, stop_active_child
+from .agent_execution_bridge import write_execution_evidence_ref
 from .agent_mutation import agent_mutation
 from .execution_control import inspect_execution_for_recovery
 from .agent_persistence import (
@@ -41,14 +43,20 @@ class SupervisorAgentRecovery:
     def recover(self, run: str, request: AgentRecoveryRequest) -> AgentRun:
         run_dir = resolve_run_dir(self.workspace, run)
         try:
-            _, state, plan, _ = load_agent_bundle(self.workspace, run)
+            _, state, plan, metadata = load_agent_bundle(self.workspace, run)
         except ValueError as exc:
             write_load_failure_report(run_dir, request.reason, exc)
             raise
         require_recovery_request(state, request)
         actual = capture_bound_workspace(run_dir)
         try:
-            process_inspection = inspect_execution_for_recovery(run_dir)
+            execution_run_dir = resolve_bound_execution_run_dir(
+                self.workspace,
+                run_dir,
+                state,
+                metadata,
+            )
+            process_inspection = inspect_execution_for_recovery(execution_run_dir)
         except ValueError as exc:
             return _block_on_execution_issue(
                 run_dir,
@@ -120,7 +128,12 @@ class SupervisorAgentRecovery:
         ]
         if process_inspection.record is not None:
             evidence_refs.append(
-                process_inspection.record.path.relative_to(run_dir).as_posix()
+                write_execution_evidence_ref(
+                    run_dir,
+                    state,
+                    execution_run_dir,
+                    process_inspection.record,
+                )
             )
         observation = AgentObservation(
             observation_id=f"recovery-{uuid4().hex[:12]}",
@@ -221,6 +234,12 @@ class SupervisorAgentRecovery:
 
     @agent_mutation("agent.stop")
     def stop(self, run: str, *, reason: str) -> AgentRun:
+        run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
+        if state.active_child_run:
+            return stop_active_child(
+                self.workspace, run_dir, state, plan, metadata,
+                reason=reason,
+            )
         return self._hold(run, reason=reason, stopped=True)
 
     @agent_mutation("agent.resume")

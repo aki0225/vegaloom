@@ -15,8 +15,8 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2A 已合并，准备 Gate 2B |
-| 审查 Gate 2B 实施前冻结 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | 待人工批准 |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2B 机械合同已实现 |
+| 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | PR CI 与真实案例待执行 |
 | 查看 Supervisor Agent Gate 2A 交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 2A 已完成 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -40,12 +40,15 @@ Coding Agent 继续读代码和修改文件；Vega 负责调查、计划批准�
 实施计划已经批准。Gate 0 已冻结状态权威与数据合同，Gate 1 已接入最小 LangGraph 控制循环，
 Gate 2A 已完成中断、恢复、单 Writer、故障注入和独立代码审查。PR `#57` 最终文档 HEAD
 `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。下一步先
-准备 Gate 2B 的真实 Codex Adapter 合同与冻结案例，尚未开始实现。打包 CLI 新增 opt-in
-`agent` 子命令，但 `v0.1.5` 的既有默认命令行为和成功语义不变。
+Gate 2B 实验分支已经实现真实 Codex Adapter 的机械合同：`agent run`、显式 operation/execution
+身份、批准 Plan 路径门禁、assist child Core 对账，以及 active child 的精确 stop/recover。
+Reviewer 打回后的 repair 复用同一 child；多 Work Item 的累计 Diff 归因尚未证明，因此当前
+Adapter 会在创建 child 前拒绝该形态，不放宽既有 baseline 门禁。
+打包 CLI 仍是 opt-in `agent` 子命令，`v0.1.5` 的既有默认命令行为和成功语义不变。
 
 Gate 2B 的 Adapter 信任边界、两个真实案例、预算、停止条件和代码变更上限已经整理到
-[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)，等待人工批准后才创建
-实验分支实施。
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。当前必须先完成 PR CI，
+再按 `SAG2B-01 → SAG2B-02` 串行运行；真实案例完成前不判定 Gate 2B 通过。
 
 ### 真实日常使用观察
 
@@ -53,8 +56,8 @@ Gate 2B 的 Adapter 信任边界、两个真实案例、预算、停止条件和
 Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist、`vega do`、Reviewer
 打回和 fail-closed 场景均有记录。
 
-Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 尚未开始。`v0.1.5` 继续按
-现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
+Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 机械合同正在实验分支验证。
+`v0.1.5` 继续按现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
 空 Scope 展示和 Workspace 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。
 当前状态与历史停止条件见：
 

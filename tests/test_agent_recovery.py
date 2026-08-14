@@ -24,6 +24,7 @@ from vega.agent_recovery_request import AgentRecoveryRequest
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_worker import SupervisorAgentWorker
 from vega.execution_control import ExecutionLease
+from vega.models import LoopAutomationState
 
 
 def test_live_worker_blocks_recovery_and_second_writer(tmp_path: Path) -> None:
@@ -611,6 +612,107 @@ def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> No
     assert "任务已停止" in runtime.status(stopped.run_dir.name)
 
 
+def test_stop_active_assist_child_targets_only_bound_operation(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    child_run = "assist-child-stop"
+    SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id="operation-stop",
+    )
+    child_dir = _write_assist_child(workspace, repo, child_run)
+    _write_execution(
+        child_dir,
+        execution_id="operation-stop",
+        status="running",
+    )
+
+    result = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="人工请求停止当前 Worker",
+    )
+
+    request = json.loads(
+        (
+            child_dir / "executions" / "worker" / "stop-request.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert request["execution_id"] == "operation-stop"
+    assert result.state.phase == "acting"
+    assert result.state.active_child_run == child_run
+    events = [item["event"] for item in read_agent_trace(result.run_dir / "trace.jsonl")]
+    assert events[-1] == "agent_stop_requested"
+
+
+def test_stop_active_assist_child_rejects_execution_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    child_run = "assist-child-mismatch"
+    SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id="operation-expected",
+    )
+    child_dir = _write_assist_child(workspace, repo, child_run)
+    _write_execution(
+        child_dir,
+        execution_id="operation-other",
+        status="running",
+    )
+
+    with pytest.raises(ValueError, match="期望 operation 身份不一致"):
+        SupervisorAgentRecovery(workspace).stop(
+            run_id,
+            reason="拒绝误停其他 execution",
+        )
+
+    assert not (
+        child_dir / "executions" / "worker" / "stop-request.json"
+    ).exists()
+
+
+def test_recover_reads_sibling_assist_child_execution(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    child_run = "assist-child-recover"
+    SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id="operation-recover",
+    )
+    child_dir = _write_assist_child(workspace, repo, child_run)
+    _write_execution(
+        child_dir,
+        execution_id="operation-recover",
+        status="failed",
+    )
+
+    recovered = SupervisorAgentRecovery(workspace).recover(
+        run_id,
+        AgentRecoveryRequest(
+            reason="原 agent run 命令中断后重新对账",
+            external_side_effects="none",
+        ),
+    )
+
+    assert recovered.state.phase == "needs_human"
+    assert recovered.state.active_child_run is None
+    assert list((recovered.run_dir / "recovery-executions").glob("*.json"))
+    observation = json.loads(
+        next((recovered.run_dir / "observations").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert any(
+        ref.startswith("recovery-executions/")
+        for ref in observation["evidence_refs"]
+    )
+
+
 def test_resume_rejects_safe_checkpoint_with_known_side_effect(
     tmp_path: Path,
 ) -> None:
@@ -733,3 +835,22 @@ def _write_execution(
         encoding="utf-8",
         newline="\n",
     )
+
+
+def _write_assist_child(
+    workspace: Path,
+    repo: Path,
+    child_run: str,
+) -> Path:
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir(parents=True)
+    LoopAutomationState(
+        run_id=child_run,
+        status="needs_human",
+        task_mode="bug",
+        automation_mode="assist",
+        repo_path=str(repo),
+        input_source="agent-task-brief",
+        current_step="waiting_for_worker",
+    ).save(child_dir / "state.json")
+    return child_dir

@@ -2,28 +2,54 @@
 
 > 日期：2026-08-14
 >
-> 原实施分支：`experiment/supervisor-agent-v1`
+> 当前实施分支：`experiment/supervisor-agent-gate-2b`
 >
-> 主线提交：`main@6a5c927`
+> 实施基线：`main@e126aa2`
 >
-> 状态：`Gate 2A 已合并 / 等待 Gate 2B 实施决定`
+> 状态：`Gate 2B 机械合同已实现 / PR CI 与真实案例待执行`
 
 ## 当前结论
 
-Gate 0、Gate 1 与 Gate 2A 已在同一个实验分支实现。独立审阅发现并修复了 Observation 发布、
+Gate 0、Gate 1 与 Gate 2A 已进入主线。独立审阅发现并修复了 Observation 发布、
 Plan 发布顺序、Recovery 证据引用和中间 Work Item 门禁四类问题。修复后的代码 HEAD
 `4180e7e` 已通过 workflow `31718078414` 的 9 项 CI，最终文档 HEAD `8ca75f2` 已通过 workflow
 `31718680069` 的 9 项 CI。PR `#57` 已以 `6a5c927` 合并到 `main`，Gate 2A 没有遗留阻断项。
 
-本次交接不授权直接开始 Gate 2B 代码。真实 Codex Adapter 的信任边界、两个冻结案例、预算、
-超时和停止条件见
-[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)，等待人工确认后再实施。
+Gate 2B 已获人工批准，并在单一实验分支和专用 Worktree 完成机械合同。真实 Codex Adapter 的
+信任边界、两个冻结案例、预算、超时和停止条件见
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。当前仍不能写成
+Gate 2B 通过：PR CI、`SAG2B-01` 与 `SAG2B-02` 尚未执行。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
-语义未改变；打包后的顶层 CLI 新增了 opt-in `vega agent` 子命令。`vega agent` 仍是实验入口；
-Graph 只能路由到 `finalizing`，不能自行写入 `ready_to_commit`。
+语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
+`finalizing`，不能自行写入 `ready_to_commit`。
 
-## 本轮已完成
+## Gate 2B 当前实现
+
+1. `vega agent run --run <agent-run> --timeout <seconds>` 启动一个真实 `codex exec` Worker。
+2. 首次 attempt 创建现有 assist child，冻结 baseline 后绑定唯一 child、operation 和显式
+   execution identity；Reviewer 打回后的 repair 复用同一 child，并为新 operation 保留独立
+   execution 目录。
+3. Worker 最终消息只解析为 `claimed_status / summary / tests_claimed /
+   remaining_questions`，不接受 changed files、测试状态、风险或完成声明。
+4. Worker 退出后先检查批准 Plan 的总路径范围，再由现有 child Core 执行 Workspace、
+   Verification、Risk、Reviewer 与 Finish；Core 结束后再次检查 Plan 范围，验证或其他
+   Core 步骤产生的越界修改同样不能进入成功路由。
+5. Adapter 读取 child execution、状态和 Finish 摘要，形成 `machine_reconcile` Observation；
+   外部 `agent observe` 仍然只保存 Claim。
+6. `blocked` Risk/Reviewer/Verification 直接进入人工；明确失败才按范围选择 repair 或 replan。
+7. active child 的 `stop` 只向与 Agent operation 身份匹配的 owned execution 写入停止请求；
+   `recover` 能读取 sibling assist child 的 execution 并在 Agent run 内保存摘要引用。
+8. 单个 Work Item 最多两次 dispatch；Plan 外路径修改不进入 Core，直接形成 replan 或人工结果。
+9. 本轮没有修改 `loop_runtime.py`、Verification、Risk、Reviewer、Finish、默认
+   `do / loop / goal` 或自动 Git 行为。
+10. Gate 2B Adapter 当前只接受一个未完成 Work Item。现有 assist child 会拒绝把旧 tracked
+    diff 当作新 child baseline，因此多 Work Item 累计 Diff 归因仍未证明；本轮没有为通过测试
+    而放宽该门禁。
+11. 首次真实 Worker 要求干净 Workspace；repair Worker 如果没有产生新的 Workspace 变化，
+    不运行 Core，也不把上一 attempt 的 Diff 重记为当前修复证据。
+
+## Gate 2A 已进入主线的能力
 
 1. 对同一 Agent run 的批准、计划修改、dispatch、observe、recover、pause、resume、steer 和
    stop 使用 mutation lock 串行化。
@@ -61,7 +87,30 @@ Graph 只能路由到 `finalizing`，不能自行写入 `ready_to_commit`。
     明确失败或阻断仍按既有规则进入 `repair / replan / human`。
 17. 增加打包 CLI 回归，确认新增 opt-in `agent` 后，既有 `do / loop / goal` 命令仍然存在。
 
-## 已取得的本机证据
+## Gate 2B 本机机械证据
+
+通过：
+
+```text
+Codex Adapter 定向回归：11 passed
+active child stop/recover 定向回归：3 passed
+显式 execution identity 定向回归：通过
+Agent 机器 Observation、blocked Risk 与 CLI 定向回归：通过
+完整测试节点收集：1216 collected
+architecture growth：通过（C901 35->35，Python 模块 122->126）
+Ruff：通过
+compileall：通过
+repository hygiene --base-ref origin/main：通过
+git diff --check：通过
+```
+
+当前本机使用 Python 3.14，首次加载 LangGraph/LangChain 依赖较慢，并出现其已知 Pydantic V1
+兼容性警告；定向测试按小集合串行执行。项目 PR CI 使用 Python 3.11/3.12，仍是本轮合并前
+必须取得的权威自动化证据。
+
+上述结果不包含真实 Codex Case，不得写成 `SAG2B-01` 或 `SAG2B-02` 已通过。
+
+## 已有 Gate 2A 证据
 
 通过：
 
@@ -97,7 +146,7 @@ workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
 
 ```powershell
 git fetch origin --prune
-git switch main
+git switch experiment/supervisor-agent-gate-2b
 git pull --ff-only
 git status --short --branch
 Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
@@ -105,12 +154,11 @@ Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
 
 建议顺序：
 
-1. 确认 `main` 与 `origin/main` 一致，Workspace 干净。
-2. 审查 [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) 的 Adapter
-   信任边界、两个冻结案例、预算、超时和停止条件。
-3. 计划获得人工批准后只创建一个 Gate 2B 实验分支和一个专用 Worktree。
-4. 实现薄 Adapter，不建设 Provider 平台，不改变既有默认命令和成功语义。
-5. 取得真实案例证据后再决定是否进入 Gate 3。
+1. 确认当前分支与远端实验分支一致，Workspace 干净。
+2. 查看 PR CI；失败时只修复与 Gate 2B 机械合同直接相关的问题。
+3. CI 通过后准备隔离目标副本，先运行 `SAG2B-01`。
+4. `SAG2B-01` 形成合同允许终态后，才运行 `SAG2B-02` 的 stop/partial-diff 场景。
+5. 两个真实案例和独立审查完成后，再决定是否合并并进入 Gate 3。
 
 ## 下一 Gate 的边界
 
@@ -128,8 +176,9 @@ Gate 2B 不新增多 Worker、Provider 平台、服务端、自动重试、自�
 
 ## 未完成事项
 
-- 尚未连接真实 Codex Worker。
+- 尚未取得当前实验分支的 PR CI。
 - 尚未执行两个冻结真实案例。
+- 尚未证明多 Work Item 的真实 Adapter 累计 Diff 归因；Gate 2B 当前 fail-closed 拒绝该形态。
 - 尚未验证跨机器 Task Card 接力和 Claude Code 薄 Adapter；它们属于 Gate 3。
 - 尚未决定 `v0.2.0` 发布时点。
 - 受信 Observation 已经 write-once；若其后的 Checkpoint 写入失败，State 会保守保留 active

@@ -245,6 +245,20 @@ class SupervisorAgentRuntime:
             authority="fake_worker",
         )
 
+    @agent_mutation("agent.observe")
+    def observe_machine(
+        self,
+        run: str,
+        observation: AgentObservation,
+    ) -> AgentRun:
+        """真实 Adapter 的内部机器对账入口，不接受 CLI 直接提交。"""
+
+        return self._observe_locked(
+            run,
+            observation,
+            authority="machine_reconcile",
+        )
+
     def _observe_locked(
         self,
         run: str,
