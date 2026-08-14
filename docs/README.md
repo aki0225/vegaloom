@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-13
+> 更新时间：2026-08-14
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -15,8 +15,8 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2A 代码与审阅通过，状态文档 HEAD 待 CI |
-| 跨机器继续 Supervisor Agent 实验 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | 当前交接 |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2A 已合并，准备 Gate 2B |
+| 查看 Supervisor Agent Gate 2A 交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 2A 已完成 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
 | 查看 RCB-02 离线检索结果 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | Phase 0 停止，未运行 Holdout |
@@ -37,10 +37,10 @@ Coding Agent 继续读代码和修改文件；Vega 负责调查、计划批准�
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)。
 
 实施计划已经批准。Gate 0 已冻结状态权威与数据合同，Gate 1 已接入最小 LangGraph 控制循环，
-Gate 2A 已在独立实验分支完成中断、恢复、单 Writer、故障注入和独立代码审查。Draft PR `#57`
-的审阅修复代码 HEAD `4180e7e` 已通过 workflow `31718078414` 的 9 项 CI；本次状态文档 HEAD
-通过自身 CI 后可转为 Ready。在单独决定前不进入 Gate 2B 的真实 Codex 接入。打包 CLI 新增
-opt-in `agent` 子命令，但 `v0.1.5` 的既有默认命令行为和成功语义不变。
+Gate 2A 已完成中断、恢复、单 Writer、故障注入和独立代码审查。PR `#57` 最终文档 HEAD
+`8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。下一步先
+准备 Gate 2B 的真实 Codex Adapter 合同与冻结案例，尚未开始实现。打包 CLI 新增 opt-in
+`agent` 子命令，但 `v0.1.5` 的既有默认命令行为和成功语义不变。
 
 ### 真实日常使用观察
 
@@ -48,9 +48,10 @@ opt-in `agent` 子命令，但 `v0.1.5` 的既有默认命令行为和成功语�
 Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist、`vega do`、Reviewer
 打回和 fail-closed 场景均有记录。
 
-Supervisor Agent V1 只在独立实验分支按 Gate 推进；`v0.1.5` 继续按现有日常使用合同维护，
-不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、空 Scope 展示和 Workspace
-汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。当前状态与历史停止条件见：
+Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 尚未开始。`v0.1.5` 继续按
+现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
+空 Scope 展示和 Workspace 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。
+当前状态与历史停止条件见：
 
 - [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：已完成阶段与验收记录。
 - [`ROADMAP.md`](ROADMAP.md)：当前观察期和冻结方向。

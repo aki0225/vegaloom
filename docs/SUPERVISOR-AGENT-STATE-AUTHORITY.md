@@ -1,10 +1,12 @@
 # Supervisor Agent V1 状态权威与最小合同 ADR
 
-> 状态：`accepted / Gate 2A 代码与审阅通过 / 状态文档 HEAD 待 CI`
+> 状态：`accepted / Gate 2A 已合并 / Gate 2B 尚未开始`
 >
 > 日期：2026-08-13
 >
-> 实施分支：`experiment/supervisor-agent-v1`
+> 更新：2026-08-14
+>
+> Gate 0～2A 实施分支：`experiment/supervisor-agent-v1`（PR `#57` 合并后归档）
 
 ## 1. 决定
 
@@ -154,6 +156,7 @@ Gate 2A 已补充：
 - SQLite Graph checkpoint 丢失不影响从 Agent State、Checkpoint 和真实 Workspace 对账；
 - `pause / resume-local / stop` 保留 Goal、Plan、Diff 和 Artifact，不执行自动回滚。
 
-本地故障注入与状态回归为 62 项通过；审阅修复代码 HEAD `4180e7e` 已通过 PR `#57` 的
-workflow `31718078414`，9 项 CI 全部成功，最终差异复核没有阻断项。本次状态文档 HEAD
-通过自身 CI 后即可把 PR 转为 Ready；该动作不授权进入 Gate 2B。
+本地故障注入与状态回归为 62 项通过；审阅修复代码 HEAD `4180e7e` 已通过 workflow
+`31718078414` 的 9 项 CI，最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，
+并以 `6a5c927` 合并到 `main`。Gate 2A 退出条件已经满足；这些证据不代表 Gate 2B 已实现或
+通过。

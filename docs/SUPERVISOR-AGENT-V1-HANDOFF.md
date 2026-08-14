@@ -1,20 +1,22 @@
 # Supervisor Agent V1 当前交接
 
-> 日期：2026-08-13
+> 日期：2026-08-14
 >
-> 分支：`experiment/supervisor-agent-v1`
+> 原实施分支：`experiment/supervisor-agent-v1`
 >
-> 主线基线：`origin/main@706286d`
+> 主线提交：`main@6a5c927`
 >
-> 状态：`Gate 2A 代码与审阅通过 / 状态文档 HEAD 待 CI`
+> 状态：`Gate 2A 已合并 / 等待 Gate 2B 实施决定`
 
 ## 当前结论
 
-Gate 0、Gate 1 与 Gate 2A 已在同一个实验分支实现，Draft PR `#57` 已建立。独立审阅发现并
-修复了 Observation 发布、Plan 发布顺序、Recovery 证据引用和中间 Work Item 门禁四类问题。
-修复后的代码 HEAD `4180e7e` 已通过 workflow `31718078414` 的 9 项 CI，最终差异复核没有
-阻断项。本次只更新状态文档；该纯文档 HEAD 通过自身 CI 后可把 PR 转为 Ready，但仍
-**不应自动合并到 `main`，也不应开始 Gate 2B 的真实 Codex 接入**。
+Gate 0、Gate 1 与 Gate 2A 已在同一个实验分支实现。独立审阅发现并修复了 Observation 发布、
+Plan 发布顺序、Recovery 证据引用和中间 Work Item 门禁四类问题。修复后的代码 HEAD
+`4180e7e` 已通过 workflow `31718078414` 的 9 项 CI，最终文档 HEAD `8ca75f2` 已通过 workflow
+`31718680069` 的 9 项 CI。PR `#57` 已以 `6a5c927` 合并到 `main`，Gate 2A 没有遗留阻断项。
+
+本次交接不授权直接开始 Gate 2B 代码。下一步先固定真实 Codex Adapter 的信任边界、两个冻结
+案例、预算、超时和停止条件，再由人工确认是否实施。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 新增了 opt-in `vega agent` 子命令。`vega agent` 仍是实验入口；
@@ -69,6 +71,9 @@ Agent 状态、恢复、Task Card 与锁定向回归：62 passed
 旧代码 HEAD PR #57 CI：9/9 success
 审阅修复代码 HEAD 4180e7e PR #57 CI：9/9 success
 workflow：31718078414
+最终文档 HEAD 8ca75f2 PR #57 CI：9/9 success
+最终文档 workflow：31718680069
+主线合并提交：6a5c927
 Ruff：通过
 compileall：通过
 architecture growth：通过（C901 35->35，Python 模块 104->122）
@@ -84,14 +89,14 @@ Recovery 20、Runtime 19、Task Card 4，共 `62 passed`。Runtime 拆为 10/9 �
 和 Recovery 的首次命令超过 60 秒，只能记录为超时未验证，不能计为失败或通过。
 
 审阅修复代码 HEAD `4180e7e` 已完成 workflow `31718078414` 的 9 项 PR CI。当前完整节点
-收集为 `1192 collected`，比旧代码 HEAD 增加 4 个审阅回归。本次状态文档提交不修改代码、
-测试或成功语义；其自身 CI 通过后不再追加 post-CI 文档提交，直接把 PR 转为 Ready。
+收集为 `1192 collected`，比旧代码 HEAD 增加 4 个审阅回归。最终文档 HEAD `8ca75f2` 也已完成
+workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
 
-## 回家后继续
+## 后续接力
 
 ```powershell
 git fetch origin --prune
-git switch experiment/supervisor-agent-v1
+git switch main
 git pull --ff-only
 git status --short --branch
 Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
@@ -99,13 +104,11 @@ Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
 
 建议顺序：
 
-1. 确认本地 HEAD 与远端实验分支一致，Workspace 干净。
-2. 查看 Draft PR `#57` 状态文档 HEAD 的全部 CI，代码证据固定为 `4180e7e` /
-   workflow `31718078414`。
-3. CI 失败时只修复能够复现的失败，不降低 fail-closed、单 Writer 或 60 秒测试上限。
-4. CI 通过后再做一次最终 diff 审查，重点检查 Observation/Plan 发布顺序、Writer binding
-   核销条件、损坏 Artifact 和 partial diff 的恢复路径。
-5. 状态文档 HEAD 的 CI 通过后把 Draft 转为 Ready；Gate 2B 仍需单独获得实施决定。
+1. 确认 `main` 与 `origin/main` 一致，Workspace 干净。
+2. 在实现前固定一个真实 Codex Adapter 的信任边界、两个冻结案例、预算、超时和停止条件。
+3. 获得人工批准后只创建一个 Gate 2B 实验分支和一个专用 Worktree。
+4. 实现薄 Adapter，不建设 Provider 平台，不改变既有默认命令和成功语义。
+5. 取得真实案例证据后再决定是否进入 Gate 3。
 
 ## 下一 Gate 的边界
 
@@ -123,10 +126,10 @@ Gate 2B 不新增多 Worker、Provider 平台、服务端、自动重试、自�
 
 ## 未完成事项
 
-- Draft PR `#57` 的审阅修复代码 HEAD `4180e7e` 已通过 9 项 CI；本次状态文档 HEAD 尚待 CI。
 - 尚未连接真实 Codex Worker。
 - 尚未执行两个冻结真实案例。
 - 尚未验证跨机器 Task Card 接力和 Claude Code 薄 Adapter；它们属于 Gate 3。
+- 尚未决定 `v0.2.0` 发布时点。
 - 受信 Observation 已经 write-once；若其后的 Checkpoint 写入失败，State 会保守保留 active
   Writer，但重试需要新的 Observation ID。该路径不会开放第二 Writer，后续是否需要事务化
   Observation/Decision/Graph 由 Gate 2B 真实 Adapter 故障注入决定。

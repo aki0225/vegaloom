@@ -1,14 +1,14 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2A 代码与审阅通过 / 状态文档 HEAD 待 CI`
+> 状态：`approved / Gate 2A 已合并 / Gate 2B 准备中`
 >
 > 计划日期：2026-08-13
 >
 > 规划基线：`main@8884458` / `v0.1.5`
 >
-> 本文已获批准，并在独立实验分支按 Gate 推进。Gate 2A 代码 HEAD `4180e7e` 已完成本地验证、
-> 独立代码审查和 workflow `31718078414` 的 9 项 CI；本次状态文档 HEAD 通过自身 CI 后即可把
-> PR 转为 Ready，证据通过前不进入 Gate 2B。
+> 本文已获批准，并按 Gate 推进。PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow
+> `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。Gate 2A 已完成，Gate 2B 尚未开始
+> 实现。
 
 ## 一、产品决定
 
@@ -828,8 +828,8 @@ Adapter，两者复用同一 Task Card、Task Brief、Checkpoint、Trace 和 Veg
 
 ## 十一、实施 Gate
 
-每个 Gate 形成可审查结论后再进入下一 Gate。实现使用一个长期实验分支和一个专用 Worktree，
-不为每个 Gate 或 Work Item 反复创建分支；合并前再根据实际 Diff 决定是否拆成少量原子 PR。
+每个 Gate 形成可审查结论后再进入下一 Gate。每个未合并 Gate 只使用一个短生命周期实验分支和
+一个专用 Worktree，不为每个 Work Item 反复创建分支；合并后删除该分支与 Worktree。
 
 ### Gate 0：冻结最小合同
 
@@ -986,6 +986,9 @@ reviewer_worker_context_leak = 0
 
 ## 十三、审核通过后的实际顺序
 
+当前执行进度：第 1～4 项已完成。下一步为第 5 项，先固定 Adapter 信任边界和真实案例，再开始
+实现。
+
 1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
 2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；
 3. 按 `Task Card / State → Checkpoint / Trace → Task Brief / 状态卡 → LangGraph` 实现 Gate 1；
@@ -1003,8 +1006,8 @@ reviewer_worker_context_leak = 0
 2. Task Card 进入 Git，运行状态、Checkpoint 和 Trace 默认留在本机；
 3. Task Brief 使用分层压缩，不设下限，默认软上限为 `32 KiB`；
 4. V1 先支持 Codex，合同稳定后再做 Claude Code 薄接入；
-5. 实现只使用一个长期实验分支，不为每个小步骤创建新分支，并把未完成任务的 WIP Task Card
-   跨机器接力作为 Gate 3 必过场景。
+5. 每个未合并 Gate 只使用一个短生命周期实验分支和一个专用 Worktree，不为每个小步骤创建
+   新分支；合并后删除，并把未完成任务的 WIP Task Card 跨机器接力作为 Gate 3 必过场景。
 
 本文与当前代码或产品契约冲突时，在新版本发布前仍以已发布代码、
 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 和真实运行证据为准。

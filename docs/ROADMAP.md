@@ -1,16 +1,15 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-13
+> 更新时间：2026-08-14
 > 当前稳定基线：`v0.1.5`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
 > 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式 `--rerun-worker`
 > 已进入主线；r6 真实路径、七项启动前证据加固、崩溃恢复事务及 PR #55 的 9 项 CI 均已
-> 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已在
-> 独立实验分支完成本地实现和独立审查。Draft PR `#57` 的审阅修复代码 HEAD `4180e7e`
-> 已通过 workflow `31718078414` 的 9 项 CI；状态文档 HEAD 通过自身 CI 后可转为 Ready，
-> Gate 2B 仍需单独决定。既有
+> 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已完成。
+> PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以
+> `6a5c927` 合并到 `main`。当前进入 Gate 2B 准备阶段，真实 Codex Adapter 尚未开始实现。既有
 > `vega do / loop / goal`、Reviewer 和成功语义保持不变，顶层 CLI 仅新增 opt-in `agent`。
 
 本文是 Vega 当前路线的统一入口，只回答：
@@ -43,8 +42,8 @@ v0.1.5 发布（完成）
   -> 真实控制进程中断 dogfood（r3 reject；r6 显式重跑路径通过）
   -> r6 后安全审阅与 baseline/授权加固（完成并进入主线）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
-  -> Gate 2A 中断恢复（代码与审阅通过，状态文档 HEAD 待 CI）
-  -> Gate 2B 真实 Codex → Gate 3 跨机器/Claude Code
+  -> Gate 2A 中断恢复（完成并进入主线）
+  -> Gate 2B 真实 Codex（准备阶段，尚未实现）→ Gate 3 跨机器/Claude Code
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
 
@@ -643,13 +642,13 @@ Checkpoint、Task Brief、主会话控制、恢复和现有 Core 的可信完成
 对未来路线的限制；这些旧记录仍保留为当时的历史约束，不再阻止本次已批准的独立实验。
 它不推翻此前失败实验结论：不恢复默认 LangGraph Loop、多 Reviewer、服务端控制面或自动 Memory。
 
-实施只使用 `experiment/supervisor-agent-v1` 一个长期实验分支和一个专用 Worktree，按以下 Gate
-串行推进：
+Gate 0～2A 已使用 `experiment/supervisor-agent-v1` 一个实验分支和一个专用 Worktree 完成。
+后续 Gate 2B 仍只使用一个短生命周期实验分支和一个专用 Worktree，按以下 Gate 串行推进：
 
 1. Gate 0：冻结状态权威、Task Card、Resume Capsule、Task Brief、Checkpoint、Trace 与 Decision Contract；
 2. Gate 1：Fake Worker 证明主会话可见、人工批准和 `next/repair/replan/human/finalize` 条件路由；
 3. Gate 2A：验证重复 Writer、partial diff、未知副作用和损坏状态恢复
-   （代码 HEAD `4180e7e` 的 9 项 CI 与独立审查通过，状态文档 HEAD 待 CI）；
+   （最终 HEAD `8ca75f2` 的 9 项 CI、独立审查与 PR `#57` 合并均已完成）；
 4. Gate 2B：接入真实 Codex；
 5. Gate 3：验证未完成 WIP 经任务分支 commit/push 后的跨机器恢复，并完成 Claude Code 薄接入。
 
@@ -664,8 +663,18 @@ execution 证据时保留旧 Writer、Worker 仍存活、partial diff、数据�
 未知副作用、operation identity 不可复用、Observation write-once、Recovery 证据引用、
 Task Card 与 Observation 推进的安全发布顺序、中间 Work Item 门禁、损坏 state、未知 schema、
 Trace 尾部截断、SQLite 丢失以及 pause/resume/stop 均有定向回归。本地 Agent 回归为
-`62 passed`；代码 HEAD `4180e7e` 的 workflow `31718078414` 为 9/9 success。当前未连接
-真实 Codex，既有默认命令行为未改变。
+`62 passed`；代码 HEAD `4180e7e` 的 workflow `31718078414` 为 9/9 success，最终文档 HEAD
+`8ca75f2` 的 workflow `31718680069` 同样为 9/9 success，并以 `6a5c927` 合并到 `main`。
+当前未连接真实 Codex，既有默认命令行为未改变。
+
+### 2026-08-14：Gate 2A 合并，进入 Gate 2B 准备
+
+PR `#57` 已完成最终 CI 和合并，Gate 0、Gate 1 与 Gate 2A 的实现进入主线。原实验分支与
+`main@6a5c927` 的文件树一致，不再保留为后续开发入口。
+
+下一步先固定一个真实 Codex Adapter 的信任边界、两个冻结案例、预算、超时和停止条件，再决定
+Gate 2B 的具体实现。当前没有开始 Gate 2B 代码，也不发布新版本；既有 opt-in `agent` 入口、
+默认命令行为和成功语义保持不变。
 
 ## 七、更新规则
 
