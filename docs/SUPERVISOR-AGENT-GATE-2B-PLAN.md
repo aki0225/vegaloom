@@ -304,6 +304,55 @@ b34d12acb28c9ad3a6b0b3cc82f03a4b0b98c8c0
 
 本 Case 只证明中断、停止、对账和人工接管，不评价补丁正确性。
 
+#### 2026-08-14 Amendment：准备提交改为可跨机器重建
+
+本修订发生在 `SAG2B-02` 的 Agent、Worker、Verification 和 Reviewer 启动之前。
+
+预检确认原冻结准备提交
+`93c303e0e7e36f24aa45fc339ba78cbf1ca3e257` 只存在于已经删除的本地实验副本。该对象不在
+上游、公开修复分支、Vega 对象库或当前保留的项目相关目标中；原计划也没有保存生成该提交的
+准备补丁。继续把该 SHA 当作可恢复输入，会让换机执行依赖已经丢失的本机 Git 对象。
+
+因此保留该 SHA 作为 2026-08-02 历史 Dogfood 的来源标识，但本次执行改用以下可重建合同：
+
+1. 上游父提交仍固定为
+   `b34d12acb28c9ad3a6b0b3cc82f03a4b0b98c8c0`，不更换缺陷基线；
+2. 从该提交建立无 remote、不可达公开修复对象的隔离副本；
+3. checkout 前固定 `core.autocrlf=false`，准备文件统一使用 UTF-8 无 BOM 和 LF；
+4. 只把
+   [`examples/tasks/sag2b-02-packaging.vega.yaml`](../examples/tasks/sag2b-02-packaging.vega.yaml)
+   复制为目标仓库 `.vega.yaml`；
+5. 任务目标、事实、范围、验证与停止规则固定在
+   [`examples/tasks/sag2b-02-packaging.md`](../examples/tasks/sag2b-02-packaging.md)；
+6. 准备提交使用固定作者、提交者、时间和中文提交信息；执行登记必须记录父提交、tree、准备
+   文件 SHA-256、任务文件 SHA-256 和最终准备提交 SHA；
+7. Worker 启动前必须重新确认目标对象库不含公开修复提交
+   `fa40f9db8582c146c3f6c5c55babad79eac224a0`。
+
+机器可读重建清单固定在
+[`examples/tasks/sag2b-02-packaging-preparation.json`](../examples/tasks/sag2b-02-packaging-preparation.json)。
+本次准备结果必须与下列值一致：
+
+```text
+task sha256: 4ad716d7496e5e0e83b3b83649f4f4cb545b2604f58d972e0f3a4306bd9aaabb
+policy sha256: dd12a78308d35349fad372aa07fa2cd677014209ba92e92d457d4dd2b4eacdbc
+parent: b34d12acb28c9ad3a6b0b3cc82f03a4b0b98c8c0
+tree: a6add885399e25abdc3971691d89beaa4e4ae1ca
+commit: 26dc3e4982c5e8738553384abb1c85dd019a2e01
+```
+
+固定提交元数据：
+
+```text
+author / committer: Vega Experiment <vega@example.invalid>
+author / committer date: 2026-08-14T09:15:00Z
+message: 实验：准备 SAG2B-02 可恢复中断目标
+```
+
+上述材料随 Vega 分支提交后，任意机器都可以从上游基线重建并核对相同 tree 和准备提交，而不再
+依赖某台机器的 dangling Git object。该修订不改变用户目标、允许路径、模型、预算、中断时机、
+零重试和人工接管判定，也不引入公开修复内容。
+
 ## 七、代码变更上限
 
 Gate 2B 预计只修改：
