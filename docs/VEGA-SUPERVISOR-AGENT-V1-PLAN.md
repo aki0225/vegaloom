@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2A 已合并 / Gate 2B 机械合同验证中`
+> 状态：`approved / Gate 2A 已合并 / Gate 2B 代码 HEAD CI 通过`
 >
 > 计划日期：2026-08-13
 >
@@ -8,7 +8,7 @@
 >
 > 本文已获批准，并按 Gate 推进。PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow
 > `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。Gate 2A 已完成；Gate 2B 已在
-> 单一实验分支完成机械合同，PR CI 与真实案例待执行。
+> 单一实验分支完成机械合同；代码 HEAD `799bb29` 已通过 PR `#58` 的 9 项 CI，真实案例待执行。
 
 ## 一、产品决定
 
@@ -885,7 +885,8 @@ Adapter，两者复用同一 Task Card、Task Brief、Checkpoint、Trace 和 Veg
 
 具体 Adapter 信任边界、预算、冻结案例和停止条件见
 [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。冻结计划已经人工
-批准，真实 Codex Adapter 的机械合同已实现；PR CI 和两个冻结案例完成前不判定 Gate 2B 通过。
+批准，真实 Codex Adapter 的机械合同已实现；代码 HEAD `799bb29` 已通过 PR `#58` 的 9 项
+CI，两个冻结案例完成前不判定 Gate 2B 通过。
 
 Gate 2B 当前只执行一个未完成 Work Item，并允许一次同 child repair。多 Work Item 的真实派发
 仍缺少累计 Diff 归因证据；现有 assist baseline 会拒绝旧 tracked diff，因此本轮不通过放宽

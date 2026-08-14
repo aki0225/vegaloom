@@ -9,8 +9,9 @@
 > 已进入主线；r6 真实路径、七项启动前证据加固、崩溃恢复事务及 PR #55 的 9 项 CI 均已
 > 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已完成。
 > PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以
-> `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同，
-> 当前等待 PR CI 与两个冻结真实案例。既有 `vega do / loop / goal`、Reviewer 和成功语义
+> `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同；
+> 代码 HEAD `799bb29` 已通过 PR `#58` 的 9 项 CI，当前等待两个冻结真实案例。既有
+> `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
 本文是 Vega 当前路线的统一入口，只回答：
@@ -44,7 +45,7 @@ v0.1.5 发布（完成）
   -> r6 后安全审阅与 baseline/授权加固（完成并进入主线）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
-  -> Gate 2B 真实 Codex（机械合同已实现，PR CI 与真实案例待执行）
+  -> Gate 2B 真实 Codex（代码 HEAD CI 通过，真实案例待执行）
   -> Gate 3 跨机器/Claude Code
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
@@ -696,7 +697,8 @@ Plan 外 tracked 变更后仍进入成功路由。
 新 Worker 证据来绕过。首次 Worker 还要求干净 Workspace；repair 没有产生新变化时直接交还
 人工。
 
-本地机械验证只证明 Adapter 合同，没有证明真实 Codex 案例通过。下一步先取得 PR CI，再严格按
+代码 HEAD `799bb29` 已通过 PR `#58` workflow `31775697034` 的 9 项 CI，但这仍只证明
+Adapter 机械合同，没有证明真实 Codex 案例通过。下一步严格按
 `SAG2B-01 → SAG2B-02` 串行执行；SAG2B-01 必须形成可解释 Decision，SAG2B-02 必须保留
 partial diff 并进入人工接管。两项完成前不进入 Gate 3，也不发布新版本。
 

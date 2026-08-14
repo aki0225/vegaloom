@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 2B 实施与验证记录
 
-> 状态：`已批准 / 机械合同已实现 / PR CI 与真实案例待执行`
+> 状态：`已批准 / 机械合同已实现 / 代码 HEAD CI 9/9 / 真实案例待执行`
 >
 > 日期：2026-08-14
 >
@@ -34,8 +34,8 @@
 首次真实 Worker 还要求 Workspace 干净；repair Worker 必须相对上一 attempt 产生新的 Workspace
 变化，不能把旧 Diff 再次当作新修复证据。
 
-这些结果只说明 Adapter 机械合同已经形成。Gate 2B 仍需 PR CI，以及
-`SAG2B-01 → SAG2B-02` 两个真实案例，才能判定通过。
+代码 HEAD `799bb29` 已通过 PR `#58` workflow `31775697034` 的 9 项 CI。这只说明 Adapter
+机械合同已经形成；Gate 2B 仍需 `SAG2B-01 → SAG2B-02` 两个真实案例，才能判定通过。
 
 ## 一、Gate 2B 要证明什么
 
@@ -380,5 +380,4 @@ stop_targets_only_owned_child = true
 8. 真实案例需要修改冻结目标、模型或预算才能得到更好结果。
 
 本文已获人工批准，并只创建一个 Gate 2B 短生命周期实验分支和一个专用 Worktree。当前实现
-继续停留在实验分支；PR CI 和两个冻结真实案例完成前不得合并，也不得把本轮结果写成 Gate 2B
-通过。
+继续停留在实验分支；两个冻结真实案例完成前不得合并，也不得把本轮结果写成 Gate 2B 通过。

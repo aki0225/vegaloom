@@ -6,7 +6,7 @@
 >
 > 实施基线：`main@e126aa2`
 >
-> 状态：`Gate 2B 机械合同已实现 / PR CI 与真实案例待执行`
+> 状态：`Gate 2B 代码 HEAD CI 9/9 / 真实案例待执行`
 
 ## 当前结论
 
@@ -18,7 +18,8 @@ Plan 发布顺序、Recovery 证据引用和中间 Work Item 门禁四类问题�
 Gate 2B 已获人工批准，并在单一实验分支和专用 Worktree 完成机械合同。真实 Codex Adapter 的
 信任边界、两个冻结案例、预算、超时和停止条件见
 [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。当前仍不能写成
-Gate 2B 通过：PR CI、`SAG2B-01` 与 `SAG2B-02` 尚未执行。
+Gate 2B 通过：代码 HEAD `799bb29` 已通过 PR `#58` workflow `31775697034` 的 9 项 CI，但
+`SAG2B-01` 与 `SAG2B-02` 尚未执行。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
@@ -102,6 +103,8 @@ Ruff：通过
 compileall：通过
 repository hygiene --base-ref origin/main：通过
 git diff --check：通过
+PR #58 代码 HEAD 799bb29 CI：9/9 success
+workflow：31775697034
 ```
 
 当前本机使用 Python 3.14，首次加载 LangGraph/LangChain 依赖较慢，并出现其已知 Pydantic V1
@@ -155,10 +158,9 @@ Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
 建议顺序：
 
 1. 确认当前分支与远端实验分支一致，Workspace 干净。
-2. 查看 PR CI；失败时只修复与 Gate 2B 机械合同直接相关的问题。
-3. CI 通过后准备隔离目标副本，先运行 `SAG2B-01`。
-4. `SAG2B-01` 形成合同允许终态后，才运行 `SAG2B-02` 的 stop/partial-diff 场景。
-5. 两个真实案例和独立审查完成后，再决定是否合并并进入 Gate 3。
+2. 准备隔离目标副本，先运行 `SAG2B-01`。
+3. `SAG2B-01` 形成合同允许终态后，才运行 `SAG2B-02` 的 stop/partial-diff 场景。
+4. 两个真实案例和独立审查完成后，再决定是否把 Draft PR 转为 Ready、合并或继续修改。
 
 ## 下一 Gate 的边界
 
@@ -176,7 +178,6 @@ Gate 2B 不新增多 Worker、Provider 平台、服务端、自动重试、自�
 
 ## 未完成事项
 
-- 尚未取得当前实验分支的 PR CI。
 - 尚未执行两个冻结真实案例。
 - 尚未证明多 Work Item 的真实 Adapter 累计 Diff 归因；Gate 2B 当前 fail-closed 拒绝该形态。
 - 尚未验证跨机器 Task Card 接力和 Claude Code 薄 Adapter；它们属于 Gate 3。

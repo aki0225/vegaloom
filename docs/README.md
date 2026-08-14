@@ -16,7 +16,7 @@
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
 | 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2B 机械合同已实现 |
-| 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | PR CI 与真实案例待执行 |
+| 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | 代码 HEAD CI 通过，真实案例待执行 |
 | 查看 Supervisor Agent Gate 2A 交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 2A 已完成 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -47,8 +47,9 @@ Adapter 会在创建 child 前拒绝该形态，不放宽既有 baseline 门禁�
 打包 CLI 仍是 opt-in `agent` 子命令，`v0.1.5` 的既有默认命令行为和成功语义不变。
 
 Gate 2B 的 Adapter 信任边界、两个真实案例、预算、停止条件和代码变更上限已经整理到
-[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。当前必须先完成 PR CI，
-再按 `SAG2B-01 → SAG2B-02` 串行运行；真实案例完成前不判定 Gate 2B 通过。
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。代码 HEAD
+`799bb29` 已通过 PR `#58` 的 9 项 CI；下一步按 `SAG2B-01 → SAG2B-02` 串行运行，真实案例
+完成前不判定 Gate 2B 通过。
 
 ### 真实日常使用观察
 
