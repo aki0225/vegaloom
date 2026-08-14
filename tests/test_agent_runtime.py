@@ -134,6 +134,87 @@ def test_fake_worker_two_items_route_next_then_finalize(
     ]
 
 
+def test_machine_observation_can_advance_but_external_claim_cannot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    run = runtime.approve(run.run_dir.name)
+    run = _started_worker(
+        workspace,
+        run.run_dir.name,
+        child_run="attempt-machine",
+        operation_id="operation-machine",
+    )
+
+    machine = runtime.observe_machine(
+        run.run_dir.name,
+        AgentObservation(
+            observation_id="obs-machine",
+            work_item_id="W1",
+            child_run="attempt-machine",
+            operation_id="operation-machine",
+            machine_summary="机器已重新采集 Workspace 与门禁证据",
+            workspace_fingerprint="0" * 64,
+            evidence_refs=["operations/machine.json"],
+            work_item_completed=True,
+            all_work_items_completed=True,
+            verification="passed",
+            risk="passed",
+            review="passed",
+        ),
+    )
+
+    assert machine.state.phase == "finalizing"
+    saved = json.loads(
+        (machine.run_dir / "observations" / "obs-machine.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert saved["authority"] == "machine_reconcile"
+
+
+def test_blocked_risk_gate_routes_human_instead_of_replan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    run = runtime.approve(run.run_dir.name)
+    run = _started_worker(
+        workspace,
+        run.run_dir.name,
+        child_run="attempt-risk-human",
+        operation_id="operation-risk-human",
+    )
+
+    routed = runtime.observe_machine(
+        run.run_dir.name,
+        AgentObservation(
+            observation_id="obs-risk-human",
+            work_item_id="W1",
+            child_run="attempt-risk-human",
+            operation_id="operation-risk-human",
+            machine_summary="Risk Gate 要求人工审查",
+            workspace_fingerprint="0" * 64,
+            evidence_refs=["children/risk-human.json"],
+            risk="blocked",
+        ),
+    )
+
+    assert routed.state.phase == "needs_human"
+    assert routed.state.allowed_actions == ["human"]
+
+
 def test_fake_worker_failure_routes_repair_and_unknown_side_effect_routes_human(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -718,7 +799,12 @@ def test_agent_cli_status_card_and_capabilities(
     assert started.exit_code == 0, started.output
     assert "阶段：等待批准" in started.output
     assert capabilities.exit_code == 0
-    assert json.loads(capabilities.output)["langgraph"] is True
+    capability_payload = json.loads(capabilities.output)
+    assert capability_payload["langgraph"] is True
+    assert capability_payload["worker"] == "codex-exec"
+    agent_help = CliRunner().invoke(app, ["agent", "--help"])
+    assert agent_help.exit_code == 0
+    assert "run" in agent_help.output
 
 
 def test_packaged_cli_entrypoint_preserves_core_commands() -> None:

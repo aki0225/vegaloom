@@ -29,6 +29,7 @@ from .agent_runtime_logic import (
     validate_observation_binding,
 )
 from .agent_runtime_support import (
+    bound_repo,
     capture_bound_workspace,
     load_agent_bundle,
     require_git_root,
@@ -43,6 +44,7 @@ from .redaction import write_redacted_json, write_redacted_json_once
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
 from .workspace_check import capture_review_workspace
+from .workspace_inventory import prepare_verification_temp_root
 
 
 class SupervisorAgentRuntime:
@@ -113,6 +115,9 @@ class SupervisorAgentRuntime:
         if plan.unresolved_decisions:
             raise ValueError("Plan 仍有未解决决策，不能批准")
         approved = approve_plan(plan, actor=actor)
+        # assist child 会在冻结 Worker baseline 时建立该受控目录。批准前先准备，
+        # 让 safe Checkpoint 包含真实执行前置现场，避免首个 child 被误判为用户漂移。
+        prepare_verification_temp_root(bound_repo(run_dir))
         snapshot = capture_bound_workspace(run_dir)
         ready_state = update_state(
             state,
@@ -243,6 +248,20 @@ class SupervisorAgentRuntime:
             run,
             observation,
             authority="fake_worker",
+        )
+
+    @agent_mutation("agent.observe")
+    def observe_machine(
+        self,
+        run: str,
+        observation: AgentObservation,
+    ) -> AgentRun:
+        """真实 Adapter 的内部机器对账入口，不接受 CLI 直接提交。"""
+
+        return self._observe_locked(
+            run,
+            observation,
+            authority="machine_reconcile",
         )
 
     def _observe_locked(

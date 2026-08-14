@@ -16,6 +16,11 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from .execution_feedback import ExecutionProgressReporter, ExecutionProgressTicker
+from .execution_identity import (
+    same_execution_identity as _same_execution_identity,
+    stop_request_matches_lease as _stop_request_matches_lease,
+    validate_explicit_execution_id as _validate_explicit_execution_id,
+)
 from .execution_output import (
     ExecutionOutputLineObserver,
     ProcessOutputCapture, redact_diagnostic_output as _redact_diagnostic_output,
@@ -109,6 +114,7 @@ class RunnerExecutionContext:
     execution_dir: Path
     run_id: str
     step: str
+    execution_id: str | None = None
     iteration: int | None = None
     heartbeat_interval_seconds: float = 1.0
     lease_timeout_seconds: float = 10.0
@@ -118,6 +124,8 @@ class RunnerExecutionContext:
     capture_stderr_separately: bool = False
 
     def __post_init__(self) -> None:
+        if self.execution_id is not None:
+            _validate_explicit_execution_id(self.execution_id)
         if self.heartbeat_interval_seconds <= 0:
             raise ValueError("heartbeat_interval_seconds 必须大于 0")
         if self.lease_timeout_seconds <= self.heartbeat_interval_seconds:
@@ -168,7 +176,7 @@ class ExecutionController:
         command_parts = [command] if isinstance(command, str) else command
         self.lease = ExecutionLease(
             run_id=self.context.run_id,
-            execution_id=uuid4().hex,
+            execution_id=self.context.execution_id or uuid4().hex,
             step=self.context.step,
             iteration=self.context.iteration,
             owner_pid=os.getpid(),
@@ -497,12 +505,19 @@ def run_owned_process(
     )
 
 
-def request_stop_for_run(run_dir: Path, reason: str) -> ExecutionRecord:
+def request_stop_for_run(
+    run_dir: Path,
+    reason: str,
+    *,
+    expected_execution_id: str | None = None,
+) -> ExecutionRecord:
     """为指定 run 最新且仍存活的 active execution 写入 stop request。"""
 
     normalized_reason = _redact_process_output(reason.strip())
     if not normalized_reason:
         raise ValueError("stop 必须提供原因，方便后续追溯。")
+    if expected_execution_id is not None:
+        _validate_explicit_execution_id(expected_execution_id)
     active_records = [
         (record, _active_execution_stale_reason(record.lease))
         for record in find_execution_records(run_dir)
@@ -546,6 +561,14 @@ def request_stop_for_run(run_dir: Path, reason: str) -> ExecutionRecord:
         record.lease.owner_pid,
         record.lease.owner_creation_token,
     )
+    if (
+        expected_execution_id is not None
+        and record.lease.execution_id != expected_execution_id
+    ):
+        raise ValueError(
+            "当前 active execution 与期望 operation 身份不一致，"
+            "已拒绝写入 stop request。"
+        )
     if owner_probe.status != "alive":
         raise ValueError(
             "active execution 的原 owner 已退出或无法确认存活，"
@@ -624,36 +647,6 @@ def _confirm_stop_target_still_active(
         "目标 execution 在 stop request 写入期间已结束，但不是 stopped；"
         "无法确认请求是否生效，请检查 status 后按需重试。"
     )
-
-
-def _same_execution_identity(left: ExecutionLease, right: ExecutionLease) -> bool:
-    if left.execution_id is not None or right.execution_id is not None:
-        return (
-            left.execution_id is not None
-            and left.execution_id == right.execution_id
-        )
-    return (
-        left.started_at == right.started_at
-        and left.step == right.step
-        and left.iteration == right.iteration
-        and left.owner_pid == right.owner_pid
-    )
-
-
-def _stop_request_matches_lease(
-    request: StopRequest,
-    lease: ExecutionLease,
-) -> bool:
-    if request.execution_id is not None:
-        return (
-            lease.execution_id is not None
-            and request.execution_id == lease.execution_id
-        )
-    if request.execution_started_at is not None:
-        return request.execution_started_at == lease.started_at
-    # 旧三字段请求只能由同样没有 execution_id 的旧 lease 消费；升级后的新 execution
-    # 必须忽略它，避免 CLI 在身份切换窗口拒绝后，旧请求反而误停新进程。
-    return lease.execution_id is None
 
 
 def find_execution_records(run_dir: Path) -> list[ExecutionRecord]:

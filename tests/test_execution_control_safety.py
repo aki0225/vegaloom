@@ -121,6 +121,46 @@ def test_execution_records_one_hour_deadline_without_waiting(
     assert (deadline - started_at).total_seconds() == 3600
 
 
+def test_execution_prepare_preserves_explicit_operation_identity(
+    tmp_path: Path,
+) -> None:
+    execution_root = tmp_path / "run"
+    execution_root.mkdir()
+    context = RunnerExecutionContext(
+        execution_root=execution_root,
+        execution_dir=execution_root / "executions" / "worker",
+        run_id="explicit-identity",
+        step="worker",
+        execution_id="operation-explicit-01",
+    )
+
+    lease = ExecutionController(context).prepare(["runner"], 60)
+    persisted = ExecutionLease.model_validate_json(
+        context.execution_dir.joinpath("execution.json").read_text(encoding="utf-8")
+    )
+
+    assert lease.execution_id == "operation-explicit-01"
+    assert persisted.execution_id == "operation-explicit-01"
+
+
+@pytest.mark.parametrize(
+    "execution_id",
+    ["", " leading", "trailing ", "line\nbreak", "nul\0byte", "x" * 129],
+)
+def test_execution_context_rejects_invalid_explicit_identity(
+    tmp_path: Path,
+    execution_id: str,
+) -> None:
+    with pytest.raises(ValueError, match="execution_id"):
+        RunnerExecutionContext(
+            execution_root=tmp_path,
+            execution_dir=tmp_path / "executions" / "worker",
+            run_id="invalid-explicit-identity",
+            step="worker",
+            execution_id=execution_id,
+        )
+
+
 @pytest.mark.parametrize("operation", ["heartbeat", "output", "stderr"])
 def test_execution_revalidates_directory_before_later_writes(
     tmp_path: Path,
@@ -200,6 +240,38 @@ def test_codex_exec_runner_propagates_termination_unconfirmed(
     assert result.termination_unconfirmed is True
 
 
+def test_codex_exec_runner_records_terminal_preflight_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "missing-codex" / "executions" / "worker",
+        run_id="missing-codex",
+        step="worker",
+        execution_id="a" * 32,
+    )
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: None)
+
+    result = CodexExecRunner(executable="missing-codex").run(
+        "test prompt",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=60,
+        execution_context=context,
+    )
+
+    lease = ExecutionLease.model_validate_json(
+        (context.execution_dir / "execution.json").read_text(encoding="utf-8")
+    )
+    assert result.status == "error"
+    assert lease.execution_id == context.execution_id
+    assert lease.status == "failed"
+    assert lease.child_pid is None
+
+
 def test_codex_exec_runner_writes_output_schema_inside_execution_dir(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -257,6 +329,66 @@ def test_codex_exec_runner_writes_output_schema_inside_execution_dir(
     assert result.status == "success"
     assert captured["schema"] == output_schema
     assert captured["schema_path"] == context.execution_dir / "output-schema.json"
+
+
+def test_codex_exec_runner_single_writer_disables_target_multi_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, stream_context, **kwargs
+    ):
+        del input_text, cwd, timeout_seconds, stream_context, kwargs
+        captured["command"] = command
+        payload = {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": '{"status":"ok"}',
+            },
+        }
+        return OwnedProcessResult(
+            status="success",
+            output=json.dumps(payload),
+            error=None,
+            returncode=0,
+        )
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+
+    result = CodexExecRunner(single_writer=True).run(
+        "test prompt",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "success"
+    command = captured["command"]
+    disabled = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--disable"
+    ]
+    assert disabled == [
+        "hooks",
+        "memories",
+        "plugins",
+        "multi_agent",
+        "multi_agent_v2",
+    ]
+    config_values = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--config"
+    ]
+    assert "sandbox_workspace_write.network_access=false" in config_values
+    assert "sandbox_workspace_write.writable_roots=[]" in config_values
 
 
 def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
@@ -1962,6 +2094,38 @@ def test_stop_request_reason_is_redacted_before_persisting(tmp_path: Path) -> No
         "requested_at",
         "requester_pid",
     }
+
+
+def test_stop_rejects_mismatched_expected_execution_before_writing(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "runs" / "stop-identity-mismatch"
+    now = datetime.now(UTC)
+    execution_path = run_dir / "executions" / "worker" / "execution.json"
+    _write_execution(
+        execution_path,
+        ExecutionLease(
+            run_id=run_dir.name,
+            execution_id="operation-current",
+            step="worker",
+            owner_pid=os.getpid(),
+            command=["worker"],
+            started_at=now.isoformat(),
+            last_heartbeat=now.isoformat(),
+            lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+            deadline=(now + timedelta(minutes=2)).isoformat(),
+            status="running",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="期望 operation 身份不一致"):
+        request_stop_for_run(
+            run_dir,
+            "stop wrong execution",
+            expected_execution_id="operation-other",
+        )
+
+    assert not execution_path.with_name("stop-request.json").exists()
 
 
 def test_stop_prefers_latest_live_active_execution_over_newer_stale_record(

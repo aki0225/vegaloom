@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "case_id": "SAG2B-02",
+  "upstream_repository": "https://github.com/pypa/packaging.git",
+  "upstream_baseline": "b34d12acb28c9ad3a6b0b3cc82f03a4b0b98c8c0",
+  "task_source": "examples/tasks/sag2b-02-packaging.md",
+  "task_sha256": "4ad716d7496e5e0e83b3b83649f4f4cb545b2604f58d972e0f3a4306bd9aaabb",
+  "policy_source": "examples/tasks/sag2b-02-packaging.vega.yaml",
+  "policy_sha256": "dd12a78308d35349fad372aa07fa2cd677014209ba92e92d457d4dd2b4eacdbc",
+  "target_policy_path": ".vega.yaml",
+  "git_config": {
+    "core.autocrlf": "false",
+    "core.eol": "lf",
+    "commit.gpgsign": "false"
+  },
+  "local_excludes": [
+    "runs/",
+    ".tmp/"
+  ],
+  "commit": {
+    "author_name": "Vega Experiment",
+    "author_email": "vega@example.invalid",
+    "author_date": "2026-08-14T09:15:00Z",
+    "committer_name": "Vega Experiment",
+    "committer_email": "vega@example.invalid",
+    "committer_date": "2026-08-14T09:15:00Z",
+    "message": "实验：准备 SAG2B-02 可恢复中断目标",
+    "expected_parent": "b34d12acb28c9ad3a6b0b3cc82f03a4b0b98c8c0",
+    "expected_tree": "a6add885399e25abdc3971691d89beaa4e4ae1ca",
+    "expected_commit": "26dc3e4982c5e8738553384abb1c85dd019a2e01"
+  },
+  "forbidden_object": "fa40f9db8582c146c3f6c5c55babad79eac224a0"
+}

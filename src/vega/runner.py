@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from .execution_control import RunnerExecutionContext, run_owned_process
+from .execution_control import (
+    ExecutionController,
+    RunnerExecutionContext,
+    run_owned_process,
+)
 from .execution_output import MAX_JSONL_LINE_CHARS
 from .execution_paths import ExecutionPathGuard
 from .project_config import CodexExecOptions
@@ -245,10 +249,13 @@ class CodexExecRunner:
         executable: str = "codex",
         options: CodexExecOptions | None = None,
         output_schema: dict[str, Any] | None = None,
+        *,
+        single_writer: bool = False,
     ) -> None:
         self.executable = executable
         self.options = options or CodexExecOptions()
         self.output_schema = output_schema
+        self.single_writer = single_writer
 
     def run(
         self,
@@ -259,15 +266,6 @@ class CodexExecRunner:
         timeout_seconds: int,
         execution_context: RunnerExecutionContext | None = None,
     ) -> RunnerResult:
-        resolved = shutil.which(self.executable)
-        if not resolved:
-            return RunnerResult(
-                status="error",
-                output="",
-                error=f"未找到 {self.executable}，无法启动 codex exec。",
-                command=[self.executable, "exec"],
-            )
-
         standalone_root = Path.cwd()
         context = execution_context or RunnerExecutionContext(
             execution_root=standalone_root,
@@ -278,6 +276,23 @@ class CodexExecRunner:
             run_id="standalone-runner",
             step="codex-exec",
         )
+        resolved = shutil.which(self.executable)
+        if not resolved:
+            command = [self.executable, "exec"]
+            error = f"未找到 {self.executable}，无法启动 codex exec。"
+            _record_preflight_failure(
+                context,
+                command,
+                timeout_seconds,
+                error,
+            )
+            return RunnerResult(
+                status="error",
+                output="",
+                error=error,
+                command=command,
+            )
+
         command = [
             resolved,
             "exec",
@@ -294,6 +309,22 @@ class CodexExecRunner:
             "--disable",
             "plugins",
         ]
+        if self.single_writer:
+            # Supervisor 只允许一个 Writer。目标仓库不能通过项目级 Codex 配置
+            # 再启用子代理并发写入、网络或额外可写根目录，也不能让无关的
+            # 多代理参数阻断真实 Worker。
+            command.extend(
+                [
+                    "--config",
+                    "sandbox_workspace_write.network_access=false",
+                    "--config",
+                    "sandbox_workspace_write.writable_roots=[]",
+                    "--disable",
+                    "multi_agent",
+                    "--disable",
+                    "multi_agent_v2",
+                ]
+            )
         if self.options.profile:
             command.extend(["--profile", self.options.profile])
         if self.options.model:
@@ -327,13 +358,20 @@ class CodexExecRunner:
                     newline="\n",
                 )
             except (OSError, TypeError, ValueError) as exc:
+                error = (
+                    "无法写入 codex exec output schema："
+                    f"{type(exc).__name__}"
+                )
+                _record_preflight_failure(
+                    context,
+                    command,
+                    timeout_seconds,
+                    error,
+                )
                 return RunnerResult(
                     status="error",
                     output="",
-                    error=(
-                        "无法写入 codex exec output schema："
-                        f"{type(exc).__name__}"
-                    ),
+                    error=error,
                     command=command,
                 )
             command.extend(["--output-schema", str(schema_path.resolve())])
@@ -376,6 +414,23 @@ class CodexExecRunner:
             command=command,
             termination_unconfirmed=getattr(result, "termination_unconfirmed", False),
         )
+
+
+def _record_preflight_failure(
+    context: RunnerExecutionContext,
+    command: list[str],
+    timeout_seconds: int,
+    error: str,
+) -> None:
+    """在子进程启动前失败时也留下与 operation 绑定的终态执行证据。"""
+
+    try:
+        controller = ExecutionController(context)
+        controller.prepare(command, timeout_seconds)
+        controller.finish("error", reason=error, returncode=None)
+    except (OSError, ValueError):
+        # Artifact 路径本身不可信时不能伪造终态；上层会保守保留 Writer binding。
+        return
 
 
 def make_runner(

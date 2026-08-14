@@ -89,7 +89,15 @@ def _route(
     if precondition is not None:
         return precondition
 
-    blocking_gate = _blocking_gate(observation)
+    blocked_gate = _human_blocked_gate(observation)
+    if blocked_gate is not None:
+        return (
+            ["human"],
+            "human",
+            f"{blocked_gate} 明确要求人工处理，不能自动 repair 或 replan",
+        )
+
+    blocking_gate = _failed_gate(observation)
     if blocking_gate is not None:
         if observation.repairable_in_scope:
             return (
@@ -192,13 +200,24 @@ def _finalization_claim_matches_plan(
     )
 
 
-def _blocking_gate(observation: AgentObservation) -> str | None:
+def _human_blocked_gate(observation: AgentObservation) -> str | None:
     for label, status in (
         ("Verification", observation.verification),
         ("Risk Gate", observation.risk),
         ("Reviewer", observation.review),
     ):
-        if status in {"failed", "blocked"}:
+        if status == "blocked":
+            return label
+    return None
+
+
+def _failed_gate(observation: AgentObservation) -> str | None:
+    for label, status in (
+        ("Verification", observation.verification),
+        ("Risk Gate", observation.risk),
+        ("Reviewer", observation.review),
+    ):
+        if status == "failed":
             return label
     return None
 
