@@ -15,9 +15,10 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2B 退出条件已满足 |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2C 已批准待执行 |
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
-| 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 3 仍冻结 |
+| 查看 Gate 2C 真实完整路径协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | 已批准待执行 |
+| 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 2B 交接记录 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
 | 查看 RCB-02 离线检索结果 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | Phase 0 停止，未运行 Holdout |
@@ -32,9 +33,9 @@
 
 ### 进行中：Supervisor Agent V1 实验
 
-Vega 下一阶段的主线方向是一个轻量但完整的软件工程 Supervisor Agent：Codex、Claude Code 等
-Coding Agent 继续读代码和修改文件；Vega 负责调查、计划批准、派发、Workspace 对账、检查点、
-恢复、主会话进度展示，以及最终可信完成判断。完整链路和范围见
+Vega 下一阶段的主线方向是一个轻量但完整的软件工程 Supervisor Agent：宿主主会话负责只读调查
+并提交结构化计划，Coding Agent 继续读代码和修改文件；Vega 负责计划校验与批准、派发、
+Workspace 对账、检查点、恢复、主会话进度展示，以及最终可信完成判断。完整链路和范围见
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)。
 
 实施计划已经批准。Gate 0 已冻结状态权威与数据合同，Gate 1 已接入最小 LangGraph 控制循环，
@@ -50,8 +51,9 @@ Gate 2B 的 Adapter 信任边界、两个真实案例、预算、停止条件和
 [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。`SAG2B-01` 已证明
 真实 Worker 的成功 Claim 不会越过未跟踪文件门禁；`SAG2B-02` 已证明带 partial Diff 的
 owned execution 能由身份绑定的 `agent stop` 停止并交还人工。当前状态为
-`gate-exit-pass`：两个冻结真实案例、最终 PR CI 和合并前审阅均满足 Gate 2B 的退出门槛；
-Gate 3 仍保持冻结，需另行批准，不改变既有默认命令行为和成功语义。
+`gate-exit-pass`：两个冻结真实案例、最终 PR CI 和合并前审阅均满足 Gate 2B 的退出门槛。
+Gate 2C 已批准，先补一条当前主线真实完整成功路径；Gate 3A～3C 仍保持冻结，不改变既有默认
+命令行为和成功语义。
 
 ### 真实日常使用观察
 
@@ -60,7 +62,7 @@ Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist�
 打回和 fail-closed 场景均有记录。
 
 Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 已完成两个冻结真实案例，
-最终分支 CI 和合并前审阅均已通过。
+最终分支 CI 和合并前审阅均已通过，当前执行 Gate 2C。
 `v0.1.5` 继续按现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
 空 Scope 展示和 Workspace 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。
 当前状态与历史停止条件见：

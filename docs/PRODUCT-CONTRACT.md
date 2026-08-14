@@ -111,20 +111,26 @@ reviewer 合同。该提示词边界只能降低误跟随风险，不能证明�
 ### 实验能力
 
 - Memory proposal / ledger。
-- Goal P0 长任务人工状态层，以及默认关闭、一次只运行一个 checkpoint 的 P1 实验入口。
+- Goal P0 长任务人工状态层，以及已冻结、默认关闭、一次只运行一个 checkpoint 的 P1 实验入口。
 - Codex skill adapter。
+- opt-in `vega agent` Supervisor 控制层：Plan 批准、单 Writer、Checkpoint、机器对账、本机恢复和
+  真实 Codex Adapter。它尚未成为默认入口，当前只承诺一个未完成 Work Item。
+
+Goal P1 不再作为新的长任务能力扩建入口。后续可恢复任务实验只在 Supervisor Agent 路线进行；
+Goal P1 保留兼容和历史证据，不与 Supervisor 维护两套同级的当前事实。
 
 实验能力不得反向扩大核心成功条件。未使用 Memory、Goal 或 adapter 时，bug/feature
 主流程仍必须可以完整运行。
 
 ## 项目知识分层
 
-项目知识按职责分为四层：
+项目知识与任务控制材料按职责分为五层：
 
 | 层级 | 内容 | 特性 |
 |---|---|---|
 | `AGENTS.md` | 稳定规范、架构边界、长期踩坑 | Git 版本化，面向人和 AI |
 | `.vega.yaml` | 验证命令、精确路径范围、预算、风险路径、runner 策略 | 机器可执行 |
+| `.vega/tasks/**/*.md` | 已批准计划和人工跨机器 Resume Capsule | Git 版本化，只保存粗粒度任务事实 |
 | run artifacts | 本次任务、diff、验证、review 和恢复证据 | 单次运行事实 |
 | accepted memory | 已人工确认、跨任务可复用的局部经验 | 可选，不是规范来源 |
 
@@ -167,9 +173,10 @@ Memory 是可选经验账本，不是每轮必须生成的流水线产物：
 仅增加命令、artifact、状态字段或架构名词，不视为有效演进。没有真实使用证据的能力保持实验状态，
 不得继续扩建。
 
-## v0.1.0 停止线
+## v0.1.0 历史停止线
 
-v0.1.0 完成核心证据一致性和口径统一后进入功能冻结：
+以下内容记录 v0.1.0 发布时的冻结决定。后来进入主线的 Goal P1 与 opt-in Supervisor Agent 均经过
+新的计划批准和独立 Gate，不代表默认 `vega do` 边界被放宽：
 
 - 保持上下文编译、受控执行、确定性验证、隔离审查和恢复交接稳定。
 - `loop continue` 必须绑定原仓库和 `needs_human` 状态。

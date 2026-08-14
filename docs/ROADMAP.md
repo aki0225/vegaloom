@@ -10,7 +10,8 @@
 > 完成。2026-08-13 已批准 Supervisor Agent V1 实施计划；Gate 0、Gate 1 与 Gate 2A 已完成。
 > PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以
 > `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同、
-> 两个冻结真实案例、最终 PR CI 和合并前审阅，当前状态为 `gate-exit-pass`。既有
+> 两个冻结真实案例、最终 PR CI 和合并前审阅，当前状态为 `gate-exit-pass`。2026-08-14
+> 路线复核后，Gate 2C 已批准用于补一条当前主线真实完整成功路径；Gate 3 已拆分但仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
@@ -25,7 +26,7 @@
 [`ASSURANCE-CONTRACT-CANDIDATE.md`](ASSURANCE-CONTRACT-CANDIDATE.md) 为准，历史验证证据
 以 [`../eval/assurance-validation.md`](../eval/assurance-validation.md) 为准。本文不复制这些
 文档的完整内容。当前执行计划见
-[`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)，文档状态见
+[`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)，文档状态见
 [`README.md`](README.md)。
 
 ## 一、当前主线
@@ -46,7 +47,10 @@ v0.1.5 发布（完成）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
-  -> Gate 3 跨机器/Claude Code（冻结，需单独批准）
+  -> Gate 2C 当前主线真实完整成功路径（已批准，待执行）
+  -> Gate 3A Handoff 机械生产与本地往返（冻结）
+  -> Gate 3B 单 Work Item 跨机器接力（冻结）
+  -> Gate 3C 小规模日常价值观察（冻结）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
 
@@ -723,6 +727,22 @@ Supervisor 进入 `needs_human`。没有直接 kill PID、第二 Writer、自动
 两个真实案例、最终 PR CI 与合并前审阅已经满足 Gate 2B 冻结退出条件，当前判定为
 `gate-exit-pass`。Gate 3 仍保持冻结，必须另行批准；本阶段没有改变默认 Runtime、Reviewer、
 成功语义或人工 Git 边界。
+
+### 2026-08-14：路线复核并增加 Gate 2C
+
+复核确认 Gate 2B 的两个真实案例都形成了安全且可解释的终态，但没有一个案例完整经过
+Verification、Risk、独立 Reviewer 与 Finish。因此在实现跨机器 Handoff 前，先增加 Gate 2C，
+使用当前 `main`、单 Work Item 和真实 Codex 补一条完整成功路径。
+
+原 Gate 3 不再把 Handoff 实现、真实换机、Claude Code 和价值 A/B 混在一次实验中，改为：
+
+1. Gate 3A：只实现 Handoff 生产端并完成本地两个隔离副本的机械往返；
+2. Gate 3B：使用同一 Codex Adapter 完成一个单 Work Item 的真实跨机器接力；
+3. Gate 3C：记录少量真实任务的恢复时间、重复调查、人工步骤和再次使用意愿。
+
+Supervisor V1 只承诺一个真实 Codex Adapter。Claude Code 已有外部 assist 证据，但尚未满足
+Supervisor 受信 Worker 合同，因此移到 V1 之后单独评估。多 Work Item 累计 Diff、Memory
+Proposal、Provider 平台和正式 Token A/B 同样不属于 V1 必过范围。
 
 ## 七、更新规则
 

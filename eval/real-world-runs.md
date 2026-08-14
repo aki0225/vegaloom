@@ -637,3 +637,14 @@ SHA-256 分别为
 该结果不证明两个目标补丁正确、Codex 通用修复成功率、任意仓库泛化能力、多 Work Item
 累计归因、跨机器未完成 WIP 恢复或 Claude Code Adapter。包含运行中三项集成修复和本结果文档的
 最终分支 HEAD 仍需通过 PR CI 与合并前审阅；完成前 PR 保持 Draft，不进入 Gate 3。
+
+## 2026-08-14 Supervisor Agent Gate 2B 合并后状态
+
+本条只追加 Gate 2B 的后续合并事实，不改写上方正式运行发生时的 `merge-pending` 裁决。
+
+- PR `#58` 已完成最终 CI 与合并前独立审阅；
+- 合并提交为 `63096bcb453d2dfc7446113b3523b5fde961e2e5`；
+- Gate 2B 当前最终状态为 `gate-exit-pass`；
+- 两个真实案例的能力边界保持不变，仍不证明补丁正确、完整成功路径、多 Work Item、跨机器恢复
+  或 Claude Code Supervisor Adapter；
+- 后续先执行 Gate 2C 当前主线真实完整成功路径，原 Gate 3 拆分后继续保持冻结。
