@@ -13,6 +13,7 @@ from vega.agent_runtime import SupervisorAgentRuntime
 from vega.execution_control import ExecutionController, RunnerExecutionContext
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.runner import RunnerResult
+from vega.workspace_inventory import prepare_verification_temp_root
 
 
 class _FakeLoopRuntime:
@@ -22,10 +23,12 @@ class _FakeLoopRuntime:
         *,
         finish_status: str = "ready_to_commit",
         core_mutation_relative: str | None = None,
+        prepare_runtime_root: bool = False,
     ) -> None:
         self.workspace = workspace
         self.finish_status = finish_status
         self.core_mutation_relative = core_mutation_relative
+        self.prepare_runtime_root = prepare_runtime_root
         self.continued = False
         self.start_count = 0
         self.continue_count = 0
@@ -43,6 +46,8 @@ class _FakeLoopRuntime:
     ) -> Path:
         del worker_name, reviewer_name, max_iterations, verify, on_run_created
         assert automation_mode == "assist"
+        if self.prepare_runtime_root:
+            prepare_verification_temp_root(Path(brief_input.repo_path))
         self.start_count += 1
         child_dir = self.workspace / "runs" / "fake-assist-child"
         child_dir.mkdir(parents=True)
@@ -266,6 +271,40 @@ def test_adapter_maps_child_core_evidence_to_machine_observation(
     assert payload["risk"] == "passed"
     assert payload["review"] == "passed"
     assert payload["changed_files"] == ["src/example.py"]
+
+
+def test_approved_checkpoint_includes_first_assist_runtime_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    repo.joinpath(".gitignore").write_text(
+        ".tmp/\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", "测试：忽略运行目录")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    plan = _plan()
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    approved = runtime.approve(run.run_dir.name)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(workspace, prepare_runtime_root=True)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    result = adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+    assert repo.joinpath(".tmp", "vega-verification").is_dir()
+    assert result.state.phase == "finalizing"
+    assert loop.start_count == 1
 
 
 def test_worker_timeout_preserves_partial_diff_and_skips_core(

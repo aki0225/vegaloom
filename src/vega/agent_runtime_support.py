@@ -43,6 +43,7 @@ from .redaction import write_redacted_json, write_redacted_text
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir, resolve_run_dir
 from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
+from .workspace_inventory import prepare_verification_temp_root
 
 
 def require_git_root(repo: Path) -> Path:
@@ -172,6 +173,8 @@ def resume_agent_task_card(
     repo_root = require_git_root(repo)
     resolved_task, relative_task = resolve_resume_task(repo_root, task_path)
     card = load_task_card(resolved_task)
+    # 新机器不会携带空的运行目录；先重建 Vega 自己的固定根路径，再冻结新现场。
+    prepare_verification_temp_root(repo_root)
     snapshot = validate_resume_workspace(repo_root, card)
     revision = resolve_git_revision(repo_root)
     assert revision is not None
