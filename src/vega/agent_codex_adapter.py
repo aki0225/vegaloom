@@ -170,7 +170,9 @@ class SupervisorAgentCodexAdapter:
         timeout_seconds: int,
     ) -> ExecutedCodexAttempt:
         child_run = child_dir.name
-        operation_id = f"operation-{uuid4().hex}"
+        # Windows Job 名称直接绑定 execution_id；沿用 UUID 十六进制格式，
+        # 不添加人类可读前缀，避免真实 Runner 在创建 owned process 前拒绝身份。
+        operation_id = uuid4().hex
         bound = self.worker.bind(
             prepared.run_dir.name,
             child_run=child_run,

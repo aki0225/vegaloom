@@ -254,6 +254,8 @@ def test_adapter_maps_child_core_evidence_to_machine_observation(
     assert result.state.active_child_run is None
     assert result.plan.work_items[0].status == "completed"
     assert runner.execution_id is not None
+    assert len(runner.execution_id) == 32
+    assert set(runner.execution_id) <= set("0123456789abcdef")
     assert loop.child_dir is not None
     execution = json.loads(
         next(
