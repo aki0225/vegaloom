@@ -15,8 +15,9 @@ Plan 发布顺序、Recovery 证据引用和中间 Work Item 门禁四类问题�
 `4180e7e` 已通过 workflow `31718078414` 的 9 项 CI，最终文档 HEAD `8ca75f2` 已通过 workflow
 `31718680069` 的 9 项 CI。PR `#57` 已以 `6a5c927` 合并到 `main`，Gate 2A 没有遗留阻断项。
 
-本次交接不授权直接开始 Gate 2B 代码。下一步先固定真实 Codex Adapter 的信任边界、两个冻结
-案例、预算、超时和停止条件，再由人工确认是否实施。
+本次交接不授权直接开始 Gate 2B 代码。真实 Codex Adapter 的信任边界、两个冻结案例、预算、
+超时和停止条件见
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)，等待人工确认后再实施。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 新增了 opt-in `vega agent` 子命令。`vega agent` 仍是实验入口；
@@ -105,8 +106,9 @@ Get-Content docs/SUPERVISOR-AGENT-V1-HANDOFF.md
 建议顺序：
 
 1. 确认 `main` 与 `origin/main` 一致，Workspace 干净。
-2. 在实现前固定一个真实 Codex Adapter 的信任边界、两个冻结案例、预算、超时和停止条件。
-3. 获得人工批准后只创建一个 Gate 2B 实验分支和一个专用 Worktree。
+2. 审查 [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) 的 Adapter
+   信任边界、两个冻结案例、预算、超时和停止条件。
+3. 计划获得人工批准后只创建一个 Gate 2B 实验分支和一个专用 Worktree。
 4. 实现薄 Adapter，不建设 Provider 平台，不改变既有默认命令和成功语义。
 5. 取得真实案例证据后再决定是否进入 Gate 3。
 

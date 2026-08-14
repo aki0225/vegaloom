@@ -883,10 +883,14 @@ Adapter，两者复用同一 Task Card、Task Brief、Checkpoint、Trace 和 Veg
 
 ### Gate 2B：真实 Codex 与主会话控制
 
+具体 Adapter 信任边界、预算、冻结案例和停止条件见
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。该实施前冻结尚待人工
+批准，未批准前不开始 Runtime 改造。
+
 冻结两个案例：
 
-1. **模糊 Bug**：用户不知道根因位置；Supervisor 先调查，人工批准两个以上 Work Item，新证据触发
-   一次合理 `next`、`repair` 或 `replan`；
+1. **模糊 Bug**：用户不知道根因位置；Supervisor 先调查并请求人工批准计划，真实 Worker 结果
+   根据证据进入合理的 `finalize`、`repair`、`replan` 或 `human`；
 2. **长任务中断**：真实 Worker 留下 partial diff 后中断，主会话看到现场并由人工选择新 Worker
    接手或验证当前工作。
 

@@ -16,6 +16,7 @@
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
 | 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2A 已合并，准备 Gate 2B |
+| 审查 Gate 2B 实施前冻结 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | 待人工批准 |
 | 查看 Supervisor Agent Gate 2A 交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 2A 已完成 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -41,6 +42,10 @@ Gate 2A 已完成中断、恢复、单 Writer、故障注入和独立代码审�
 `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。下一步先
 准备 Gate 2B 的真实 Codex Adapter 合同与冻结案例，尚未开始实现。打包 CLI 新增 opt-in
 `agent` 子命令，但 `v0.1.5` 的既有默认命令行为和成功语义不变。
+
+Gate 2B 的 Adapter 信任边界、两个真实案例、预算、停止条件和代码变更上限已经整理到
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)，等待人工批准后才创建
+实验分支实施。
 
 ### 真实日常使用观察
 

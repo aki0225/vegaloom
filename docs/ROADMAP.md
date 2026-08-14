@@ -672,9 +672,10 @@ Trace 尾部截断、SQLite 丢失以及 pause/resume/stop 均有定向回归。
 PR `#57` 已完成最终 CI 和合并，Gate 0、Gate 1 与 Gate 2A 的实现进入主线。原实验分支与
 `main@6a5c927` 的文件树一致，不再保留为后续开发入口。
 
-下一步先固定一个真实 Codex Adapter 的信任边界、两个冻结案例、预算、超时和停止条件，再决定
-Gate 2B 的具体实现。当前没有开始 Gate 2B 代码，也不发布新版本；既有 opt-in `agent` 入口、
-默认命令行为和成功语义保持不变。
+真实 Codex Adapter 的信任边界、两个冻结案例、预算、超时、停止条件和代码变更上限已经整理到
+[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。该计划尚待人工批准，
+当前没有开始 Gate 2B 代码，也不发布新版本；既有 opt-in `agent` 入口、默认命令行为和成功
+语义保持不变。
 
 ## 七、更新规则
 
