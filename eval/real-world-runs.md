@@ -648,3 +648,34 @@ SHA-256 分别为
 - 两个真实案例的能力边界保持不变，仍不证明补丁正确、完整成功路径、多 Work Item、跨机器恢复
   或 Claude Code Supervisor Adapter；
 - 后续先执行 Gate 2C 当前主线真实完整成功路径，原 Gate 3 拆分后继续保持冻结。
+
+## 2026-08-14 Supervisor Agent Gate 2C：SAG2C-01 验证入口无效
+
+本条只记录首次 Gate 2C 正式运行及其协议缺陷，不删除或覆盖 run Artifact、目标 Diff 或原冻结
+协议。Agent run 为 `20260814-233225-agent`，child 为
+`20260814-233312-366836-bug-loop`。
+
+- 真实 Worker 使用 `gpt-5.6-terra / xhigh`，execution 正常完成，只修改
+  `CHANGELOG.rst`、`src/packaging/requirements.py` 和
+  `tests/test_requirements.py`，共新增 12 行、删除 1 行；
+- 三阶段 Scope Gate 全部通过，Workspace 没有新增未跟踪文件，Risk Gate 为
+  `low / self-check`；
+- 四条验证中，缺陷复现命令、Ruff 和 `git diff --check` 通过，完整 pytest 命令失败；
+- 独立只读 Reviewer 使用 `gpt-5.6-sol / xhigh`，返回 `request_changes`；
+- Finish 为 `needs_fix / needs_human`，Supervisor 没有采用 Worker 的完成 Claim，而是根据
+  `Verification=failed` 与 `Reviewer=failed` 确定性选择 `replan`；
+- 没有启动第二 Writer、repair、自动重试、commit、push、release 或长期 Memory 写入。
+
+事后核对发现，冻结命令
+`python -m pytest -q -o pythonpath=src tests/test_requirements.py` 在 pytest 启动阶段已经从
+控制仓库虚拟环境加载 `packaging`。后续 `pythonpath=src` 不能替换 `sys.modules` 中已导入的
+包，因此失败输出混合了控制环境实现，不是目标仓库的受信验证。
+
+改用“在导入 pytest 前把目标 `src` 放入 `sys.path`”的命令后，同一 Worker Diff 的完整
+`tests/test_requirements.py` 为 `5308 passed`；在不含目标修复的干净基线上为
+`5307 passed`，而目标哈希复现仍按预期失败。这证明问题来自验证入口。
+
+SAG2C-01 判定为 `invalid-harness`：不计为 Gate 通过，也不计为模型修复失败。原 Case 不重跑；
+修正验证入口、禁用运行缓存并使用全新目标的 SAG2C-02 由
+[`../docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](../docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md)
+单独冻结。

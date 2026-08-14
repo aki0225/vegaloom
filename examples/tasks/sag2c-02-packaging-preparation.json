@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "case_id": "SAG2C-02",
+  "upstream_repository": "https://github.com/pypa/packaging.git",
+  "upstream_baseline": "b34d12acb28c9ad3a6b0b3cc82f03a4b0b98c8c0",
+  "base_preparation_commit": "26dc3e4982c5e8738553384abb1c85dd019a2e01",
+  "task_source": "examples/tasks/sag2c-02-packaging.md",
+  "task_sha256": "023b8c0f18168926e0dd8961562c7c1b39df41b51dccc4e11c055181eda15f69",
+  "policy_source": "examples/tasks/sag2c-02-packaging.vega.yaml",
+  "policy_sha256": "7a5a0814278f53fd060848e7150e6829ed923ac546cd6d89d77819cb2d580814",
+  "target_policy_path": ".vega.yaml",
+  "git_config": {
+    "core.autocrlf": "false",
+    "core.eol": "lf",
+    "commit.gpgsign": "false"
+  },
+  "local_excludes": [
+    "runs/",
+    ".tmp/"
+  ],
+  "baseline_checks": {
+    "defect_reproduction": "failed_as_expected",
+    "requirements_test_count": 5307,
+    "requirements_test_status": "passed",
+    "ruff_status": "passed"
+  },
+  "commit": {
+    "author_name": "Vega Experiment",
+    "author_email": "vega@example.invalid",
+    "author_date": "2026-08-14T16:00:00Z",
+    "committer_name": "Vega Experiment",
+    "committer_email": "vega@example.invalid",
+    "committer_date": "2026-08-14T16:00:00Z",
+    "message": "实验：修正 SAG2C 验证入口",
+    "expected_parent": "26dc3e4982c5e8738553384abb1c85dd019a2e01",
+    "expected_tree": "77c056ca6cc287fdfcc8626199dcd6f3d2e23612",
+    "expected_commit": "a2ac3ee0d68da64bdc765e5189911b206d9ebd91"
+  },
+  "forbidden_object": "fa40f9db8582c146c3f6c5c55babad79eac224a0"
+}

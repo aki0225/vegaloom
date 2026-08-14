@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C 已批准待执行 / Gate 3 冻结`
+> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C R2 已批准待执行 / Gate 3 冻结`
 >
 > 计划日期：2026-08-13
 >
@@ -9,8 +9,9 @@
 > 本文已获批准，并按 Gate 推进。PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow
 > `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。Gate 2A 已完成；Gate 2B 已在
 > 单一实验分支完成机械合同、两个冻结真实案例、最终 PR CI 与合并前审阅，当前状态为
-> `gate-exit-pass`。2026-08-14 路线复核后增加 Gate 2C，用当前主线补一条真实完整成功路径；
-> 原 Gate 3 拆成机械交接、真实跨机器和价值观察，仍需按阶段批准。
+> `gate-exit-pass`。2026-08-14 路线复核后增加 Gate 2C，用当前主线补一条真实完整成功路径。
+> SAG2C-01 因 pytest 提前导入控制环境中的 `packaging` 而记为 `invalid-harness`；修正验证入口的
+> Gate 2C R2 已批准待执行。原 Gate 3 拆成机械交接、真实跨机器和价值观察，仍需按阶段批准。
 
 ## 一、产品决定
 
@@ -920,8 +921,10 @@ Gate 2B 证明了真实 Worker 的 Claim 不会越过门禁，以及 partial Dif
 但两个正式案例都没有完整经过 Verification、Risk、Reviewer 与 Finish。进入跨机器实现前，先用
 当前 `main` 完成一个单 Work Item、低风险、可重建的真实 Codex 案例。
 
-冻结协议见
-[`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md)。
+SAG2C-01 已证明失败验证不能被 Worker Claim 或 Reviewer 覆盖，但其 pytest 命令验证了错误的
+Python 包来源，因此不计为 Gate 通过或模型失败。原协议与无效结果见
+[`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md)，修正后的冻结协议见
+[`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md)。
 
 通过条件：
 
@@ -1042,8 +1045,9 @@ reviewer_worker_context_leak = 0
 
 ## 十三、审核通过后的实际顺序
 
-当前执行进度：第 1～5 项已完成。第 6 项 Gate 2C 已批准，先验证当前主线真实完整成功路径；
-Gate 3A～3C 在 Gate 2C 形成结论前保持冻结。
+当前执行进度：第 1～5 项已完成。第 6 项 Gate 2C 的首次运行记为 `invalid-harness`；
+Gate 2C R2 已批准，继续验证当前主线真实完整成功路径。Gate 3A～3C 在 Gate 2C
+形成有效结论前保持冻结。
 
 1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
 2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；

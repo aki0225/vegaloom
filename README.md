@@ -236,7 +236,8 @@ Claude Code 主会话复用同一份
 |---|---|
 | 全部文档及状态 | [文档导航](docs/README.md) |
 | 当前 Supervisor Agent 实施计划 | [Supervisor Agent V1 计划](docs/VEGA-SUPERVISOR-AGENT-V1-PLAN.md) |
-| Gate 2C 真实完整路径协议 | [Supervisor Agent Gate 2C](docs/SUPERVISOR-AGENT-GATE-2C-PLAN.md) |
+| Gate 2C 首次运行记录 | [Supervisor Agent Gate 2C](docs/SUPERVISOR-AGENT-GATE-2C-PLAN.md) |
+| Gate 2C R2 修正协议 | [Supervisor Agent Gate 2C R2](docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) |
 | 调查、Plan 与修改前人工确认 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 完整使用流程 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |

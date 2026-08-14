@@ -11,7 +11,9 @@
 > PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以
 > `6a5c927` 合并到 `main`。Gate 2B 已在单一实验分支完成真实 Codex Adapter 的机械合同、
 > 两个冻结真实案例、最终 PR CI 和合并前审阅，当前状态为 `gate-exit-pass`。2026-08-14
-> 路线复核后，Gate 2C 已批准用于补一条当前主线真实完整成功路径；Gate 3 已拆分但仍冻结。既有
+> 路线复核后，Gate 2C 用于补一条当前主线真实完整成功路径。SAG2C-01 因验证入口加载了
+> 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 Gate 2C R2 已批准待执行。
+> Gate 3 已拆分但仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
@@ -47,7 +49,7 @@ v0.1.5 发布（完成）
   -> Supervisor Agent V1：Gate 0 合同冻结 → Gate 1 Fake Worker（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
-  -> Gate 2C 当前主线真实完整成功路径（已批准，待执行）
+  -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；R2 已批准待执行）
   -> Gate 3A Handoff 机械生产与本地往返（冻结）
   -> Gate 3B 单 Work Item 跨机器接力（冻结）
   -> Gate 3C 小规模日常价值观察（冻结）
@@ -743,6 +745,19 @@ Verification、Risk、独立 Reviewer 与 Finish。因此在实现跨机器 Hand
 Supervisor V1 只承诺一个真实 Codex Adapter。Claude Code 已有外部 assist 证据，但尚未满足
 Supervisor 受信 Worker 合同，因此移到 V1 之后单独评估。多 Work Item 累计 Diff、Memory
 Proposal、Provider 平台和正式 Token A/B 同样不属于 V1 必过范围。
+
+### 2026-08-14：Gate 2C 首次运行识别验证入口错误
+
+SAG2C-01 的真实 Worker 只修改批准路径，Scope Gate 与 Risk Gate 通过；冻结 pytest 命令失败，
+Reviewer 返回 `request_changes`，Finish 为 `needs_fix`，Supervisor 确定性选择 `replan`。
+后续核对确认，`python -m pytest -o pythonpath=src` 在 pytest 启动阶段已经从控制仓库虚拟环境
+导入 `packaging`，因此没有验证目标仓库源码。本次结果记为 `invalid-harness`，不计为 Gate
+通过或模型失败，也不在原 Case 上重跑。
+
+Gate 2C R2 只把验证入口改为在导入 pytest 前显式插入目标 `src`，同时禁用 Python、pytest
+和 Ruff 的运行缓存。新基线已证明目标缺陷稳定失败，而完整需求测试为 `5307 passed`；
+任务、允许路径、模型、预算、成功标准和 Core 门禁保持不变。R2 协议见
+[`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md)。
 
 ## 七、更新规则
 
