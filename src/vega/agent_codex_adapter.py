@@ -118,6 +118,7 @@ class SupervisorAgentCodexAdapter:
         runner = self.worker_runner or CodexExecRunner(
             options=config.runner.codex_exec.worker,
             output_schema=WorkerClaim.model_json_schema(),
+            single_writer=True,
         )
         return PreparedCodexAttempt(
             run_dir=run_dir,

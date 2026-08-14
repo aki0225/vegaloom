@@ -299,6 +299,59 @@ def test_codex_exec_runner_writes_output_schema_inside_execution_dir(
     assert captured["schema_path"] == context.execution_dir / "output-schema.json"
 
 
+def test_codex_exec_runner_single_writer_disables_target_multi_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, stream_context, **kwargs
+    ):
+        del input_text, cwd, timeout_seconds, stream_context, kwargs
+        captured["command"] = command
+        payload = {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": '{"status":"ok"}',
+            },
+        }
+        return OwnedProcessResult(
+            status="success",
+            output=json.dumps(payload),
+            error=None,
+            returncode=0,
+        )
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+
+    result = CodexExecRunner(single_writer=True).run(
+        "test prompt",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "success"
+    command = captured["command"]
+    disabled = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--disable"
+    ]
+    assert disabled == [
+        "hooks",
+        "memories",
+        "plugins",
+        "multi_agent",
+        "multi_agent_v2",
+    ]
+
+
 def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -245,10 +245,13 @@ class CodexExecRunner:
         executable: str = "codex",
         options: CodexExecOptions | None = None,
         output_schema: dict[str, Any] | None = None,
+        *,
+        single_writer: bool = False,
     ) -> None:
         self.executable = executable
         self.options = options or CodexExecOptions()
         self.output_schema = output_schema
+        self.single_writer = single_writer
 
     def run(
         self,
@@ -294,6 +297,17 @@ class CodexExecRunner:
             "--disable",
             "plugins",
         ]
+        if self.single_writer:
+            # Supervisor 只允许一个 Writer。目标仓库不能通过项目级 Codex 配置
+            # 再启用子代理并发写入，也不能让无关的多代理参数阻断真实 Worker。
+            command.extend(
+                [
+                    "--disable",
+                    "multi_agent",
+                    "--disable",
+                    "multi_agent_v2",
+                ]
+            )
         if self.options.profile:
             command.extend(["--profile", self.options.profile])
         if self.options.model:
