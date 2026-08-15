@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`prerequisite-local-pass / side-effect-adjudication-ci-pending / machine-a-not-started`
+> 状态：`prerequisite-ci-pass / controller-refrozen / machine-a-not-started`
 >
 > 日期：2026-08-15
 >
@@ -11,15 +11,15 @@
 > 首次协议提交：`977af8f45ae6ba0bc425ca3c9e8556d696ab6664`。该提交在真实 Worker
 > 启动前发现控制器自修改和未知副作用降级两个前置缺口，因此不得作为正式执行基线。
 >
-> 前置修复提交：`e53143f9c83a9dad79795d9f08fc828ec362335e`
+> 前置门禁实现提交：`0a6985f591b73cbef3c6db59223a5eb72e0a0ae9`
 >
-> 控制源码 tree：`289031ad6a436b7262328ac711caf53d85b9aacd`
+> 控制源码 tree：`99cf1559a28a70a9882b283bc1c0ca35f27dc307`
 >
 > 控制源码 archive SHA-256：
-> `cd98c541a8e06361a656602bf36f4e90606f320d60ab3146bc9b17609d7d31d8`
+> `c3e1d01e83dc2b4eef15f9398a6e8084b788dbc1d1ba15d03707447535888e85`
 >
 > Runner 配置 SHA-256：
-> `dfd596a1db326adc94adb715ce311eb4145d0fd2e890a8583a3fd9257e33adc5`
+> `dba63bd3abaf7a8a0950430b6c4d6fbcc40fca45370b0bd853cc42d81fdc6acb`
 
 ## 一、目标
 
@@ -140,10 +140,10 @@ editable_install = false
 本次冻结值：
 
 ```text
-control_source_commit = e53143f9c83a9dad79795d9f08fc828ec362335e
-control_source_tree = 289031ad6a436b7262328ac711caf53d85b9aacd
-control_source_sha256 = cd98c541a8e06361a656602bf36f4e90606f320d60ab3146bc9b17609d7d31d8
-runner_config_digest = dfd596a1db326adc94adb715ce311eb4145d0fd2e890a8583a3fd9257e33adc5
+control_source_commit = 0a6985f591b73cbef3c6db59223a5eb72e0a0ae9
+control_source_tree = 99cf1559a28a70a9882b283bc1c0ca35f27dc307
+control_source_sha256 = c3e1d01e83dc2b4eef15f9398a6e8084b788dbc1d1ba15d03707447535888e85
+runner_config_digest = dba63bd3abaf7a8a0950430b6c4d6fbcc40fca45370b0bd853cc42d81fdc6acb
 ```
 
 控制源码放在项目内被忽略的 `.tmp/dogfood/sag3b-01/control-runtime/`。启动前必须证明实际
@@ -233,8 +233,10 @@ Gate 3B 成败证据。
 - Ruff、compileall、repository hygiene、architecture growth 和 `git diff --check` 通过；
   architecture growth 为 `C901 35→35`、Python 模块 `128→129`。
 
-人工裁决候选对应的新 HEAD 尚未通过 9 项 CI，因此当前只算
-`prerequisite-local-pass`，机器 A 不得启动。
+人工裁决候选 HEAD `0a6985f` 已通过 workflow `31877813234` 的 9 项 CI。控制源码已从该
+commit 独立导出到被忽略的 run-local 目录，实际 `vega.__file__` 指向固定快照；控制 tree、
+archive 与 runner 配置摘要均已重新登记。当前状态为 `prerequisite-ci-pass /
+controller-refrozen`，机器 A 尚未启动。
 
 ## 六、机器 A 协议
 

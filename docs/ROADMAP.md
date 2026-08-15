@@ -14,8 +14,8 @@
 > 路线复核后，Gate 2C 用于补一条当前主线真实完整成功路径。SAG2C-01 因验证入口加载了
 > 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 SAG2C-02 已完成并判定为
 > `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、同机双隔离副本往返、PR CI 和
-> 合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，固定控制器和未知副作用继承
-> 门禁已通过；人工副作用裁决路径本地通过、PR CI 待验证，机器 A 尚未启动。Gate 3C
+> 合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，固定控制器、未知副作用继承
+> 和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结，机器 A 尚未启动。Gate 3C
 > 仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
@@ -54,7 +54,7 @@ v0.1.5 发布（完成）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
   -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
   -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
-  -> Gate 3B 单 Work Item 跨机器接力（人工副作用裁决本地通过，PR CI 待验证）
+  -> Gate 3B 单 Work Item 跨机器接力（前置 CI 通过，控制器已重新冻结，机器 A 未启动）
   -> Gate 3C 小规模日常价值观察（冻结）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
@@ -802,9 +802,8 @@ historical，新 Verification、Risk、Reviewer 均为 `not_run`。
 本地 CI 同款节点合计 `1239 collected / 1227 passed / 12 skipped / 0 failed`；Ruff、compileall、
 repository hygiene、architecture growth 和 `git diff --check` 通过。实现提交 `33c4ac1`
 对应 PR `#60` 的 9 项 CI 全部通过，两轮独立本地审阅无剩余阻断项。Gate 3A 判定为
-`gate-exit-pass`。Gate 3B 随后获批，固定控制器和未知副作用继承门禁已通过。真实停止演练
-暴露了人工副作用裁决缺口；当前窄实现本地通过、PR CI 待验证，机器 A 尚未启动。Gate 3C
-日常价值观察仍冻结。
+`gate-exit-pass`。Gate 3B 随后获批，固定控制器、未知副作用继承和人工副作用裁决门禁均
+已通过 PR CI；控制器已重新冻结，机器 A 尚未启动。Gate 3C 日常价值观察仍冻结。
 
 ## 七、更新规则
 
