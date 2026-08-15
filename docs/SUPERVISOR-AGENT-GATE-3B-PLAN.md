@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`prerequisite-local-pass / pr-ci-pending / machine-a-not-started`
+> 状态：`prerequisite-branch-frozen / pr-ci-pending / machine-a-not-started`
 >
 > 日期：2026-08-15
 >
@@ -10,6 +10,16 @@
 
 > 首次协议提交：`977af8f45ae6ba0bc425ca3c9e8556d696ab6664`。该提交在真实 Worker
 > 启动前发现控制器自修改和未知副作用降级两个前置缺口，因此不得作为正式执行基线。
+>
+> 前置修复提交：`e53143f9c83a9dad79795d9f08fc828ec362335e`
+>
+> 控制源码 tree：`289031ad6a436b7262328ac711caf53d85b9aacd`
+>
+> 控制源码 archive SHA-256：
+> `cd98c541a8e06361a656602bf36f4e90606f320d60ab3146bc9b17609d7d31d8`
+>
+> Runner 配置 SHA-256：
+> `dfd596a1db326adc94adb715ce311eb4145d0fd2e890a8583a3fd9257e33adc5`
 
 ## 一、目标
 
@@ -125,6 +135,15 @@ os_arch
 codex_version
 runner_config_digest
 editable_install = false
+```
+
+本次冻结值：
+
+```text
+control_source_commit = e53143f9c83a9dad79795d9f08fc828ec362335e
+control_source_tree = 289031ad6a436b7262328ac711caf53d85b9aacd
+control_source_sha256 = cd98c541a8e06361a656602bf36f4e90606f320d60ab3146bc9b17609d7d31d8
+runner_config_digest = dfd596a1db326adc94adb715ce311eb4145d0fd2e890a8583a3fd9257e33adc5
 ```
 
 控制源码放在项目内被忽略的 `.tmp/dogfood/sag3b-01/control-runtime/`。启动前必须证明实际
