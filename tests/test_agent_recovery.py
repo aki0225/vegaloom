@@ -808,6 +808,7 @@ def test_known_side_effect_adjudication_remains_blocked(
         AgentRecoveryRequest(
             reason="人工确认存在外部 API 写入",
             external_side_effects="known",
+            actor="operator",
             evidence_refs=["manual-evidence/known-side-effect.md"],
         ),
     )
@@ -845,12 +846,23 @@ def test_side_effect_adjudication_rejects_missing_evidence_or_workspace_drift(
     )
     adjudicator = SupervisorAgentSideEffectAdjudicator(workspace)
 
+    with pytest.raises(ValueError, match="actor"):
+        adjudicator.adjudicate(
+            run_id,
+            AgentRecoveryRequest(
+                reason="缺少明确裁决人",
+                external_side_effects="none",
+                evidence_refs=["manual-evidence/review.md"],
+            ),
+        )
+
     with pytest.raises(ValueError, match="至少需要一个"):
         adjudicator.adjudicate(
             run_id,
             AgentRecoveryRequest(
                 reason="不能只凭口头断言解除 unknown",
                 external_side_effects="none",
+                actor="operator",
             ),
         )
 
@@ -864,6 +876,7 @@ def test_side_effect_adjudication_rejects_missing_evidence_or_workspace_drift(
             AgentRecoveryRequest(
                 reason="现场变化后不能复用旧证据",
                 external_side_effects="none",
+                actor="operator",
                 evidence_refs=["manual-evidence/review.md"],
             ),
         )
@@ -898,6 +911,7 @@ def test_side_effect_adjudication_rejects_stale_checkpoint_binding(
             AgentRecoveryRequest(
                 reason="没有仓库外写入",
                 external_side_effects="none",
+                actor="operator",
                 evidence_refs=["manual-evidence/review.md"],
             ),
         )
@@ -953,6 +967,7 @@ def test_side_effect_adjudication_fails_closed_before_state_publish(
                     AgentRecoveryRequest(
                         reason="没有仓库外写入",
                         external_side_effects="none",
+                        actor="operator",
                         evidence_refs=["manual-evidence/review.md"],
                     ),
                 )
@@ -1002,6 +1017,7 @@ def test_side_effect_adjudication_treats_observable_trace_commit_as_success(
         AgentRecoveryRequest(
             reason="没有仓库外写入",
             external_side_effects="none",
+            actor="operator",
             evidence_refs=["manual-evidence/review.md"],
         ),
     )
@@ -1035,6 +1051,7 @@ def test_side_effect_adjudication_rejects_linked_artifact_directory(
             AgentRecoveryRequest(
                 reason="没有仓库外写入",
                 external_side_effects="none",
+                actor="operator",
                 evidence_refs=["manual-evidence/review.md"],
             ),
         )

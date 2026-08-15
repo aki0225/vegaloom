@@ -14,5 +14,5 @@ class AgentRecoveryRequest(BaseModel):
     reason: str
     workspace_explained: bool = True
     external_side_effects: Literal["none", "known", "unknown"] = "unknown"
-    actor: str = "human"
+    actor: str = ""
     evidence_refs: list[str] = Field(default_factory=list)
