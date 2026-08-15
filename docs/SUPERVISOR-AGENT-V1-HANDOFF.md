@@ -6,7 +6,7 @@
 >
 > 实施基线：`main@e126aa2`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 3 冻结`
+> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3 冻结`
 
 ## 当前结论
 
@@ -32,6 +32,13 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
 真实案例、最终 PR CI 与合并前审阅已经满足冻结退出条件，Gate 2B 判定为
 `gate-exit-pass`。Gate 3 仍保持冻结，需另行批准；本阶段不再重跑案例或增加 Adapter 能力。
 
+Gate 2C 的 SAG2C-02 已在修正验证入口后完成真实完整成功路径。Worker 只修改三条批准路径，
+缺陷复现、`tests/test_requirements.py`（`5308 passed`）、Ruff 和 `git diff --check` 均通过；
+Workspace、Scope、Artifact integrity、Evidence freshness、Risk、独立 Reviewer 和 Finish
+均形成有效证据，Supervisor 根据机器 Observation 进入 `finalize`。这条结果只证明单
+Work Item、低风险、可重建案例的完整控制链，不证明目标补丁已被人工合并、跨机器恢复、
+Claude Code Adapter、Memory 或通用修复成功率。Gate 3A～3C 继续冻结。
+
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
 `finalizing`，不能自行写入 `ready_to_commit`。
@@ -54,22 +61,18 @@ Adapter 集成问题已分别在 `a213f0e`、`fa99682` 和 `9ed0b62` 修复；�
 6. Finish 的 `verification_passed=true` 原先可能先于 Artifact 完整性和新鲜度判定；现在
    不可信证据一律为 `blocked`，通过标记不能覆盖 fail-closed 门禁。
 
-当前状态文档已同步为 `gate-exit-pass`，同时明确 Gate 3 仍冻结。
+当前状态文档已同步为 Gate 2C `gate-exit-pass`，同时明确 Gate 3 仍冻结。
 
-本地验证：
+Gate 2C 文档与重建材料的本地验证：
 
 ```text
-Codex Adapter：16 passed
-Agent Recovery：24 passed
-Agent Runtime：21 passed
-Execution Safety：71 passed, 1 skipped
-完整测试节点收集：1224 collected
+pytest 分片汇总：1224 collected，1213 passed，11 skipped，0 failed
 Ruff、compileall、repository hygiene、architecture growth、git diff --check：通过
-architecture growth：C901 35->35，Python 模块 122->126
 ```
 
-合并裁决以 PR `#58` 最终 HEAD 的 Python 3.11/3.12 与 Windows CI 为硬门槛；CI 未完整通过
-时必须保持 fail-closed。Gate 3 不随本 PR 自动开启。
+PR `#58` 仍是 Gate 2B 的历史合并证据。Gate 2C 记录分支必须通过其自身面向 `main` 的
+Python 3.11/3.12 与 Windows CI 后才能合并；CI 未完整通过时必须保持 fail-closed。
+Gate 3 不随 Gate 2C 记录 PR 自动开启。
 
 ## Gate 2B 当前实现
 
@@ -220,8 +223,8 @@ workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
 
 1. 不重跑 `SAG2B-01` 或 `SAG2B-02`，保留既有冻结案例和负结果现场。
 2. 日常仍以 `vega do / loop / goal` 为默认入口；`vega agent` 继续保持 opt-in。
-3. 若要进入 Gate 3，先单独批准并冻结跨机器 WIP commit/push 与 Claude Code 薄 Adapter
-   的验证合同，不直接在 Gate 2B 实现上追加能力。
+3. 若要进入 Gate 3，先单独批准 Gate 3A 的 Handoff 生产端、本地往返与停止条件，不直接把
+   真实跨机器、Claude Code 或多 Work Item 混入同一实现。
 4. Gate 3 未获批准前，只处理重复出现且影响日常使用的缺陷。
 
 ## 下一 Gate 的边界
@@ -241,7 +244,9 @@ Gate 2B 不新增多 Worker、Provider 平台、服务端、自动重试、自�
 ## 未完成事项
 
 - 尚未证明多 Work Item 的真实 Adapter 累计 Diff 归因；Gate 2B 当前 fail-closed 拒绝该形态。
-- 尚未验证跨机器 Task Card 接力和 Claude Code 薄 Adapter；它们属于 Gate 3。
+- 尚未验证 Handoff 生产端与本地往返，它们属于 Gate 3A。
+- 尚未验证跨机器 Task Card 接力，它属于 Gate 3B。
+- Claude Code Supervisor Adapter 不属于 V1 Gate 3，V1 完成后再单独评估。
 - 尚未决定 `v0.2.0` 发布时点。
 - 受信 Observation 已经 write-once；若其后的 Checkpoint 写入失败，State 会保守保留 active
   Writer，但重试需要新的 Observation ID。该路径不会开放第二 Writer，后续是否需要事务化

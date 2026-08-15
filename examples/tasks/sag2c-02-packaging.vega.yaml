@@ -1,0 +1,52 @@
+version: 1
+
+verification:
+  commands:
+    - >-
+      python -B -c "import sys; sys.path.insert(0, 'src');
+      from packaging.requirements import Requirement;
+      a = Requirement('foo==1.0.0'); b = Requirement('foo==1.0.0.0');
+      assert a == b; assert hash(a) == hash(b); assert len({a, b}) == 1"
+    - >-
+      python -B -c "import sys; sys.path.insert(0, 'src'); import pytest;
+      raise SystemExit(pytest.main(['-q', '-p', 'no:cacheprovider',
+      'tests/test_requirements.py']))"
+    - ruff check --no-cache src/packaging/requirements.py tests/test_requirements.py
+    - git diff --check
+  max_commands: 4
+  timeout_seconds: 300
+
+risk:
+  high_paths: []
+  medium_paths: []
+  require_human_review: []
+  required_reviews: []
+
+budget:
+  max_changed_files: 3
+  max_diff_lines: 200
+  max_new_files: 0
+  forbid_new_dependencies: true
+  forbid_large_generated_files: true
+
+scope:
+  allowed_paths:
+    - src/packaging/requirements.py
+    - tests/test_requirements.py
+    - CHANGELOG.rst
+  forbidden_paths:
+    - .vega.yaml
+    - pyproject.toml
+
+runner:
+  worker: codex-exec
+  reviewer: codex-exec
+  codex_exec:
+    worker:
+      model: gpt-5.6-terra
+      reasoning_effort: xhigh
+      ephemeral: true
+    reviewer:
+      model: gpt-5.6-sol
+      reasoning_effort: xhigh
+      ephemeral: true

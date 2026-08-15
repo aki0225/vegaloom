@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2A 已合并 / Gate 2B gate-exit-pass`
+> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3 冻结`
 >
 > 计划日期：2026-08-13
 >
@@ -9,7 +9,10 @@
 > 本文已获批准，并按 Gate 推进。PR `#57` 最终文档 HEAD `8ca75f2` 已通过 workflow
 > `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。Gate 2A 已完成；Gate 2B 已在
 > 单一实验分支完成机械合同、两个冻结真实案例、最终 PR CI 与合并前审阅，当前状态为
-> `gate-exit-pass`。Gate 3 仍冻结，需另行批准。
+> `gate-exit-pass`。2026-08-14 路线复核后增加 Gate 2C，用当前主线补一条真实完整成功路径。
+> SAG2C-01 因 pytest 提前导入控制环境中的 `packaging` 而记为 `invalid-harness`；修正验证入口的
+> SAG2C-02 已于 2026-08-14 通过 Gate 2C。原 Gate 3 拆成机械交接、真实跨机器和价值观察，
+> 仍需按阶段批准。
 
 ## 一、产品决定
 
@@ -20,9 +23,9 @@ Vega 下一阶段要做成一个**轻量但完整的软件工程 Supervisor Agen
 
 一句话说明这条链路：
 
-> 用户提出目标，Vega 先调查并固定计划；Coding Agent 分步修改；Vega 持续核对真实 Workspace、
-> 验证证据和风险，主会话随时看得到进度，也能暂停、改计划或接管；最后仍由现有 Vega Core
-> 判断任务能不能交付。
+> 用户提出目标，宿主主会话先在只读边界内调查并提交计划；Vega 校验、固定并等待人工批准；
+> Coding Agent 在批准范围内修改；Vega 持续核对真实 Workspace、验证证据和风险，主会话随时
+> 看得到进度，也能暂停、改计划或接管；最后仍由现有 Vega Core 判断任务能不能交付。
 
 ```text
 用户目标
@@ -41,8 +44,8 @@ Vega 下一阶段要做成一个**轻量但完整的软件工程 Supervisor Agen
 V1 必须具备以下完整能力：
 
 1. 保存目标、边界、成功条件和人工决定；
-2. 面对未知 Bug 位置时主动进行只读调查；
-3. 根据调查结果制定可批准的多步骤计划；
+2. 允许宿主主会话在只读边界内调查未知 Bug，并把事实、假设和未决问题结构化提交；
+3. 校验并持久化可批准的执行计划，不把模型自由文本直接提升为控制事实；
 4. 派发外部 Coding Agent 执行当前 Work Item；
 5. 把 Worker 的自述与机器观察到的事实分开；
 6. 根据不同 Observation 选择不同下一动作；
@@ -78,7 +81,7 @@ Goal → Observe → Decide → Act → Reconcile
 | 主体 | 职责 | 明确不做 |
 |---|---|---|
 | 主会话 | 接收用户目标、展示计划与状态、转发人工决定 | 不凭聊天文本宣称任务成功 |
-| Supervisor | 调查、编译计划与上下文、派发、观察、选择下一动作 | 不直接修改业务代码，不绕过 Core |
+| Supervisor | 校验并固化计划、编译上下文、派发、观察、选择下一动作 | 不直接修改业务代码，不把宿主调查结果自动提升为事实，不绕过 Core |
 | Worker | 完成一个有界 Work Item，返回 Claim 和执行 Artifact | 不决定任务是否完成 |
 | Reviewer | 在独立只读会话中审查 Diff、规则和验证证据 | 不接受 Worker 完整聊天，不覆盖确定性 Gate |
 | 人工 | 批准、纠偏、处理高风险和最终 Git 操作 | 不需要通读每一行日志才能知道当前状态 |
@@ -125,9 +128,9 @@ Vega 首先记录：
 
 主会话显示：目标已登记、当前 Workspace、下一步是快速核实还是完整调查。
 
-### 3.2 只读调查
+### 3.2 主会话只读调查
 
-Supervisor 只读检查：
+宿主主会话或用户选择的 Coding Agent 在只读边界内检查：
 
 - `AGENTS.md`、`.vega.yaml` 和项目规则；
 - 相关源码、调用链、测试、配置和历史证据；
@@ -143,11 +146,15 @@ Supervisor 只读检查：
 支付、数据库与迁移、并发与异步、权限、敏感数据、部署和外部 API 副作用应在计划前标记，
 不能等到 Finish 才第一次披露。
 
+调查结果通过结构化 Agent Plan 提交给 Vega。当前 Runtime 不内置 Planner 模型，也不自行调用
+模型完成调查；Vega 负责校验字段、版本化 Plan、等待人工批准并编译后续 Task Brief。
+
 主会话显示“调查完成”以及少量关键事实、假设和未决问题，不倾倒全部搜索日志。
 
 ### 3.3 制定 Plan
 
-Plan 拆成 2～4 个粗粒度 Work Item。每项至少说明：
+Plan Schema 支持 1～4 个粗粒度 Work Item。V1 的真实 Adapter 同一时刻只接受一个未完成
+Work Item；多 Work Item 的累计 Diff 归因在独立 Gate 证明前，不属于 V1 必过能力。每项至少说明：
 
 ```yaml
 id: WI-01
@@ -896,8 +903,8 @@ Core 或自动 commit 绕过。V1 的多 Work Item 目标仍保留，但必须�
 
 冻结两个案例：
 
-1. **模糊 Bug**：用户不知道根因位置；Supervisor 先调查并请求人工批准计划，真实 Worker 结果
-   根据证据进入合理的 `finalize`、`repair`、`replan` 或 `human`；
+1. **模糊 Bug**：用户不知道根因位置；宿主主会话先只读调查并提交计划，Vega 校验后请求人工批准，
+   真实 Worker 结果根据证据进入合理的 `finalize`、`repair`、`replan` 或 `human`；
 2. **长任务中断**：真实 Worker 留下 partial diff 后中断，主会话看到现场并由人工选择新 Worker
    接手或验证当前工作。
 
@@ -909,7 +916,46 @@ Core 或自动 commit 绕过。V1 的多 Work Item 目标仍保留，但必须�
 - Reviewer 仍与 Worker 会话隔离；
 - 最终 Finish 继续 fail-closed。
 
-### Gate 3：换机器、Claude Code 薄接入与真实价值
+### Gate 2C：当前主线真实完整成功路径
+
+Gate 2B 证明了真实 Worker 的 Claim 不会越过门禁，以及 partial Diff 能被安全停止并交还人工，
+但两个正式案例都没有完整经过 Verification、Risk、Reviewer 与 Finish。进入跨机器实现前，先用
+当前 `main` 完成一个单 Work Item、低风险、可重建的真实 Codex 案例。
+
+SAG2C-01 已证明失败验证不能被 Worker Claim 或 Reviewer 覆盖，但其 pytest 命令验证了错误的
+Python 包来源，因此不计为 Gate 通过或模型失败。修正后的 SAG2C-02 已使用全新目标和正确的
+验证入口，完整经过 Verification、Risk、独立 Reviewer、Finish 和 Supervisor `finalize`，
+结果为 `gate-exit-pass`。原协议与无效结果见
+[`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md)，修正后的冻结协议见
+[`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md)。
+
+通过条件：
+
+- 真实 Worker 只修改批准路径；
+- Verification、Risk、独立 Reviewer 和 Finish 均产生可信 Artifact；
+- Supervisor 只能根据机器 Observation 进入 `finalize`；
+- `false_success = 0`、`duplicate_writer_start = 0`；
+- 任务、模型和预算不因结果而替换。
+
+Gate 2C 只验证当前主线的完整可用路径，不新增 Handoff、Claude、Memory、多 Work Item 或默认入口。
+Gate 2C 已完成；Gate 3A～3C 仍冻结，进入下一阶段前必须单独批准 Handoff 范围和停止条件。
+
+### Gate 3A：Handoff 机械生产与本地往返
+
+只实现计划中的 Handoff 生产端：
+
+```text
+当前 Agent run
+  → 停止继续调度并对账 Writer、Workspace 和副作用
+  → 写 Handoff Checkpoint
+  → 生成 Resume Capsule 与 Git Task Card
+  → 输出待提交文件和人工 Git 检查清单
+```
+
+先在同一机器的两个隔离 clone/worktree 间完成往返，排除 OS、依赖和宿主变化。Vega 仍不自动
+commit 或 push，也不建设第二套 Handoff Runtime。
+
+### Gate 3B：单 Work Item 的真实跨机器接力
 
 完成一次真实接力：
 
@@ -922,22 +968,26 @@ Task Card 必须包含未完成 Work Item、失败尝试、约束、风险、WIP
 新会话不得依赖旧聊天就能解释当前任务。旧验证和 Reviewer 结果必须被识别为历史证据，重新验证后
 才能进入 Finish。
 
-随后用同一控制合同做一次 Claude Code 主会话 smoke；不要求新的原生 Runner，只验证状态卡、人工控制
-和外部 Worker 接手方式兼容。
+该 Gate 固定使用同一个 Codex Adapter、一个未完成 Work Item 和同一任务分支。多 Work Item、
+Claude Code、Memory 和自动 Git 不进入本实验。
 
-价值对照：
+### Gate 3C：小规模日常价值观察
+
+Gate 3B 通过后，使用少量真实任务记录：
 
 ```text
-同一 Coding Agent + 当前 Vega Harness
-vs
-同一 Coding Agent + Vega Supervisor Agent V1
+恢复到可执行状态的时间
+重复调查次数
+人工重建步骤
+错误恢复或重复 Writer 次数
+用户是否愿意再次使用
 ```
 
-记录：恢复后重新解释时间、重复调查次数、重复 Worker、范围漂移、人工打开文件数、Token、总耗时、
-人工介入次数和用户是否愿意再次使用。
+这不是正式成功率或 Token A/B。只有出现真实使用收益，才讨论扩大样本或把 `vega agent` 提升为
+推荐入口。
 
-Gate 3 通过后再讨论 `v0.2.0`、README 对外表述和是否让 `vega agent` 成为推荐的长任务入口；
-清晰小任务仍可直接使用当前入口。
+Claude Code 已通过外部 assist 复用 Vega Core，但尚未满足 Supervisor 受信 Worker 合同。V1 只承诺
+Codex Adapter；Claude Code 薄接入移到 V1 之后单独评估，不与跨机器恢复混跑。
 
 ## 十二、V1 范围与硬门槛
 
@@ -948,16 +998,18 @@ Gate 3 通过后再讨论 `v0.2.0`、README 对外表述和是否让 `vega agent
 - 一个 Task Card、一个本机状态、一条 Trace；
 - 粗粒度 Checkpoint 与 Task Brief；
 - 主会话状态卡、事件和人工控制；
-- 最小 LangGraph 控制面；
+- 引擎无关的状态、条件路由和人工 interrupt/resume 合同；当前实现可以使用 LangGraph，但框架本身
+  不是验收目标；
 - 单 Writer、operation/child 对账；
 - 一个真实 Codex Adapter；
+- 一个未完成 Work Item 的真实完整成功路径；
 - 本机恢复和一次跨机器接力；
 - 现有 Verification、Risk、Reviewer 和 Finish 集成；
-- 人工选择性 Memory Proposal。
 
 ### 12.2 V1 不做
 
 - 多 Worker 并行、群聊或多 Reviewer fan-out；
+- 多 Work Item 的真实累计 Diff 自动归因与连续派发；
 - Planner、Researcher、Memory 等额外角色；
 - Web UI、TUI、服务端、队列或 daemon；
 - Provider SDK、模型托管或重写 Codex/Claude Code；
@@ -997,28 +1049,32 @@ reviewer_worker_context_leak = 0
 
 ## 十三、审核通过后的实际顺序
 
-当前执行进度：第 1～5 项已完成。第 6 项属于冻结的 Gate 3，只有另行批准并冻结验证合同后
-才开始。
+当前执行进度：第 1～6 项已完成。第 6 项的首次运行记为 `invalid-harness`，修正后的
+SAG2C-02 已完成并判定为 `gate-exit-pass`。Gate 3A～3C 在获得单独批准前保持冻结。
 
 1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
 2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；
 3. 按 `Task Card / State → Checkpoint / Trace → Task Brief / 状态卡 → LangGraph` 实现 Gate 1；
 4. Gate 1 独立审查通过后做 Gate 2A 故障注入；
 5. Gate 2A 通过后才连接真实 Codex；
-6. Gate 2B 通过后做一次换机器恢复和 Claude Code 薄接入；
-7. Gate 3 结束后给出发布或继续修改的明确结论；
-8. 每个 Gate 都先给用户看证据和下一步，不一次性跨过全部阶段。
+6. Gate 2B 通过后先完成 Gate 2C 当前主线真实完整成功路径（已完成，`gate-exit-pass`）；
+7. 获得单独批准后实现 Gate 3A Handoff 生产端并完成本地往返；
+8. Gate 3A 通过后做 Gate 3B 单 Work Item 跨机器接力；
+9. Gate 3B 通过后做 Gate 3C 小规模日常价值观察；
+10. 每个 Gate 都先给用户看证据和下一步，不一次性跨过全部阶段。
 
-## 十四、本次需要确认的决定
+## 十四、已确认的决定
 
-审核本文时只需要确认以下五点：
+截至 2026-08-14 已确认：
 
 1. Vega 的主线定位为轻量、可恢复、主会话可控的软件工程 Supervisor Agent；
 2. Task Card 进入 Git，运行状态、Checkpoint 和 Trace 默认留在本机；
 3. Task Brief 使用分层压缩，不设下限，默认软上限为 `32 KiB`；
-4. V1 先支持 Codex，合同稳定后再做 Claude Code 薄接入；
+4. V1 只承诺 Codex Adapter，Claude Code 薄接入不与跨机器恢复混跑；
 5. 每个未合并 Gate 只使用一个短生命周期实验分支和一个专用 Worktree，不为每个小步骤创建
-   新分支；合并后删除，并把未完成任务的 WIP Task Card 跨机器接力作为 Gate 3 必过场景。
+   新分支；合并后删除；
+6. Gate 2C 先证明当前主线完整成功路径，再进入 Handoff 实现；
+7. 多 Work Item、Memory Proposal 和 Provider 平台不属于 Supervisor Agent V1 必过范围。
 
 本文与当前代码或产品契约冲突时，在新版本发布前仍以已发布代码、
 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 和真实运行证据为准。

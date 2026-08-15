@@ -235,7 +235,9 @@ Claude Code 主会话复用同一份
 | 想了解 | 文档 |
 |---|---|
 | 全部文档及状态 | [文档导航](docs/README.md) |
-| 下一阶段完整计划 | [日常可信使用完成计划](docs/DAILY-USAGE-COMPLETION-PLAN.md) |
+| 当前 Supervisor Agent 实施计划 | [Supervisor Agent V1 计划](docs/VEGA-SUPERVISOR-AGENT-V1-PLAN.md) |
+| Gate 2C 首次运行记录 | [Supervisor Agent Gate 2C](docs/SUPERVISOR-AGENT-GATE-2C-PLAN.md) |
+| Gate 2C R2 修正协议 | [Supervisor Agent Gate 2C R2](docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) |
 | 调查、Plan 与修改前人工确认 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 完整使用流程 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
@@ -255,7 +257,7 @@ Claude Code 主会话复用同一份
 - Vega 是外围 Harness，不替代 Codex、Claude Code、Cursor 等编码工具。
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
-- Goal、Memory proposal 和 adapters 是可选能力，不扩大核心 loop 的成功条件。
+- Goal、Memory proposal、adapters 和 `vega agent` 是可选能力，不扩大核心 loop 的成功条件。
 - 当前稳定基线为 `v0.1.5`。它补齐 Plan-first、Finish 第一屏、Reviewer 覆盖与显式
   Worker 重跑的 fail-closed 恢复边界；Goal P1 仍是人工触发的实验能力，不扩大默认
   `vega do`、Reviewer 或成功语义。

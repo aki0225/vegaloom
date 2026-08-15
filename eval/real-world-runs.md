@@ -637,3 +637,71 @@ SHA-256 分别为
 该结果不证明两个目标补丁正确、Codex 通用修复成功率、任意仓库泛化能力、多 Work Item
 累计归因、跨机器未完成 WIP 恢复或 Claude Code Adapter。包含运行中三项集成修复和本结果文档的
 最终分支 HEAD 仍需通过 PR CI 与合并前审阅；完成前 PR 保持 Draft，不进入 Gate 3。
+
+## 2026-08-14 Supervisor Agent Gate 2B 合并后状态
+
+本条只追加 Gate 2B 的后续合并事实，不改写上方正式运行发生时的 `merge-pending` 裁决。
+
+- PR `#58` 已完成最终 CI 与合并前独立审阅；
+- 合并提交为 `63096bcb453d2dfc7446113b3523b5fde961e2e5`；
+- Gate 2B 当前最终状态为 `gate-exit-pass`；
+- 两个真实案例的能力边界保持不变，仍不证明补丁正确、完整成功路径、多 Work Item、跨机器恢复
+  或 Claude Code Supervisor Adapter；
+- 后续先执行 Gate 2C 当前主线真实完整成功路径，原 Gate 3 拆分后继续保持冻结。
+
+## 2026-08-14 Supervisor Agent Gate 2C：SAG2C-01 验证入口无效
+
+本条只记录首次 Gate 2C 正式运行及其协议缺陷，不删除或覆盖 run Artifact、目标 Diff 或原冻结
+协议。Agent run 为 `20260814-233225-agent`，child 为
+`20260814-233312-366836-bug-loop`。
+
+- 真实 Worker 使用 `gpt-5.6-terra / xhigh`，execution 正常完成，只修改
+  `CHANGELOG.rst`、`src/packaging/requirements.py` 和
+  `tests/test_requirements.py`，共新增 12 行、删除 1 行；
+- 三阶段 Scope Gate 全部通过，Workspace 没有新增未跟踪文件，Risk Gate 为
+  `low / self-check`；
+- 四条验证中，缺陷复现命令、Ruff 和 `git diff --check` 通过，完整 pytest 命令失败；
+- 独立只读 Reviewer 使用 `gpt-5.6-sol / xhigh`，返回 `request_changes`；
+- Finish 为 `needs_fix / needs_human`，Supervisor 没有采用 Worker 的完成 Claim，而是根据
+  `Verification=failed` 与 `Reviewer=failed` 确定性选择 `replan`；
+- 没有启动第二 Writer、repair、自动重试、commit、push、release 或长期 Memory 写入。
+
+事后核对发现，冻结命令
+`python -m pytest -q -o pythonpath=src tests/test_requirements.py` 在 pytest 启动阶段已经从
+控制仓库虚拟环境加载 `packaging`。后续 `pythonpath=src` 不能替换 `sys.modules` 中已导入的
+包，因此失败输出混合了控制环境实现，不是目标仓库的受信验证。
+
+改用“在导入 pytest 前把目标 `src` 放入 `sys.path`”的命令后，同一 Worker Diff 的完整
+`tests/test_requirements.py` 为 `5308 passed`；在不含目标修复的干净基线上为
+`5307 passed`，而目标哈希复现仍按预期失败。这证明问题来自验证入口。
+
+SAG2C-01 判定为 `invalid-harness`：不计为 Gate 通过，也不计为模型修复失败。原 Case 不重跑；
+修正验证入口、禁用运行缓存并使用全新目标的 SAG2C-02 由
+[`../docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](../docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md)
+单独冻结。
+
+## 2026-08-14 Supervisor Agent Gate 2C：SAG2C-02 完整成功路径
+
+本条记录修正验证入口后的全新正式运行，不覆盖或重跑 SAG2C-01。运行使用
+`pypa/packaging` 的冻结基线和单一 Work Item，目标仓库只作为项目内隔离现场使用。
+
+- Agent run：`20260814-235155-agent`；
+- child：`20260814-235220-433171-bug-loop`；
+- operation：`e05b1abb7bb4414d8f484b1f6d2207a7`；
+- 目标 HEAD：`a2ac3ee0d68da64bdc765e5189911b206d9ebd91`；
+- Worker：`gpt-5.6-terra / xhigh`；Reviewer：`gpt-5.6-sol / xhigh`；
+- Worker 只修改 `CHANGELOG.rst`、`src/packaging/requirements.py` 和
+  `tests/test_requirements.py`，没有越出批准路径；
+- 缺陷复现、目标完整需求测试、Ruff 和 `git diff --check` 均通过；目标完整需求测试结果为
+  `5308 passed`；
+- Workspace、Scope Gate、Artifact integrity、Evidence freshness 和 Risk Gate 均通过；
+- Reviewer 返回 `approve`，findings 为 `0`，覆盖 `3/3` 个变更文件；
+- Finish 为 `ready_to_commit / success`，Supervisor 根据机器 Observation 进入
+  `finalize`；
+- Worker、Reviewer 和 Vega owner 进程均已退出；目标仓库 HEAD 未变化，未执行自动
+  commit、push、release 或长期 Memory 写入。
+
+SAG2C-02 判定为 `gate-exit-pass`。这条证据证明当前主线在一个低风险、单 Work Item、
+可重建真实案例中，能够完整通过 Worker、Verification、Risk、独立 Reviewer、Finish 和
+Supervisor 裁决；不证明目标补丁已被人工合并，也不证明多 Work Item、跨机器恢复、Claude
+Code Adapter、Memory 或通用修复成功率。

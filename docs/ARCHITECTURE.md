@@ -2,8 +2,8 @@
 
 ## 总览
 
-Vega v0.1 是一个本地文件系统优先的 AI Coding Harness。它不追求复杂编排，而是通过两条
-顶层执行路径覆盖只读检查和日常编码闭环。
+Vega v0.1 是一个本地文件系统优先的 AI Coding Harness。稳定产品通过两条顶层执行路径覆盖
+只读检查和日常编码闭环；当前 `main` 另有一个 opt-in Supervisor Agent 实验入口。
 
 ```text
 vega run engineering-change
@@ -31,6 +31,16 @@ vega do / vega loop
   -> Recover / Finish
 ```
 
+```text
+vega agent
+  -> 宿主主会话只读调查并提交 Agent Plan
+  -> 人工批准与 Task Brief
+  -> 单 Writer / operation / child binding
+  -> 真实 Codex Worker
+  -> Workspace / Verification / Risk / Reviewer / Finish
+  -> Checkpoint / Recovery / Human
+```
+
 `vega do/loop` 是当前日常 Coding Harness 主线。`vega run engineering-change` 保留为
 可安装的只读 Inspection Loop baseline：其解析顺序为 workspace 的
 `loops/engineering-change.loop.yaml` 优先，包内只读 baseline 回退；因此源码仓可显式覆盖，
@@ -40,7 +50,11 @@ wheel 安装后也能在任意 workspace 使用该检查入口。
 语义不同。`BriefRuntime`、`ReviewPackRuntime` 和 `ReviewRuntime` 是阶段组件或可单独调用阶段，
 不是额外的长期 Agent。
 
-长任务 P0 已提供人工驱动状态层：`goal start/status/step/attach/checkpoint-done/pause/resume/stop/recover`。实验性 P1 另外提供 `goal run --max-checkpoints 1`，只调度一个普通 auto loop，并在 checkpoint 证据边界停止。每个 checkpoint 持久化唯一 `bound_child_run` 和单次 runner timeout；控制进程中断后，`goal reconcile` 只重新校验这个 child。它不自动串联下一 checkpoint，不自动 commit/push，也不声称模型能够跨小时或跨天无人值守自治。详见 `docs/LONG-RUNNING-GOALS.md`。
+长任务 P0 已提供人工驱动状态层：`goal start/status/step/attach/checkpoint-done/pause/resume/stop/recover`。
+实验性 P1 另外提供 `goal run --max-checkpoints 1`，只调度一个普通 auto loop，并在 checkpoint
+证据边界停止。P1 现已冻结，不再承担后续长任务演进；新的 Plan 批准、单 Writer、Checkpoint
+和跨机器实验统一进入 opt-in Supervisor Agent 路线。详见 `docs/LONG-RUNNING-GOALS.md` 和
+`docs/VEGA-SUPERVISOR-AGENT-V1-PLAN.md`。
 
 ## 核心流程
 
@@ -598,9 +612,34 @@ Windows Job 或 POSIX process group 时只等待；child 状态为 running 但�
 证据新鲜度和仓库身份重新校验通过时，才完成 checkpoint。该流程不会自动恢复模型会话、
 重试、回滚、commit、push、写长期 Memory 或进入下一 checkpoint。
 
+## Supervisor Agent（opt-in 实验）
+
+Supervisor Agent 是当前 `main` 的可选控制层，不改变 `vega do/loop` 的默认行为。宿主主会话
+负责只读调查并提交结构化 Agent Plan；Vega Runtime 不内置 Planner 模型，负责 Plan 版本与批准、
+Task Brief、单 Writer、operation/child 对账、Checkpoint、状态卡、恢复和条件路由。
+
+```text
+Agent Plan / approval
+  -> agent-state.json
+  -> task-brief.md
+  -> checkpoints/
+  -> real Codex child
+  -> machine Observation
+  -> next | repair | replan | human | finalize
+```
+
+真实 Adapter 当前只接受一个未完成 Work Item。Gate 2B 已证明真实 Worker Claim 不会越过
+Workspace Gate，并证明 partial Diff 可以通过 identity-bound stop 保留并交还人工；Gate 2C
+已补齐 Verification、Risk、独立 Reviewer、Finish 和 Supervisor `finalize` 的完整成功路径。
+Handoff 生产端和真实跨机器恢复仍按 Gate 3A、Gate 3B 分别验证。
+
+Task Card 位于 Git 跟踪的 `.vega/tasks/**/*.md`，只保存批准 Plan 和人工交接所需的 Resume
+Capsule。本机 Agent State、Checkpoint、Trace 和 LangGraph SQLite 图游标仍留在 `runs/`，不进入
+Git。SQLite 只保存可丢失的本机图游标，不拥有 Workspace、Verification、Reviewer 或成功语义。
+
 ## Tool Adapter
 
-Adapter 是 Vega 和具体 AI 编码工具之间的轻量接入层。当前只实现 Codex skill adapter：
+Adapter 是 Vega 和具体 AI 编码工具之间的轻量接入层。日常 Harness 当前提供 Codex skill adapter：
 
 ```text
 vega adapters init codex --repo <repo>
@@ -616,6 +655,10 @@ vega adapters init codex --repo <repo>
 这些 skill 只描述什么时候调用 `vega loop`、`vega gate`、`vega review`、`vega status`，不安装 hook，不修改全局配置，也不自动执行危险动作。这样可以让主会话理解 Vega 流程，同时保持核心 runtime 与具体工具解耦。
 旧版生成的 `.codex/skills` 不会被自动删除或改写；新命令只管理 `.agents/skills`
 下的两个 Vega Skill。
+
+Supervisor Agent 另有一个真实 Codex Adapter，用于启动受身份绑定的单 Writer child。它不是通用
+Provider SDK，也不承诺 Claude Code Worker 兼容；V1 之后若增加其他宿主，只复用相同 CLI、
+Task Card、Task Brief 和机器对账合同。
 
 初始化会先解析整批目标文件的真实路径；任一目标越过目标仓库或无法确认边界时，在写入前
 停止。创建父目录后还会在写文件前再次解析，`--force` 只能覆盖仓库内文件，不能绕过边界。
@@ -729,7 +772,7 @@ proposal 数量允许为 0。存在 proposal 时仍必须显式接受或拒绝�
 确认结果，而不是 runtime 自动扩权。仓库级 memory 使用不暴露绝对路径的本地仓库 scope
 精确匹配；同名目录不会互相回填，未绑定仓库的通用经验必须显式保持 `repo=null`。
 
-## 为什么仍然不做数据库
+## 为什么仍然不做共享数据库
 
 v0.1 重点是证明 loop、state、tool、eval、trace 的基本闭环。文件优先有几个好处：
 
@@ -739,4 +782,6 @@ v0.1 重点是证明 loop、state、tool、eval、trace 的基本闭环。文件
 - 容易手动清理。
 - 不引入过早复杂度。
 
-当 memory ledger 增长到需要复杂查询、审计和并发写入时，再考虑 SQLite + FTS5。
+Supervisor Agent 可以使用 run-local SQLite 保存 LangGraph 图游标，但它是可丢失的本机派生状态，
+不是共享数据库或业务事实权威。当 memory ledger 增长到需要复杂查询、审计和并发写入时，再单独
+考虑 SQLite + FTS5。
