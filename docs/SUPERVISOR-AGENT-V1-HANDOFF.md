@@ -1,12 +1,12 @@
 # Supervisor Agent V1 当前交接
 
-> 日期：2026-08-14
+> 日期：2026-08-15
 >
-> Gate 2B 来源分支：`experiment/supervisor-agent-gate-2b`
+> Gate 3A 来源分支：`codex/supervisor-gate3a`
 >
-> 实施基线：`main@e126aa2`
+> 实施基线：`main@43f0e04`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3 冻结`
+> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A local-dogfood-pass / merge-pending / Gate 3B～3C 冻结`
 
 ## 当前结论
 
@@ -37,11 +37,64 @@ Gate 2C 的 SAG2C-02 已在修正验证入口后完成真实完整成功路径�
 Workspace、Scope、Artifact integrity、Evidence freshness、Risk、独立 Reviewer 和 Finish
 均形成有效证据，Supervisor 根据机器 Observation 进入 `finalize`。这条结果只证明单
 Work Item、低风险、可重建案例的完整控制链，不证明目标补丁已被人工合并、跨机器恢复、
-Claude Code Adapter、Memory 或通用修复成功率。Gate 3A～3C 继续冻结。
+Claude Code Adapter、Memory 或通用修复成功率。
+
+Gate 3A 已实现 Handoff 生产端，并完成同机两个隔离 clone 的机械往返。A 侧生成
+Handoff Checkpoint、Resume Capsule、Task Card、manifest 和人工 Git 清单；人工只提交 WIP
+与 Task Card。B 侧不复制旧 `runs/`、Trace、SQLite 或聊天，仅凭 Git Task Card 重建新本机
+run。当前判定为 `local-dogfood-pass / merge-pending`；Gate 3B～3C 继续冻结。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
 `finalizing`，不能自行写入 `ready_to_commit`。
+
+## 2026-08-15 Gate 3A 本地证据
+
+实现增加：
+
+1. `vega agent checkpoint --run <agent-run> --handoff --reason <reason>`；
+2. Handoff Checkpoint、Resume Capsule、Git Task Card、manifest、summary 和 Trace；
+3. Task Card 独占发布、逐级链接/junction/reparse point 拒绝和本机绝对路径拒绝；
+4. active Writer、`needs_human`、未知副作用、Workspace 漂移、错误仓库历史、错误 HEAD、
+   不安全 Git index 与 Artifact 发布失败的 fail-closed 门禁；
+5. 恢复时只接受当前分支、Git 已跟踪且位于当前 Handoff HEAD 的 Task Card；旧门禁降为
+   historical，新 Verification、Risk、Reviewer 从 `not_run` 开始；
+6. Vega 不自动执行 `git add`、commit、push、release、删除或长期 Memory 写入。
+
+同机双隔离副本 Dogfood：
+
+```text
+A 侧 Agent run：20260815-132909-agent
+Handoff 状态：handoff_ready
+WIP：src/example.py
+人工 Handoff 提交：5e856ab
+B 侧新 run：20260815-144839-agent-resume
+B 侧 phase：ready
+B 侧 current_work_item：W1
+B 侧 Trace：task_card_resumed
+B 侧 Verification / Risk / Reviewer：not_run
+```
+
+B 侧 clone 不包含 A 侧 `runs/`。Task Card、A 侧 manifest/checkpoint、B 侧 State/Trace/Task Brief/
+状态卡分别有 SHA-256 记录在追加式运行证据中。该运行只证明同机机械接力，不证明真实跨机器、
+真实模型继续执行或日常收益。
+
+本地验证：
+
+```text
+CI 同款分片：1239 collected，1227 passed，12 skipped，0 failed
+Handoff / Task Card / 恢复定向：19 passed，1 skipped
+Ruff：通过
+compileall：通过
+repository hygiene：通过
+architecture growth：通过（C901 35->35，Python 模块 126->128）
+git diff --check：通过
+```
+
+唯一跳过项是当前 Windows 会话无权创建目录符号链接；实现仍显式拒绝 symlink、junction 和
+reparse point，PR Windows CI 仍是合并前权威证据。四分片首次并行运行曾出现一个既有 smoke
+节点超时和三个 Git 环境失败；前者低负载重跑通过，后者在按 CI 补齐历史对象并设置进程级
+`safe.directory` 后全部通过，未为绿测修改生产语义。
 
 ## 2026-08-14 合并前独立审阅
 
@@ -61,7 +114,7 @@ Claude Code Adapter、Memory 或通用修复成功率。Gate 3A～3C 继续冻�
 6. Finish 的 `verification_passed=true` 原先可能先于 Artifact 完整性和新鲜度判定；现在
    不可信证据一律为 `blocked`，通过标记不能覆盖 fail-closed 门禁。
 
-当前状态文档已同步为 Gate 2C `gate-exit-pass`，同时明确 Gate 3 仍冻结。
+截至该次审阅，状态文档已同步为 Gate 2C `gate-exit-pass`，同时明确 Gate 3 当时仍冻结。
 
 Gate 2C 文档与重建材料的本地验证：
 
@@ -223,29 +276,29 @@ workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
 
 1. 不重跑 `SAG2B-01` 或 `SAG2B-02`，保留既有冻结案例和负结果现场。
 2. 日常仍以 `vega do / loop / goal` 为默认入口；`vega agent` 继续保持 opt-in。
-3. 若要进入 Gate 3，先单独批准 Gate 3A 的 Handoff 生产端、本地往返与停止条件，不直接把
-   真实跨机器、Claude Code 或多 Work Item 混入同一实现。
-4. Gate 3 未获批准前，只处理重复出现且影响日常使用的缺陷。
+3. Gate 3A PR CI 与合并前审阅通过后，才能把状态升级为 `gate-exit-pass`。
+4. Gate 3B 仍需单独批准真实跨机器、单 Work Item 接力协议；不把 Claude Code、多 Work Item
+   或日常价值观察混入同一运行。
 
 ## 下一 Gate 的边界
 
-Gate 2B 只应连接一个真实 Codex Adapter，并复用当前：
+Gate 3B 只应复用当前：
 
-- Plan 批准；
-- Task Brief；
-- 单 Writer 与 owned process；
-- Observation / Decision；
-- Workspace 对账；
+- Git Task Card 与 Resume Capsule；
+- Plan 批准、Task Brief 和单 Writer；
+- Workspace、分支、Handoff HEAD 与 WIP digest 对账；
+- 新机器的 Checkpoint、Trace 和状态卡；
 - Verification、Risk、Reviewer 与 Finish。
 
-Gate 2B 不新增多 Worker、Provider 平台、服务端、自动重试、自动 commit/push/release 或第二套
-成功裁决。
+Gate 3B 不新增多 Worker、Provider 平台、服务端、自动重试、自动 commit/push/release、
+Claude Code Adapter 或第二套成功裁决。
 
 ## 未完成事项
 
 - 尚未证明多 Work Item 的真实 Adapter 累计 Diff 归因；Gate 2B 当前 fail-closed 拒绝该形态。
-- 尚未验证 Handoff 生产端与本地往返，它们属于 Gate 3A。
 - 尚未验证跨机器 Task Card 接力，它属于 Gate 3B。
+- 尚未验证真实模型在新机器继续当前 Work Item，也未观察恢复时间与再次使用意愿；它们分别属于
+  Gate 3B 和 Gate 3C。
 - Claude Code Supervisor Adapter 不属于 V1 Gate 3，V1 完成后再单独评估。
 - 尚未决定 `v0.2.0` 发布时点。
 - 受信 Observation 已经 write-once；若其后的 Checkpoint 写入失败，State 会保守保留 active

@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3 冻结`
+> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A local-dogfood-pass / merge-pending / Gate 3B～3C 冻结`
 >
 > 计划日期：2026-08-13
 >
@@ -11,8 +11,8 @@
 > 单一实验分支完成机械合同、两个冻结真实案例、最终 PR CI 与合并前审阅，当前状态为
 > `gate-exit-pass`。2026-08-14 路线复核后增加 Gate 2C，用当前主线补一条真实完整成功路径。
 > SAG2C-01 因 pytest 提前导入控制环境中的 `packaging` 而记为 `invalid-harness`；修正验证入口的
-> SAG2C-02 已于 2026-08-14 通过 Gate 2C。原 Gate 3 拆成机械交接、真实跨机器和价值观察，
-> 仍需按阶段批准。
+> SAG2C-02 已于 2026-08-14 通过 Gate 2C。Gate 3A 已于 2026-08-15 完成 Handoff 生产端和
+> 同机双隔离副本往返，本地状态为 `local-dogfood-pass / merge-pending`；Gate 3B～3C 仍冻结。
 
 ## 一、产品决定
 
@@ -819,8 +819,14 @@ vega agent stop --run <agent-run> --reason "人工停止"
 vega watch --run <agent-run> --follow
 ```
 
-`vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"` 是 Gate 3 的候选命令，
-当前尚未实现；跨机器接力仍依赖受版本控制的 Task Card 和人工 Git 操作。
+Gate 3A 已实现：
+
+```powershell
+vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"
+```
+
+该命令生成 Handoff Checkpoint、Resume Capsule、Git Task Card、manifest 和人工 Git 清单，
+但不会执行 `git add`、commit 或 push。跨机器接力仍依赖受版本控制的 Task Card 和人工 Git 操作。
 
 打包后的顶层 CLI 已新增 opt-in `agent` 子命令，但既有 `do / loop / goal` 命令行为和成功语义
 保持不变。Gate 3 通过前不把 `agent` 提升为默认推荐入口。
@@ -894,8 +900,8 @@ Adapter，两者复用同一 Task Card、Task Brief、Checkpoint、Trace 和 Veg
 具体 Adapter 信任边界、预算、冻结案例和停止条件见
 [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。冻结计划已经人工
 批准，真实 Codex Adapter 的机械合同已实现；代码 HEAD `799bb29` 已通过 PR `#58` 的 9 项
-CI，两个冻结案例也已形成合同允许终态；最终 PR CI 与合并前审阅均已完成。当前判定为
-`gate-exit-pass`，Gate 3 仍冻结并需另行批准。
+CI，两个冻结案例也已形成合同允许终态；最终 PR CI 与合并前审阅均已完成。Gate 2B 当时判定为
+`gate-exit-pass`，Gate 3 当时仍冻结并需另行批准。
 
 Gate 2B 当前只执行一个未完成 Work Item，并允许一次同 child repair。多 Work Item 的真实派发
 仍缺少累计 Diff 归因证据；现有 assist baseline 会拒绝旧 tracked diff，因此本轮不通过放宽
@@ -938,7 +944,7 @@ Python 包来源，因此不计为 Gate 通过或模型失败。修正后的 SAG
 - 任务、模型和预算不因结果而替换。
 
 Gate 2C 只验证当前主线的完整可用路径，不新增 Handoff、Claude、Memory、多 Work Item 或默认入口。
-Gate 2C 已完成；Gate 3A～3C 仍冻结，进入下一阶段前必须单独批准 Handoff 范围和停止条件。
+Gate 2C 完成后，Gate 3A～3C 当时仍冻结，进入下一阶段前必须单独批准 Handoff 范围和停止条件。
 
 ### Gate 3A：Handoff 机械生产与本地往返
 
@@ -954,6 +960,22 @@ Gate 2C 已完成；Gate 3A～3C 仍冻结，进入下一阶段前必须单独�
 
 先在同一机器的两个隔离 clone/worktree 间完成往返，排除 OS、依赖和宿主变化。Vega 仍不自动
 commit 或 push，也不建设第二套 Handoff Runtime。
+
+2026-08-15 本地结果为 `local-dogfood-pass / merge-pending`：
+
+- Agent run `20260815-132909-agent` 在旧 Writer 已停止后生成 `handoff_ready` Task Card；
+- 人工只暂存一个 WIP 文件和 Task Card，`git diff --cached --check` 通过后形成 Handoff 提交；
+- 第二个隔离 clone 不携带旧 `runs/`、Trace、SQLite 或聊天，只从 Git Task Card 创建新 run
+  `20260815-144839-agent-resume`；
+- 新 run 为 `ready`，当前 Work Item 为 `W1`，Trace 包含 `task_card_resumed`；
+- 旧 Verification、Risk、Reviewer 只保留为 historical，新状态卡三项均为 `not_run`；
+- 错误仓库历史、错误 HEAD、active Writer、`needs_human`、路径逃逸、敏感信息和 Artifact
+  发布失败均有 fail-closed 回归；
+- Vega 没有自动执行 Git 写入、启动真实模型 Worker 或进入 Gate 3B。
+
+本地 CI 同款分片合计 `1239 collected / 1227 passed / 12 skipped / 0 failed`；Ruff、compileall、
+repository hygiene、architecture growth 和 `git diff --check` 均通过。PR CI 和合并前审阅完成前，
+Gate 3A 不升级为 `gate-exit-pass`。
 
 ### Gate 3B：单 Work Item 的真实跨机器接力
 
@@ -1049,8 +1071,9 @@ reviewer_worker_context_leak = 0
 
 ## 十三、审核通过后的实际顺序
 
-当前执行进度：第 1～6 项已完成。第 6 项的首次运行记为 `invalid-harness`，修正后的
-SAG2C-02 已完成并判定为 `gate-exit-pass`。Gate 3A～3C 在获得单独批准前保持冻结。
+当前执行进度：第 1～7 项已完成本地实现与验证。第 6 项的首次运行记为 `invalid-harness`，
+修正后的 SAG2C-02 已判定为 `gate-exit-pass`；第 7 项 Gate 3A 已取得
+`local-dogfood-pass / merge-pending`，等待 PR CI 与合并前审阅。Gate 3B～3C 仍冻结。
 
 1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
 2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；
@@ -1065,7 +1088,7 @@ SAG2C-02 已完成并判定为 `gate-exit-pass`。Gate 3A～3C 在获得单独�
 
 ## 十四、已确认的决定
 
-截至 2026-08-14 已确认：
+截至 2026-08-15 已确认：
 
 1. Vega 的主线定位为轻量、可恢复、主会话可控的软件工程 Supervisor Agent；
 2. Task Card 进入 Git，运行状态、Checkpoint 和 Trace 默认留在本机；
@@ -1075,6 +1098,7 @@ SAG2C-02 已完成并判定为 `gate-exit-pass`。Gate 3A～3C 在获得单独�
    新分支；合并后删除；
 6. Gate 2C 先证明当前主线完整成功路径，再进入 Handoff 实现；
 7. 多 Work Item、Memory Proposal 和 Provider 平台不属于 Supervisor Agent V1 必过范围。
+8. Gate 3A 只证明同机机械接力；真实跨机器继续执行和日常价值分别属于 Gate 3B、Gate 3C。
 
 本文与当前代码或产品契约冲突时，在新版本发布前仍以已发布代码、
 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 和真实运行证据为准。

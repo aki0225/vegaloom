@@ -201,6 +201,7 @@ jobs:
               tests/test_redaction.py
               tests/test_agent_codex_adapter.py
               tests/test_agent_contract.py
+              tests/test_agent_handoff.py
               tests/test_agent_recovery.py
               tests/test_agent_runtime.py
               tests/test_agent_task_card.py
