@@ -171,4 +171,5 @@ Gate 2A 已补充：
 通过。Gate 2B 后续已在独立实验分支完成机械合同、两个冻结真实案例、最终 PR CI 与合并前
 审阅，当前状态为 `gate-exit-pass`。状态权威顺序和本 ADR 的 fail-closed 决定没有改变。
 Gate 3A 已完成；Gate 3B 已获批准。固定控制器、未知副作用继承和人工副作用裁决门禁均
-已通过 PR CI；控制器已重新冻结，机器 A 尚未启动。
+已通过 PR CI；控制器重新冻结后完成机器 A 正式 attempt，但没有形成可交接 partial Diff。
+Gate 3B 未通过，机器 B 未启动，Gate 3C 继续冻结。

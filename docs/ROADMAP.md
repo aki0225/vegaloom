@@ -805,7 +805,8 @@ historical，新 Verification、Risk、Reviewer 均为 `not_run`。
 repository hygiene、architecture growth 和 `git diff --check` 通过。实现提交 `33c4ac1`
 对应 PR `#60` 的 9 项 CI 全部通过，两轮独立本地审阅无剩余阻断项。Gate 3A 判定为
 `gate-exit-pass`。Gate 3B 随后获批，固定控制器、未知副作用继承和人工副作用裁决门禁均
-已通过 PR CI；控制器已重新冻结，机器 A 尚未启动。Gate 3C 日常价值观察仍冻结。
+已通过 PR CI；控制器重新冻结后的机器 A 正式 attempt 结果见下一节。Gate 3C 日常价值观察
+仍冻结。
 
 ### 2026-08-15：Gate 3B 机器 A 正式 Attempt 未形成可交接 WIP
 
