@@ -44,7 +44,7 @@ from .redaction import write_redacted_json, write_redacted_text
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir, resolve_run_dir
 from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
-from .workspace_inventory import prepare_verification_temp_root
+from .workspace_inventory import prepare_verification_temp_root, workspace_ignored_path_exclusions
 
 
 def require_git_root(repo: Path) -> Path:
@@ -105,7 +105,8 @@ def resolve_resume_task(repo: Path, task_path: Path | None) -> tuple[Path, str]:
 def capture_bound_workspace(run_dir: Path) -> ReviewWorkspaceSnapshot:
     metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
     repo = Path(metadata["repo_path"]).resolve(strict=True)
-    return capture_review_workspace(repo)
+    exclusions = workspace_ignored_path_exclusions(run_dir.parent.parent, repo)
+    return capture_review_workspace(repo, ignored_path_exclusions=exclusions)
 
 
 def load_agent_bundle(
