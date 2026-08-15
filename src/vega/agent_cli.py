@@ -194,6 +194,39 @@ def agent_resume_local(
     typer.echo(_runtime().status(result.run_dir.name))
 
 
+@agent_app.command("checkpoint")
+def agent_checkpoint(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+    handoff: bool = typer.Option(
+        False,
+        "--handoff",
+        help="生成跨机器 Handoff Checkpoint、Resume Capsule 和 Task Card。",
+    ),
+    reason: str = typer.Option(..., "--reason", help="交接或停止调度的原因。"),
+) -> None:
+    """在旧 Writer 已停止后生成可人工提交的 Handoff。"""
+
+    if not handoff:
+        raise typer.BadParameter("当前仅支持 Gate 3A 的 --handoff 形式")
+    runtime = _runtime()
+    try:
+        result = runtime.handoff(run, reason=reason)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(
+        f"Handoff 已生成：{result.run.run_dir.name}；"
+        f"Task Card：{result.task_card_path}"
+    )
+    typer.echo("")
+    try:
+        typer.echo((result.run.run_dir / "status-card.md").read_text(encoding="utf-8"))
+    except OSError:
+        typer.echo(
+            "Handoff 已成功生成，但状态卡暂时无法读取；请直接检查对应 run 目录。",
+            err=True,
+        )
+
+
 @agent_app.command("observe")
 def agent_observe(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),

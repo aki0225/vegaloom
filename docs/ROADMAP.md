@@ -1,6 +1,6 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-14
+> 更新时间：2026-08-15
 > 当前稳定基线：`v0.1.5`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
@@ -13,8 +13,8 @@
 > 两个冻结真实案例、最终 PR CI 和合并前审阅，当前状态为 `gate-exit-pass`。2026-08-14
 > 路线复核后，Gate 2C 用于补一条当前主线真实完整成功路径。SAG2C-01 因验证入口加载了
 > 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 SAG2C-02 已完成并判定为
-> `gate-exit-pass`。
-> Gate 3 已拆分但仍冻结。既有
+> `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、同机双隔离副本往返、PR CI 和
+> 合并前审阅，状态为 `gate-exit-pass`；Gate 3B～3C 仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
@@ -51,7 +51,7 @@ v0.1.5 发布（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
   -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
-  -> Gate 3A Handoff 机械生产与本地往返（冻结）
+  -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
   -> Gate 3B 单 Work Item 跨机器接力（冻结）
   -> Gate 3C 小规模日常价值观察（冻结）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
@@ -775,8 +775,32 @@ Risk、独立 Reviewer 和 Finish 均形成有效证据，Supervisor 根据机�
 `finalize`。本次结果判定为 `gate-exit-pass`。
 
 这条证据只覆盖单 Work Item、低风险、可重建案例，不证明目标补丁已被人工合并，也不证明
-多 Work Item、跨机器恢复、Claude Code Adapter、Memory 或通用修复成功率。Gate 3A～3C
-继续冻结，下一步必须先单独批准 Handoff 范围，再开始 Gate 3A。
+多 Work Item、跨机器恢复、Claude Code Adapter、Memory 或通用修复成功率。后续已单独批准并
+执行 Gate 3A；其结果见紧接着的记录。
+
+### 2026-08-15：Gate 3A Handoff 生产端与同机往返完成
+
+Gate 3A 只增加一个窄命令：
+
+```powershell
+vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"
+```
+
+它在旧 Writer 已停止且现场可解释时生成 Handoff Checkpoint、Resume Capsule、Git Task Card、
+manifest、状态卡和人工 Git 清单。Vega 不自动 `git add`、commit 或 push。active Writer、
+`needs_human`、未知副作用、Workspace 漂移、敏感路径、Task Card 目录链接、错误仓库历史、
+错误 HEAD 和 Artifact 发布失败均 fail-closed。
+
+同机 Dogfood 使用两个隔离 clone：A 侧 run `20260815-132909-agent` 生成人工可提交的
+`handoff_ready` Task Card；人工只提交 WIP 与 Task Card。B 侧没有复制 A 侧 `runs/`、Trace、
+SQLite 或聊天，仅凭 Git 中的 Resume Capsule 创建新 run `20260815-144839-agent-resume`。
+新 run 为 `ready`、当前 Work Item 为 `W1`，Trace 包含 `task_card_resumed`，旧门禁只作为
+historical，新 Verification、Risk、Reviewer 均为 `not_run`。
+
+本地 CI 同款节点合计 `1239 collected / 1227 passed / 12 skipped / 0 failed`；Ruff、compileall、
+repository hygiene、architecture growth 和 `git diff --check` 通过。实现提交 `33c4ac1`
+对应 PR `#60` 的 9 项 CI 全部通过，两轮独立本地审阅无剩余阻断项。Gate 3A 判定为
+`gate-exit-pass`；Gate 3B 真实跨机器接力和 Gate 3C 日常价值观察仍冻结。
 
 ## 七、更新规则
 

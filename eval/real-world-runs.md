@@ -705,3 +705,64 @@ SAG2C-02 判定为 `gate-exit-pass`。这条证据证明当前主线在一个低
 可重建真实案例中，能够完整通过 Worker、Verification、Risk、独立 Reviewer、Finish 和
 Supervisor 裁决；不证明目标补丁已被人工合并，也不证明多 Work Item、跨机器恢复、Claude
 Code Adapter、Memory 或通用修复成功率。
+
+## 2026-08-15 Supervisor Agent Gate 3A：同机 Handoff 机械往返
+
+本条只记录 Gate 3A 的 Handoff 生产端和同机双隔离副本往返，不把结果外推为真实跨机器恢复、
+真实模型继续执行或日常价值。Vega 没有自动 `git add`、commit、push、release、删除文件或写入
+长期 Memory。
+
+A 侧使用 Agent run `20260815-132909-agent`。批准 Plan 只有一个未完成 Work Item `W1`，
+WIP 只有 `src/example.py`。旧 Writer 已停止，最近 Checkpoint 为 safe，外部副作用为 `none`。
+执行：
+
+```powershell
+vega agent checkpoint --run 20260815-132909-agent --handoff --reason "Gate 3A same-host isolated clone transfer."
+```
+
+生成的 Task Card 为 `handoff_ready`，旧 Verification、Risk、Reviewer 均写为 historical
+`not_run`。人工只暂存 `src/example.py` 与 Task Card；`git diff --cached --check` 通过后形成
+fixture Handoff 提交 `5e856ab`。Task Card SHA-256 为
+`29d39c0a0c7f83d0ab1da8ea795f21f0d20ecb4da548e73ead77f57b41211a9e`；A 侧
+manifest 与 Handoff Checkpoint SHA-256 分别为
+`8515cb23737b92fba53ba52b85e22ca933af42cd02407fc70e97f98b91da6842` 和
+`15e59ea311527d3e316e910670e624fb0c31e51e2c5e5f57695d33d4281d358a`。
+
+B 侧由该提交重新 clone，不包含 A 侧 `runs/`、Trace、SQLite 或聊天。执行
+`vega agent resume --repo .` 后创建新 run `20260815-144839-agent-resume`：
+
+- `phase=ready`；
+- `current_work_item=W1`；
+- `handoff_status=handoff_ready`；
+- `allowed_actions=repair,human`；
+- Trace 包含且仅包含本轮 `task_card_resumed`；
+- 新 Verification、Risk、Reviewer 均为 `not_run`；
+- B 侧 HEAD 与包含 Task Card 的 Handoff 提交均为 `5e856ab`，Workspace 无额外 Diff。
+
+B 侧 State、Trace、Task Brief 和状态卡 SHA-256 分别为
+`a59479216e80f91faa1dc62daba8486f29fb70abbbd458f1272ad350e01a2b93`、
+`ae6df44b9d443eb9a469d21839fe797267c348491d8417a9409cd44686756ae5`、
+`a87dc81804674e98e94604807c7eba2491e897c8a1fdc6dc95dfdbe55e816488` 和
+`92a57e0679cb6ccd1d8aa7e164dfd21c964ba9888324526b71037d88c2c801e7`。
+
+安全回归覆盖 active Writer、`needs_human` 保留、Workspace 漂移、Task Card 目录链接/
+junction/reparse point、绝对路径、fake key、Artifact 发布失败、错误仓库历史和错误 HEAD。
+本地 CI 同款节点合计 `1239 collected / 1227 passed / 12 skipped / 0 failed`；Ruff、compileall、
+repository hygiene、architecture growth 和 `git diff --check` 通过。
+
+当前判定为 `local-dogfood-pass / merge-pending`。PR CI 与合并前审阅通过后才能将 Gate 3A
+记为 `gate-exit-pass`。Gate 3B 真实跨机器接力与 Gate 3C 日常价值观察仍冻结。
+
+## 2026-08-15 Supervisor Agent Gate 3A：PR CI 与退出判定
+
+本条只追加 Gate 3A 的后续验证事实，不改写上方正式运行发生时的
+`local-dogfood-pass / merge-pending` 裁决。
+
+实现提交 `33c4ac1` 推送到 PR `#60` 后，workflow run `31871901115` 的 9 项任务全部通过，
+覆盖静态检查与分片完整性、POSIX 临时目录、wheel/sdist 构建安装、Python 3.11 兼容性、
+Windows 专项与 wheel smoke，以及 Python 3.12 的四个测试分片。两轮独立本地审阅已整合，
+没有剩余合并阻断项。
+
+因此 Gate 3A 判定为 `gate-exit-pass`。该结论仍只证明单 Work Item、人工 Git、同机双隔离
+副本的机械接力；不证明真实跨机器、真实模型继续执行或日常价值。Gate 3B 与 Gate 3C
+继续冻结。

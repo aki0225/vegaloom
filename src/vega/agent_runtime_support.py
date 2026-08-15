@@ -22,6 +22,7 @@ from .agent_contract import (
     AgentStatusCard,
     canonical_digest,
 )
+from .agent_handoff_safety import validate_handoff_history
 from .agent_persistence import (
     AgentArtifactError,
     append_agent_trace,
@@ -175,7 +176,11 @@ def resume_agent_task_card(
     card = load_task_card(resolved_task)
     # 新机器不会携带空的运行目录；先重建 Vega 自己的固定根路径，再冻结新现场。
     prepare_verification_temp_root(repo_root)
-    snapshot = validate_resume_workspace(repo_root, card)
+    snapshot = validate_resume_workspace(
+        repo_root,
+        card,
+        relative_task=relative_task,
+    )
     revision = resolve_git_revision(repo_root)
     assert revision is not None
     run_id, run_dir = create_run_dir(
@@ -424,14 +429,21 @@ def default_next_step(phase: str, current_index: int) -> str:
 def validate_resume_workspace(
     repo: Path,
     card: AgentTaskCard,
+    *,
+    relative_task: str,
 ) -> ReviewWorkspaceSnapshot:
     if card.handoff_status == "none":
         raise ValueError("Task Card 没有可恢复交接")
     if card.branch != current_branch(repo):
         raise ValueError("Task Card 分支与当前分支不一致")
+    validate_handoff_history(repo, card, relative_task)
     snapshot = capture_review_workspace(repo)
     if snapshot.changed_files:
         raise ValueError("恢复前 Workspace 必须没有额外 Diff")
+    if snapshot.unsafe_index_paths:
+        raise ValueError("恢复前 Git index 包含不安全标记")
+    if not snapshot.git_control_complete:
+        raise ValueError("恢复前 Git control manifest 不完整")
     if card.resume_capsule is None:
         raise ValueError("Task Card 缺少 Resume Capsule")
     expected_changed = set(card.resume_capsule.changed_files)
@@ -457,9 +469,13 @@ def state_from_task_card(
     card: AgentTaskCard,
     snapshot: ReviewWorkspaceSnapshot,
 ) -> AgentState:
+    requires_human = (
+        card.handoff_status == "handoff_blocked"
+        or card.status == "needs_human"
+    )
     allowed_actions = (
         ["human"]
-        if card.handoff_status == "handoff_blocked"
+        if requires_human
         else list(card.resume_capsule.allowed_actions)
         if card.resume_capsule
         else ["human"]
@@ -468,7 +484,7 @@ def state_from_task_card(
         run_id=run_id,
         task_id=card.task_id,
         repository_id=repository_scope(repo),
-        phase="needs_human" if card.handoff_status == "handoff_blocked" else "ready",
+        phase="needs_human" if requires_human else "ready",
         goal_revision=card.plan.goal_revision,
         plan_revision=card.plan.plan_revision,
         approved_plan_digest=card.plan.approved_digest,

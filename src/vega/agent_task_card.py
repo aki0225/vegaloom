@@ -22,6 +22,7 @@ from .agent_contract import (
     StrictAgentModel,
     canonical_digest,
 )
+from .agent_handoff_safety import TaskCardError, assert_portable_task_card_payload
 from .redaction import redact_value
 
 
@@ -29,10 +30,6 @@ _MACHINE_STATE_START = "<!-- vega-task-card-state:v1"
 _MACHINE_STATE_END = "-->"
 _REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _TERMINAL_TASK_STATUSES = frozenset({"completed", "stopped"})
-
-
-class TaskCardError(ValueError):
-    pass
 
 
 class HistoricalGateEvidence(StrictAgentModel):
@@ -148,35 +145,53 @@ class AgentTaskCard(StrictAgentModel):
         }:
             raise ValueError("current_work_item 不属于当前 Plan")
 
-        handoff_values = (
-            self.handoff_base_revision,
-            self.handoff_workspace_digest,
-            self.last_handoff_checkpoint,
-            self.resume_capsule,
-        )
         if self.handoff_status == "none":
-            if self.handoff_sequence != 0 or any(value is not None for value in handoff_values):
-                raise ValueError("无交接状态不能包含 Resume Capsule 或交接绑定")
+            _validate_empty_handoff(self)
             return self
 
-        if self.handoff_sequence < 1 or any(value is None for value in handoff_values):
-            raise ValueError("交接状态必须包含 sequence、revision、digest、checkpoint 和 Resume Capsule")
-        assert self.resume_capsule is not None
-        if self.current_work_item != self.resume_capsule.current_work_item:
-            raise ValueError("Task Card 与 Resume Capsule 的 current_work_item 不一致")
-        if self.handoff_workspace_digest != self.resume_capsule.workspace_digest:
-            raise ValueError("Task Card 与 Resume Capsule 的 Workspace digest 不一致")
-        if self.handoff_status == "handoff_ready" and (
-            not self.resume_capsule.writer_stopped
-            or not self.resume_capsule.workspace_explained
-            or self.resume_capsule.external_side_effects == "unknown"
-        ):
-            raise ValueError("handoff_ready 必须证明 Writer 已停止、现场可解释且副作用已知")
+        _validate_active_handoff(self)
         return self
 
 
+def _validate_empty_handoff(card: AgentTaskCard) -> None:
+    handoff_values = (
+        card.handoff_base_revision,
+        card.handoff_workspace_digest,
+        card.last_handoff_checkpoint,
+        card.resume_capsule,
+    )
+    if card.handoff_sequence != 0 or any(value is not None for value in handoff_values):
+        raise ValueError("无交接状态不能包含 Resume Capsule 或交接绑定")
+
+
+def _validate_active_handoff(card: AgentTaskCard) -> None:
+    handoff_values = (
+        card.handoff_base_revision,
+        card.handoff_workspace_digest,
+        card.last_handoff_checkpoint,
+        card.resume_capsule,
+    )
+    if card.status in _TERMINAL_TASK_STATUSES:
+        raise ValueError("终态 Task Card 不能保留可恢复 Handoff")
+    if card.handoff_sequence < 1 or any(value is None for value in handoff_values):
+        raise ValueError("交接状态必须包含 sequence、revision、digest、checkpoint 和 Resume Capsule")
+    assert card.resume_capsule is not None
+    if card.current_work_item != card.resume_capsule.current_work_item:
+        raise ValueError("Task Card 与 Resume Capsule 的 current_work_item 不一致")
+    if card.handoff_workspace_digest != card.resume_capsule.workspace_digest:
+        raise ValueError("Task Card 与 Resume Capsule 的 Workspace digest 不一致")
+    if card.handoff_status == "handoff_ready" and (
+        not card.resume_capsule.writer_stopped
+        or not card.resume_capsule.workspace_explained
+        or card.resume_capsule.external_side_effects == "unknown"
+    ):
+        raise ValueError("handoff_ready 必须证明 Writer 已停止、现场可解释且副作用已知")
+
+
 def render_task_card(card: AgentTaskCard) -> str:
-    safe_card = AgentTaskCard.model_validate(redact_value(card.model_dump(mode="json")))
+    safe_payload = redact_value(card.model_dump(mode="json"))
+    assert_portable_task_card_payload(safe_payload)
+    safe_card = AgentTaskCard.model_validate(safe_payload)
     payload = safe_card.model_dump(mode="json")
     payload_digest = canonical_digest(payload)
     front_matter = {
@@ -227,6 +242,7 @@ def parse_task_card(content: str) -> AgentTaskCard:
     front_matter, payload = _parse_parts(content)
     if front_matter.get("payload_digest") != canonical_digest(payload):
         raise TaskCardError("Task Card payload digest 不一致")
+    assert_portable_task_card_payload(payload)
     try:
         card = AgentTaskCard.model_validate(payload)
     except ValueError as exc:
@@ -258,20 +274,27 @@ def save_task_card(path: Path, card: AgentTaskCard) -> None:
     if path.suffix.lower() != ".md":
         raise TaskCardError("Task Card 必须使用 .md 扩展名")
     path.parent.mkdir(parents=True, exist_ok=True)
+    if os.path.lexists(path):
+        raise TaskCardError(f"目标 Task Card 已存在，拒绝覆盖：{path.name}")
     temp_path = path.with_name(f".task-{uuid4().hex[:16]}")
     temp_path.write_text(render_task_card(card), encoding="utf-8", newline="\n")
-    last_error: OSError | None = None
-    for _ in range(10):
-        try:
-            os.replace(temp_path, path)
-            return
-        except PermissionError as exc:
-            last_error = exc
-            time.sleep(0.02)
-    if temp_path.exists():
-        temp_path.unlink()
-    assert last_error is not None
-    raise last_error
+    try:
+        for attempt in range(10):
+            try:
+                os.link(temp_path, path)
+                break
+            except FileExistsError as exc:
+                raise TaskCardError(
+                    f"目标 Task Card 已存在，拒绝覆盖：{path.name}"
+                ) from exc
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(0.02)
+        else:  # pragma: no cover - 循环只会 break 或抛出
+            raise OSError("无法独占发布 Task Card")
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def load_task_card(path: Path) -> AgentTaskCard:

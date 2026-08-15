@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-14
+> 更新时间：2026-08-15
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -15,11 +15,11 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 2C `gate-exit-pass` |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 3A `gate-exit-pass` |
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
 | 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
-| 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 2C 交接记录 |
+| 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 3A 交接记录 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
 | 查看 RCB-02 离线检索结果 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | Phase 0 停止，未运行 Holdout |
@@ -54,8 +54,9 @@ Gate 2B 的 Adapter 信任边界、两个真实案例、预算、停止条件和
 owned execution 能由身份绑定的 `agent stop` 停止并交还人工。当前状态为
 `gate-exit-pass`：两个冻结真实案例、最终 PR CI 和合并前审阅均满足 Gate 2B 的退出门槛。
 Gate 2C 首次运行因 pytest 加载了控制环境中的 `packaging` 而记为 `invalid-harness`；
-修正验证入口的 Gate 2C R2 已完成并判定为 `gate-exit-pass`。Gate 3A～3C 仍保持冻结，不改变既有默认命令行为
-和成功语义。
+修正验证入口的 Gate 2C R2 已完成并判定为 `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、
+同机双隔离副本往返、PR CI 与合并前审阅，状态为 `gate-exit-pass`；Gate 3B～3C 仍冻结，
+不改变既有默认命令行为和成功语义。
 
 ### 真实日常使用观察
 
@@ -64,7 +65,7 @@ Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist�
 打回和 fail-closed 场景均有记录。
 
 Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 已完成两个冻结真实案例，
-最终分支 CI 和合并前审阅均已通过，Gate 2C R2 已完成并通过。
+最终分支 CI 和合并前审阅均已通过，Gate 2C R2 已完成并通过，Gate 3A 已取得本地往返证据。
 `v0.1.5` 继续按现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
 空 Scope 展示和 Workspace 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。
 当前状态与历史停止条件见：

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from .agent_handoff import HandoffResult, create_handoff
 from .agent_contract import (
     AgentObservation,
     AgentPlan,
@@ -468,6 +469,10 @@ class SupervisorAgentRuntime:
 
     def resume_task_card(self, repo: Path, task_path: Path | None = None) -> AgentRun:
         return resume_agent_task_card(self.workspace, repo, task_path)
+
+    @agent_mutation("agent.handoff")
+    def handoff(self, run: str, *, reason: str) -> HandoffResult:
+        return create_handoff(self.workspace, run, reason=reason)
 
     def _load_run(self, run: str) -> tuple[Path, AgentState, AgentPlan, dict[str, str]]:
         return load_agent_bundle(self.workspace, run)
