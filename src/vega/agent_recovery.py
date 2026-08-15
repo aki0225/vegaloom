@@ -347,7 +347,7 @@ class SupervisorAgentRecovery:
             )
             return AgentRun(run_dir=run_dir, state=blocked_state, plan=plan)
         safe = not actual.unsafe_index_paths and actual.git_control_complete
-        if stopped and safe and external_side_effects != "unknown":
+        if stopped and safe and external_side_effects == "none":
             phase = "stopped"
             allowed_actions: list[str] = []
             status = "safe"

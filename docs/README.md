@@ -19,7 +19,7 @@
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
 | 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
-| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | 前置门禁修复中 |
+| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | 人工副作用裁决本地通过，PR CI 待验证 |
 | 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 3A 交接记录 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -57,8 +57,9 @@ owned execution 能由身份绑定的 `agent stop` 停止并交还人工。当�
 Gate 2C 首次运行因 pytest 加载了控制环境中的 `packaging` 而记为 `invalid-harness`；
 修正验证入口的 Gate 2C R2 已完成并判定为 `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、
 同机双隔离副本往返、PR CI 与合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，
-当前先完成固定控制器和未知副作用继承前置门禁；Gate 3C 仍冻结，不改变既有默认命令行为
-和成功语义。
+固定控制器和未知副作用继承门禁已通过；真实停止演练随后暴露了人工副作用裁决缺口。该窄路径
+已完成本地验证，仍需通过 PR CI 后才能启动机器 A。Gate 3C 仍冻结，不改变既有默认命令
+行为和成功语义。
 
 ### 真实日常使用观察
 

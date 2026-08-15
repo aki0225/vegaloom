@@ -247,8 +247,12 @@ def write_checkpoint(
     operation_started: bool | None = None,
     external_side_effects: Literal["none", "known", "unknown"] | None = None,
 ) -> AgentCheckpoint:
-    checkpoints = sorted((run_dir / "checkpoints").glob("checkpoint-*.json"))
-    checkpoint_id = f"checkpoint-{len(checkpoints) + 1:03d}"
+    checkpoint_numbers = [
+        int(path.stem.removeprefix("checkpoint-"))
+        for path in (run_dir / "checkpoints").glob("checkpoint-*.json")
+        if path.stem.removeprefix("checkpoint-").isdigit()
+    ]
+    checkpoint_id = f"checkpoint-{max(checkpoint_numbers, default=0) + 1:03d}"
     checkpoint = AgentCheckpoint(
         checkpoint_id=checkpoint_id,
         run_id=state.run_id,

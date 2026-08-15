@@ -6,7 +6,7 @@
 >
 > 实施基线：`main@43f0e04`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B prerequisite-fix-in-progress / Gate 3C 冻结`
+> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B prerequisite-local-pass / side-effect-adjudication-ci-pending / machine-a-not-started / Gate 3C 冻结`
 
 ## 当前结论
 
@@ -43,8 +43,9 @@ Gate 3A 已实现 Handoff 生产端，并完成同机两个隔离 clone 的机�
 Handoff Checkpoint、Resume Capsule、Task Card、manifest 和人工 Git 清单；人工只提交 WIP
 与 Task Card。B 侧不复制旧 `runs/`、Trace、SQLite 或聊天，仅凭 Git Task Card 重建新本机
 run。PR `#60` 的 9 项 CI 与两轮独立本地审阅均无剩余阻断项，Gate 3A 判定为
-`gate-exit-pass`。Gate 3B 已获批准，当前先完成固定控制器和未知副作用继承前置门禁；
-Gate 3C 继续冻结。
+`gate-exit-pass`。Gate 3B 已获批准，固定控制器和未知副作用继承门禁已通过。真实停止演练
+暴露的人工副作用裁决缺口已完成本地修复，仍需 PR CI 验证；机器 A 尚未启动，Gate 3C
+继续冻结。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
@@ -280,7 +281,7 @@ workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
 2. 日常仍以 `vega do / loop / goal` 为默认入口；`vega agent` 继续保持 opt-in。
 3. Gate 3A 已判定为 `gate-exit-pass`，不再扩大其机械接力范围。
 4. Gate 3B 已按 [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md)
-   获批；必须先通过固定控制器和未知副作用继承前置门禁，再启动机器 A。
+   获批；人工副作用裁决路径必须先通过 PR CI，再冻结新控制器并启动机器 A。
 5. 不把 Claude Code、多 Work Item 或日常价值观察混入同一运行。
 
 ## 下一 Gate 的边界

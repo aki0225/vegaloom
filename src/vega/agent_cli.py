@@ -11,6 +11,7 @@ from .agent_graph import langgraph_available
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_recovery_request import AgentRecoveryRequest
 from .agent_runtime import SupervisorAgentRuntime
+from .agent_side_effect_adjudication import SupervisorAgentSideEffectAdjudicator
 from .agent_worker import SupervisorAgentWorker
 from .cli_support import (
     ensure_runner_ready,
@@ -18,6 +19,7 @@ from .cli_support import (
     report_execution_progress,
     require_repo_directory,
 )
+from .redaction import redact_text
 
 
 agent_app = typer.Typer(help="运行轻量 Supervisor Agent 控制层。")
@@ -194,6 +196,29 @@ def agent_resume_local(
     typer.echo(_runtime().status(result.run_dir.name))
 
 
+@agent_app.command("adjudicate-side-effects")
+def agent_adjudicate_side_effects(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+    input_path: Path = typer.Option(..., "--input", help="结构化 Recovery Request JSON。"),
+) -> None:
+    """人工核对 unknown 外部副作用，并追加不可变 Checkpoint。"""
+
+    try:
+        request = AgentRecoveryRequest.model_validate_json(
+            input_path.read_text(encoding="utf-8")
+        )
+        result = _side_effect_adjudicator().adjudicate(run, request)
+    except (OSError, FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(redact_text(str(exc))) from exc
+    typer.echo(
+        "外部副作用已确认不存在，可继续准备 Handoff。"
+        if result.state.phase == "stopped"
+        else "外部副作用已确认为 known，任务继续等待人工处理。"
+    )
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
 @agent_app.command("checkpoint")
 def agent_checkpoint(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
@@ -324,6 +349,10 @@ def _recovery() -> SupervisorAgentRecovery:
 
 def _worker() -> SupervisorAgentWorker:
     return SupervisorAgentWorker(Path.cwd())
+
+
+def _side_effect_adjudicator() -> SupervisorAgentSideEffectAdjudicator:
+    return SupervisorAgentSideEffectAdjudicator(Path.cwd())
 
 
 def _adapter() -> SupervisorAgentCodexAdapter:

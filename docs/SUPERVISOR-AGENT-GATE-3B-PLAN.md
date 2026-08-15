@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`prerequisite-branch-frozen / pr-ci-pending / machine-a-not-started`
+> 状态：`prerequisite-local-pass / side-effect-adjudication-ci-pending / machine-a-not-started`
 >
 > 日期：2026-08-15
 >
@@ -163,8 +163,29 @@ commit 独立重建快照，不复制机器 A 的 wheel、源码目录或 Python
 3. `unknown → stop → handoff` 只能得到 `handoff_blocked`；
 4. 不新增状态模型、事务框架或自动副作用判断。
 
-该修复通过定向回归、本地静态门禁和 PR CI 后，重新冻结
-`control_source_commit`，才能开始机器 A。
+上述继承修复通过后，真实停止演练进一步确认：主动停止真实 Worker 会保守留下
+`external_side_effects=unknown`。这不是可以改成 `none` 的 Adapter bug；在缺少人工确认时，
+`handoff_blocked` 正是正确终态。Gate 3B 若要继续，必须补一个窄的人工裁决入口，而不是
+自动猜测副作用。
+
+人工裁决固定为：
+
+```text
+needs_human + no active Writer + latest Checkpoint unknown
+  → 人工提供 actor、reason，并在 evidence_refs 中提供至少一个 run-local 条目
+  → Vega 重新采集并核对 Workspace
+  → 追加 adjudication Artifact 和新 Checkpoint
+  → none: stopped / safe
+  → known: needs_human / blocked
+```
+
+旧 `unknown` Checkpoint 和 Trace 不得改写。证据路径必须位于当前 run 内并绑定 SHA-256；
+Workspace 漂移、Git control 不完整、Handoff 已发布或证据缺失时拒绝裁决。CLI 只新增显式
+`vega agent adjudicate-side-effects --run <agent-run> --input <request.json>`，不改变默认
+命令、自动重试或成功语义。
+
+该窄路径通过定向回归、本地静态门禁和 PR CI 后，重新冻结 `control_source_commit`，才能
+开始机器 A。
 
 ### 5.3 无效预检记录
 
@@ -191,6 +212,29 @@ Gate 3B 成败证据。
 
 完整跨平台回归由 Draft PR 的 9 项 CI 继续验证。CI 未全绿前，当前状态只算
 `prerequisite-local-pass`，不得启动机器 A。
+
+未知副作用继承修复与协议 HEAD `87ef7a9` 已通过 PR `#61` workflow `31875925859` 的 9 项 CI：
+
+- 静态检查、仓库卫生和架构增长通过；
+- Python 3.12 四个完整文件分片通过；
+- Windows 专项与 wheel smoke 通过；
+- POSIX 临时目录专项通过；
+- Python 3.11 编译与 `1242` 节点收集通过；
+- wheel、sdist 构建及干净环境安装通过。
+
+该结果只证明 unknown 不会被第二次 stop 洗白。后续人工裁决候选已完成本地验证：
+
+- Recovery 四个独立分片：`6 + 8 + 8 + 11 = 33 passed`，最慢分片 `25.58s`；
+- Handoff：`14 passed, 1 skipped in 39.07s`；
+- mutation lock：`10 passed in 5.35s`；
+- 裁决安全强化节点：`6 passed in 10.76s`，覆盖 Checkpoint 缺口、State 绑定、
+  故障注入、CLI 脱敏和 junction 边界；
+- 完整节点收集：`1248 collected`；
+- Ruff、compileall、repository hygiene、architecture growth 和 `git diff --check` 通过；
+  architecture growth 为 `C901 35→35`、Python 模块 `128→129`。
+
+人工裁决候选对应的新 HEAD 尚未通过 9 项 CI，因此当前只算
+`prerequisite-local-pass`，机器 A 不得启动。
 
 ## 六、机器 A 协议
 
@@ -240,7 +284,33 @@ Gate 3B 成败证据。
 - 外部副作用为 `none` 或已明确解释；
 - 最新 Checkpoint 可以安全交接。
 
-随后执行：
+如果最新 Checkpoint 的 `external_side_effects=unknown`，先在当前 run 内写入人工核对记录，
+例如 `runs/<agent-run>/manual-evidence/side-effects-reviewed.md`，并在
+`.tmp/dogfood/sag3b-01/protocol/side-effect-adjudication.json` 写入：
+
+```json
+{
+  "reason": "已核对执行记录、进程和任务范围；本次没有仓库外写入",
+  "workspace_explained": true,
+  "external_side_effects": "none",
+  "actor": "machine-a-operator",
+  "evidence_refs": [
+    "manual-evidence/side-effects-reviewed.md"
+  ]
+}
+```
+
+随后使用同一固定控制器执行：
+
+```powershell
+<frozen-vega> agent adjudicate-side-effects --run <agent-run> --input .tmp/dogfood/sag3b-01/protocol/side-effect-adjudication.json
+```
+
+只有裁决结果为 `none`、最新 Checkpoint 为 `stopped / safe` 时才继续。若人工确认结果为
+`known`，必须在请求中如实写入 `known`，任务保持 `needs_human / blocked`，本次 Gate 不得
+发布 ready Handoff。
+
+满足上述条件后执行：
 
 ```powershell
 <frozen-vega> agent checkpoint --run <agent-run> --handoff --reason "Gate 3B physical-machine handoff"
