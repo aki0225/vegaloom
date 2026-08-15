@@ -44,7 +44,7 @@ from .redaction import write_redacted_json, write_redacted_text
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir, resolve_run_dir
 from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
-from .workspace_inventory import prepare_verification_temp_root
+from .workspace_inventory import prepare_verification_temp_root, workspace_ignored_path_exclusions
 
 
 def require_git_root(repo: Path) -> Path:
@@ -105,7 +105,8 @@ def resolve_resume_task(repo: Path, task_path: Path | None) -> tuple[Path, str]:
 def capture_bound_workspace(run_dir: Path) -> ReviewWorkspaceSnapshot:
     metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
     repo = Path(metadata["repo_path"]).resolve(strict=True)
-    return capture_review_workspace(repo)
+    exclusions = workspace_ignored_path_exclusions(run_dir.parent.parent, repo)
+    return capture_review_workspace(repo, ignored_path_exclusions=exclusions)
 
 
 def load_agent_bundle(
@@ -247,8 +248,12 @@ def write_checkpoint(
     operation_started: bool | None = None,
     external_side_effects: Literal["none", "known", "unknown"] | None = None,
 ) -> AgentCheckpoint:
-    checkpoints = sorted((run_dir / "checkpoints").glob("checkpoint-*.json"))
-    checkpoint_id = f"checkpoint-{len(checkpoints) + 1:03d}"
+    checkpoint_numbers = [
+        int(path.stem.removeprefix("checkpoint-"))
+        for path in (run_dir / "checkpoints").glob("checkpoint-*.json")
+        if path.stem.removeprefix("checkpoint-").isdigit()
+    ]
+    checkpoint_id = f"checkpoint-{max(checkpoint_numbers, default=0) + 1:03d}"
     checkpoint = AgentCheckpoint(
         checkpoint_id=checkpoint_id,
         run_id=state.run_id,

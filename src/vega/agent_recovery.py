@@ -301,6 +301,9 @@ class SupervisorAgentRecovery:
         if not stopped and state.phase == "needs_human":
             raise ValueError("当前 run 已在等待人工；无需重复 pause")
         actual = capture_bound_workspace(run_dir)
+        external_side_effects = latest_checkpoint(
+            run_dir, state
+        ).external_side_effects if state.latest_checkpoint_id is not None else "none"
         if state.workspace_fingerprint != actual.fingerprint:
             blocked_reason = (
                 f"{action} 前 Workspace 已漂移；现场已保留并交由人工对账"
@@ -320,6 +323,7 @@ class SupervisorAgentRecovery:
                 status="blocked",
                 pending_actions=["human"],
                 operation_started=False,
+                external_side_effects=external_side_effects,
             )
             blocked_state = update_state(
                 blocked_state,
@@ -343,7 +347,7 @@ class SupervisorAgentRecovery:
             )
             return AgentRun(run_dir=run_dir, state=blocked_state, plan=plan)
         safe = not actual.unsafe_index_paths and actual.git_control_complete
-        if stopped and safe:
+        if stopped and safe and external_side_effects == "none":
             phase = "stopped"
             allowed_actions: list[str] = []
             status = "safe"
@@ -373,6 +377,7 @@ class SupervisorAgentRecovery:
             status=status,
             pending_actions=pending_actions,
             operation_started=False,
+            external_side_effects=external_side_effects,
         )
         next_state = update_state(
             next_state,

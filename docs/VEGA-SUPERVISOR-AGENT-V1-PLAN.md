@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B～3C 冻结`
+> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B machine-a-insufficient-handoff-opportunity / machine-b-not-started / gate-not-passed / Gate 3C 冻结`
 >
 > 计划日期：2026-08-13
 >
@@ -12,7 +12,11 @@
 > `gate-exit-pass`。2026-08-14 路线复核后增加 Gate 2C，用当前主线补一条真实完整成功路径。
 > SAG2C-01 因 pytest 提前导入控制环境中的 `packaging` 而记为 `invalid-harness`；修正验证入口的
 > SAG2C-02 已于 2026-08-14 通过 Gate 2C。Gate 3A 已于 2026-08-15 完成 Handoff 生产端、
-> 同机双隔离副本往返、PR CI 和合并前审阅，状态为 `gate-exit-pass`；Gate 3B～3C 仍冻结。
+> 同机双隔离副本往返、PR CI 和合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，
+> 固定控制器、未知副作用继承和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结，
+> 机器 A 正式 attempt 因 Windows 沙箱工具环境阻断而没有形成可交接 partial Diff，判定为
+> `insufficient-handoff-opportunity / environment-blocked`。Gate 3B 未通过，机器 B 未启动，
+> Gate 3C 仍冻结。
 
 ## 一、产品决定
 
@@ -1074,7 +1078,9 @@ reviewer_worker_context_leak = 0
 
 当前执行进度：第 1～7 项已完成。第 6 项的首次运行记为 `invalid-harness`，修正后的
 SAG2C-02 已判定为 `gate-exit-pass`；第 7 项 Gate 3A 已完成实现、本地往返、PR CI 与
-合并前审阅，判定为 `gate-exit-pass`。Gate 3B～3C 仍冻结。
+合并前审阅，判定为 `gate-exit-pass`。Gate 3B 已完成机器 A 正式 attempt，但没有形成可交接
+partial Diff，判定为 `insufficient-handoff-opportunity / environment-blocked`；Gate 未通过，
+机器 B 未启动。Gate 3C 仍冻结。
 
 1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
 2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；

@@ -8,8 +8,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from vega import agent_recovery as agent_recovery_module
+from vega import agent_side_effect_adjudication as agent_adjudication_module
 from vega import agent_worker as agent_worker_module
 from vega.agent_contract import AgentObservation, AgentPlan, AgentWorkItem
 from vega.agent_persistence import (
@@ -22,7 +24,11 @@ from vega.agent_persistence import (
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_recovery_request import AgentRecoveryRequest
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_side_effect_adjudication import (
+    SupervisorAgentSideEffectAdjudicator,
+)
 from vega.agent_worker import SupervisorAgentWorker
+from vega.cli_entrypoint import app
 from vega.execution_control import ExecutionLease
 from vega.models import LoopAutomationState
 
@@ -612,6 +618,448 @@ def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> No
     assert "任务已停止" in runtime.status(stopped.run_dir.name)
 
 
+def test_stop_inherits_unknown_side_effect_and_remains_blocked(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+
+    stopped = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="外部副作用仍未完成对账",
+    )
+    checkpoint = _latest_checkpoint(run_dir)
+
+    assert stopped.state.phase == "needs_human"
+    assert stopped.state.allowed_actions == ["human"]
+    assert checkpoint.status == "blocked"
+    assert checkpoint.pending_actions == ["human"]
+    assert checkpoint.external_side_effects == "unknown"
+    handoff = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="未知外部副作用仍未解除",
+    )
+    assert handoff.handoff_status == "handoff_blocked"
+
+
+def test_pause_inherits_known_side_effect(tmp_path: Path) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "known")
+
+    SupervisorAgentRecovery(workspace).pause(
+        run_id,
+        reason="暂停并保留已知外部副作用",
+    )
+
+    assert _latest_checkpoint(run_dir).external_side_effects == "known"
+
+
+def test_stop_without_latest_checkpoint_keeps_side_effect_none(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    state_path = run_dir / "agent-state.json"
+    state = load_agent_state(state_path)
+    save_agent_state(
+        state_path,
+        state.model_copy(update={"latest_checkpoint_id": None}),
+    )
+
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="没有历史 Checkpoint 时停止",
+    )
+
+    assert _latest_checkpoint(run_dir).external_side_effects == "none"
+
+
+def test_unknown_side_effect_adjudication_appends_evidence_and_allows_handoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="Worker 已停止，等待人工核对外部副作用",
+    )
+    previous = _latest_checkpoint(run_dir)
+    previous_path = run_dir / "checkpoints" / f"{previous.checkpoint_id}.json"
+    previous_bytes = previous_path.read_bytes()
+    checkpoint_paths = sorted((run_dir / "checkpoints").glob("checkpoint-*.json"))
+    assert len(checkpoint_paths) >= 2
+    next(path for path in checkpoint_paths if path != previous_path).unlink()
+    evidence_path = run_dir / "manual-evidence" / "side-effects-reviewed.md"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text(
+        "已核对执行记录和任务范围；本次只产生仓库内文件修改。\n",
+        encoding="utf-8",
+    )
+    request_path = workspace / "side-effect-adjudication.json"
+    fake_secret = "sk-test-side-effect-adjudication-secret"
+    request_path.write_text(
+        AgentRecoveryRequest(
+            reason=(
+                "执行记录未包含部署、数据库或外部 API 操作；"
+                f"临时核对 token={fake_secret}"
+            ),
+            external_side_effects="none",
+            actor="operator",
+            evidence_refs=["manual-evidence/side-effects-reviewed.md"],
+        ).model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(workspace)
+    invalid_secret = "sk-test-invalid-side-effect-secret"
+    invalid_request_path = workspace / "invalid-side-effect-adjudication.json"
+    invalid_request_path.write_text(
+        json.dumps(
+            {
+                "reason": "invalid request",
+                "external_side_effects": invalid_secret,
+            }
+        ),
+        encoding="utf-8",
+    )
+    invalid = CliRunner().invoke(
+        app,
+        [
+            "agent",
+            "adjudicate-side-effects",
+            "--run",
+            run_id,
+            "--input",
+            str(invalid_request_path),
+        ],
+    )
+    assert invalid.exit_code != 0
+    assert invalid_secret not in invalid.output
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "agent",
+            "adjudicate-side-effects",
+            "--run",
+            run_id,
+            "--input",
+            str(request_path),
+        ],
+    )
+    adjudicated = load_agent_state(run_dir / "agent-state.json")
+    current = _latest_checkpoint(run_dir)
+
+    assert result.exit_code == 0, result.output
+    assert adjudicated.phase == "stopped"
+    assert current.status == "safe"
+    assert current.external_side_effects == "none"
+    assert f"checkpoints/{previous.checkpoint_id}.json" in current.evidence_refs
+    assert "manual-evidence/side-effects-reviewed.md" in current.evidence_refs
+    assert previous_path.read_bytes() == previous_bytes
+    assert load_agent_checkpoint(
+        previous_path
+    ).external_side_effects == "unknown"
+    adjudication = json.loads(
+        next((run_dir / "adjudications").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert adjudication["previous_external_side_effects"] == "unknown"
+    assert adjudication["resolved_external_side_effects"] == "none"
+    assert adjudication["evidence"][1]["path"] == (
+        "manual-evidence/side-effects-reviewed.md"
+    )
+    events = [item["event"] for item in read_agent_trace(run_dir / "trace.jsonl")]
+    assert events[-1] == "agent_side_effects_adjudicated"
+    run_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in run_dir.rglob("*")
+        if path.is_file()
+    )
+    assert fake_secret not in run_text
+    handoff = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="人工副作用裁决后准备换机",
+    )
+    assert handoff.handoff_status == "handoff_ready"
+    assert repo.joinpath(handoff.task_card_path.relative_to(repo)).is_file()
+
+
+def test_known_side_effect_adjudication_remains_blocked(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="等待人工确认已发生的外部动作",
+    )
+    evidence_path = run_dir / "manual-evidence" / "known-side-effect.md"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text("已确认存在外部 API 写入。\n", encoding="utf-8")
+
+    adjudicated = SupervisorAgentSideEffectAdjudicator(workspace).adjudicate(
+        run_id,
+        AgentRecoveryRequest(
+            reason="人工确认存在外部 API 写入",
+            external_side_effects="known",
+            actor="operator",
+            evidence_refs=["manual-evidence/known-side-effect.md"],
+        ),
+    )
+
+    assert adjudicated.state.phase == "needs_human"
+    assert adjudicated.state.allowed_actions == ["human"]
+    checkpoint = _latest_checkpoint(run_dir)
+    assert checkpoint.status == "blocked"
+    assert checkpoint.external_side_effects == "known"
+    stopped = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="已知外部副作用仍未处理",
+    )
+    assert stopped.state.phase == "needs_human"
+    assert stopped.state.allowed_actions == ["human"]
+    checkpoint = _latest_checkpoint(run_dir)
+    assert checkpoint.status == "blocked"
+    assert checkpoint.external_side_effects == "known"
+    handoff = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="已知副作用仍需人工处理",
+    )
+    assert handoff.handoff_status == "handoff_blocked"
+
+
+def test_side_effect_adjudication_rejects_missing_evidence_or_workspace_drift(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="等待严格人工裁决",
+    )
+    adjudicator = SupervisorAgentSideEffectAdjudicator(workspace)
+
+    with pytest.raises(ValueError, match="actor"):
+        adjudicator.adjudicate(
+            run_id,
+            AgentRecoveryRequest(
+                reason="缺少明确裁决人",
+                external_side_effects="none",
+                evidence_refs=["manual-evidence/review.md"],
+            ),
+        )
+
+    with pytest.raises(ValueError, match="至少需要一个"):
+        adjudicator.adjudicate(
+            run_id,
+            AgentRecoveryRequest(
+                reason="不能只凭口头断言解除 unknown",
+                external_side_effects="none",
+                actor="operator",
+            ),
+        )
+
+    evidence_path = run_dir / "manual-evidence" / "review.md"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text("人工检查记录。\n", encoding="utf-8")
+    (repo / "README.md").write_text("workspace drift\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Workspace 已漂移"):
+        adjudicator.adjudicate(
+            run_id,
+            AgentRecoveryRequest(
+                reason="现场变化后不能复用旧证据",
+                external_side_effects="none",
+                actor="operator",
+                evidence_refs=["manual-evidence/review.md"],
+            ),
+        )
+    assert _latest_checkpoint(run_dir).external_side_effects == "unknown"
+
+
+def test_side_effect_adjudication_rejects_stale_checkpoint_binding(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="等待人工确认外部副作用",
+    )
+    checkpoint = _latest_checkpoint(run_dir)
+    checkpoint_path = (
+        run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json"
+    )
+    save_agent_checkpoint(
+        checkpoint_path,
+        checkpoint.model_copy(update={"current_work_item": "stale-work-item"}),
+    )
+    evidence_path = run_dir / "manual-evidence" / "review.md"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text("人工核对记录。\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="绑定不一致"):
+        SupervisorAgentSideEffectAdjudicator(workspace).adjudicate(
+            run_id,
+            AgentRecoveryRequest(
+                reason="没有仓库外写入",
+                external_side_effects="none",
+                actor="operator",
+                evidence_refs=["manual-evidence/review.md"],
+            ),
+        )
+
+    assert load_agent_state(run_dir / "agent-state.json").phase == "needs_human"
+
+
+def test_side_effect_adjudication_fails_closed_before_state_publish(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for target in (
+        "write_redacted_json_once",
+        "write_checkpoint",
+        "save_agent_state",
+        "write_status_card",
+        "append_agent_trace",
+    ):
+        _, workspace, run_id = _approved_run(tmp_path / target)
+        run_dir = workspace / "runs" / run_id
+        _replace_latest_external_side_effects(run_dir, "unknown")
+        SupervisorAgentRecovery(workspace).stop(
+            run_id,
+            reason="等待人工确认外部副作用",
+        )
+        original_state = (run_dir / "agent-state.json").read_bytes()
+        original_trace = (run_dir / "trace.jsonl").read_bytes()
+        original_status = (run_dir / "status-card.md").read_bytes()
+        original_checkpoints = {
+            path.name: path.read_bytes()
+            for path in (run_dir / "checkpoints").glob("checkpoint-*.json")
+        }
+        original_adjudications = {
+            path.name: path.read_bytes()
+            for path in (run_dir / "adjudications").glob("*.json")
+        }
+        evidence_path = run_dir / "manual-evidence" / "review.md"
+        evidence_path.parent.mkdir()
+        evidence_path.write_text("人工核对记录。\n", encoding="utf-8")
+
+        original_publisher = getattr(agent_adjudication_module, target)
+
+        def fail_publish(*args: object, **kwargs: object) -> None:
+            if target != "append_agent_trace":
+                original_publisher(*args, **kwargs)
+            raise OSError(f"simulated {target} failure")
+
+        with monkeypatch.context() as scoped:
+            scoped.setattr(agent_adjudication_module, target, fail_publish)
+            with pytest.raises(OSError, match="simulated"):
+                SupervisorAgentSideEffectAdjudicator(workspace).adjudicate(
+                    run_id,
+                    AgentRecoveryRequest(
+                        reason="没有仓库外写入",
+                        external_side_effects="none",
+                        actor="operator",
+                        evidence_refs=["manual-evidence/review.md"],
+                    ),
+                )
+
+        assert (run_dir / "agent-state.json").read_bytes() == original_state
+        assert (run_dir / "trace.jsonl").read_bytes() == original_trace
+        assert (run_dir / "status-card.md").read_bytes() == original_status
+        assert {
+            path.name: path.read_bytes()
+            for path in (run_dir / "checkpoints").glob("checkpoint-*.json")
+        } == original_checkpoints
+        assert {
+            path.name: path.read_bytes()
+            for path in (run_dir / "adjudications").glob("*.json")
+        } == original_adjudications
+        assert _latest_checkpoint(run_dir).external_side_effects == "unknown"
+
+
+def test_side_effect_adjudication_treats_observable_trace_commit_as_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="等待人工确认外部副作用",
+    )
+    evidence_path = run_dir / "manual-evidence" / "review.md"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text("人工核对记录。\n", encoding="utf-8")
+    original_trace_writer = agent_adjudication_module.append_agent_trace
+
+    def write_then_fail(*args: object, **kwargs: object) -> None:
+        original_trace_writer(*args, **kwargs)
+        raise OSError("simulated trace acknowledgement failure")
+
+    monkeypatch.setattr(
+        agent_adjudication_module,
+        "append_agent_trace",
+        write_then_fail,
+    )
+
+    result = SupervisorAgentSideEffectAdjudicator(workspace).adjudicate(
+        run_id,
+        AgentRecoveryRequest(
+            reason="没有仓库外写入",
+            external_side_effects="none",
+            actor="operator",
+            evidence_refs=["manual-evidence/review.md"],
+        ),
+    )
+
+    assert result.state.phase == "stopped"
+    assert _latest_checkpoint(run_dir).external_side_effects == "none"
+    events = read_agent_trace(run_dir / "trace.jsonl")
+    assert events[-1]["event"] == "agent_side_effects_adjudicated"
+
+
+def test_side_effect_adjudication_rejects_linked_artifact_directory(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="等待人工确认外部副作用",
+    )
+    evidence_path = run_dir / "manual-evidence" / "review.md"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text("人工核对记录。\n", encoding="utf-8")
+    outside = tmp_path / "outside-adjudications"
+    outside.mkdir()
+    _create_directory_link(run_dir / "adjudications", outside)
+
+    with pytest.raises(OSError, match="链接|junction|reparse"):
+        SupervisorAgentSideEffectAdjudicator(workspace).adjudicate(
+            run_id,
+            AgentRecoveryRequest(
+                reason="没有仓库外写入",
+                external_side_effects="none",
+                actor="operator",
+                evidence_refs=["manual-evidence/review.md"],
+            ),
+        )
+
+    assert not list(outside.iterdir())
+    assert _latest_checkpoint(run_dir).external_side_effects == "unknown"
+
+
 def test_stop_active_assist_child_targets_only_bound_operation(
     tmp_path: Path,
 ) -> None:
@@ -820,6 +1268,30 @@ def _latest_checkpoint(run_dir: Path):
     return load_agent_checkpoint(
         run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
     )
+
+
+def _replace_latest_external_side_effects(run_dir: Path, value: str) -> None:
+    checkpoint = _latest_checkpoint(run_dir)
+    payload = checkpoint.model_dump(mode="json")
+    payload["external_side_effects"] = value
+    save_agent_checkpoint(
+        run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json",
+        checkpoint.model_validate(payload),
+    )
+
+
+def _create_directory_link(link_path: Path, target_path: Path) -> None:
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd", "/d", "/c", "mklink", "/J", str(link_path), str(target_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            pytest.skip("当前 Windows 环境不能创建 junction")
+        return
+    link_path.symlink_to(target_path, target_is_directory=True)
 
 
 def _repo(path: Path) -> Path:

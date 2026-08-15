@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 import vega.agent_handoff as agent_handoff_module
 from vega.agent_contract import AgentPlan, AgentWorkItem
-from vega.agent_persistence import load_agent_state
+from vega.agent_persistence import load_agent_state, read_agent_trace
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_task_card import TaskCardError, load_task_card
@@ -216,7 +216,7 @@ def test_handoff_redacts_fake_key_from_all_artifacts(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "failed_writer",
-    ["manifest", "summary", "state", "trace", "status"],
+    ["metadata", "manifest", "summary", "state", "trace", "status"],
 )
 def test_handoff_artifact_failure_does_not_publish_task_card(
     tmp_path: Path,
@@ -224,11 +224,35 @@ def test_handoff_artifact_failure_does_not_publish_task_card(
     failed_writer: str,
 ) -> None:
     repo, workspace, run_id = _stopped_run(tmp_path)
-    if failed_writer == "manifest":
+    run_dir = workspace / "runs" / run_id
+    state_path = run_dir / "agent-state.json"
+    trace_path = run_dir / "trace.jsonl"
+    status_path = run_dir / "status-card.md"
+    metadata_path = run_dir / "agent-run.json"
+    manifest_path = run_dir / "handoff-manifest.json"
+    summary_path = run_dir / "handoff-summary.md"
+    original_state_bytes = state_path.read_bytes()
+    original_trace_bytes = trace_path.read_bytes()
+    original_status_bytes = status_path.read_bytes()
+    original_metadata_bytes = metadata_path.read_bytes()
+    original_checkpoints = {
+        path.name: path.read_bytes()
+        for path in (run_dir / "checkpoints").glob("checkpoint-*.json")
+    }
+    if failed_writer == "metadata":
+        original_metadata_writer = agent_handoff_module.write_run_metadata
+
+        def fail_metadata(*args: object, **kwargs: object) -> None:
+            original_metadata_writer(*args, **kwargs)
+            raise OSError("simulated metadata failure")
+
+        monkeypatch.setattr(agent_handoff_module, "write_run_metadata", fail_metadata)
+    elif failed_writer == "manifest":
         original = agent_handoff_module.write_redacted_json
 
         def fail_manifest(path: Path, payload: object) -> None:
             if path.name == "handoff-manifest.json":
+                original(path, payload)
                 raise OSError("simulated manifest failure")
             original(path, payload)
 
@@ -238,30 +262,35 @@ def test_handoff_artifact_failure_does_not_publish_task_card(
 
         def fail_summary(path: Path, text: str) -> None:
             if path.name == "handoff-summary.md":
+                original_text(path, text)
                 raise OSError("simulated summary failure")
             original_text(path, text)
 
         monkeypatch.setattr(agent_handoff_module, "write_redacted_text", fail_summary)
     elif failed_writer == "state":
-        original_state = agent_handoff_module.save_agent_state
+        original_state_writer = agent_handoff_module.save_agent_state
 
         def fail_state(path: Path, state: object) -> None:
             if getattr(state, "handoff_status", None) != "none":
+                original_state_writer(path, state)
                 raise OSError("simulated state failure")
-            original_state(path, state)
+            original_state_writer(path, state)
 
         monkeypatch.setattr(agent_handoff_module, "save_agent_state", fail_state)
     elif failed_writer == "trace":
-        original_trace = agent_handoff_module.append_agent_trace
+        original_trace_writer = agent_handoff_module.append_agent_trace
 
         def fail_trace(*args, **kwargs) -> None:
             if kwargs.get("event") == "agent_handoff_created":
                 raise OSError("simulated trace failure")
-            original_trace(*args, **kwargs)
+            original_trace_writer(*args, **kwargs)
 
         monkeypatch.setattr(agent_handoff_module, "append_agent_trace", fail_trace)
     else:
+        original_status_writer = agent_handoff_module.write_status_card
+
         def fail_status(*args, **kwargs) -> None:
+            original_status_writer(*args, **kwargs)
             raise OSError("simulated status failure")
 
         monkeypatch.setattr(agent_handoff_module, "write_status_card", fail_status)
@@ -272,9 +301,77 @@ def test_handoff_artifact_failure_does_not_publish_task_card(
             reason="验证失败发布顺序",
         )
 
-    state = load_agent_state(workspace / "runs" / run_id / "agent-state.json")
+    state = load_agent_state(state_path)
     assert state.handoff_status == "none"
+    assert state_path.read_bytes() == original_state_bytes
+    assert trace_path.read_bytes() == original_trace_bytes
+    assert status_path.read_bytes() == original_status_bytes
+    assert metadata_path.read_bytes() == original_metadata_bytes
+    assert not manifest_path.exists()
+    assert not summary_path.exists()
+    assert {
+        path.name: path.read_bytes()
+        for path in (run_dir / "checkpoints").glob("checkpoint-*.json")
+    } == original_checkpoints
     assert not list((repo / ".vega" / "tasks").rglob("*.md"))
+
+
+def test_handoff_treats_observable_trace_commit_as_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _stopped_run(tmp_path)
+    original_trace_writer = agent_handoff_module.append_agent_trace
+
+    def write_then_fail(*args, **kwargs) -> None:
+        original_trace_writer(*args, **kwargs)
+        raise OSError("simulated trace acknowledgement failure")
+
+    monkeypatch.setattr(
+        agent_handoff_module,
+        "append_agent_trace",
+        write_then_fail,
+    )
+
+    result = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证 Trace 已落盘时不回滚已提交 Handoff",
+    )
+
+    assert result.run.state.handoff_status == "handoff_ready"
+    assert result.task_card_path.is_file()
+    events = read_agent_trace(result.run.run_dir / "trace.jsonl")
+    assert events[-1]["event"] == "agent_handoff_created"
+
+
+def test_handoff_failure_preserves_concurrently_created_task_card(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    concurrent_content = "concurrent task card\n"
+
+    def fail_after_concurrent_publish(path: Path, card: object) -> None:
+        del card
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(concurrent_content, encoding="utf-8")
+        raise TaskCardError("simulated concurrent Task Card publication")
+
+    monkeypatch.setattr(
+        agent_handoff_module,
+        "save_task_card",
+        fail_after_concurrent_publish,
+    )
+
+    with pytest.raises(TaskCardError, match="simulated concurrent"):
+        SupervisorAgentRuntime(workspace).handoff(
+            run_id,
+            reason="验证失败回滚不删除其他 run 的 Task Card",
+        )
+
+    cards = list((repo / ".vega" / "tasks").rglob("*.md"))
+    assert len(cards) == 1
+    assert cards[0].read_text(encoding="utf-8") == concurrent_content
 
 
 def test_resume_rejects_head_after_handoff_commit(tmp_path: Path) -> None:

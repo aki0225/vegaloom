@@ -766,3 +766,64 @@ Windows 专项与 wheel smoke，以及 Python 3.12 的四个测试分片。两�
 因此 Gate 3A 判定为 `gate-exit-pass`。该结论仍只证明单 Work Item、人工 Git、同机双隔离
 副本的机械接力；不证明真实跨机器、真实模型继续执行或日常价值。Gate 3B 与 Gate 3C
 继续冻结。
+
+## 2026-08-15 Supervisor Agent Gate 3B：仓库内 Workspace 预检阻断
+
+本条只追加 SAG3B-01 在模型启动前暴露的控制器缺陷，不覆盖 Gate 3A 或 Gate 3B 协议中的
+历史记录。候选 Agent run 为 `20260815-180117-agent`。
+
+- 固定 Plan 创建并批准成功，状态进入 `ready`；
+- `agent run` 在创建 child 前以 `Workspace 已漂移` fail-closed；
+- 没有模型 turn、active child、tracked Diff、自动重试、commit、push、release 或外部副作用；
+- 根因是 Vega workspace 与目标仓库相同时，自有 `runs/` 中新写入的 Task Brief、
+  Checkpoint、State 和 Trace 被纳入 ignored 指纹；
+- 该 run 判定为 `invalid-preflight / no-model-turn`，不占用机器 A 的正式 attempt。
+
+修复提交 `3e636e4` 只排除当前 workspace 自有 `runs/` 和受控 verification 临时根；其他
+ignored 路径变化继续 fail-closed。正反向回归、既有漂移节点、静态门禁和完整
+`1250` 节点收集通过，workflow `31879544491` 的 9 项 CI 全部成功。固定控制器已从该提交
+重新导出；机器 A 仍未正式启动，需等待协议文档提交的 CI 后重新预检。
+
+## 2026-08-15 Supervisor Agent Gate 3B：SAG3B-01 机器 A 正式 Attempt
+
+本条只追加 SAG3B-01 的正式机器 A 结果，不覆盖上方预检阻断记录，也不把环境故障外推为
+目标代码或模型通用能力结论。
+
+- 正式启动 HEAD：`c08d46ab469f1a98421b3cabc73a2c5cd18ceb50`；
+- 固定控制源码提交：`3e636e40537bfda5213d13a407ae51b6be0fbbd8`；
+- Agent run：`20260815-184052-agent`；
+- child：`20260815-184120-147051-bug-loop`；
+- operation：`02125d80693b4fe7ae548fd527814bb5`；
+- Worker：`gpt-5.6-sol / xhigh`。
+
+Codex Worker 从 `18:41:25 +08:00` 运行至 `18:46:49 +08:00`，进程返回码为 `0`，并返回
+结构化 `blocked` Claim。返回码只表示 Runner 成功收集到 Claim，不代表任务完成。Worker
+尝试使用 PowerShell、Git、Ripgrep 和 Node REPL 读取工作区，但全部在工具启动前遇到
+`windows sandbox: helper_unknown_error: setup refresh had errors`。Worker 因此没有读取或
+修改目标文件，没有运行自检，也没有产生 tracked Diff。
+
+观察进程没有看到“允许路径 Diff + active Writer”的同时窗口，按冻结协议没有发送
+`agent stop`。Worker 退出后，Core 以 `assist continue` 对账当前工作区：
+
+- Workspace 与三个 Scope Gate 均因无 Diff 保持 `skipped`，没有越界文件；
+- Ruff 验证通过；
+- pytest 受控执行在写入自身 `execution.json` 时遇到 Windows `WinError 5`，Verification
+  记为 `failed`，不能作为测试通过证据；
+- Risk Gate 与独立 Reviewer 均未运行；
+- child Finish 为 `needs_human / no_diff`；
+- Supervisor 机器 Observation 记录 `work_item_completed=false`、
+  `worker_alive=false`、`external_side_effects=none`；
+- Supervisor 确定性选择 `replan`，最终 phase 为 `planning`，Checkpoint 为
+  `blocked`，没有启动第二 Writer。
+
+运行结束后 HEAD 未改变，工作区没有 tracked Diff，Writer、pytest 和 Vega owner 进程均已
+退出；没有自动 commit、push、release、删除文件或写入长期 Memory。
+
+SAG3B-01 判定为
+`insufficient-handoff-opportunity / environment-blocked`：机器 A 没有形成能够安全停止和
+发布的 partial WIP，因此没有 Handoff Task Card、Handoff 提交或机器 B 恢复。该 Case 不重跑，
+不更换任务、模型、预算或成功条件。Gate 3B 未通过，Gate 3C 继续冻结。
+
+这条证据只证明当前 Supervisor 在真实 Worker 工具环境阻断且 Core Verification 失败时保持
+fail-closed，不会把 Runner 返回码 `0` 或 Worker 自述误当完成，也不会自动重试或制造跨机器
+成功叙事；它不证明跨机器接力、任务修复成功率或 Windows Codex 沙箱稳定性。

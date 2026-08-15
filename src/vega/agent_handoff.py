@@ -19,10 +19,15 @@ from .agent_handoff_safety import (
     prepare_task_card_root,
     require_plain_task_card_tree,
 )
+from .agent_handoff_rendering import git_checklist, render_handoff_summary
 from .agent_persistence import (
     append_agent_trace,
+    append_agent_trace_commit,
     load_agent_checkpoint,
+    read_optional_artifact,
     read_agent_trace,
+    remove_artifact_if_published,
+    restore_optional_artifact,
     save_agent_state,
 )
 from .agent_run import AgentRun
@@ -237,61 +242,68 @@ def create_handoff(
     card_digest = task_card_content_digest(card_content)
     relative_card = card_path.relative_to(repo).as_posix()
 
-    write_run_metadata(
-        run_dir,
-        repo,
-        _metadata_revision(metadata, snapshot.head_sha),
-        task_card=relative_card,
-    )
-    write_redacted_json(
-        run_dir / "handoff-manifest.json",
-        {
-            "schema_version": 1,
-            "run_id": state.run_id,
-            "task_id": state.task_id,
-            "task_card": relative_card,
-            "task_card_sha256": card_digest,
-            "handoff_status": handoff_status,
-            "checkpoint_id": checkpoint.checkpoint_id,
-            "handoff_base_revision": snapshot.head_sha,
-            "handoff_workspace_digest": workspace_digest,
-            "changed_files": list(snapshot.changed_files),
-            "pending_git_actions": _git_checklist(relative_card, snapshot.changed_files, branch),
-        },
-    )
-    write_redacted_text(
-        run_dir / "handoff-summary.md",
-        _render_handoff_summary(
-            card=card,
-            card_path=relative_card,
-            card_digest=card_digest,
-            branch=branch,
-            changed_files=snapshot.changed_files,
-            issues=issues,
-        ),
-    )
     published_state = update_state(
         checkpoint_state,
         latest_checkpoint_id=checkpoint.checkpoint_id,
         state_version=checkpoint_state.state_version + 1,
     )
-    require_plain_task_card_tree(repo, card_path.parent)
-    save_task_card(card_path, card)
+    metadata_path = run_dir / "agent-run.json"
+    manifest_path = run_dir / "handoff-manifest.json"
+    summary_path = run_dir / "handoff-summary.md"
+    state_path = run_dir / "agent-state.json"
+    trace_path = run_dir / "trace.jsonl"
+    status_path = run_dir / "status-card.md"
+    checkpoint_path = (
+        run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json"
+    )
+    previous_metadata = metadata_path.read_bytes()
+    previous_manifest = read_optional_artifact(manifest_path)
+    previous_summary = read_optional_artifact(summary_path)
+    previous_state = state_path.read_bytes()
+    previous_status = status_path.read_bytes() if status_path.exists() else None
+    card_published = False
     try:
-        save_agent_state(run_dir / "agent-state.json", published_state)
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="agent_handoff_created",
-            state=published_state,
-            observation_summary=f"已生成 {relative_card}",
-            route_reason=reason.strip(),
-            artifact_refs=[
-                relative_card,
-                "handoff-manifest.json",
-                "handoff-summary.md",
-                f"checkpoints/{checkpoint.checkpoint_id}.json",
-            ],
+        write_run_metadata(
+            run_dir,
+            repo,
+            _metadata_revision(metadata, snapshot.head_sha),
+            task_card=relative_card,
         )
+        write_redacted_json(
+            manifest_path,
+            {
+                "schema_version": 1,
+                "run_id": state.run_id,
+                "task_id": state.task_id,
+                "task_card": relative_card,
+                "task_card_sha256": card_digest,
+                "handoff_status": handoff_status,
+                "checkpoint_id": checkpoint.checkpoint_id,
+                "handoff_base_revision": snapshot.head_sha,
+                "handoff_workspace_digest": workspace_digest,
+                "changed_files": list(snapshot.changed_files),
+                "pending_git_actions": git_checklist(
+                    relative_card,
+                    snapshot.changed_files,
+                    branch,
+                ),
+            },
+        )
+        write_redacted_text(
+            summary_path,
+            render_handoff_summary(
+                card=card,
+                card_path=relative_card,
+                card_digest=card_digest,
+                branch=branch,
+                changed_files=snapshot.changed_files,
+                issues=issues,
+            ),
+        )
+        require_plain_task_card_tree(repo, card_path.parent)
+        save_task_card(card_path, card)
+        card_published = True
+        save_agent_state(state_path, published_state)
         write_status_card(
             run_dir,
             published_state,
@@ -299,14 +311,30 @@ def create_handoff(
             checkpoint=checkpoint,
             next_step=capsule.next_step,
         )
-    except Exception:
-        card_path.unlink(missing_ok=True)
-        save_agent_state(run_dir / "agent-state.json", state)
-        write_run_metadata(
-            run_dir,
-            repo,
-            _metadata_revision(metadata, snapshot.head_sha),
+        # Trace 是本次发布的最后提交点，避免后续失败留下无条件成功叙事。
+        trace_artifacts = [
+            relative_card,
+            "handoff-manifest.json",
+            "handoff-summary.md",
+            f"checkpoints/{checkpoint.checkpoint_id}.json",
+        ]
+        append_agent_trace_commit(
+            trace_path,
+            event="agent_handoff_created",
+            state=published_state,
+            observation_summary=f"已生成 {relative_card}",
+            route_reason=reason.strip(),
+            artifact_refs=trace_artifacts,
+            writer=append_agent_trace,
         )
+    except Exception:
+        restore_optional_artifact(state_path, previous_state)
+        restore_optional_artifact(status_path, previous_status)
+        restore_optional_artifact(metadata_path, previous_metadata)
+        restore_optional_artifact(manifest_path, previous_manifest)
+        restore_optional_artifact(summary_path, previous_summary)
+        remove_artifact_if_published(card_path, card_published)
+        checkpoint_path.unlink(missing_ok=True)
         raise
     return HandoffResult(
         run=AgentRun(run_dir=run_dir, state=published_state, plan=plan),
@@ -443,57 +471,3 @@ def _compact(values: list[str], *, limit: int = 12) -> list[str]:
         if text and text not in unique:
             unique.append(text)
     return unique[:limit]
-
-
-def _git_checklist(
-    card_path: str,
-    changed_files: tuple[str, ...],
-    branch: str,
-) -> list[str]:
-    paths = [*changed_files, card_path]
-    add_paths = " ".join(f"`{path}`" for path in paths) or "`<Task Card>`"
-    return [
-        "人工确认旧 Writer、进程和外部副作用已经停止或已明确标记 blocked",
-        "执行 `git status --short` 和 `git diff --check`",
-        f"只暂存 WIP 与 Task Card：{add_paths}",
-        "执行 `git diff --cached --check`，人工检查完整 staged diff",
-        f"人工决定是否在任务分支 `{branch}` commit 和 push",
-        "新机器使用 `git pull --ff-only` 后运行 `vega agent resume --repo .`",
-    ]
-
-
-def _render_handoff_summary(
-    *,
-    card: AgentTaskCard,
-    card_path: str,
-    card_digest: str,
-    branch: str,
-    changed_files: tuple[str, ...],
-    issues: list[str],
-) -> str:
-    lines = [
-        "# Vega Handoff Summary",
-        "",
-        f"- Task Card：`{card_path}`",
-        f"- Task Card SHA-256：`{card_digest}`",
-        f"- 分支：`{branch}`",
-        f"- Handoff 状态：`{card.handoff_status}`",
-        f"- 当前 Work Item：`{card.current_work_item}`",
-        f"- WIP 文件：{', '.join(f'`{path}`' for path in changed_files) or '无'}",
-        "",
-        "## 现场说明",
-        "",
-        *(
-            [f"- 阻断原因：{issue}" for issue in issues]
-            if issues
-            else ["- 现场可解释，旧 Writer 未保持 active binding。"]
-        ),
-        "",
-        "## 人工 Git 清单",
-        "",
-        *_git_checklist(card_path, changed_files, branch),
-        "",
-        "Vega 不会自动执行 commit、push、release 或删除文件。",
-        "",
-    ]
-    return "\n".join(lines)

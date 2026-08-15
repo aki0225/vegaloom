@@ -406,6 +406,69 @@ def test_approved_checkpoint_includes_first_assist_runtime_root(
     assert loop.start_count == 1
 
 
+def test_repo_local_agent_runs_do_not_drift_on_own_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    repo.joinpath(".gitignore").write_text(
+        "runs/\n.tmp/\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", "测试：忽略本地运行目录")
+    monkeypatch.chdir(repo)
+    runtime = SupervisorAgentRuntime(repo)
+    plan = _plan()
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    approved = runtime.approve(run.run_dir.name)
+    loop = _FakeLoopRuntime(repo, prepare_runtime_root=True)
+    adapter = SupervisorAgentCodexAdapter(
+        repo,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    result = adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+    assert result.state.phase == "finalizing"
+    assert loop.start_count == 1
+
+
+def test_repo_local_agent_runs_still_detect_other_ignored_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    repo.joinpath(".gitignore").write_text(
+        "runs/\n.tmp/\n.local-cache/\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", "测试：忽略本地运行目录")
+    monkeypatch.chdir(repo)
+    runtime = SupervisorAgentRuntime(repo)
+    plan = _plan()
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    approved = runtime.approve(run.run_dir.name)
+    repo.joinpath(".local-cache").mkdir()
+    repo.joinpath(".local-cache", "unexpected.txt").write_text(
+        "unexpected\n",
+        encoding="utf-8",
+    )
+    adapter = SupervisorAgentCodexAdapter(
+        repo,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=_FakeLoopRuntime(repo),
+    )
+
+    with pytest.raises(ValueError, match="Workspace 已漂移"):
+        adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+
 def test_worker_timeout_preserves_partial_diff_and_skips_core(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

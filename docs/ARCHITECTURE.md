@@ -632,7 +632,9 @@ Agent Plan / approval
 Workspace Gate，并证明 partial Diff 可以通过 identity-bound stop 保留并交还人工；Gate 2C
 已补齐 Verification、Risk、独立 Reviewer、Finish 和 Supervisor `finalize` 的完整成功路径。
 Gate 3A 已实现 Handoff Checkpoint、Resume Capsule、Git Task Card 与同机双隔离副本恢复；
-真实跨机器继续执行仍属于 Gate 3B。
+真实跨机器继续执行仍属于 Gate 3B。Gate 3B 的控制器必须从固定 commit 重建源码快照，不能
+使用目标 checkout 的 editable 安装；`pause/stop` 生成的新 Checkpoint 继承最近外部副作用
+状态，`unknown` 不能经二次停止降级为可安全 Handoff。
 
 Task Card 位于 Git 跟踪的 `.vega/tasks/**/*.md`，只保存批准 Plan 和人工交接所需的 Resume
 Capsule。本机 Agent State、Checkpoint、Trace 和 LangGraph SQLite 图游标仍留在 `runs/`，不进入
