@@ -13,8 +13,8 @@
 > 两个冻结真实案例、最终 PR CI 和合并前审阅，当前状态为 `gate-exit-pass`。2026-08-14
 > 路线复核后，Gate 2C 用于补一条当前主线真实完整成功路径。SAG2C-01 因验证入口加载了
 > 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 SAG2C-02 已完成并判定为
-> `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端和同机双隔离副本往返，本地状态为
-> `local-dogfood-pass / merge-pending`；Gate 3B～3C 仍冻结。既有
+> `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、同机双隔离副本往返、PR CI 和
+> 合并前审阅，状态为 `gate-exit-pass`；Gate 3B～3C 仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
@@ -51,7 +51,7 @@ v0.1.5 发布（完成）
   -> Gate 2A 中断恢复（完成并进入主线）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
   -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
-  -> Gate 3A Handoff 机械生产与本地往返（local-dogfood-pass / merge-pending）
+  -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
   -> Gate 3B 单 Work Item 跨机器接力（冻结）
   -> Gate 3C 小规模日常价值观察（冻结）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
@@ -798,8 +798,8 @@ SQLite 或聊天，仅凭 Git 中的 Resume Capsule 创建新 run `20260815-1448
 historical，新 Verification、Risk、Reviewer 均为 `not_run`。
 
 本地 CI 同款节点合计 `1239 collected / 1227 passed / 12 skipped / 0 failed`；Ruff、compileall、
-repository hygiene、architecture growth 和 `git diff --check` 通过。当前判定为
-`local-dogfood-pass / merge-pending`。只有 PR CI 与合并前审阅通过后才记为 Gate 3A
+repository hygiene、architecture growth 和 `git diff --check` 通过。实现提交 `33c4ac1`
+对应 PR `#60` 的 9 项 CI 全部通过，两轮独立本地审阅无剩余阻断项。Gate 3A 判定为
 `gate-exit-pass`；Gate 3B 真实跨机器接力和 Gate 3C 日常价值观察仍冻结。
 
 ## 七、更新规则

@@ -15,7 +15,7 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 3A `local-dogfood-pass / merge-pending` |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 3A `gate-exit-pass` |
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
 | 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
@@ -54,8 +54,8 @@ Gate 2B 的 Adapter 信任边界、两个真实案例、预算、停止条件和
 owned execution 能由身份绑定的 `agent stop` 停止并交还人工。当前状态为
 `gate-exit-pass`：两个冻结真实案例、最终 PR CI 和合并前审阅均满足 Gate 2B 的退出门槛。
 Gate 2C 首次运行因 pytest 加载了控制环境中的 `packaging` 而记为 `invalid-harness`；
-修正验证入口的 Gate 2C R2 已完成并判定为 `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端与
-同机双隔离副本往返，本地状态为 `local-dogfood-pass / merge-pending`；Gate 3B～3C 仍冻结，
+修正验证入口的 Gate 2C R2 已完成并判定为 `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、
+同机双隔离副本往返、PR CI 与合并前审阅，状态为 `gate-exit-pass`；Gate 3B～3C 仍冻结，
 不改变既有默认命令行为和成功语义。
 
 ### 真实日常使用观察

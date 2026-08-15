@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A local-dogfood-pass / merge-pending / Gate 3B～3C 冻结`
+> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B～3C 冻结`
 >
 > 计划日期：2026-08-13
 >
@@ -11,8 +11,8 @@
 > 单一实验分支完成机械合同、两个冻结真实案例、最终 PR CI 与合并前审阅，当前状态为
 > `gate-exit-pass`。2026-08-14 路线复核后增加 Gate 2C，用当前主线补一条真实完整成功路径。
 > SAG2C-01 因 pytest 提前导入控制环境中的 `packaging` 而记为 `invalid-harness`；修正验证入口的
-> SAG2C-02 已于 2026-08-14 通过 Gate 2C。Gate 3A 已于 2026-08-15 完成 Handoff 生产端和
-> 同机双隔离副本往返，本地状态为 `local-dogfood-pass / merge-pending`；Gate 3B～3C 仍冻结。
+> SAG2C-02 已于 2026-08-14 通过 Gate 2C。Gate 3A 已于 2026-08-15 完成 Handoff 生产端、
+> 同机双隔离副本往返、PR CI 和合并前审阅，状态为 `gate-exit-pass`；Gate 3B～3C 仍冻结。
 
 ## 一、产品决定
 
@@ -974,8 +974,9 @@ commit 或 push，也不建设第二套 Handoff Runtime。
 - Vega 没有自动执行 Git 写入、启动真实模型 Worker 或进入 Gate 3B。
 
 本地 CI 同款分片合计 `1239 collected / 1227 passed / 12 skipped / 0 failed`；Ruff、compileall、
-repository hygiene、architecture growth 和 `git diff --check` 均通过。PR CI 和合并前审阅完成前，
-Gate 3A 不升级为 `gate-exit-pass`。
+repository hygiene、architecture growth 和 `git diff --check` 均通过。实现提交 `33c4ac1`
+对应 PR `#60` 的 9 项 CI 全部通过，两轮独立本地审阅无剩余阻断项，Gate 3A 判定为
+`gate-exit-pass`。
 
 ### Gate 3B：单 Work Item 的真实跨机器接力
 
@@ -1071,9 +1072,9 @@ reviewer_worker_context_leak = 0
 
 ## 十三、审核通过后的实际顺序
 
-当前执行进度：第 1～7 项已完成本地实现与验证。第 6 项的首次运行记为 `invalid-harness`，
-修正后的 SAG2C-02 已判定为 `gate-exit-pass`；第 7 项 Gate 3A 已取得
-`local-dogfood-pass / merge-pending`，等待 PR CI 与合并前审阅。Gate 3B～3C 仍冻结。
+当前执行进度：第 1～7 项已完成。第 6 项的首次运行记为 `invalid-harness`，修正后的
+SAG2C-02 已判定为 `gate-exit-pass`；第 7 项 Gate 3A 已完成实现、本地往返、PR CI 与
+合并前审阅，判定为 `gate-exit-pass`。Gate 3B～3C 仍冻结。
 
 1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
 2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；

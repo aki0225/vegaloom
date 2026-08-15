@@ -752,3 +752,17 @@ repository hygiene、architecture growth 和 `git diff --check` 通过。
 
 当前判定为 `local-dogfood-pass / merge-pending`。PR CI 与合并前审阅通过后才能将 Gate 3A
 记为 `gate-exit-pass`。Gate 3B 真实跨机器接力与 Gate 3C 日常价值观察仍冻结。
+
+## 2026-08-15 Supervisor Agent Gate 3A：PR CI 与退出判定
+
+本条只追加 Gate 3A 的后续验证事实，不改写上方正式运行发生时的
+`local-dogfood-pass / merge-pending` 裁决。
+
+实现提交 `33c4ac1` 推送到 PR `#60` 后，workflow run `31871901115` 的 9 项任务全部通过，
+覆盖静态检查与分片完整性、POSIX 临时目录、wheel/sdist 构建安装、Python 3.11 兼容性、
+Windows 专项与 wheel smoke，以及 Python 3.12 的四个测试分片。两轮独立本地审阅已整合，
+没有剩余合并阻断项。
+
+因此 Gate 3A 判定为 `gate-exit-pass`。该结论仍只证明单 Work Item、人工 Git、同机双隔离
+副本的机械接力；不证明真实跨机器、真实模型继续执行或日常价值。Gate 3B 与 Gate 3C
+继续冻结。
