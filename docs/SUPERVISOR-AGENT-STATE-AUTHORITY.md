@@ -62,6 +62,8 @@ next / repair / replan / human / finalize
 - 旧 Writer 或 owned process 仍存活时不能启动第二 Writer；
 - Verification 失败、Risk 阻断、Artifact 不完整或 stale 时不能 `finalize`；
 - 未知外部副作用不能自动重试；
+- 人工 `pause/stop` 必须继承最近 Checkpoint 的外部副作用状态，不能把 `unknown` 降级为
+  `none` 或新的 `safe` Handoff；
 - Graph `END` 不能写入 `ready_to_commit`。
 
 ## 4. Task Card 与跨机器恢复
@@ -154,11 +156,12 @@ Gate 2A 已补充：
   Work Item 和 Workspace binding；
 - partial diff、未知外部副作用、Trace 损坏和状态损坏进入人工处理；
 - SQLite Graph checkpoint 丢失不影响从 Agent State、Checkpoint 和真实 Workspace 对账；
-- `pause / resume-local / stop` 保留 Goal、Plan、Diff 和 Artifact，不执行自动回滚。
+- `pause / resume-local / stop` 保留 Goal、Plan、Diff、Artifact 和最近 Checkpoint 的外部
+  副作用状态，不执行自动回滚。
 
 本地故障注入与状态回归为 62 项通过；审阅修复代码 HEAD `4180e7e` 已通过 workflow
 `31718078414` 的 9 项 CI，最终文档 HEAD `8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，
 并以 `6a5c927` 合并到 `main`。Gate 2A 退出条件已经满足；这些证据不代表 Gate 2B 已实现或
 通过。Gate 2B 后续已在独立实验分支完成机械合同、两个冻结真实案例、最终 PR CI 与合并前
-审阅，当前状态为 `gate-exit-pass`。状态权威顺序和本 ADR 的 fail-closed 决定没有改变；
-Gate 3 仍需单独批准。
+审阅，当前状态为 `gate-exit-pass`。状态权威顺序和本 ADR 的 fail-closed 决定没有改变。
+Gate 3A 已完成；Gate 3B 已获批准，当前先完成固定控制器和未知副作用继承前置门禁。

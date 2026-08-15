@@ -1,12 +1,15 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`protocol-frozen / machine-a-pending`
+> 状态：`prerequisite-local-pass / pr-ci-pending / machine-a-not-started`
 >
 > 日期：2026-08-15
 >
 > 主线基线：`main@2b765cfefe8deac121f752e3c9acfec1e3effd73`
 >
 > 实验分支：`codex/supervisor-gate3b`
+
+> 首次协议提交：`977af8f45ae6ba0bc425ca3c9e8556d696ab6664`。该提交在真实 Worker
+> 启动前发现控制器自修改和未知副作用降级两个前置缺口，因此不得作为正式执行基线。
 
 ## 一、目标
 
@@ -89,8 +92,11 @@ Adapter: codex-exec
 Worker: gpt-5.6-sol / xhigh
 Reviewer: gpt-5.6-sol / xhigh
 Worker timeout: 900 秒
-Reviewer timeout: 继承当前项目默认值
+Reviewer timeout: 900 秒
+机器 A 最大正式 attempt: 1
+机器 B 最大正式 attempt: 1
 自动重试: 0
+manual repair: 0
 replan: 0
 Work Item: 1
 ```
@@ -99,23 +105,93 @@ Work Item: 1
 允许路径或成功条件。凭据、Provider URL 和本机 Codex 配置不进入协议、Task Card、运行证据
 或 Git。
 
-## 五、机器 A 协议
+## 五、执行前置门禁
 
-### 5.1 预检
+### 5.1 固定控制器
 
-1. 从本协议提交后的 `codex/supervisor-gate3b` HEAD 开始；
+正式运行不得从目标 checkout 的 editable 安装加载 Vega。目标任务会修改 Vega 自身源码，如果后续
+`agent stop`、`checkpoint --handoff` 或 `agent resume` 直接导入目标 Workspace，实验 WIP
+就会改变实验控制器。
+
+机器 A 和机器 B 必须分别从同一个 `control_source_commit` 重建只读控制源码快照，并登记：
+
+```text
+control_source_commit
+control_source_tree
+control_source_sha256
+vega_version
+python_version
+os_arch
+codex_version
+runner_config_digest
+editable_install = false
+```
+
+控制源码放在项目内被忽略的 `.tmp/dogfood/sag3b-01/control-runtime/`。启动前必须证明实际
+`vega.__file__` 位于该快照，而不是目标 checkout 的 `src/vega/`。机器 B 从 Git 中的同一
+commit 独立重建快照，不复制机器 A 的 wheel、源码目录或 Python 环境。
+
+本协议中的 `<frozen-vega>` 表示上述固定控制器启动方式，不表示目标 checkout 中的
+`.venv/Scripts/vega.exe`。
+
+### 5.2 未知副作用不得降级
+
+正式运行前必须先通过一个窄前置修复：
+
+1. 没有 active Writer 的 `pause/stop` 必须继承最近 Checkpoint 的
+   `external_side_effects`；
+2. 最近值为 `unknown` 时，第二次 `stop` 仍为 `needs_human / blocked`；
+3. `unknown → stop → handoff` 只能得到 `handoff_blocked`；
+4. 不新增状态模型、事务框架或自动副作用判断。
+
+该修复通过定向回归、本地静态门禁和 PR CI 后，重新冻结
+`control_source_commit`，才能开始机器 A。
+
+### 5.3 无效预检记录
+
+`20260815-163843-agent` 只创建了未批准 Plan，没有启动 Worker、没有源码 Diff，也没有外部
+副作用。它暴露了：
+
+- 当前仓库需要通过 `VEGA_GIT_SAFE_DIRECTORY` 做进程级显式授权；
+- 初始 Plan 错把实现自由度写进 `unresolved_decisions`，因此批准被正确拒绝；
+- 当前 `.venv` 是目标 checkout 的 editable 安装，不能作为正式控制器。
+
+该 run 记为 `invalid-preflight / no-model-turn`，不占用机器 A 的一次正式 attempt，也不作为
+Gate 3B 成败证据。
+
+### 5.4 前置门禁本地结果
+
+2026-08-15 的本地结果：
+
+- Recovery 分片：`27 passed in 50.23s`；
+- Handoff 分片：`14 passed, 1 skipped in 37.31s`；
+- 最终新增节点复核：`3 passed in 3.47s`；
+- Ruff、compileall、repository hygiene 和 `git diff --check` 通过；
+- architecture growth 通过：`C901 35→35`、Python 模块 `128→128`；
+- 完整节点收集：`1242 collected`。
+
+完整跨平台回归由 Draft PR 的 9 项 CI 继续验证。CI 未全绿前，当前状态只算
+`prerequisite-local-pass`，不得启动机器 A。
+
+## 六、机器 A 协议
+
+### 6.1 预检
+
+1. 从前置修复和协议修订均提交后的 `codex/supervisor-gate3b` HEAD 开始；
 2. `git status --short --branch` 除忽略目录外必须干净；
-3. `codex --version`、`codex login status` 和 `vega agent capabilities` 通过；
+3. `codex --version`、`codex login status` 和 `<frozen-vega> agent capabilities` 通过；
 4. 确认有效模型为 `gpt-5.6-sol / xhigh`，但不得读取或打印凭据；
-5. Agent Plan 只写入 `.tmp/dogfood/sag3b-01/protocol/agent-plan.json`，不得提交；
-6. 启动前记录 HEAD、tree、Plan 摘要和关键文件 SHA-256 到本地运行登记，不修改历史实验记录。
+5. `control_source_commit`、控制源码摘要和 runner 配置摘要均与协议登记一致；
+6. `HEAD == origin/codex/supervisor-gate3b`，且远端 HEAD 等于正式启动 HEAD；
+7. Agent Plan 只写入 `.tmp/dogfood/sag3b-01/protocol/agent-plan.json`，不得提交；
+8. 启动前记录 HEAD、tree、Plan 摘要和关键文件 SHA-256 到本地运行登记，不修改历史实验记录。
 
-### 5.2 启动与停止
+### 6.2 启动与停止
 
 ```powershell
-vega agent start --repo . --plan .tmp/dogfood/sag3b-01/protocol/agent-plan.json --text "<冻结目标>"
-vega agent approve --run <agent-run>
-vega agent run --run <agent-run> --timeout 900
+<frozen-vega> agent start --repo . --plan .tmp/dogfood/sag3b-01/protocol/agent-plan.json --text "<冻结目标>"
+<frozen-vega> agent approve --run <agent-run>
+<frozen-vega> agent run --run <agent-run> --timeout 900
 ```
 
 `agent run` 在一个控制进程中执行；另一个控制进程只观察状态和 tracked Diff。首次同时满足以下
@@ -127,14 +203,14 @@ vega agent run --run <agent-run> --timeout 900
 4. 没有允许路径外变更或未知外部副作用。
 
 ```powershell
-vega agent stop --run <agent-run> --reason "Gate 3B physical-machine handoff"
+<frozen-vega> agent stop --run <agent-run> --reason "Gate 3B physical-machine handoff"
 ```
 
 如果 Worker 在停止请求前已经完成整个任务，本 Case 记为
 `insufficient-handoff-opportunity`，不替换任务、不改超时、不故意制造失败，也不宣称 Gate
 通过。
 
-### 5.3 Handoff 发布
+### 6.3 Handoff 发布
 
 停止后必须等待原 `agent run` 进程退出，并确认：
 
@@ -148,7 +224,7 @@ vega agent stop --run <agent-run> --reason "Gate 3B physical-machine handoff"
 随后执行：
 
 ```powershell
-vega agent checkpoint --run <agent-run> --handoff --reason "Gate 3B physical-machine handoff"
+<frozen-vega> agent checkpoint --run <agent-run> --handoff --reason "Gate 3B physical-machine handoff"
 ```
 
 人工只暂存：
@@ -167,7 +243,7 @@ git status --short --branch
 确认无 `.env`、`runs/`、`.tmp/`、本地 Agent/Trellis 配置、凭据或其他项目文件后，人工
 commit/push。Vega 本身不得执行 Git 写入。
 
-## 六、机器 B 协议
+## 七、机器 B 协议
 
 机器 B 必须是另一台物理机器，并且只通过 Git 获取：
 
@@ -182,15 +258,18 @@ commit/push。Vega 本身不得执行 Git 写入。
 - `.env`、凭据和本地工具配置；
 - 未提交文件。
 
+机器 B 必须从 `control_source_commit` 独立重建 `<frozen-vega>`，并确认控制源码摘要、版本和
+runner 配置摘要与机器 A 一致。
+
 执行顺序固定为：
 
 ```powershell
 git fetch origin
 git switch codex/supervisor-gate3b
 git pull --ff-only
-vega agent resume --repo .
-vega agent status --run <resumed-run>
-vega agent run --run <resumed-run> --timeout 900
+<frozen-vega> agent resume --repo .
+<frozen-vega> agent status --run <resumed-run>
+<frozen-vega> agent run --run <resumed-run> --timeout 900
 ```
 
 开始真实 Worker 前必须确认：
@@ -205,13 +284,15 @@ vega agent run --run <resumed-run> --timeout 900
 机器 B 完成后必须重新执行冻结验证、风险门禁、独立 Reviewer 和 Finish。只有新的机器证据
 完整且一致，Supervisor 才能进入 `finalize`。
 
-## 七、通过标准
+## 八、通过标准
 
 Gate 3B 通过必须同时满足：
 
 ```text
 physical_machine_handoff = 1
 work_item_count = 1
+control_runtime_digest_match = 1
+remote_head_match = 1
 false_success = 0
 duplicate_writer_start = 0
 cross_machine_stale_evidence_accepted = 0
@@ -237,9 +318,11 @@ automatic_git_write = 0
 - 任一验证、风险、Reviewer 或 Finish 证据缺失、过期或冲突；
 - `needs_human`、`replan` 或未知副作用。
 
-## 八、立即停止条件
+## 九、立即停止条件
 
 - 需要把机器 A 的本地 run、Trace、SQLite 或聊天复制到机器 B；
+- 正式控制器从目标 checkout 的 editable 安装导入 Vega；
+- 机器 A/B 的控制源码 commit、摘要或 runner 配置不一致；
 - 需要放宽 fail-closed、Scope、Workspace、Evidence freshness 或 Reviewer 门禁；
 - 需要修改允许路径外代码才能继续；
 - 出现第二 Writer、身份不明的残留子进程或未知外部副作用；
@@ -247,7 +330,7 @@ automatic_git_write = 0
 - 需要加入 Claude Code、Memory、多 Work Item、Provider SDK、服务端或新的恢复框架；
 - 需要按结果更换任务、模型、预算或成功条件。
 
-## 九、结果记录
+## 十、结果记录
 
 本 Gate 的最终结果只在机器 B 完成后追加到：
 

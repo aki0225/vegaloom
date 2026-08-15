@@ -6,7 +6,7 @@
 >
 > 实施基线：`main@43f0e04`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B～3C 冻结`
+> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B prerequisite-fix-in-progress / Gate 3C 冻结`
 
 ## 当前结论
 
@@ -43,7 +43,8 @@ Gate 3A 已实现 Handoff 生产端，并完成同机两个隔离 clone 的机�
 Handoff Checkpoint、Resume Capsule、Task Card、manifest 和人工 Git 清单；人工只提交 WIP
 与 Task Card。B 侧不复制旧 `runs/`、Trace、SQLite 或聊天，仅凭 Git Task Card 重建新本机
 run。PR `#60` 的 9 项 CI 与两轮独立本地审阅均无剩余阻断项，Gate 3A 判定为
-`gate-exit-pass`；Gate 3B～3C 继续冻结。
+`gate-exit-pass`。Gate 3B 已获批准，当前先完成固定控制器和未知副作用继承前置门禁；
+Gate 3C 继续冻结。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
@@ -278,8 +279,9 @@ workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
 1. 不重跑 `SAG2B-01` 或 `SAG2B-02`，保留既有冻结案例和负结果现场。
 2. 日常仍以 `vega do / loop / goal` 为默认入口；`vega agent` 继续保持 opt-in。
 3. Gate 3A 已判定为 `gate-exit-pass`，不再扩大其机械接力范围。
-4. Gate 3B 仍需单独批准真实跨机器、单 Work Item 接力协议；不把 Claude Code、多 Work Item
-   或日常价值观察混入同一运行。
+4. Gate 3B 已按 [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md)
+   获批；必须先通过固定控制器和未知副作用继承前置门禁，再启动机器 A。
+5. 不把 Claude Code、多 Work Item 或日常价值观察混入同一运行。
 
 ## 下一 Gate 的边界
 

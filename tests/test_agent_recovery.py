@@ -612,6 +612,64 @@ def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> No
     assert "任务已停止" in runtime.status(stopped.run_dir.name)
 
 
+def test_stop_inherits_unknown_side_effect_and_remains_blocked(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+
+    stopped = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="外部副作用仍未完成对账",
+    )
+    checkpoint = _latest_checkpoint(run_dir)
+
+    assert stopped.state.phase == "needs_human"
+    assert stopped.state.allowed_actions == ["human"]
+    assert checkpoint.status == "blocked"
+    assert checkpoint.pending_actions == ["human"]
+    assert checkpoint.external_side_effects == "unknown"
+    handoff = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="未知外部副作用仍未解除",
+    )
+    assert handoff.handoff_status == "handoff_blocked"
+
+
+def test_pause_inherits_known_side_effect(tmp_path: Path) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "known")
+
+    SupervisorAgentRecovery(workspace).pause(
+        run_id,
+        reason="暂停并保留已知外部副作用",
+    )
+
+    assert _latest_checkpoint(run_dir).external_side_effects == "known"
+
+
+def test_stop_without_latest_checkpoint_keeps_side_effect_none(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    state_path = run_dir / "agent-state.json"
+    state = load_agent_state(state_path)
+    save_agent_state(
+        state_path,
+        state.model_copy(update={"latest_checkpoint_id": None}),
+    )
+
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="没有历史 Checkpoint 时停止",
+    )
+
+    assert _latest_checkpoint(run_dir).external_side_effects == "none"
+
+
 def test_stop_active_assist_child_targets_only_bound_operation(
     tmp_path: Path,
 ) -> None:
@@ -819,6 +877,16 @@ def _latest_checkpoint(run_dir: Path):
     assert state.latest_checkpoint_id is not None
     return load_agent_checkpoint(
         run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
+    )
+
+
+def _replace_latest_external_side_effects(run_dir: Path, value: str) -> None:
+    checkpoint = _latest_checkpoint(run_dir)
+    payload = checkpoint.model_dump(mode="json")
+    payload["external_side_effects"] = value
+    save_agent_checkpoint(
+        run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json",
+        checkpoint.model_validate(payload),
     )
 
 
