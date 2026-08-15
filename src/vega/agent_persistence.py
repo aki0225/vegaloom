@@ -4,7 +4,8 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
@@ -64,6 +65,85 @@ def append_agent_trace(
 
 def read_agent_trace(trace_path: Path) -> list[dict[str, object]]:
     return read_trace_items(trace_path)
+
+
+def append_agent_trace_commit(
+    trace_path: Path,
+    *,
+    event: str,
+    state: AgentState,
+    observation_summary: str | None = None,
+    route_reason: str | None = None,
+    artifact_refs: list[str] | None = None,
+    writer: Callable[..., None] = append_agent_trace,
+) -> None:
+    refs = artifact_refs or []
+    try:
+        writer(
+            trace_path,
+            event=event,
+            state=state,
+            observation_summary=observation_summary,
+            route_reason=route_reason,
+            artifact_refs=refs,
+        )
+    except Exception:
+        if not _trace_commit_exists(
+            trace_path,
+            event=event,
+            state=state,
+            artifact_refs=refs,
+        ):
+            raise
+
+
+def read_optional_artifact(path: Path) -> bytes | None:
+    return path.read_bytes() if path.exists() else None
+
+
+def restore_optional_artifact(path: Path, content: bytes | None) -> None:
+    if content is None:
+        path.unlink(missing_ok=True)
+        return
+    path.write_bytes(content)
+
+
+def artifact_names(directory: Path, pattern: str) -> set[str]:
+    return {path.name for path in directory.glob(pattern)}
+
+
+def remove_new_artifacts(
+    directory: Path,
+    pattern: str,
+    previous_names: set[str],
+) -> None:
+    for path in directory.glob(pattern):
+        if path.name not in previous_names:
+            path.unlink(missing_ok=True)
+
+
+def remove_artifact_if_published(path: Path, published: bool) -> None:
+    if published:
+        path.unlink(missing_ok=True)
+
+
+def _trace_commit_exists(
+    trace_path: Path,
+    *,
+    event: str,
+    state: AgentState,
+    artifact_refs: list[str],
+) -> bool:
+    try:
+        item: dict[str, Any] = read_trace_items(trace_path)[-1]
+    except (IndexError, OSError, ValueError):
+        return False
+    return (
+        item.get("event") == event
+        and item.get("run_id") == state.run_id
+        and item.get("state_version") == state.state_version
+        and item.get("artifact_refs") == artifact_refs
+    )
 
 
 def _save_envelope(path: Path, kind: str, model: BaseModel) -> None:

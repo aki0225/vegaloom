@@ -909,7 +909,13 @@ def test_side_effect_adjudication_fails_closed_before_state_publish(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for target in ("append_agent_trace", "write_status_card"):
+    for target in (
+        "write_redacted_json_once",
+        "write_checkpoint",
+        "save_agent_state",
+        "write_status_card",
+        "append_agent_trace",
+    ):
         _, workspace, run_id = _approved_run(tmp_path / target)
         run_dir = workspace / "runs" / run_id
         _replace_latest_external_side_effects(run_dir, "unknown")
@@ -918,12 +924,25 @@ def test_side_effect_adjudication_fails_closed_before_state_publish(
             reason="等待人工确认外部副作用",
         )
         original_state = (run_dir / "agent-state.json").read_bytes()
+        original_trace = (run_dir / "trace.jsonl").read_bytes()
+        original_status = (run_dir / "status-card.md").read_bytes()
+        original_checkpoints = {
+            path.name: path.read_bytes()
+            for path in (run_dir / "checkpoints").glob("checkpoint-*.json")
+        }
+        original_adjudications = {
+            path.name: path.read_bytes()
+            for path in (run_dir / "adjudications").glob("*.json")
+        }
         evidence_path = run_dir / "manual-evidence" / "review.md"
         evidence_path.parent.mkdir()
         evidence_path.write_text("人工核对记录。\n", encoding="utf-8")
 
+        original_publisher = getattr(agent_adjudication_module, target)
+
         def fail_publish(*args: object, **kwargs: object) -> None:
-            del args, kwargs
+            if target != "append_agent_trace":
+                original_publisher(*args, **kwargs)
             raise OSError(f"simulated {target} failure")
 
         with monkeypatch.context() as scoped:
@@ -939,7 +958,58 @@ def test_side_effect_adjudication_fails_closed_before_state_publish(
                 )
 
         assert (run_dir / "agent-state.json").read_bytes() == original_state
+        assert (run_dir / "trace.jsonl").read_bytes() == original_trace
+        assert (run_dir / "status-card.md").read_bytes() == original_status
+        assert {
+            path.name: path.read_bytes()
+            for path in (run_dir / "checkpoints").glob("checkpoint-*.json")
+        } == original_checkpoints
+        assert {
+            path.name: path.read_bytes()
+            for path in (run_dir / "adjudications").glob("*.json")
+        } == original_adjudications
         assert _latest_checkpoint(run_dir).external_side_effects == "unknown"
+
+
+def test_side_effect_adjudication_treats_observable_trace_commit_as_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    _replace_latest_external_side_effects(run_dir, "unknown")
+    SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="等待人工确认外部副作用",
+    )
+    evidence_path = run_dir / "manual-evidence" / "review.md"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text("人工核对记录。\n", encoding="utf-8")
+    original_trace_writer = agent_adjudication_module.append_agent_trace
+
+    def write_then_fail(*args: object, **kwargs: object) -> None:
+        original_trace_writer(*args, **kwargs)
+        raise OSError("simulated trace acknowledgement failure")
+
+    monkeypatch.setattr(
+        agent_adjudication_module,
+        "append_agent_trace",
+        write_then_fail,
+    )
+
+    result = SupervisorAgentSideEffectAdjudicator(workspace).adjudicate(
+        run_id,
+        AgentRecoveryRequest(
+            reason="没有仓库外写入",
+            external_side_effects="none",
+            evidence_refs=["manual-evidence/review.md"],
+        ),
+    )
+
+    assert result.state.phase == "stopped"
+    assert _latest_checkpoint(run_dir).external_side_effects == "none"
+    events = read_agent_trace(run_dir / "trace.jsonl")
+    assert events[-1]["event"] == "agent_side_effects_adjudicated"
 
 
 def test_side_effect_adjudication_rejects_linked_artifact_directory(
