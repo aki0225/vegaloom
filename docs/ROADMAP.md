@@ -653,14 +653,20 @@ Checkpoint、Task Brief、主会话控制、恢复和现有 Core 的可信完成
 它不推翻此前失败实验结论：不恢复默认 LangGraph Loop、多 Reviewer、服务端控制面或自动 Memory。
 
 Gate 0～2A 已使用 `experiment/supervisor-agent-v1` 一个实验分支和一个专用 Worktree 完成。
-后续 Gate 2B 仍只使用一个短生命周期实验分支和一个专用 Worktree，按以下 Gate 串行推进：
+后续阶段继续为每个未合并 Gate 使用一个短生命周期实验分支和一个专用 Worktree，按以下顺序推进：
 
 1. Gate 0：冻结状态权威、Task Card、Resume Capsule、Task Brief、Checkpoint、Trace 与 Decision Contract；
 2. Gate 1：Fake Worker 证明主会话可见、人工批准和 `next/repair/replan/human/finalize` 条件路由；
 3. Gate 2A：验证重复 Writer、partial diff、未知副作用和损坏状态恢复
    （最终 HEAD `8ca75f2` 的 9 项 CI、独立审查与 PR `#57` 合并均已完成）；
 4. Gate 2B：接入真实 Codex；
-5. Gate 3：验证未完成 WIP 经任务分支 commit/push 后的跨机器恢复，并完成 Claude Code 薄接入。
+5. Gate 2C：补齐当前主线的真实完整成功路径；
+6. Gate 3A：生成 Handoff Checkpoint、Resume Capsule 和 Git Task Card，并完成同机往返；
+7. Gate 3B：验证单 Work Item 经人工 commit/push 后的真实跨机器恢复；
+8. Gate 3C：记录少量真实任务的恢复成本和再次使用意愿。
+
+Claude Code 已有外部 assist 证据，但不属于 Supervisor Agent V1 的 Gate 3；V1 完成后再单独评估
+是否增加满足相同 Worker 信任合同的薄 Adapter。
 
 Agent Graph 不拥有 Git、Workspace、Verification、Risk、Reviewer 或成功状态。LangGraph 只在 Gate 1
 用于图游标、条件边和人工 interrupt/resume；Gate 0 先实现引擎无关合同。顶层 CLI 可以提供

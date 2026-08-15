@@ -629,8 +629,9 @@ Agent Plan / approval
 ```
 
 真实 Adapter 当前只接受一个未完成 Work Item。Gate 2B 已证明真实 Worker Claim 不会越过
-Workspace Gate，并证明 partial Diff 可以通过 identity-bound stop 保留并交还人工；完整成功路径、
-Handoff 生产端和真实跨机器恢复仍按后续 Gate 验证。
+Workspace Gate，并证明 partial Diff 可以通过 identity-bound stop 保留并交还人工；Gate 2C
+已补齐 Verification、Risk、独立 Reviewer、Finish 和 Supervisor `finalize` 的完整成功路径。
+Handoff 生产端和真实跨机器恢复仍按 Gate 3A、Gate 3B 分别验证。
 
 Task Card 位于 Git 跟踪的 `.vega/tasks/**/*.md`，只保存批准 Plan 和人工交接所需的 Resume
 Capsule。本机 Agent State、Checkpoint、Trace 和 LangGraph SQLite 图游标仍留在 `runs/`，不进入
