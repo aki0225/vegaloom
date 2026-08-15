@@ -58,7 +58,8 @@ Gate 2C 首次运行因 pytest 加载了控制环境中的 `packaging` 而记为
 修正验证入口的 Gate 2C R2 已完成并判定为 `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、
 同机双隔离副本往返、PR CI 与合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，
 固定控制器、未知副作用继承和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结到
-`0a6985f`，机器 A 尚未启动。Gate 3C 仍冻结，不改变既有默认命令行为和成功语义。
+`3e636e4`，并修复仓库内 workspace 把自有 `runs/` artifact 误判为漂移的问题；机器 A
+尚未启动。Gate 3C 仍冻结，不改变既有默认命令行为和成功语义。
 
 ### 真实日常使用观察
 

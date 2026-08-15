@@ -11,12 +11,12 @@
 > 首次协议提交：`977af8f45ae6ba0bc425ca3c9e8556d696ab6664`。该提交在真实 Worker
 > 启动前发现控制器自修改和未知副作用降级两个前置缺口，因此不得作为正式执行基线。
 >
-> 前置门禁实现提交：`0a6985f591b73cbef3c6db59223a5eb72e0a0ae9`
+> 前置门禁实现提交：`3e636e40537bfda5213d13a407ae51b6be0fbbd8`
 >
-> 控制源码 tree：`99cf1559a28a70a9882b283bc1c0ca35f27dc307`
+> 控制源码 tree：`a8c8a5c5d92cd4fb523f895c70803ecfcf0f31fd`
 >
 > 控制源码 archive SHA-256：
-> `c3e1d01e83dc2b4eef15f9398a6e8084b788dbc1d1ba15d03707447535888e85`
+> `f6c58b15a8bffe69df8f7805bfa996ae9eb8c31294c6aaf9b263171d22ad37e9`
 >
 > Runner 配置 SHA-256：
 > `dba63bd3abaf7a8a0950430b6c4d6fbcc40fca45370b0bd853cc42d81fdc6acb`
@@ -140,15 +140,16 @@ editable_install = false
 本次冻结值：
 
 ```text
-control_source_commit = 0a6985f591b73cbef3c6db59223a5eb72e0a0ae9
-control_source_tree = 99cf1559a28a70a9882b283bc1c0ca35f27dc307
-control_source_sha256 = c3e1d01e83dc2b4eef15f9398a6e8084b788dbc1d1ba15d03707447535888e85
+control_source_commit = 3e636e40537bfda5213d13a407ae51b6be0fbbd8
+control_source_tree = a8c8a5c5d92cd4fb523f895c70803ecfcf0f31fd
+control_source_sha256 = f6c58b15a8bffe69df8f7805bfa996ae9eb8c31294c6aaf9b263171d22ad37e9
 runner_config_digest = dba63bd3abaf7a8a0950430b6c4d6fbcc40fca45370b0bd853cc42d81fdc6acb
 ```
 
-控制源码放在项目内被忽略的 `.tmp/dogfood/sag3b-01/control-runtime/`。启动前必须证明实际
-`vega.__file__` 位于该快照，而不是目标 checkout 的 `src/vega/`。机器 B 从 Git 中的同一
-commit 独立重建快照，不复制机器 A 的 wheel、源码目录或 Python 环境。
+控制源码放在项目内被忽略的
+`.tmp/dogfood/sag3b-01/control-runtime-3e636e4/`。启动前必须证明实际 `vega.__file__`
+位于该快照，而不是目标 checkout 的 `src/vega/`。机器 B 从 Git 中的同一 commit 独立重建
+快照，不复制机器 A 的 wheel、源码目录或 Python 环境。
 
 本协议中的 `<frozen-vega>` 表示上述固定控制器启动方式，不表示目标 checkout 中的
 `.venv/Scripts/vega.exe`。
@@ -237,6 +238,46 @@ Gate 3B 成败证据。
 commit 独立导出到被忽略的 run-local 目录，实际 `vega.__file__` 指向固定快照；控制 tree、
 archive 与 runner 配置摘要均已重新登记。当前状态为 `prerequisite-ci-pass /
 controller-refrozen`，机器 A 尚未启动。
+
+### 5.5 仓库内 Workspace 预检阻断与重新冻结
+
+2026-08-15 的候选 run `20260815-180117-agent` 使用当时的固定控制器创建并批准 Plan。
+第一次简写目标在创建 run 前被 Plan 一致性校验拒绝；改用冻结目标原文后，run 正常进入
+`ready`。执行 `agent run` 时，控制器在创建 child 和启动模型前拒绝继续：
+
+```text
+创建 child 前 Workspace 已漂移，必须先重新对账
+```
+
+核对确认没有 tracked Diff、模型 turn、active child 或外部副作用。漂移来自 Vega 把自己
+刚写入仓库内 `runs/` 的 Task Brief、Checkpoint、State 和 Trace 纳入了 Workspace ignored
+指纹。该记录判定为 `invalid-preflight / no-model-turn`，不占用机器 A 的正式 attempt，也
+不能作为 Gate 3B 成败证据。
+
+最小修复只让绑定 Agent Workspace 复用既有 `workspace_ignored_path_exclusions()`：
+
+- workspace 自有 `runs/` 与受控 verification 临时根不再制造虚假漂移；
+- 其他 ignored 路径新增或修改仍触发 `Workspace 已漂移`；
+- 不改变 tracked Diff、Git control、Handoff、成功语义或允许路径。
+
+本地新增正反向回归 `2 passed`，并复核 Runtime、Recovery、Handoff 漂移节点 `4 passed`；
+完整节点收集为 `1250 collected`。提交 `3e636e4` 已通过 workflow `31879544491` 的 9 项
+CI。控制源码随后从该提交重新导出，`vega.__file__` 指向
+`.tmp/dogfood/sag3b-01/control-runtime-3e636e4/src/vega/__init__.py`，能力检查通过。
+
+重新冻结值：
+
+```text
+control_source_commit = 3e636e40537bfda5213d13a407ae51b6be0fbbd8
+control_source_tree = a8c8a5c5d92cd4fb523f895c70803ecfcf0f31fd
+control_source_sha256 = f6c58b15a8bffe69df8f7805bfa996ae9eb8c31294c6aaf9b263171d22ad37e9
+runner_config_digest = dba63bd3abaf7a8a0950430b6c4d6fbcc40fca45370b0bd853cc42d81fdc6acb
+launcher_sha256 = 0af0b84ca94823b92a97c56cfd2a2427a6ac80574af72d6655cad6439661b6a1
+agent_plan_revision = 2
+agent_plan_sha256 = 78da4cccfaf2c24425bff29f6da8e161a165ff381eb5b0f27bed5df6de143fcf
+```
+
+机器 A 仍未正式启动；必须在该文档提交通过 PR CI 后重新生成启动预检。
 
 ## 六、机器 A 协议
 

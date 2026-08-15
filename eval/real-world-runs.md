@@ -766,3 +766,20 @@ Windows 专项与 wheel smoke，以及 Python 3.12 的四个测试分片。两�
 因此 Gate 3A 判定为 `gate-exit-pass`。该结论仍只证明单 Work Item、人工 Git、同机双隔离
 副本的机械接力；不证明真实跨机器、真实模型继续执行或日常价值。Gate 3B 与 Gate 3C
 继续冻结。
+
+## 2026-08-15 Supervisor Agent Gate 3B：仓库内 Workspace 预检阻断
+
+本条只追加 SAG3B-01 在模型启动前暴露的控制器缺陷，不覆盖 Gate 3A 或 Gate 3B 协议中的
+历史记录。候选 Agent run 为 `20260815-180117-agent`。
+
+- 固定 Plan 创建并批准成功，状态进入 `ready`；
+- `agent run` 在创建 child 前以 `Workspace 已漂移` fail-closed；
+- 没有模型 turn、active child、tracked Diff、自动重试、commit、push、release 或外部副作用；
+- 根因是 Vega workspace 与目标仓库相同时，自有 `runs/` 中新写入的 Task Brief、
+  Checkpoint、State 和 Trace 被纳入 ignored 指纹；
+- 该 run 判定为 `invalid-preflight / no-model-turn`，不占用机器 A 的正式 attempt。
+
+修复提交 `3e636e4` 只排除当前 workspace 自有 `runs/` 和受控 verification 临时根；其他
+ignored 路径变化继续 fail-closed。正反向回归、既有漂移节点、静态门禁和完整
+`1250` 节点收集通过，workflow `31879544491` 的 9 项 CI 全部成功。固定控制器已从该提交
+重新导出；机器 A 仍未正式启动，需等待协议文档提交的 CI 后重新预检。
