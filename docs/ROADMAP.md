@@ -15,8 +15,10 @@
 > 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 SAG2C-02 已完成并判定为
 > `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、同机双隔离副本往返、PR CI 和
 > 合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，固定控制器、未知副作用继承
-> 和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结，机器 A 尚未启动。Gate 3C
-> 仍冻结。既有
+> 和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结。机器 A 正式 attempt 因
+> Windows 沙箱工具环境阻断而没有产生 partial Diff，判定为
+> `insufficient-handoff-opportunity / environment-blocked`。Gate 3B 未通过，机器 B 未启动，
+> Gate 3C 仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
 
@@ -54,7 +56,7 @@ v0.1.5 发布（完成）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
   -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
   -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
-  -> Gate 3B 单 Work Item 跨机器接力（前置 CI 通过，控制器已重新冻结，机器 A 未启动）
+  -> Gate 3B 单 Work Item 跨机器接力（机器 A 无 partial Diff，Gate 未通过，机器 B 未启动）
   -> Gate 3C 小规模日常价值观察（冻结）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
@@ -804,6 +806,21 @@ repository hygiene、architecture growth 和 `git diff --check` 通过。实现�
 对应 PR `#60` 的 9 项 CI 全部通过，两轮独立本地审阅无剩余阻断项。Gate 3A 判定为
 `gate-exit-pass`。Gate 3B 随后获批，固定控制器、未知副作用继承和人工副作用裁决门禁均
 已通过 PR CI；控制器已重新冻结，机器 A 尚未启动。Gate 3C 日常价值观察仍冻结。
+
+### 2026-08-15：Gate 3B 机器 A 正式 Attempt 未形成可交接 WIP
+
+固定控制器、runner 配置、Plan 和正式启动 HEAD 均通过预检后，SAG3B-01 启动真实
+`gpt-5.6-sol / xhigh` Worker。Codex Runner 正常收集到结构化 `blocked` Claim，但 Worker
+的 PowerShell、Git、Ripgrep 和 Node REPL 均在工具启动前遇到 Windows 沙箱初始化错误，
+没有产生 tracked Diff。
+
+由于从未出现“允许路径 Diff + active Writer”的同时窗口，观察进程没有发送 `agent stop`。
+随后 Core Verification 失败，Risk 与 Reviewer 未运行，Supervisor 确定性选择 `replan`，
+最终 Checkpoint 为 `blocked`。HEAD 和 Workspace 保持不变，没有第二 Writer、自动重试或
+自动 Git 操作。
+
+本次判定为 `insufficient-handoff-opportunity / environment-blocked`，不重跑 SAG3B-01，
+不按结果更换任务、模型、预算或成功条件。机器 B 未启动，Gate 3B 未通过，Gate 3C 继续冻结。
 
 ## 七、更新规则
 

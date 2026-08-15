@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`prerequisite-ci-pass / controller-refrozen / machine-a-not-started`
+> 状态：`prerequisite-ci-pass / controller-refrozen / machine-a-insufficient-handoff-opportunity / machine-b-not-started / gate-not-passed`
 >
 > 日期：2026-08-15
 >
@@ -481,3 +481,36 @@ eval/real-world-runs.md
 
 历史失败和 fail-closed 结果不得删除、覆盖或润色。机器 A 阶段只提交协议与真实 Handoff WIP，
 不提前写入最终 Gate 结论。
+
+## 十一、2026-08-15 机器 A 正式 Attempt 结果
+
+本节只追加 SAG3B-01 的正式机器 A 结果，不改写上方冻结协议。正式启动 HEAD 为
+`c08d46ab469f1a98421b3cabc73a2c5cd18ceb50`，固定控制源码提交为
+`3e636e40537bfda5213d13a407ae51b6be0fbbd8`。控制源码 tree、archive、launcher、
+runner 配置和 Plan 摘要均与启动预检登记一致。
+
+- Agent run：`20260815-184052-agent`；
+- child：`20260815-184120-147051-bug-loop`；
+- operation：`02125d80693b4fe7ae548fd527814bb5`；
+- Worker：`gpt-5.6-sol / xhigh`；
+- Codex Worker 进程正常返回结构化 `blocked` Claim，但其 PowerShell、Git、Ripgrep 和
+  Node REPL 工具均在启动前遇到
+  `windows sandbox: helper_unknown_error: setup refresh had errors`；
+- Worker 未能读取或修改工作区，没有 tracked Diff，也没有运行 Worker 自检；
+- 观察进程始终没有看到“允许路径 Diff + active Writer”的同时窗口，因此没有发送
+  `agent stop`；
+- Core Verification 中 Ruff 通过，pytest 对应的受控执行因 Windows `WinError 5`
+  无法原子发布 `execution.json` 而失败；该结果只能记为 Verification `failed`，
+  不能解释为目标修复通过；
+- Risk Gate 和 Reviewer 均未运行，child Finish 为 `needs_human`；
+- Supervisor 根据机器 Observation 确定性选择 `replan`，最终 phase 为 `planning`，
+  Checkpoint 为 `blocked`；
+- HEAD 未改变，Workspace 没有 tracked Diff，外部副作用为 `none`，Writer、pytest
+  和 Vega owner 进程均已退出。
+
+本次正式 attempt 判定为
+`insufficient-handoff-opportunity / environment-blocked`。它证明真实 Worker 无法形成
+可交接 WIP 且 Verification 失败时，Supervisor 不会制造成功、自动重试或继续启动机器 B；
+不证明真实跨机器恢复。SAG3B-01 不更换任务、模型、预算或成功条件，也不进行第二次运行。
+机器 B 未启动，没有生成 Handoff Task Card 或 Handoff 提交，Gate 3B 未通过，Gate 3C
+继续冻结。

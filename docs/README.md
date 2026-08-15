@@ -19,7 +19,7 @@
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
 | 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
-| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | 前置 CI 通过，控制器已重新冻结，机器 A 未启动 |
+| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | `insufficient-handoff-opportunity`，Gate 未通过 |
 | 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | Gate 3A 交接记录 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -58,8 +58,10 @@ Gate 2C 首次运行因 pytest 加载了控制环境中的 `packaging` 而记为
 修正验证入口的 Gate 2C R2 已完成并判定为 `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、
 同机双隔离副本往返、PR CI 与合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，
 固定控制器、未知副作用继承和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结到
-`3e636e4`，并修复仓库内 workspace 把自有 `runs/` artifact 误判为漂移的问题；机器 A
-尚未启动。Gate 3C 仍冻结，不改变既有默认命令行为和成功语义。
+`3e636e4`，并修复仓库内 workspace 把自有 `runs/` artifact 误判为漂移的问题。机器 A
+正式 attempt 因 Codex Worker 的 Windows 沙箱工具环境阻断而没有产生 partial Diff，判定为
+`insufficient-handoff-opportunity / environment-blocked`；Gate 3B 未通过，机器 B 未启动。
+Gate 3C 仍冻结，不改变既有默认命令行为和成功语义。
 
 ### 真实日常使用观察
 
@@ -68,7 +70,8 @@ Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist�
 打回和 fail-closed 场景均有记录。
 
 Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 已完成两个冻结真实案例，
-最终分支 CI 和合并前审阅均已通过，Gate 2C R2 已完成并通过，Gate 3A 已取得本地往返证据。
+最终分支 CI 和合并前审阅均已通过，Gate 2C R2 已完成并通过，Gate 3A 已取得本地往返证据；
+Gate 3B 的首次正式机器 A attempt 没有形成可交接 WIP，未启动机器 B。
 `v0.1.5` 继续按现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
 空 Scope 展示和 Workspace 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。
 当前状态与历史停止条件见：
