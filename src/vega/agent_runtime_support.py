@@ -22,7 +22,6 @@ from .agent_contract import (
     AgentStatusCard,
     canonical_digest,
 )
-from .agent_handoff_safety import validate_handoff_history
 from .agent_persistence import (
     AgentArtifactError,
     append_agent_trace,
@@ -31,17 +30,21 @@ from .agent_persistence import (
     save_agent_state,
     save_agent_checkpoint,
 )
+from .agent_resume_validation import (
+    current_branch as current_branch,
+    validate_resume_workspace,
+)
 from .agent_run import AgentRun
 from .agent_runtime_logic import update_state
 from .agent_task_card import (
     AgentTaskCard,
-    compute_handoff_workspace_digest,
     discover_handoff_task_cards,
     load_task_card,
 )
 from .agent_visibility import render_agent_status_card
+from .comparison_binding import comparison_binding_from_mapping
 from .redaction import write_redacted_json, write_redacted_text
-from .repository_identity import repository_scope, resolve_git_revision
+from .repository_identity import repository_scope
 from .run_utils import create_run_dir, resolve_run_dir
 from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
 from .workspace_inventory import prepare_verification_temp_root, workspace_ignored_path_exclusions
@@ -60,21 +63,6 @@ def require_git_root(repo: Path) -> Path:
     if process.returncode != 0 or Path(process.stdout.strip()).resolve() != root:
         raise ValueError("目标目录必须是 Git 仓库根目录")
     return root
-
-
-def current_branch(repo: Path) -> str:
-    process = subprocess.run(
-        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
-        cwd=repo,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    branch = process.stdout.strip()
-    if process.returncode != 0 or not branch:
-        raise ValueError("当前 HEAD 不是任务分支")
-    return branch
 
 
 def resolve_resume_task(repo: Path, task_path: Path | None) -> tuple[Path, str]:
@@ -106,7 +94,16 @@ def capture_bound_workspace(run_dir: Path) -> ReviewWorkspaceSnapshot:
     metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
     repo = Path(metadata["repo_path"]).resolve(strict=True)
     exclusions = workspace_ignored_path_exclusions(run_dir.parent.parent, repo)
-    return capture_review_workspace(repo, ignored_path_exclusions=exclusions)
+    comparison_base, comparison_paths, _ = comparison_binding_from_mapping(
+        metadata,
+        base_key="comparison_base_revision",
+    )
+    return capture_review_workspace(
+        repo,
+        ignored_path_exclusions=exclusions,
+        comparison_base_sha=comparison_base,
+        comparison_paths=comparison_paths,
+    )
 
 
 def load_agent_bundle(
@@ -154,16 +151,22 @@ def write_run_metadata(
     base_revision: str,
     *,
     task_card: str | None = None,
+    comparison_base_revision: str | None = None,
+    comparison_paths: list[str] | None = None,
 ) -> None:
+    payload = {
+        "schema_version": 1,
+        "run_id": run_dir.name,
+        "repo_path": str(repo),
+        "base_revision": base_revision,
+        "task_card": task_card,
+    }
+    if comparison_base_revision is not None:
+        payload["comparison_base_revision"] = comparison_base_revision
+        payload["comparison_paths"] = list(comparison_paths or [])
     write_redacted_json(
         run_dir / "agent-run.json",
-        {
-            "schema_version": 1,
-            "run_id": run_dir.name,
-            "repo_path": str(repo),
-            "base_revision": base_revision,
-            "task_card": task_card,
-        },
+        payload,
     )
 
 
@@ -182,14 +185,19 @@ def resume_agent_task_card(
         card,
         relative_task=relative_task,
     )
-    revision = resolve_git_revision(repo_root)
-    assert revision is not None
     run_id, run_dir = create_run_dir(
         workspace,
         f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent-resume",
     )
     state = state_from_task_card(run_id, repo_root, card, snapshot)
-    write_run_metadata(run_dir, repo_root, revision.commit, task_card=relative_task)
+    write_run_metadata(
+        run_dir,
+        repo_root,
+        snapshot.head_sha,
+        task_card=relative_task,
+        comparison_base_revision=card.handoff_base_revision,
+        comparison_paths=list(card.resume_capsule.changed_files),
+    )
     save_agent_plan(run_dir, card.plan)
     checkpoint = write_checkpoint(
         run_dir,
@@ -429,43 +437,6 @@ def default_next_step(phase: str, current_index: int) -> str:
     if phase == "finalizing":
         return "调用现有 Vega Finish，Agent Graph 不能自行宣称成功"
     return "查看结构化状态与允许动作"
-
-
-def validate_resume_workspace(
-    repo: Path,
-    card: AgentTaskCard,
-    *,
-    relative_task: str,
-) -> ReviewWorkspaceSnapshot:
-    if card.handoff_status == "none":
-        raise ValueError("Task Card 没有可恢复交接")
-    if card.branch != current_branch(repo):
-        raise ValueError("Task Card 分支与当前分支不一致")
-    validate_handoff_history(repo, card, relative_task)
-    snapshot = capture_review_workspace(repo)
-    if snapshot.changed_files:
-        raise ValueError("恢复前 Workspace 必须没有额外 Diff")
-    if snapshot.unsafe_index_paths:
-        raise ValueError("恢复前 Git index 包含不安全标记")
-    if not snapshot.git_control_complete:
-        raise ValueError("恢复前 Git control manifest 不完整")
-    if card.resume_capsule is None:
-        raise ValueError("Task Card 缺少 Resume Capsule")
-    expected_changed = set(card.resume_capsule.changed_files)
-    observed_changed = set(snapshot.changed_files)
-    if not observed_changed.issubset(expected_changed):
-        unexpected = ", ".join(sorted(observed_changed - expected_changed))
-        raise ValueError(f"恢复前存在交接未登记的 Workspace 变化：{unexpected}")
-    current_digest = compute_handoff_workspace_digest(
-        repo,
-        card.resume_capsule.changed_files,
-    )
-    if card.handoff_workspace_digest != current_digest:
-        raise ValueError(
-            "当前 WIP 内容与交接摘要不一致；"
-            "旧验证已降为历史，但现场仍必须先人工对账"
-        )
-    return snapshot
 
 
 def state_from_task_card(

@@ -3,14 +3,24 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
+from .comparison_binding import (
+    comparison_binding_from_mapping,
+    comparison_state_issues,
+)
 from .execution_control import ExecutionLease
+from .loop_evidence_support import (
+    EvidenceFreshness as EvidenceFreshness,
+    capture_current_workspace_snapshot as _capture_current_workspace_snapshot,
+    freshness as _freshness,
+    sha256_json as _sha256_json,
+    sha256_text as _sha256_text,
+)
 from .loop_integrity import (
     LoopArtifactIntegrity,
     validate_verification_workspace_fingerprint,
@@ -45,28 +55,6 @@ from .workspace_check import ReviewWorkspaceSnapshot
 
 
 @dataclass(frozen=True)
-class EvidenceFreshness:
-    fresh: bool
-    issues: tuple[str, ...]
-    current_workspace_fingerprint: str
-    trusted_workspace_fingerprint: str = ""
-    source_run: str = ""
-    review_run: str = ""
-    snapshot_id: str = ""
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "fresh": self.fresh,
-            "issues": list(self.issues),
-            "current_workspace_fingerprint": self.current_workspace_fingerprint,
-            "trusted_workspace_fingerprint": self.trusted_workspace_fingerprint,
-            "source_run": self.source_run,
-            "review_run": self.review_run,
-            "snapshot_id": self.snapshot_id,
-        }
-
-
-@dataclass(frozen=True)
 class LoopEvidenceValidationSnapshot:
     artifact_integrity: LoopArtifactIntegrity
     evidence_freshness: EvidenceFreshness
@@ -83,11 +71,24 @@ def validate_reflect_evidence_freshness(
     source_dir = resolve_run_dir(workspace, source_run)
     state = _read_json(source_dir / "state.json")
     evidence = _read_json(source_dir / "review-evidence.json")
+    comparison_base_sha, comparison_paths, comparison_issues = (
+        comparison_binding_from_mapping(
+        evidence
+        )
+    )
     current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
-        workspace, repo, current_workspace_snapshot
+        workspace,
+        repo,
+        current_workspace_snapshot,
+        comparison_base_sha=comparison_base_sha,
+        comparison_paths=comparison_paths,
+        capture_workspace=capture_runtime_workspace,
     )
     current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
-    issues = list(snapshot_issues)
+    issues = [
+        *comparison_issues,
+        *snapshot_issues,
+    ]
     if str(state.get("run_id") or "") != source_dir.name:
         issues.append("source_run_id_mismatch")
     if state.get("status") != "success":
@@ -118,6 +119,13 @@ def validate_reflect_evidence_freshness(
     upstream_source_run = state.get("source_run")
     if evidence.get("upstream_source_run") != upstream_source_run:
         issues.append("upstream_source_run_mismatch")
+    issues.extend(
+        comparison_state_issues(
+            state,
+            comparison_base_sha,
+            comparison_paths,
+        )
+    )
 
     state_changed_files_value = state.get("changed_files")
     evidence_changed_files_value = evidence.get("changed_files")
@@ -199,13 +207,24 @@ def validate_review_evidence_freshness(
     state, state_issue = _load_review_state(review_dir / "state.json")
     context, context_issue = _load_json_object(review_dir / "review-context.json")
     verdict, verdict_issue = _load_review_verdict(review_dir / "review-verdict.json")
+    comparison_base_sha, comparison_paths, comparison_issues = (
+        comparison_binding_from_mapping(
+            context or {}
+        )
+    )
     current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
         workspace,
         repo,
         current_workspace_snapshot,
+        comparison_base_sha=comparison_base_sha,
+        comparison_paths=comparison_paths,
+        capture_workspace=capture_runtime_workspace,
     )
     current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
-    issues = list(snapshot_issues)
+    issues = [
+        *comparison_issues,
+        *snapshot_issues,
+    ]
     if state_issue:
         issues.append(f"review_state_{state_issue}")
     if context_issue:
@@ -396,6 +415,8 @@ def validate_loop_artifact_integrity(
             required=state.scope_gate_required,
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
+            comparison_base_sha=state.comparison_base_sha,
+            comparison_paths=tuple(state.comparison_paths),
         )
         issues.extend(f"{prefix}_{issue}" for issue in scope_gate_integrity.issues)
         post_scope_gate_integrity = validate_iteration_scope_gate_artifacts(
@@ -408,6 +429,8 @@ def validate_loop_artifact_integrity(
             required=state.scope_gate_required,
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
+            comparison_base_sha=state.comparison_base_sha,
+            comparison_paths=tuple(state.comparison_paths),
         )
         issues.extend(
             f"{prefix}_post_verification_{issue}"
@@ -422,6 +445,8 @@ def validate_loop_artifact_integrity(
             required=state.scope_gate_required,
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
+            comparison_base_sha=state.comparison_base_sha,
+            comparison_paths=tuple(state.comparison_paths),
         )
         issues.extend(
             f"{prefix}_pre_review_{issue}" for issue in review_scope_gate_integrity.issues
@@ -599,13 +624,24 @@ def _validate_loop_evidence_freshness(
         if state is not None
         else _read_json(loop_dir / "state.json")
     )
+    comparison_base_sha, comparison_paths, comparison_issues = (
+        comparison_binding_from_mapping(
+            state_payload
+        )
+    )
     current_snapshot, snapshot_issues = _capture_current_workspace_snapshot(
         workspace,
         repo,
         None,
+        comparison_base_sha=comparison_base_sha,
+        comparison_paths=comparison_paths,
+        capture_workspace=capture_runtime_workspace,
     )
     current_fingerprint = current_snapshot.fingerprint if current_snapshot else ""
-    issues = list(snapshot_issues)
+    issues = [
+        *comparison_issues,
+        *snapshot_issues,
+    ]
     if str(state_payload.get("run_id") or "") != loop_dir.name:
         issues.append("loop_run_id_mismatch")
     loop_repo = str(state_payload.get("repo_path") or "")
@@ -1262,49 +1298,3 @@ def _string_list(value: object) -> list[str]:
 
 def _is_string_list(value: object) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
-
-
-def _capture_current_workspace_snapshot(
-    workspace: Path,
-    repo_path: Path,
-    current_workspace_snapshot: ReviewWorkspaceSnapshot | None,
-) -> tuple[ReviewWorkspaceSnapshot | None, list[str]]:
-    if current_workspace_snapshot is not None:
-        return current_workspace_snapshot, []
-    try:
-        snapshot = capture_runtime_workspace(workspace, repo_path)
-    except (OSError, RuntimeError, subprocess.SubprocessError):
-        return None, ["workspace_snapshot_failed"]
-    return snapshot, []
-
-
-def _freshness(
-    issues: list[str],
-    current_workspace_fingerprint: str,
-    *,
-    trusted_workspace_fingerprint: str = "",
-    source_run: str = "",
-    review_run: str = "",
-    snapshot_id: str = "",
-) -> EvidenceFreshness:
-    unique_issues = tuple(dict.fromkeys(issues))
-    return EvidenceFreshness(
-        fresh=not unique_issues,
-        issues=unique_issues,
-        current_workspace_fingerprint=current_workspace_fingerprint,
-        trusted_workspace_fingerprint=trusted_workspace_fingerprint,
-        source_run=source_run,
-        review_run=review_run,
-        snapshot_id=snapshot_id,
-    )
-
-
-def _sha256_json(payload: Any) -> str:
-    serialized = json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    )
-    return _sha256_text(serialized)
-
-
-def _sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()

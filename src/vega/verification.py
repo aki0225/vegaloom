@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+from .comparison_binding import (
+    capture_workspace_fingerprint as _capture_workspace_fingerprint,
+)
 from .execution_control import RunnerExecutionContext, run_owned_process
 from .project_config import (
     VERIFICATION_TEMP_ENV,
@@ -64,6 +67,8 @@ def run_project_verification(
     timeout_seconds: int | None = None,
     progress_reporter: Callable[[str, int], None] | None = None,
     verification_commands: list[str] | None = None,
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
 ) -> VerificationRunResult:
     """按项目画像执行最小验证命令，并把结果写成可交给 reflect/reviewer 的日志。
 
@@ -79,6 +84,8 @@ def run_project_verification(
             workspace=workspace,
             repo_path=repo_path,
             iteration=iteration,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=comparison_paths,
         )
 
     profile = build_project_profile(workspace, repo_path)
@@ -146,7 +153,13 @@ def run_project_verification(
         None,
     )
     workspace_fingerprint, workspace_capture_error_type = (
-        _capture_workspace_fingerprint(workspace, repo_path)
+        _capture_workspace_fingerprint(
+            workspace,
+            repo_path,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=comparison_paths,
+            capture_workspace=capture_runtime_workspace,
+        )
     )
     failure_kind: VerificationFailureKind | None = (
         None if workspace_fingerprint is not None else "workspace_capture_failed"
@@ -219,12 +232,20 @@ def _write_verification_config_failure(
     workspace: Path,
     repo_path: Path,
     iteration: int,
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
 ) -> VerificationRunResult:
     text = redact_text(render_project_config_check(config_check))
     run_id = _find_parent_run_id(output_dir)
     shell_kind = current_verification_shell_kind()
     workspace_fingerprint, workspace_capture_error_type = (
-        _capture_workspace_fingerprint(workspace, repo_path)
+        _capture_workspace_fingerprint(
+            workspace,
+            repo_path,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=comparison_paths,
+            capture_workspace=capture_runtime_workspace,
+        )
     )
     failure_kind: VerificationFailureKind = (
         "project_config_invalid"
@@ -374,16 +395,6 @@ def render_verification_summary(payload: dict[str, Any]) -> str:
             ]
         )
     return "\n".join(lines).rstrip() + "\n"
-
-
-def _capture_workspace_fingerprint(
-    workspace: Path,
-    repo_path: Path,
-) -> tuple[str | None, str | None]:
-    try:
-        return capture_runtime_workspace(workspace, repo_path).fingerprint, None
-    except (OSError, RuntimeError) as exc:
-        return None, type(exc).__name__
 
 
 def _run_command(

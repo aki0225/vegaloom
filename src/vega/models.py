@@ -14,17 +14,13 @@ from .goal_models import (
     GoalCheckpointEvidenceType as GoalCheckpointEvidenceType,
     GoalCheckpointRecord as GoalCheckpointRecord,
     GoalCheckpointRef as GoalCheckpointRef,
-    GoalContract as GoalContract,
-    GoalState as GoalState,
+    GoalContract as GoalContract, GoalState as GoalState,
 )
 from .redaction import redact_value
 from .review_contract import (
-    GateReason,
-    RequiredReviewHit,
-    ReviewFinding as ReviewFinding,
-    ReviewVerdict as ReviewVerdict,
+    GateReason, RequiredReviewHit,
+    ReviewFinding as ReviewFinding, ReviewVerdict as ReviewVerdict,
 )
-
 
 def _save_model(path: Path, model: BaseModel) -> None:
     payload = redact_value(model.model_dump(mode="json"))
@@ -295,6 +291,8 @@ class ReflectState(BaseModel):
     status: Literal["created", "running", "success", "failed"] = "created"
     repo_path: str
     source_run: str | None = None
+    comparison_base_sha: str | None = None
+    comparison_paths: list[str] = Field(default_factory=list)
     current_step: str = "created"
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     changed_files: list[str] = Field(default_factory=list)
@@ -422,6 +420,8 @@ class LoopAutomationState(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     brief_run: str | None = None
     initial_head_sha: str | None = None
+    comparison_base_sha: str | None = None
+    comparison_paths: list[str] = Field(default_factory=list)
     project_policy_snapshot: dict[str, str | None] = Field(default_factory=dict)
     project_policy_snapshot_sha256: str | None = None
     scope_gate_required: bool = False

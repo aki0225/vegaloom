@@ -11,10 +11,18 @@ import pytest
 
 from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
 from vega.agent_codex_evidence import _verification_status
-from vega.agent_contract import AgentPlan, AgentWorkItem
+from vega.agent_contract import AgentPlan, AgentWorkItem, approve_plan
 from vega.agent_persistence import append_agent_trace, load_agent_state
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_task_card import (
+    AgentTaskCard,
+    ResumeCapsule,
+    compute_handoff_workspace_digest,
+    save_task_card,
+)
 from vega.execution_control import ExecutionController, RunnerExecutionContext
+from vega.finish_runtime import FinishRuntime
+from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.runner import CodexExecRunner, RunnerResult
 from vega.workspace_inventory import prepare_verification_temp_root
@@ -38,6 +46,8 @@ class _FakeLoopRuntime:
         self.continue_count = 0
         self.child_dir: Path | None = None
         self.verification_commands: list[str] | None = None
+        self.comparison_base_sha: str | None = None
+        self.comparison_paths: tuple[str, ...] = ()
 
     def start(
         self,
@@ -48,12 +58,16 @@ class _FakeLoopRuntime:
         max_iterations: int = 2,
         verify: bool = True,
         on_run_created=None,
+        comparison_base_sha: str | None = None,
+        comparison_paths: tuple[str, ...] = (),
     ) -> Path:
         del worker_name, reviewer_name, max_iterations, verify, on_run_created
         assert automation_mode == "assist"
         if self.prepare_runtime_root:
             prepare_verification_temp_root(Path(brief_input.repo_path))
         self.start_count += 1
+        self.comparison_base_sha = comparison_base_sha
+        self.comparison_paths = comparison_paths
         child_dir = self.workspace / "runs" / "fake-assist-child"
         child_dir.mkdir(parents=True)
         LoopAutomationState(
@@ -151,8 +165,14 @@ class _FakeLoopRuntime:
 
 
 class _FakeFinishRuntime:
-    def __init__(self, loop: _FakeLoopRuntime) -> None:
+    def __init__(
+        self,
+        loop: _FakeLoopRuntime,
+        *,
+        evidence_trusted: bool = True,
+    ) -> None:
         self.loop = loop
+        self.evidence_trusted = evidence_trusted
 
     def run(self, run: str) -> Path:
         assert self.loop.child_dir is not None
@@ -165,8 +185,8 @@ class _FakeFinishRuntime:
                     "finish_status": self.loop.finish_status,
                     "verification_passed": True,
                     "latest_verification_failed": False,
-                    "artifact_integrity": {"valid": True},
-                    "evidence_freshness": {"fresh": True},
+                    "artifact_integrity": {"valid": self.evidence_trusted},
+                    "evidence_freshness": {"fresh": self.evidence_trusted},
                     "latest_verdict": {
                         "verdict": "approve" if ready else "request_changes"
                     },
@@ -271,6 +291,21 @@ def test_untrusted_finish_evidence_blocks_passed_verification_flag() -> None:
     assert _verification_status(None, untrusted_finish) == "blocked"
 
 
+def test_iteration_verification_remains_passed_when_finish_evidence_is_untrusted() -> None:
+    iteration = LoopIterationState(
+        iteration=1,
+        verification_status="passed",
+    )
+    untrusted_finish = {
+        "verification_passed": True,
+        "latest_verification_failed": False,
+        "artifact_integrity": {"valid": False},
+        "evidence_freshness": {"fresh": False},
+    }
+
+    assert _verification_status(iteration, untrusted_finish) == "passed"
+
+
 class _FakeWorkerRunner:
     def __init__(
         self,
@@ -333,6 +368,186 @@ class _FakeWorkerRunner:
         )
 
 
+class _FakeReviewerRunner:
+    def __init__(self, changed_files: tuple[str, ...]) -> None:
+        self.changed_files = changed_files
+        self.calls = 0
+
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context: RunnerExecutionContext | None = None,
+    ) -> RunnerResult:
+        del prompt, repo_path, timeout_seconds, execution_context
+        assert sandbox == "read-only"
+        self.calls += 1
+        return RunnerResult(
+            status="success",
+            output=json.dumps(
+                {
+                    "verdict": "approve",
+                    "summary": "committed handoff reviewed",
+                    "findings": [],
+                    "reviewed_files": list(self.changed_files),
+                    "checked_items": ["scope", "tests"],
+                }
+            ),
+            command=["fake-reviewer"],
+        )
+
+
+def test_resumed_committed_handoff_runs_core_with_capsule_diff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    _git(repo, "checkout", "-b", "feature/committed-handoff")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_example.py").write_text(
+        "from src.example import value\n\n\ndef test_value():\n    assert value == 0\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (repo / ".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "scope:",
+                "  allowed_paths:",
+                "    - src/example.py",
+                "    - tests/test_example.py",
+                "verification:",
+                "  commands:",
+                "    - python -m pytest tests/test_example.py -q",
+                "  max_commands: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(repo, "add", ".vega.yaml", "tests/test_example.py")
+    _git(repo, "commit", "-m", "测试：建立跨机器基线")
+    comparison_base = _head(repo)
+    changed_files = ("src/example.py", "tests/test_example.py")
+    (repo / "src" / "example.py").write_text(
+        "value = 1\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (repo / "tests" / "test_example.py").write_text(
+        "from src.example import value\n\n\ndef test_value():\n    assert value == 1\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    plan = approve_plan(
+        AgentPlan(
+            task_id="task-committed-handoff",
+            user_goal="验证已提交 WIP 的跨机器恢复。",
+            success_conditions=["定向测试通过并完成隔离审查"],
+            work_items=[
+                AgentWorkItem(
+                    work_item_id="W1",
+                    objective="重新验证已提交 WIP",
+                    allowed_paths=list(changed_files),
+                    verification=["python -m pytest tests/test_example.py -q"],
+                )
+            ],
+        ),
+        actor="user",
+        approved_at="2026-08-16T00:00:00+00:00",
+    )
+    digest = compute_handoff_workspace_digest(repo, list(changed_files))
+    card = AgentTaskCard(
+        task_id=plan.task_id,
+        status="paused",
+        branch="feature/committed-handoff",
+        base_revision=comparison_base,
+        plan=plan,
+        current_work_item="W1",
+        handoff_sequence=1,
+        handoff_status="handoff_ready",
+        handoff_base_revision=comparison_base,
+        handoff_workspace_digest=digest,
+        last_handoff_checkpoint="checkpoint-001",
+        resume_capsule=ResumeCapsule(
+            current_work_item="W1",
+            stopped_at="WIP 已提交但尚未在新机器复验",
+            confirmed_facts=["两个允许文件已完成最小修改"],
+            changed_files=list(changed_files),
+            workspace_digest=digest,
+            writer_stopped=True,
+            workspace_explained=True,
+            allowed_actions=["repair", "human"],
+            next_step="在新机器重新执行 Core 门禁",
+        ),
+    )
+    task_path = (
+        repo
+        / ".vega"
+        / "tasks"
+        / "2026-08"
+        / "committed-handoff.md"
+    )
+    save_task_card(task_path, card)
+    _git(
+        repo,
+        "add",
+        *changed_files,
+        task_path.relative_to(repo).as_posix(),
+    )
+    _git(repo, "commit", "-m", "测试：提交可恢复 WIP")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    resumed = SupervisorAgentRuntime(workspace).resume_task_card(repo)
+    reviewer = _FakeReviewerRunner(changed_files)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(mutate_each_run=False),
+        loop_runtime=LoopAutomationRuntime(
+            workspace,
+            reviewer_runner=reviewer,
+        ),
+        finish_runtime=FinishRuntime(workspace),
+    )
+
+    result = adapter.run(resumed.run_dir.name, timeout_seconds=60)
+
+    assert result.state.phase == "finalizing"
+    assert reviewer.calls == 1
+    observation = json.loads(
+        next((result.run_dir / "observations").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert observation["changed_files"] == list(changed_files)
+    assert observation["verification"] == "passed"
+    assert observation["risk"] == "passed"
+    assert observation["review"] == "passed"
+    child = workspace / "runs" / observation["child_run"]
+    child_state = json.loads(
+        (child / "state.json").read_text(encoding="utf-8")
+    )
+    scope = json.loads(
+        (
+            child
+            / "iterations"
+            / "01"
+            / "scope-gate-result.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert child_state["status"] == "success"
+    assert child_state["comparison_base_sha"] == comparison_base
+    assert child_state["comparison_paths"] == list(changed_files)
+    assert scope["changed_files"] == list(changed_files)
+    assert scope["committed_changed_files"] == list(changed_files)
+
+
 def test_adapter_maps_child_core_evidence_to_machine_observation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -374,6 +589,33 @@ def test_adapter_maps_child_core_evidence_to_machine_observation(
     assert payload["risk"] == "passed"
     assert payload["review"] == "passed"
     assert payload["changed_files"] == ["src/example.py"]
+
+
+def test_adapter_keeps_untrusted_ready_finish_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(workspace)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop, evidence_trusted=False),
+    )
+
+    result = adapter.run(run_id, timeout_seconds=60)
+
+    assert result.state.phase == "needs_human"
+    observation = json.loads(
+        next((result.run_dir / "observations").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert observation["verification"] == "passed"
+    assert observation["work_item_completed"] is False
+    assert "Verification=passed" in observation["machine_summary"]
 
 
 def test_approved_checkpoint_includes_first_assist_runtime_root(
@@ -932,6 +1174,19 @@ def _repo(path: Path) -> Path:
     _git(path, "add", "README.md", "src/example.py")
     _git(path, "commit", "-m", "测试：初始化仓库")
     return path
+
+
+def _head(repo: Path) -> str:
+    process = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert process.returncode == 0, process.stderr
+    return process.stdout.strip()
 
 
 def _git(repo: Path, *args: str) -> None:

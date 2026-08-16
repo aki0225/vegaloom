@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 import vega.agent_handoff as agent_handoff_module
+import vega.agent_resume_validation as agent_resume_validation_module
 from vega.agent_contract import AgentPlan, AgentWorkItem
 from vega.agent_persistence import load_agent_state, read_agent_trace
 from vega.agent_recovery import SupervisorAgentRecovery
@@ -126,6 +127,49 @@ def test_handoff_round_trip_between_isolated_clones(tmp_path: Path) -> None:
     assert "Verification：尚未运行" in status_card
     assert "Risk：尚未运行" in status_card
     assert "Reviewer：尚未运行" in status_card
+
+
+def test_resume_rejects_head_change_after_handoff_history_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    result = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证恢复校验与发布快照绑定同一 HEAD",
+    )
+    _git(
+        repo,
+        "add",
+        "src/example.py",
+        result.task_card_path.relative_to(repo).as_posix(),
+    )
+    _git(repo, "commit", "-m", "测试：提交 Handoff WIP")
+    original_validate = agent_resume_validation_module.validate_handoff_history
+
+    def advance_head(repo_path, card, relative_task):
+        validated_head = original_validate(repo_path, card, relative_task)
+        repo_path.joinpath("unexpected.py").write_text(
+            "unexpected = True\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        _git(repo_path, "add", "unexpected.py")
+        _git(repo_path, "commit", "-m", "测试：模拟恢复期间并发提交")
+        return validated_head
+
+    monkeypatch.setattr(
+        agent_resume_validation_module,
+        "validate_handoff_history",
+        advance_head,
+    )
+    next_workspace = tmp_path / "next-workspace-race"
+    next_workspace.mkdir()
+
+    with pytest.raises(ValueError, match="Git HEAD 已漂移"):
+        SupervisorAgentRuntime(next_workspace).resume_task_card(repo)
+
+    assert not list((next_workspace / "runs").glob("*-agent-resume*"))
 
 
 def test_needs_human_handoff_remains_blocked_after_clone(tmp_path: Path) -> None:

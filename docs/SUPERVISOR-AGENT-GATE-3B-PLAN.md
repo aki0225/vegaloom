@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 machine-a-handoff-ready / same-host-machine-b-simulation-blocked / physical-machine-b-not-run / gate-not-passed`
+> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-locally-verified / SAG3B-04-not-run`
 >
 > 日期：2026-08-16
 >
@@ -949,3 +949,92 @@ Scope、Risk 和 Reviewer 仍因“无 Diff”被跳过，Finish 正确 fail-clo
 回归测试只需覆盖一个关键场景：clean checkout 位于 handoff WIP commit，Task Card 指向旧
 base；恢复后 Scope 必须看到两个允许代码文件，Verification、Risk、Reviewer 和 Finish
 必须重新运行。完成修复后新建独立 Case，不重跑或覆盖本次 SAG3B-03 结果。
+
+## 十六、2026-08-16 committed handoff 修复结果与 SAG3B-04 准备
+
+### 16.1 修复后的证据基线
+
+本分支完成了第 15.4 节要求的窄修复，没有增加新的调度层或第二套 Core：
+
+1. `initial_head_sha` 继续绑定恢复时的当前 WIP HEAD，负责阻止运行期间的 HEAD 漂移；
+2. 新增独立 `comparison_base_sha`，固定为 Task Card 的
+   `handoff_base_revision`；
+3. `comparison_paths` 只包含 Resume Capsule 登记的 WIP 文件，不把 Task Card 或其他
+   提交文件交给 Worker、Risk 或 Reviewer 作为代码变更；
+4. resume 预检要求 `comparison_base..HEAD` 的提交路径恰好等于 Capsule 文件与当前
+   Task Card，缺少文件或出现未登记文件均拒绝恢复；
+5. committed、staged、unstaged 与 untracked 四类事实统一进入 Scope、Verification
+   workspace fingerprint、Reflect、Risk、Reviewer freshness 和 Finish；
+6. Adapter 首次执行仍拒绝 staged、unstaged 或 untracked 污染，只允许已经完成上述对账的
+   committed WIP；
+7. comparison path 使用 Git literal pathspec，非法、重复或被篡改的路径作为证据问题
+   fail-closed；
+8. Supervisor 可以准确记录 `Verification=passed`，但只有 `ready_to_commit` 且 Finish
+   Artifact 完整、新鲜时才把 Work Item 标为完成，因此不会因措辞修正放松终态。
+9. 恢复校验、Agent State 与 run metadata 复用同一份 Handoff HEAD 快照；校验后若
+   HEAD 被另一进程推进，恢复立即拒绝，未登记提交不能被 comparison path 过滤掉。
+
+普通 `vega do`、`vega loop` 和没有 comparison binding 的 assist run 继续使用原有
+HEAD、index 与 worktree 语义。
+
+### 16.2 本地机械回归
+
+本轮按仓库 60 秒分片规则运行，取得以下明确汇总：
+
+```text
+Supervisor Codex Adapter：25 passed
+Agent handoff：18 passed, 1 skipped
+Task Card resume：1 passed
+committed handoff Core E2E：1 passed
+evidence freshness：30 passed
+review artifact integrity：32 passed
+finish artifact integrity：19 passed
+success semantics：29 passed
+scope/path matching：52 passed
+workspace baseline：18 passed
+finish policy：11 passed
+required risk review loop：6 passed
+verification capture compatibility：2 passed
+hardened Git security：9 passed
+scope evidence P0 regressions：11 passed
+合计：264 passed, 1 skipped
+```
+
+该证据证明实现可让 clean committed handoff WIP 重新经过 Scope、Verification、Reflect、
+Risk、Reviewer 与 Finish，并维持原有 fail-closed 语义。它不替代 PR CI，也不证明另一台
+物理机器上的 Gate 3B 已通过。
+
+### 16.3 SAG3B-04 控制源码身份协议
+
+SAG3B-04 必须从修复合入后的同一主线提交重新预注册。机器 A 与机器 B 均独立执行以下
+等价命令，不相互传递已展开的控制目录：
+
+```powershell
+git -c core.autocrlf=false rev-parse "<runtime-commit>^{tree}"
+git -c core.autocrlf=false ls-tree -r --full-tree "<runtime-commit>"
+git -c core.autocrlf=false archive --format=tar --output="<archive-path>" "<runtime-commit>"
+```
+
+身份判定顺序固定为：
+
+1. 完整 runtime commit；
+2. commit tree；
+3. `ls-tree` 产生的路径、mode 与 blob OID manifest；
+4. archive SHA-256。
+
+前三项是源码身份的主要证据。archive SHA-256 只用于显式
+`core.autocrlf=false`、相同导出命令下的传输校验；不得再把不同 EOL 配置产生的 tar
+字节差异解释为源码 tree 不同。
+
+### 16.4 停止条件与下一 Case
+
+SAG3B-03 的历史结果保持 `gate-not-passed`，不得用本轮单元测试或同机模拟覆盖。下一次
+正式 Case 命名为 `SAG3B-04`，开始前必须同时满足：
+
+1. 本修复已合入主线且 PR CI 全部通过；
+2. 从合并提交重新冻结 runtime commit、tree、blob manifest 与 archive 参数；
+3. 使用新的目标任务分支、Task Card、run ID 和 evidence 目录；
+4. 机器 B 是另一台物理机器，并只从远端 Git 与预注册协议恢复；
+5. Scope、Verification、Risk、Reviewer 和 Finish 均在机器 B 重新运行并形成完整 Artifact。
+
+在 SAG3B-04 完成前，Gate 3B 和 Gate 3C 都保持未通过。

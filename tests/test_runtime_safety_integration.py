@@ -17,6 +17,7 @@ from vega.execution_control import (
     ExecutionRecoveryInspection,
     OwnedProcessResult,
 )
+from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import GateRuntime
 from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime
@@ -367,6 +368,177 @@ def test_loop_attributes_project_config_failure_without_fake_command(
     assert any("项目配置预检失败" in item for item in status_payload["next_steps"])
     assert any("未执行任何验证命令" in item for item in status_payload["next_steps"])
     assert not any("自动验证失败" in item for item in status_payload["next_steps"])
+
+
+def test_assist_committed_handoff_diff_runs_all_core_gates(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    repo.joinpath("src").mkdir()
+    repo.joinpath("tests").mkdir()
+    repo.joinpath("src", "example.py").write_text(
+        "VALUE = 0\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo.joinpath("tests", "test_example.py").write_text(
+        "from src.example import VALUE\n\n\ndef test_value():\n    assert VALUE == 0\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "scope:",
+                "  allowed_paths:",
+                "    - src/example.py",
+                "    - tests/test_example.py",
+                "verification:",
+                "  commands:",
+                "    - python -m pytest tests/test_example.py -q",
+                "  max_commands: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    subprocess.run(
+        ["git", "add", "--", ".vega.yaml", "src/example.py", "tests/test_example.py"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-m",
+            "add handoff fixture",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    comparison_base = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+    repo.joinpath("src", "example.py").write_text(
+        "VALUE = 1\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo.joinpath("tests", "test_example.py").write_text(
+        "from src.example import VALUE\n\n\ndef test_value():\n    assert VALUE == 1\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    subprocess.run(
+        ["git", "add", "--", "src/example.py", "tests/test_example.py"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-m",
+            "save committed handoff wip",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    changed_files = ("src/example.py", "tests/test_example.py")
+    reviewer = QueueRunner(
+        [
+            json.dumps(
+                {
+                    "verdict": "approve",
+                    "summary": "committed handoff reviewed",
+                    "findings": [],
+                    "reviewed_files": list(changed_files),
+                    "checked_items": ["scope", "tests"],
+                }
+            )
+        ]
+    )
+    runtime = LoopAutomationRuntime(
+        workspace,
+        reviewer_runner=reviewer,
+    )
+    run_dir = runtime.start(
+        BriefInput(
+            mode="bug",
+            text="验证已提交 WIP 的跨机器恢复证据链。",
+            source="test-committed-handoff",
+            repo_path=str(repo),
+        ),
+        "assist",
+        max_iterations=1,
+        verify=True,
+        comparison_base_sha=comparison_base,
+        comparison_paths=changed_files,
+    )
+
+    run_dir = runtime.continue_assist(run_dir.name, repo, verify=True)
+    finish_dir = FinishRuntime(workspace).run(run_dir.name)
+
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
+    iteration = state["iterations"][0]
+    scope = json.loads(
+        run_dir.joinpath(
+            "iterations",
+            "01",
+            "scope-gate-result.json",
+        ).read_text(encoding="utf-8")
+    )
+    gate = json.loads(
+        run_dir.joinpath(
+            "iterations",
+            "01",
+            "risk-gate-result.json",
+        ).read_text(encoding="utf-8")
+    )
+    finish = json.loads(
+        finish_dir.joinpath("finish-summary.json").read_text(encoding="utf-8")
+    )
+
+    assert state["status"] == "success"
+    assert state["comparison_base_sha"] == comparison_base
+    assert state["comparison_paths"] == list(changed_files)
+    assert scope["committed_changed_files"] == list(changed_files)
+    assert scope["changed_files"] == list(changed_files)
+    assert scope["staged_changed_files"] == []
+    assert scope["unstaged_changed_files"] == []
+    assert iteration["verification_status"] == "passed"
+    assert iteration["risk_gate_status"] == "success"
+    assert iteration["reviewer_status"] == "success"
+    assert iteration["verdict"] == "approve"
+    assert gate["changed_files"] == list(changed_files)
+    assert finish["finish_status"] == "ready_to_commit"
+    assert reviewer.prompts
 
 
 @pytest.mark.parametrize("flow", ["auto", "continue"])

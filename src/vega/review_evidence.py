@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .redaction import redact_value
+from .tracked_workspace import normalize_comparison_paths
 from .workspace_check import ReviewWorkspaceSnapshot
 
 REVIEW_EVIDENCE_SCHEMA_VERSION = 5
@@ -27,6 +28,7 @@ def review_evidence_schema_issues(
         return ["source_evidence_schema_unsupported"]
 
     issues: list[str] = []
+    issues.extend(_comparison_base_issues(evidence, current_snapshot))
     issues.extend(_tracked_diff_hash_issues(evidence, current_snapshot))
     issues.extend(_changed_files_snapshot_issues(evidence, current_snapshot))
 
@@ -68,8 +70,11 @@ def make_review_evidence(
             "upstream_source_run": upstream_source_run,
             "workspace_fingerprint": workspace_snapshot.fingerprint,
             "head_sha": workspace_snapshot.head_sha,
+            "comparison_base_sha": workspace_snapshot.comparison_base_sha,
+            "comparison_paths": list(workspace_snapshot.comparison_paths),
             "status_sha256": workspace_snapshot.status_sha256,
             "full_diff_sha256": _sha256_text(full_diff),
+            "committed_diff_sha256": workspace_snapshot.committed_diff_sha256,
             "staged_diff_sha256": workspace_snapshot.staged_diff_sha256,
             "unstaged_diff_sha256": workspace_snapshot.unstaged_diff_sha256,
             "untracked_manifest_sha256": workspace_snapshot.untracked_manifest_sha256,
@@ -126,6 +131,14 @@ def review_evidence_issues(
         )
     )
     issues.extend(_changed_files_issues(reflect_state, source_evidence))
+    if reflect_state.get("comparison_base_sha") != source_evidence.get(
+        "comparison_base_sha"
+    ):
+        issues.append("comparison_base_state_mismatch")
+    if reflect_state.get("comparison_paths") != source_evidence.get(
+        "comparison_paths"
+    ):
+        issues.append("comparison_paths_state_mismatch")
     issues.extend(_snapshot_metadata_issues(source_evidence))
     issues.extend(
         _artifact_hash_issues(
@@ -177,6 +190,21 @@ def _tracked_diff_hash_issues(
     current_snapshot: ReviewWorkspaceSnapshot | None,
 ) -> list[str]:
     issues: list[str] = []
+    source_comparison_base = source_evidence.get("comparison_base_sha")
+    if source_comparison_base is not None or current_snapshot is not None and (
+        current_snapshot.comparison_base_sha is not None
+    ):
+        issues.extend(
+            _hash_binding_issues(
+                source_evidence.get("committed_diff_sha256"),
+                "committed_diff_sha256",
+                (
+                    current_snapshot.committed_diff_sha256
+                    if current_snapshot
+                    else None
+                ),
+            )
+        )
     for key, current_hash in (
         (
             "staged_diff_sha256",
@@ -189,6 +217,42 @@ def _tracked_diff_hash_issues(
     ):
         issues.extend(_hash_binding_issues(source_evidence.get(key), key, current_hash))
     return issues
+
+
+def _comparison_base_issues(
+    source_evidence: dict[str, Any],
+    current_snapshot: ReviewWorkspaceSnapshot | None,
+) -> list[str]:
+    source_base = source_evidence.get("comparison_base_sha")
+    source_paths = source_evidence.get("comparison_paths", [])
+    if source_base is not None and (
+        not isinstance(source_base, str)
+        or len(source_base) not in {40, 64}
+        or any(
+            character not in "0123456789abcdef"
+            for character in source_base
+        )
+    ):
+        return ["comparison_base_invalid"]
+    if not isinstance(source_paths, list) or not all(
+        isinstance(path, str) for path in source_paths
+    ):
+        return ["comparison_paths_invalid"]
+    try:
+        normalized_paths = normalize_comparison_paths(source_paths)
+    except ValueError:
+        return ["comparison_paths_invalid"]
+    if (
+        current_snapshot is not None
+        and source_base != current_snapshot.comparison_base_sha
+    ):
+        return ["comparison_base_mismatch"]
+    if (
+        current_snapshot is not None
+        and normalized_paths != current_snapshot.comparison_paths
+    ):
+        return ["comparison_paths_mismatch"]
+    return []
 
 
 def _ignored_snapshot_binding_issues(
