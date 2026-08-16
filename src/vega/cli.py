@@ -32,7 +32,6 @@ from .models import BriefInput
 from .project_config import check_project_config, render_project_config_check
 from .project_profile import ProjectProfileRuntime
 from .progress import (
-    RunProgressLog,
     render_progress_items,
     safe_run_id,
     safe_run_status,
@@ -41,6 +40,7 @@ from .progress import (
 from .reflect_runtime import ReflectRuntime
 from .recovery_runtime import RecoveryRuntime
 from .review_runtime import ReviewPackRuntime
+from .run_progress import progress_items_for_run
 from .run_status import latest_run_dir, render_run_status, run_status_payload
 from .run_utils import resolve_run_dir
 
@@ -70,7 +70,7 @@ def _register_goal_app() -> None:
 _register_goal_app()
 
 KNOWN_RUN_KINDS = {
-    "all",
+    "all", "agent",
     "loop",
     "review",
     "review-pack",
@@ -402,7 +402,7 @@ def watch(
         was_first = first
         try:
             payload = run_status_payload(Path.cwd(), run_dir.name)
-            items = RunProgressLog(run_dir).read()
+            items = progress_items_for_run(Path.cwd(), run_dir, payload)
         except (FileNotFoundError, ValueError) as exc:
             raise typer.BadParameter(str(exc)) from exc
         status_value = safe_run_status(payload["status"])

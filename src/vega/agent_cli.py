@@ -122,6 +122,21 @@ def agent_run(
     typer.echo(_runtime().status(result.run_dir.name))
 
 
+@agent_app.command("finalize")
+def agent_finalize(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+) -> None:
+    """从已验证的 Core Finish Artifact 恢复或重试 Supervisor 终态发布。"""
+
+    try:
+        result = _runtime().finalize(run)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo("Agent 终态已完成。")
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
 @agent_app.command("recover")
 def agent_recover(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),

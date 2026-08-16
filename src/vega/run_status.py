@@ -5,8 +5,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .agent_run_status import (
+    agent_artifact_names,
+    agent_next_steps,
+    load_agent_status_state,
+)
 from .decision import DecisionStore
-from .execution_feedback import render_owned_child_pid_line
 from .execution_control import (
     ACTIVE_EXECUTION_STATUSES,
     ExecutionRecord,
@@ -20,6 +24,7 @@ from .run_status_guidance import (
     recovery_next_steps as _recovery_next_steps,
     verification_failure_next_steps as _verification_failure_next_steps,
 )
+from .run_status_render import render_run_status_payload
 from .run_utils import resolve_run_dir, resolve_runs_root
 
 
@@ -41,50 +46,15 @@ def latest_run_dir(workspace: Path, kind: str = "all") -> Path | None:
 
 
 def render_run_status(workspace: Path, run: str) -> str:
-    payload = run_status_payload(workspace, run)
-    lines = [
-        "# Run Status",
-        "",
-        f"- run：`{payload['run_id']}`",
-        f"- 类型：`{payload['kind']}`",
-        f"- 状态：`{payload['status']}`",
-        f"- 当前步骤：`{payload['current_step']}`",
-    ]
-    if payload.get("repo_path"):
-        lines.append(f"- 仓库：`{payload['repo_path']}`")
-    if payload.get("risk"):
-        lines.append(f"- 风险等级：`{payload['risk']}`")
-    if payload.get("recommendation"):
-        lines.append(f"- 建议：`{payload['recommendation']}`")
-    if payload.get("decision_count"):
-        lines.append(f"- 人工决策：`{payload['decision_count']}` 条")
-    execution = payload.get("execution")
-    if execution:
-        execution_is_current = bool(execution.get("termination_unconfirmed")) or (
-            payload["status"] == "running" and execution["status"] in ACTIVE_EXECUTION_STATUSES
-        )
-        lines.extend([
-            f"- execution：`{execution['status']}` / `{execution['step']}`",
-            render_owned_child_pid_line(execution_is_current, execution["child_pid"]),
-            f"- 最后心跳：`{execution['last_heartbeat']}`",
-        ])
-        if execution.get("termination_unconfirmed"):
-            lines.append("- owned process tree：`终止未确认`")
-    lines.extend(["", "## 下一步", ""])
-    lines.extend(f"- {item}" for item in payload["next_steps"])
-    lines.extend(["", "## 关键产物", ""])
-    artifacts = payload["key_artifacts"]
-    if artifacts:
-        lines.extend(f"- `{item}`" for item in artifacts)
-    else:
-        lines.append("- 未识别关键产物。")
-    return "\n".join(lines).rstrip() + "\n"
+    return render_run_status_payload(run_status_payload(workspace, run))
 
 
 def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     run_dir = resolve_run_dir(workspace, run)
-    state = _classify_init(workspace, run_dir, _read_state(run_dir))
+    state = _read_state(run_dir)
     kind = _infer_kind(run_dir, state)
+    if kind != "agent":
+        state = _classify_init(workspace, run_dir, state)
     decisions = DecisionStore(run_dir).list()
     execution = _latest_execution_payload(run_dir, state.get("status"))
     return {
@@ -102,6 +72,11 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         "decision_count": len(decisions),
         "latest_decisions": [entry.model_dump() for entry in decisions[-3:]],
         "execution": execution,
+        "agent_phase": state.get("agent_phase"),
+        "current_work_item": state.get("current_work_item"),
+        "latest_checkpoint_id": state.get("latest_checkpoint_id"),
+        "allowed_actions": state.get("allowed_actions"),
+        "terminal_status": state.get("terminal_status"),
         "next_steps": next_steps_for_run(workspace, run_dir, state, kind),
         "key_artifacts": key_artifacts_for_run(run_dir, state, kind),
     }
@@ -130,8 +105,12 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
             f"如需停止：`vega stop --run {run_dir.name} --reason \"...\"`。",
             "fresh execution 不能直接 recover；只有 heartbeat 过期、PID 消失或 execution 终态后才能接管。",
         ]
-    if run_kind == "loop":
-        return _loop_next_steps(run_dir, state)
+    routed_next_steps = {
+        "loop": _loop_next_steps,
+        "agent": agent_next_steps,
+    }.get(run_kind)
+    if routed_next_steps is not None:
+        return routed_next_steps(run_dir, state)
     if run_kind == "reflect":
         return [
             f"生成隔离审查包：`vega review-pack --repo <repo> --run {run_dir.name}`",
@@ -254,6 +233,7 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
             "stop-report.md",
             "recovery-report.md",
         ],
+        "agent": agent_artifact_names(state),
     }.get(run_kind, ["report.md", "review.md", "eval.md"])
     result = [str((run_dir / item).resolve()) for item in preferred if (run_dir / item).exists()]
     if (run_dir / "decisions.jsonl").exists():
@@ -367,6 +347,12 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
 
 def _read_state(run_dir: Path) -> dict[str, Any]:
     state_path = run_dir / "state.json"
+    agent_state_path = run_dir / "agent-state.json"
+    if agent_state_path.exists():
+        return load_agent_status_state(
+            run_dir,
+            ordinary_state_exists=state_path.exists(),
+        )
     if not state_path.exists():
         return {}
     try:
@@ -400,7 +386,11 @@ def _read_state_for_selection(run_dir: Path) -> dict[str, Any]:
         return _read_state(run_dir)
     except ValueError:
         # latest 先选 run，再由 run_status_payload 对被选中的状态给出明确诊断。
-        return {}
+        return (
+            {"_run_kind": "agent", "automation_mode": None}
+            if (run_dir / "agent-state.json").exists()
+            else {}
+        )
 
 
 def _safe_run_dirs(runs_dir: Path) -> list[Path]:
@@ -422,6 +412,7 @@ def _safe_run_dirs(runs_dir: Path) -> list[Path]:
             continue
         if not (
             (resolved / "state.json").is_file()
+            or (resolved / "agent-state.json").is_file()
             or (resolved / "goal-state.json").is_file()
             or (resolved / "goal-contract.json").is_file()
         ):
@@ -456,7 +447,7 @@ def _referenced_child_run_ids(run_dirs: list[Path]) -> set[str]:
 def _infer_kind(run_dir: Path, state: dict[str, Any] | None = None) -> str:
     data = state if state is not None else _read_state_for_selection(run_dir)
     if "automation_mode" in data:
-        return "loop"
+        return str(data.get("_run_kind", "loop"))
     if (run_dir / "review-pack.md").exists():
         if (
             (run_dir / "review-verdict.json").exists()

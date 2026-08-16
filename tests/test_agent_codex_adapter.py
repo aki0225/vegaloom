@@ -9,10 +9,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from vega import agent_finalization as agent_finalization_module
 from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
 from vega.agent_codex_evidence import _verification_status
 from vega.agent_contract import AgentPlan, AgentWorkItem, approve_plan
-from vega.agent_persistence import append_agent_trace, load_agent_state
+from vega.agent_persistence import (
+    append_agent_trace,
+    load_agent_state,
+    read_agent_trace,
+)
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_task_card import (
     AgentTaskCard,
@@ -518,7 +523,8 @@ def test_resumed_committed_handoff_runs_core_with_capsule_diff(
 
     result = adapter.run(resumed.run_dir.name, timeout_seconds=60)
 
-    assert result.state.phase == "finalizing"
+    assert result.state.phase == "completed"
+    assert result.state.terminal_status == "ready_to_commit"
     assert reviewer.calls == 1
     observation = json.loads(
         next((result.run_dir / "observations").glob("*.json")).read_text(
@@ -565,7 +571,8 @@ def test_adapter_maps_child_core_evidence_to_machine_observation(
 
     result = adapter.run(run_id, timeout_seconds=60)
 
-    assert result.state.phase == "finalizing"
+    assert result.state.phase == "completed"
+    assert result.state.terminal_status == "ready_to_commit"
     assert result.state.active_child_run is None
     assert result.plan.work_items[0].status == "completed"
     assert runner.execution_id is not None
@@ -588,7 +595,81 @@ def test_adapter_maps_child_core_evidence_to_machine_observation(
     assert payload["verification"] == "passed"
     assert payload["risk"] == "passed"
     assert payload["review"] == "passed"
+    assert read_agent_trace(result.run_dir / "trace.jsonl")[-1]["event"] == (
+        "agent_completed"
+    )
+    status_card = (result.run_dir / "status-card.md").read_text(encoding="utf-8")
+    assert "阶段：已完成" in status_card
+    assert "Finish：`ready_to_commit`" in status_card
     assert payload["changed_files"] == ["src/example.py"]
+
+
+def test_agent_finalize_recovers_after_terminal_publish_interruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(workspace)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    def interrupt_finalize(run: str) -> None:
+        del run
+        raise OSError("模拟 Supervisor 终态发布前中断")
+
+    monkeypatch.setattr(adapter.runtime, "finalize", interrupt_finalize)
+
+    with pytest.raises(OSError, match="模拟 Supervisor 终态发布前中断"):
+        adapter.run(run_id, timeout_seconds=60)
+
+    interrupted = load_agent_state(
+        workspace / "runs" / run_id / "agent-state.json"
+    )
+    assert interrupted.phase == "finalizing"
+    assert interrupted.terminal_status is None
+
+    runtime = SupervisorAgentRuntime(workspace)
+    original_status_writer = agent_finalization_module.write_status_card
+
+    def interrupt_status_card(*args, **kwargs) -> None:
+        del args, kwargs
+        raise OSError("模拟 completed State 发布后的状态卡中断")
+
+    monkeypatch.setattr(
+        agent_finalization_module,
+        "write_status_card",
+        interrupt_status_card,
+    )
+    with pytest.raises(OSError, match="模拟 completed State 发布后的状态卡中断"):
+        runtime.finalize(run_id)
+    persisted = load_agent_state(
+        workspace / "runs" / run_id / "agent-state.json"
+    )
+    assert persisted.phase == "completed"
+    monkeypatch.setattr(
+        agent_finalization_module,
+        "write_status_card",
+        original_status_writer,
+    )
+
+    completed = runtime.finalize(run_id)
+    repeated = runtime.finalize(run_id)
+
+    assert completed.state.phase == "completed"
+    assert completed.state.terminal_status == "ready_to_commit"
+    assert repeated.state.state_version == completed.state.state_version
+    assert "阶段：已完成" in (
+        completed.run_dir / "status-card.md"
+    ).read_text(encoding="utf-8")
+    assert [
+        item["event"]
+        for item in read_agent_trace(completed.run_dir / "trace.jsonl")
+    ].count("agent_completed") == 1
 
 
 def test_adapter_keeps_untrusted_ready_finish_fail_closed(
@@ -648,7 +729,7 @@ def test_approved_checkpoint_includes_first_assist_runtime_root(
     result = adapter.run(approved.run_dir.name, timeout_seconds=60)
 
     assert repo.joinpath(".tmp", "vega-verification").is_dir()
-    assert result.state.phase == "finalizing"
+    assert result.state.phase == "completed"
     assert loop.start_count == 1
 
 
@@ -679,7 +760,7 @@ def test_repo_local_agent_runs_do_not_drift_on_own_artifacts(
 
     result = adapter.run(approved.run_dir.name, timeout_seconds=60)
 
-    assert result.state.phase == "finalizing"
+    assert result.state.phase == "completed"
     assert loop.start_count == 1
 
 

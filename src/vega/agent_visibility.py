@@ -69,6 +69,8 @@ def render_agent_status_card(card: AgentStatusCard) -> str:
         f"- Risk：{_GATE_LABELS[card.risk]}",
         f"- Reviewer：{_GATE_LABELS[card.review]}",
         f"- 允许动作：{allowed}",
-        f"- 下一步：{card.next_step}",
     ]
+    if card.terminal_status is not None:
+        lines.append(f"- Finish：`{card.terminal_status}`")
+    lines.append(f"- 下一步：{card.next_step}")
     return "\n".join(lines).rstrip() + "\n"

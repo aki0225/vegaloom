@@ -158,6 +158,120 @@ description: "当用户要求审查当前 Vega run、当前 diff 或 AI 修改�
 - 不要自动 commit、push、release。
 - 不要把 worker 的完整聊天记录塞给 reviewer。
 """,
+    "vega-agent": """---
+name: "vega-agent"
+description: "当用户明确要求使用 Vega Supervisor Agent 完成长任务、可恢复编码任务或受控 Coding Agent 执行时使用。主会话只读调查、提交单 Work Item Plan、等待人工批准，再驱动真实 Codex Worker、验证、独立 Reviewer 和可信 Finish。"
+---
+
+# Vega Supervisor Agent Skill
+
+## 什么时候使用
+
+- 用户明确说“用 Vega Agent”“用 Supervisor Agent”或调用 `$vega-agent`。
+- 任务需要长时间执行、暂停恢复、跨会话接手或保留可审计证据。
+- 用户希望主会话负责计划与控制，外部 Worker 负责写代码，Reviewer 保持独立只读。
+
+简单的一次性修改仍优先使用 `$vega-loop`。纯审查使用 `$vega-review`。
+
+## V1 边界
+
+- V1 只派发一个未完成 Work Item，不自动连续执行多 Work Item。
+- 主会话负责只读调查和 Plan，不增加 Planner、Researcher、Memory Agent 或 Provider SDK。
+- Worker 使用现有 Codex Adapter；不要把 Worker 完整聊天或推理交给 Reviewer。
+- Vega 不自动 commit、push、release、部署、回滚、删除文件或接受长期 Memory。
+- 状态只保存在 Agent run 的 Task Card、State、Checkpoint、Trace 和 Task Brief 中，
+  不依赖当前聊天记录。
+
+## 启动前检查
+
+1. 读取目标仓库的 `AGENTS.md`、`.vega.yaml`、相关代码、测试和 Git 状态。
+2. 调查阶段只读，不修改目标文件，不启动 Worker。
+3. 运行 `vega agent capabilities`。只有 `supervisor_runtime=true` 且 `langgraph=true`
+   才能继续；缺少依赖时报告问题，不自动安装。
+4. 如果目标仓库已有无法解释的修改，先交给用户判断；不要把旧 Diff 混入新 Agent run。
+5. Plan 输入文件放在宿主临时目录或项目已忽略的专用临时目录，不放在仓库根目录，
+   不提交到 Git。
+
+## Plan 合同
+
+调查后生成一个未批准的 JSON Plan。V1 只保留一个 `pending` Work Item：
+
+```json
+{
+  "schema_version": 1,
+  "task_id": "task-short-name",
+  "goal_revision": 1,
+  "plan_revision": 1,
+  "user_goal": "与启动命令完全一致的用户目标",
+  "non_goals": ["明确不做的事项"],
+  "success_conditions": ["可验证的成功条件"],
+  "observed_facts": ["已由文件或命令确认的事实"],
+  "hypotheses": ["仍需 Worker 验证的假设"],
+  "unresolved_decisions": [],
+  "work_items": [
+    {
+      "schema_version": 1,
+      "work_item_id": "W1",
+      "objective": "当前唯一可执行目标",
+      "allowed_paths": ["src/example.py", "tests/test_example.py"],
+      "forbidden_paths": [".env"],
+      "verification": ["python -m pytest tests/test_example.py -q"],
+      "risk_notes": ["需要人工关注的风险"],
+      "depends_on": [],
+      "status": "pending"
+    }
+  ],
+  "approved": false
+}
+```
+
+`observed_facts` 不能混入推测；`allowed_paths`、`forbidden_paths` 和验证命令必须来自调查证据。
+
+## 推荐流程
+
+1. 把 Plan 和关键调查事实展示给用户，不隐藏未决问题和风险。
+2. 创建 Agent run：
+   - `vega agent start --repo . --plan <plan.json> --text "<与 Plan 一致的用户目标>"`
+3. 记录输出的 `<agent_run>`，运行：
+   - `vega status --run <agent_run>`
+   - `vega watch --run <agent_run> --no-follow`
+4. 只有用户明确批准当前 Plan 后才运行：
+   - `vega agent approve --run <agent_run> --actor human`
+5. 执行当前 Work Item：
+   - `vega agent run --run <agent_run> --timeout 900`
+6. 执行期间可以在另一个终端跟随安全低频事件：
+   - `vega watch --run <agent_run> --follow`
+7. 每次命令返回后读取 `vega status --run <agent_run> --json`，按真实 phase 处理：
+   - `completed`：展示全部 changed files、关键 Diff、验证、Risk、Reviewer 和 Finish。
+   - `finalizing`：运行 `vega agent finalize --run <agent_run>`，采用已有可信 Core Finish。
+   - `ready` 且允许 `repair`：说明 Reviewer 或验证结果后，只允许再执行一次
+     `vega agent run`；第二次仍未完成就停止并交还人工。
+   - `awaiting_approval`：新证据要求 replan；重新只读调查、提交 revision，并再次等待批准。
+   - `needs_human`：停止自动执行，展示阻断、Checkpoint、未知副作用和人工选项。
+   - `stopped`：保留现场，除非用户明确要求，否则不要恢复。
+
+## 人工控制与恢复
+
+- 查询：`vega agent status --run <agent_run>` 或 `vega status --run <agent_run>`。
+- 新约束：`vega agent steer --run <agent_run> --instruction "<约束>"`。
+- 暂停：`vega agent pause --run <agent_run> --reason "<原因>"`。
+- 停止：`vega agent stop --run <agent_run> --reason "<原因>"`。
+- 本机恢复：先确认无 active Writer，再运行
+  `vega agent resume-local --run <agent_run>`。
+- 跨机器准备：仅在用户明确要求时运行
+  `vega agent checkpoint --run <agent_run> --handoff --reason "<原因>"`；
+  Vega 只生成材料，不执行 Git 操作。
+
+## 主会话展示要求
+
+- 默认展示阶段、Work Item、Worker、changed files、Checkpoint、Verification、Risk、
+  Reviewer、Finish 和下一步。
+- 列出全部 changed files，不能只展示模型认为重要的文件。
+- 小 Diff 直接展示完整代码；大 Diff 分批展示，但必须声明已展示和未展示范围。
+- 只展示安全低频事件，不输出模型正文、隐藏推理、完整命令参数或凭据。
+- `Worker completed`、`Reviewer approve` 或 LangGraph `END` 都不等于成功；
+  只有可信 Core Finish 为 `ready_to_commit` 且 Agent phase 为 `completed` 才能建议人工提交。
+""",
 }
 
 CODEX_SKILLS_ROOT = Path(".agents") / "skills"

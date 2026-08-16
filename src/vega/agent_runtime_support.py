@@ -437,6 +437,7 @@ def write_status_card(
         verification=observation.verification if observation else "not_run",
         risk=observation.risk if observation else "not_run",
         review=observation.review if observation else "not_run",
+        terminal_status=state.terminal_status,
         allowed_actions=list(state.allowed_actions),
         next_step=next_step or default_next_step(state.phase, current_index),
     )
@@ -452,6 +453,8 @@ def default_next_step(phase: str, current_index: int) -> str:
         return "查看最近 Observation 与 Checkpoint 后选择人工动作"
     if phase == "finalizing":
         return "调用现有 Vega Finish，Agent Graph 不能自行宣称成功"
+    if phase == "completed":
+        return "读取 Core Finish 结论并完成人工提交前检查；Vega 不自动执行 Git 操作"
     return "查看结构化状态与允许动作"
 
 

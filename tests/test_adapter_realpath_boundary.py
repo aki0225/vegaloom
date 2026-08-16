@@ -58,7 +58,7 @@ def test_adapter_init_rejects_external_directory_link(
     outside.mkdir()
     outside_skills = [
         outside / "skills" / skill_name / "SKILL.md"
-        for skill_name in ("vega-loop", "vega-review")
+        for skill_name in ("vega-agent", "vega-loop", "vega-review")
     ]
     if preexisting:
         for skill_path in outside_skills:
@@ -128,7 +128,7 @@ def test_adapter_init_allows_directory_link_resolving_inside_repo(tmp_path: Path
         )
 
         assert result.exit_code == 0, result.output
-        for skill_name in ("vega-loop", "vega-review"):
+        for skill_name in ("vega-agent", "vega-loop", "vega-review"):
             skill_path = link_path / "skills" / skill_name / "SKILL.md"
             assert skill_path.exists()
             assert skill_path.resolve().is_relative_to(repo.resolve())

@@ -47,6 +47,7 @@ WorkItemStatus = Literal[
 ]
 CheckpointStatus = Literal["safe", "uncertain", "blocked"]
 GateStatus = Literal["not_run", "passed", "failed", "blocked", "stale"]
+TerminalStatus = Literal["ready_to_commit", "request_changes", "needs_human"]
 
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 RelativePathText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -302,9 +303,11 @@ class AgentCheckpoint(StrictAgentModel):
         if (
             self.status == "safe"
             and not self.pending_actions
-            and self.phase != "stopped"
+            and self.phase not in {"completed", "stopped"}
         ):
             raise ValueError("safe Checkpoint 必须声明后续允许动作")
+        if self.phase == "completed" and self.pending_actions:
+            raise ValueError("completed Checkpoint 不能保留后续动作")
         if self.status != "safe" and any(
             action in {"next", "repair", "finalize"} for action in self.pending_actions
         ):
@@ -326,6 +329,7 @@ class AgentStatusCard(StrictAgentModel):
     verification: GateStatus = "not_run"
     risk: GateStatus = "not_run"
     review: GateStatus = "not_run"
+    terminal_status: TerminalStatus | None = None
     allowed_actions: list[AgentAction] = Field(default_factory=list)
     next_step: NonEmptyText
 
@@ -353,7 +357,7 @@ class AgentState(StrictAgentModel):
     latest_checkpoint_id: NonEmptyText | None = None
     allowed_actions: list[AgentAction] = Field(default_factory=list)
     handoff_status: Literal["none", "handoff_ready", "handoff_blocked"] = "none"
-    terminal_status: Literal["ready_to_commit", "request_changes", "needs_human"] | None = None
+    terminal_status: TerminalStatus | None = None
     updated_at: str = Field(default_factory=utc_now)
 
     @model_validator(mode="after")
