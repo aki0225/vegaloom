@@ -425,6 +425,10 @@ class SupervisorAgentCodexAdapter:
         self._event("Workspace 与现有 Core Artifact 已完成对账")
         routed = self.runtime.observe_machine(run_dir.name, observation)
         self._event(f"Supervisor 选择：{decision_label(routed, observation)}")
+        if routed.state.phase == "finalizing":
+            self._event("正在采用可信 Core Finish 终态")
+            routed = self.runtime.finalize(routed.run_dir.name)
+            self._event("Supervisor 已完成：ready_to_commit")
         return routed
 
     def _observe_failure(

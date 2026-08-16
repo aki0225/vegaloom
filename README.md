@@ -204,11 +204,21 @@ vega adapters init codex --repo .
 ```text
 .agents/skills/vega-loop/SKILL.md
 .agents/skills/vega-review/SKILL.md
+.agents/skills/vega-agent/SKILL.md
 ```
 
-在该仓库的新 Codex 任务中可通过 `$vega-loop` 或 `$vega-review` 显式调用。Skill 只提供
-Vega 工作流说明；`$vega-loop` 会在模糊任务下先要求只读调查、固定 Plan 和修改前人工确认。
-Skill 不安装 hook、不修改 Codex 全局配置，也不会自行启动自动 worker。
+在该仓库的新 Codex 任务中可通过 `$vega-loop`、`$vega-review` 或 `$vega-agent` 显式调用。
+`$vega-loop` 会在模糊任务下先要求只读调查、固定 Plan 和修改前人工确认；`$vega-agent`
+面向需要暂停恢复或持续控制的任务，由主会话提交单 Work Item Plan，人工批准后再驱动真实
+Codex Worker、Verification、Risk、独立 Reviewer 和可信 Finish。
+
+Supervisor Agent V1 保持 opt-in，当前只接受一个未完成 Work Item。通用
+`vega status --run <agent_run>` 与 `vega watch --run <agent_run> --follow` 可以直接查看父 Agent
+状态、Supervisor 低频事件和绑定 child 的安全进度。只有 Core Finish 为 `ready_to_commit`
+且父 Agent phase 为 `completed` 时，才建议人工检查并提交。
+
+Skill 不安装 hook、不修改 Codex 全局配置，初始化时也不会启动 Worker；执行阶段仍需要当前
+会话按 Skill 调用 CLI，并遵守人工批准和 fail-closed 门禁。
 初始化默认不覆盖已有文件；`--force` 只覆盖新的 `.agents/skills` 目标，不删除或改写历史
 `.codex/skills` 文件。是否将生成的仓库级 Skill 纳入版本控制，由目标项目自行决定。
 

@@ -626,11 +626,17 @@ Agent Plan / approval
   -> real Codex child
   -> machine Observation
   -> next | repair | replan | human | finalize
+  -> trusted Core Finish
+  -> Agent completed
 ```
 
 真实 Adapter 当前只接受一个未完成 Work Item。Gate 2B 已证明真实 Worker Claim 不会越过
 Workspace Gate，并证明 partial Diff 可以通过 identity-bound stop 保留并交还人工；Gate 2C
 已补齐 Verification、Risk、独立 Reviewer、Finish 和 Supervisor `finalize` 的完整成功路径。
+Supervisor 选择 `finalize` 后，Adapter 只采用已绑定且完整性、新鲜度、Verification、Risk、
+Reviewer 均通过的 Core `finish-summary.json`，把父 Agent 发布为
+`completed / ready_to_commit`。如果 Core 已完成而父终态发布前中断，可以用
+`vega agent finalize --run <agent-run>` 幂等恢复；它不创造第二套成功语义。
 Gate 3A 已实现 Handoff Checkpoint、Resume Capsule、Git Task Card 与同机双隔离副本恢复；
 真实跨机器继续执行仍属于 Gate 3B。Gate 3B 的控制器必须从固定 commit 重建源码快照，不能
 使用目标 checkout 的 editable 安装；`pause/stop` 生成的新 Checkpoint 继承最近外部副作用
@@ -653,11 +659,19 @@ vega adapters init codex --repo <repo>
 ```text
 .agents/skills/vega-loop/SKILL.md
 .agents/skills/vega-review/SKILL.md
+.agents/skills/vega-agent/SKILL.md
 ```
 
-这些 skill 只描述什么时候调用 `vega loop`、`vega gate`、`vega review`、`vega status`，不安装 hook，不修改全局配置，也不自动执行危险动作。这样可以让主会话理解 Vega 流程，同时保持核心 runtime 与具体工具解耦。
+这些 skill 只描述什么时候调用现有 `loop / gate / review / agent / status / watch` 命令，不安装
+hook，不修改全局配置，也不自动执行危险动作。`vega-agent` 让主会话负责只读调查、单 Work
+Item Plan、人工批准和控制；真实状态仍只存在于 Agent run。
+
+通用 `status` 直接校验 `agent-state.json` envelope。通用 `watch` 不新增第二份 Agent 进度账本，
+而是把父 `trace.jsonl` 的白名单事件与已绑定 child 的 `progress.jsonl` 合并展示；模型正文、
+隐藏推理和原始命令参数不会进入输出。这样可以让主会话理解 Vega 流程，同时保持核心 runtime
+与具体工具解耦。
 旧版生成的 `.codex/skills` 不会被自动删除或改写；新命令只管理 `.agents/skills`
-下的两个 Vega Skill。
+下的三个 Vega Skill。
 
 Supervisor Agent 另有一个真实 Codex Adapter，用于启动受身份绑定的单 Writer child。它不是通用
 Provider SDK，也不承诺 Claude Code Worker 兼容；V1 之后若增加其他宿主，只复用相同 CLI、

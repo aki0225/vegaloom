@@ -1,10 +1,10 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-locally-verified / SAG3B-04-not-run`
+> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged-main-435767a / SAG3B-04-not-run`
 >
 > 日期：2026-08-16
 >
-> 主线基线：`main@be6fce26c227ac14abd1600b48ade063a01f5686`
+> 当前主线：`main@435767a2fcacf853ed055c704fe8e22f0c8fe9fa`
 >
 > 实验分支：`codex/supervisor-gate3b-r3`
 
@@ -1038,3 +1038,6 @@ SAG3B-03 的历史结果保持 `gate-not-passed`，不得用本轮单元测试�
 5. Scope、Verification、Risk、Reviewer 和 Finish 均在机器 B 重新运行并形成完整 Artifact。
 
 在 SAG3B-04 完成前，Gate 3B 和 Gate 3C 都保持未通过。
+
+截至 2026-08-16，条件 1 已由 PR `#63` 和 `main@435767a` 满足；条件 2～5 仍未执行。
+SAG3B-04 必须使用新的预注册材料和另一台物理机器，不能复用或改写 SAG3B-03 现场。

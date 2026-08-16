@@ -26,6 +26,7 @@ from vega.agent_task_card import (
 )
 from vega.cli_entrypoint import app
 from vega.comparison_binding import require_comparison_binding_from_mapping
+from vega.progress import RunProgressLog
 
 
 def test_comparison_paths_require_comparison_base() -> None:
@@ -33,6 +34,81 @@ def test_comparison_paths_require_comparison_base() -> None:
         require_comparison_binding_from_mapping(
             {"comparison_paths": ["src/example.py"]}
         )
+
+
+def test_generic_status_latest_and_watch_recognize_agent_parent_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    plan = _single_item_plan()
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+
+    status = CliRunner().invoke(
+        app,
+        ["status", "--run", run.run_dir.name, "--json"],
+    )
+    latest = CliRunner().invoke(app, ["latest", "--kind", "agent", "--json"])
+    watch = CliRunner().invoke(
+        app,
+        ["watch", "--run", run.run_dir.name, "--no-follow"],
+    )
+
+    assert status.exit_code == 0, status.output
+    assert latest.exit_code == 0, latest.output
+    assert watch.exit_code == 0, watch.output
+    status_payload = json.loads(status.output)
+    latest_payload = json.loads(latest.output)
+    assert status_payload["kind"] == "agent"
+    assert status_payload["status"] == "paused"
+    assert status_payload["current_step"] == "awaiting_approval"
+    assert status_payload["agent_phase"] == "awaiting_approval"
+    assert latest_payload["run_id"] == run.run_dir.name
+    assert f"run={run.run_dir.name} status=paused step=awaiting_approval" in (
+        watch.output
+    )
+    assert "agent / 已启动" in watch.output
+
+
+def test_agent_parent_watch_includes_bound_child_safe_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    plan = _single_item_plan()
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    approved = runtime.approve(run.run_dir.name)
+    child_run = "20260816-120000-child-loop"
+    _started_worker(
+        workspace,
+        approved.run_dir.name,
+        child_run=child_run,
+        operation_id="operation-watch-child",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir()
+    RunProgressLog(child_dir).append(
+        "worker.command_started",
+        elapsed_seconds=2,
+    )
+
+    watch = CliRunner().invoke(
+        app,
+        ["watch", "--run", run.run_dir.name, "--no-follow"],
+    )
+
+    assert watch.exit_code == 0, watch.output
+    assert f"run={run.run_dir.name} status=running step=acting" in watch.output
+    assert "worker / 开始执行命令" in watch.output
+    assert f"child={child_run}" in watch.output
 
 
 def test_fake_worker_two_items_route_next_then_finalize(
@@ -119,7 +195,9 @@ def test_fake_worker_two_items_route_next_then_finalize(
     assert final.state.phase == "finalizing"
     assert final.state.terminal_status is None
     assert final.plan.work_items[1].status == "completed"
-    assert "调用现有 Vega Finish" in runtime.status(final.run_dir.name)
+    assert "采用同一证据发布 Supervisor completed" in runtime.status(
+        final.run_dir.name
+    )
     events = [item["event"] for item in read_agent_trace(final.run_dir / "trace.jsonl")]
     routed_events = [
         event
@@ -813,6 +891,10 @@ def test_agent_cli_status_card_and_capabilities(
     agent_help = CliRunner().invoke(app, ["agent", "--help"])
     assert agent_help.exit_code == 0
     assert "run" in agent_help.output
+    assert "finalize" in agent_help.output
+    finalize_help = CliRunner().invoke(app, ["agent", "finalize", "--help"])
+    assert finalize_help.exit_code == 0
+    assert "--run" in finalize_help.output
 
 
 def test_packaged_cli_entrypoint_preserves_core_commands() -> None:

@@ -15,6 +15,7 @@ _ALLOWED_OPERATIONS = {
     "agent.adjudicate_side_effects",
     "agent.approve",
     "agent.dispatch",
+    "agent.finalize",
     "agent.handoff",
     "agent.observe",
     "agent.pause",

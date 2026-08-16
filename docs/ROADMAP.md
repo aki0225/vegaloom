@@ -1,6 +1,6 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-15
+> 更新时间：2026-08-16
 > 当前稳定基线：`v0.1.5`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
@@ -14,13 +14,14 @@
 > 路线复核后，Gate 2C 用于补一条当前主线真实完整成功路径。SAG2C-01 因验证入口加载了
 > 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 SAG2C-02 已完成并判定为
 > `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、同机双隔离副本往返、PR CI 和
-> 合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，固定控制器、未知副作用继承
-> 和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结。机器 A 正式 attempt 因
-> Windows 沙箱工具环境阻断而没有产生 partial Diff，判定为
-> `insufficient-handoff-opportunity / environment-blocked`。Gate 3B 未通过，机器 B 未启动，
+> 合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已执行 SAG3B-01～03；SAG3B-03 的机器 A
+> 和同机隔离 B 模拟暴露 committed handoff 基线缺口，窄修复已通过 PR `#63` 合入
+> `main@435767a`。历史 Case 保持 `gate-not-passed`，SAG3B-04 与另一台物理机器 B 尚未运行，
 > Gate 3C 仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
-> 保持不变，顶层 CLI 仅扩展 opt-in `agent`。
+> 保持不变，顶层 CLI 仅扩展 opt-in `agent`。2026-08-16 已补齐既有 V1 合同中的父
+> Agent 终态、`$vega-agent` 主会话 Skill 和通用 `status/watch`；当前状态为
+> “本地验证通过 / PR CI pending”。这不改变 Gate 3B/3C 的实验结论。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -56,8 +57,9 @@ v0.1.5 发布（完成）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
   -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
   -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
-  -> Gate 3B 单 Work Item 跨机器接力（机器 A 无 partial Diff，Gate 未通过，机器 B 未启动）
+  -> Gate 3B 单 Work Item 跨机器接力（SAG3B-03 保持未通过；修复已合并；SAG3B-04 未运行）
   -> Gate 3C 小规模日常价值观察（冻结）
+  -> V1 产品合同补全：父终态、主会话 Skill、父 run status/watch（本地验证通过 / PR CI pending）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
 
@@ -822,6 +824,39 @@ repository hygiene、architecture growth 和 `git diff --check` 通过。实现�
 
 本次判定为 `insufficient-handoff-opportunity / environment-blocked`，不重跑 SAG3B-01，
 不按结果更换任务、模型、预算或成功条件。机器 B 未启动，Gate 3B 未通过，Gate 3C 继续冻结。
+
+### 2026-08-16：Gate 3B R2/R3 与 committed handoff 修复
+
+SAG3B-02 的机器 A 已形成可交接 WIP，但控制源码与预注册 commit 不再字节一致，因此记为
+`formal-gate-nonconforming`，没有继续正式机器 B。SAG3B-03 从同一冻结控制提交重新开始：
+机器 A 完成 Handoff，随后用同机全新目录、仅经远端 Git 的 B 模拟验证恢复链。
+
+同机 B 能恢复 Goal、Plan、Work Item 和冻结 Verification，Worker 也没有重复修改已提交 WIP；
+但 Core 只观察未提交 Diff，未把 `handoff_base_revision..HEAD` 纳入当前变更集，导致 Scope、
+Risk、Reviewer 和 Finish 因 `no_diff` fail-closed。SAG3B-03 因此保持
+`gate-not-passed`，不能被单元测试或后续修复覆盖。
+
+committed handoff comparison baseline、HEAD 竞态和证据传播的窄修复已通过 PR `#63` 合入
+`main@435767a`。下一正式 Case 为 SAG3B-04，必须从新的主线提交预注册，并在另一台物理机器
+只经 Git 恢复后重新运行 Scope、Verification、Risk、Reviewer 和 Finish。在此之前 Gate 3B
+与 Gate 3C 均未通过。
+
+### 2026-08-16：补齐 Supervisor Agent V1 产品合同
+
+主线审查确认三个已写入 V1 计划、但产品入口尚未完整实现的缺口：真实成功路径永久停在
+`finalizing`、Codex 初始化没有 `$vega-agent`、通用 `status/watch` 不识别父 Agent run。
+
+本轮在一个分支内做窄修正：
+
+1. 父 Agent 只采用可信 Core Finish 发布 `completed / ready_to_commit`，并提供幂等
+   `vega agent finalize` 恢复崩溃窗口；
+2. `$vega-agent` 只编排现有 CLI，固定主会话只读调查、单 Work Item Plan、人工批准、
+   一次 repair 和人工 Git 边界；
+3. 通用 `status/latest/watch` 读取现有 Agent State、Trace 和 child progress，不增加新的
+   Runtime、事件账本或成功裁决。
+
+本轮明确不做多 Work Item 连续派发、Planner、Memory、Claude Adapter、Provider SDK、Web UI
+或自动 Git。当前状态为“本地验证通过 / PR CI pending”；Gate 3B 与 Gate 3C 状态不变。
 
 ## 七、更新规则
 

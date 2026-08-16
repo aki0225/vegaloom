@@ -12,10 +12,8 @@ from .agent_contract import (
     ObservationAuthority,
     approve_plan,
 )
-from .agent_persistence import (
-    append_agent_trace,
-    save_agent_state,
-)
+from .agent_finalization import finalize_agent_state
+from .agent_persistence import append_agent_trace, save_agent_state
 from .agent_graph import langgraph_available, record_supervisor_route
 from .agent_mutation import agent_mutation
 from .agent_run import AgentRun
@@ -394,12 +392,25 @@ class SupervisorAgentRuntime:
             observation=reconciled,
             checkpoint=checkpoint,
             next_step=(
-                "调用现有 Vega Finish；当前 Graph 仅进入 finalizing，不能自行宣称成功"
+                "Core Finish 已满足可信终态；采用同一证据发布 Supervisor completed"
                 if decision.selected_action == "finalize"
                 else decision.reason
             ),
         )
         return AgentRun(run_dir=run_dir, state=state, plan=plan)
+
+    @agent_mutation("agent.finalize")
+    def finalize(self, run: str) -> AgentRun:
+        """采用可信 Core Finish 证据，完成 Supervisor 自身的终态发布。"""
+
+        run_dir, state, plan, _ = self._load_run(run)
+        completed = finalize_agent_state(
+            self.workspace,
+            run_dir,
+            state,
+            plan,
+        )
+        return AgentRun(run_dir=run_dir, state=completed, plan=plan)
 
     @agent_mutation("agent.steer")
     def steer(self, run: str, *, instruction: str) -> AgentRun:

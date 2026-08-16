@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B machine-a-insufficient-handoff-opportunity / machine-b-not-started / gate-not-passed / Gate 3C 冻结`
+> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04-not-run / physical-machine-b-not-run / Gate 3C 冻结 / 2026-08-16 V1 产品合同补全：本地验证通过 / PR CI pending`
 >
 > 计划日期：2026-08-13
 >
@@ -12,11 +12,11 @@
 > `gate-exit-pass`。2026-08-14 路线复核后增加 Gate 2C，用当前主线补一条真实完整成功路径。
 > SAG2C-01 因 pytest 提前导入控制环境中的 `packaging` 而记为 `invalid-harness`；修正验证入口的
 > SAG2C-02 已于 2026-08-14 通过 Gate 2C。Gate 3A 已于 2026-08-15 完成 Handoff 生产端、
-> 同机双隔离副本往返、PR CI 和合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，
-> 固定控制器、未知副作用继承和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结，
-> 机器 A 正式 attempt 因 Windows 沙箱工具环境阻断而没有形成可交接 partial Diff，判定为
-> `insufficient-handoff-opportunity / environment-blocked`。Gate 3B 未通过，机器 B 未启动，
-> Gate 3C 仍冻结。
+> 同机双隔离副本往返、PR CI 和合并前审阅，状态为 `gate-exit-pass`。Gate 3B 的
+> SAG3B-01 未形成 WIP；SAG3B-02 形成 Handoff，但控制源码身份不符合预注册协议；
+> SAG3B-03 完成机器 A 和同机隔离 B 模拟，暴露 committed handoff 基线缺口。该窄修复已通过
+> PR `#63` 合入 `main@435767a`，但 SAG3B-03 历史结果仍为 `gate-not-passed`。
+> 新的 SAG3B-04 尚未运行，另一台物理机器 B 尚未验证，Gate 3C 仍冻结。
 
 ## 一、产品决定
 
@@ -306,6 +306,11 @@ Observation 必须能产生不同路由；这是 Gate 1 判断它是否真正形
 - 人工下一步。
 
 LangGraph `END`、Worker `completed` 或 Reviewer `approve` 都不等于 `ready_to_commit`。
+
+父 Agent 的 `completed` 只镜像可信 Core Finish：必须重新校验绑定的 child/operation、
+Artifact SHA、Verification、Risk、Reviewer、完整性、新鲜度和当前 Workspace。Core Finish
+已经生成、但父终态发布前中断时，允许用幂等 `agent finalize` 恢复；不得重新运行 Finish 或
+根据聊天结论补造成功。
 
 ### 3.12 可选 Memory
 
@@ -809,6 +814,7 @@ Gate 2A 已实现的命令保持少量：
 ```powershell
 vega agent start --repo . --input <task-card-or-text>
 vega agent status --run <agent-run>
+vega agent finalize --run <agent-run>
 vega agent resume-local --run <agent-run>
 vega agent resume --repo .                     # 按当前分支发现可恢复 Task Card
 vega agent resume --repo . --task <task-card> # 换机器后创建新本机 run
@@ -843,6 +849,10 @@ vega agent checkpoint --run <agent-run> --handoff --reason "准备换机"
 
 状态不保存在 Skill 或聊天里。Codex 作为第一个真实 Adapter；核心合同稳定后再接 Claude Code 的薄
 Adapter，两者复用同一 Task Card、Task Brief、Checkpoint、Trace 和 Vega Core，不建设通用 Provider SDK。
+
+2026-08-16 的 V1 产品合同补全在现有 Codex 初始化中增加 `$vega-agent`，并让通用
+`vega status/watch` 识别父 Agent run。`watch` 复用父 Trace 与 child progress，不新增第二套
+证据文件；这项改动不改变 Gate 3B/3C 实验结论，也不把 Agent 提升为默认入口。
 
 ## 十一、实施 Gate
 
@@ -1078,9 +1088,15 @@ reviewer_worker_context_leak = 0
 
 当前执行进度：第 1～7 项已完成。第 6 项的首次运行记为 `invalid-harness`，修正后的
 SAG2C-02 已判定为 `gate-exit-pass`；第 7 项 Gate 3A 已完成实现、本地往返、PR CI 与
-合并前审阅，判定为 `gate-exit-pass`。Gate 3B 已完成机器 A 正式 attempt，但没有形成可交接
-partial Diff，判定为 `insufficient-handoff-opportunity / environment-blocked`；Gate 未通过，
-机器 B 未启动。Gate 3C 仍冻结。
+合并前审阅，判定为 `gate-exit-pass`。Gate 3B 已执行 SAG3B-01～03：前两项分别因没有 WIP
+和控制源码身份不符合预注册协议而停止；SAG3B-03 的同机隔离 B 模拟暴露 committed handoff
+基线缺口，修复已通过 PR `#63` 合入 `main@435767a`。历史结果保持
+`gate-not-passed`，SAG3B-04 与另一台物理机器 B 尚未运行，Gate 3C 仍冻结。
+
+2026-08-16 另行补齐了 V1 已承诺但此前未完整发布的三个产品合同：可信 Core Finish 到父
+Agent `completed` 的终态发布、`$vega-agent` 主会话 Skill、父 Agent 的通用
+`status/watch`。它们属于既有 V1 合同，不代表 Gate 3B 已通过，也不新增多 Work Item、
+Planner、Memory、Provider SDK 或自动 Git。
 
 1. 先把本文的关键决定登记到 `ROADMAP.md`，写一份小型状态权威 ADR；
 2. 使用一个实验分支和一个专用 Worktree 完成 Gate 0；

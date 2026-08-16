@@ -1,12 +1,12 @@
 # Supervisor Agent V1 当前交接
 
-> 日期：2026-08-15
+> 日期：2026-08-16
 >
-> Gate 3A 来源分支：`codex/supervisor-gate3a`
+> 当前实施分支：`codex/supervisor-agent-v1-completion`
 >
-> 实施基线：`main@43f0e04`
+> 实施基线：`main@435767a`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B machine-a-insufficient-handoff-opportunity / machine-b-not-started / gate-not-passed / Gate 3C 冻结`
+> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04-not-run / physical-machine-b-not-run / Gate 3C 冻结 / 2026-08-16 V1 产品合同补全：本地验证通过 / PR CI pending`
 
 ## 当前结论
 
@@ -43,13 +43,52 @@ Gate 3A 已实现 Handoff 生产端，并完成同机两个隔离 clone 的机�
 Handoff Checkpoint、Resume Capsule、Task Card、manifest 和人工 Git 清单；人工只提交 WIP
 与 Task Card。B 侧不复制旧 `runs/`、Trace、SQLite 或聊天，仅凭 Git Task Card 重建新本机
 run。PR `#60` 的 9 项 CI 与两轮独立本地审阅均无剩余阻断项，Gate 3A 判定为
-`gate-exit-pass`。Gate 3B 已获批准，固定控制器、未知副作用继承和人工副作用裁决门禁均
-已通过 PR CI；控制器重新冻结后完成机器 A 正式 attempt，但 Windows 沙箱工具环境阻断，
-没有形成可交接 partial Diff。Gate 3B 未通过，机器 B 未启动，Gate 3C 继续冻结。
+`gate-exit-pass`。Gate 3B 的 SAG3B-01 没有形成 WIP；SAG3B-02 形成 Handoff，但控制源码
+身份不符合预注册协议；SAG3B-03 完成机器 A 和同机隔离 B 模拟，并暴露 committed handoff
+基线缺口。窄修复已通过 PR `#63` 合入 `main@435767a`，但历史 Case 仍保持
+`gate-not-passed`。SAG3B-04 与另一台物理机器 B 尚未运行，Gate 3C 继续冻结。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
-语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。Graph 只能路由到
-`finalizing`，不能自行写入 `ready_to_commit`。
+语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。
+
+## 2026-08-16 V1 产品合同补全
+
+本轮只补计划已经承诺、但主线此前未完整发布的三个能力：
+
+1. 真实 Adapter 在确定性选择 `finalize` 后，只采用绑定的 Core `finish-summary.json`、
+   Machine Observation、Decision、Checkpoint 与 Artifact SHA，把父 Agent 发布为
+   `completed / ready_to_commit`；
+2. 增加可重入 `vega agent finalize --run <agent-run>`，覆盖 Core 已完成、父终态发布前中断，
+   以及 `completed` State 已落盘但完成 Trace 或状态卡尚未写完的窗口；
+3. `vega adapters init codex` 生成 `$vega-agent`，主会话负责只读调查、单 Work Item Plan、
+   人工批准、运行、一次 repair、恢复和最终证据展示；
+4. 通用 `vega status/latest/watch` 识别父 Agent run；`watch` 复用父 Trace 与 child
+   `progress.jsonl`，不新增第二套进度账本。
+
+父 `completed` 不拥有新的成功语义，只镜像已经通过完整性、新鲜度、Verification、Risk 和
+Reviewer 检查的 Core `ready_to_commit`。当前状态为“本地验证通过 / PR CI pending”。
+本轮没有增加多 Work Item 连续派发、Planner、Memory、Claude Adapter、Provider SDK 或自动
+Git，也没有改变 Gate 3B 未通过和 Gate 3C 冻结的结论。
+
+本轮本地验证：
+
+```text
+core-cli：420 passed，2 skipped
+execution-artifacts：332 passed，7 skipped
+semantics-review：243 passed
+config-assurance-pilot：269 passed，3 skipped
+合计：1276 collected，1264 passed，12 skipped，0 failed
+最终审阅补丁后的受影响回归：69 passed
+compileall：通过
+Ruff：通过
+repository hygiene：通过
+architecture growth：通过（C901 34->34，Python 模块 139->143）
+git diff --check：通过
+```
+
+这些结果只证明本轮产品合同补全在当前本地环境通过工程门禁。PR CI 仍待运行；它们不把
+SAG3B-03 改写为通过，不代表 SAG3B-04 已运行，不代表另一台物理机器 B 已验证，也不解冻
+Gate 3C。
 
 ## 2026-08-15 Gate 3A 本地证据
 
@@ -304,9 +343,9 @@ Claude Code Adapter 或第二套成功裁决。
 ## 未完成事项
 
 - 尚未证明多 Work Item 的真实 Adapter 累计 Diff 归因；Gate 2B 当前 fail-closed 拒绝该形态。
-- 尚未验证跨机器 Task Card 接力，它属于 Gate 3B。
-- 尚未验证真实模型在新机器继续当前 Work Item，也未观察恢复时间与再次使用意愿；它们分别属于
-  Gate 3B 和 Gate 3C。
+- 尚未在另一台物理机器完成 Task Card 接力；同机隔离 B 模拟不等于 Gate 3B 通过。
+- 尚未验证真实模型在另一台物理机器继续当前 Work Item，也未观察恢复时间与再次使用意愿；
+  它们分别属于 Gate 3B 和 Gate 3C。
 - Claude Code Supervisor Adapter 不属于 V1 Gate 3，V1 完成后再单独评估。
 - 尚未决定 `v0.2.0` 发布时点。
 - 受信 Observation 已经 write-once；若其后的 Checkpoint 写入失败，State 会保守保留 active
@@ -349,3 +388,19 @@ active Writer 时的第一次 `agent stop` 只发送身份绑定请求；原 `ag
 2. 合入主线后，从同一主线提交预注册新的 `SAG3B-03`；
 3. 新 Case 的机器 A/B 必须分别从同一控制提交重建固定控制器；
 4. 只有物理换机恢复并重新通过 Verification、Risk、Reviewer 和 Finish，才通过 Gate 3B。
+
+## 2026-08-16 Gate 3B R3 与当前主线
+
+上节 R2 的下一步已经执行。SAG3B-03 从同一冻结控制提交完成机器 A Handoff，并在同机全新
+目录、仅经远端 Git 的 B 模拟中验证恢复。B 能恢复 Goal、Plan、Work Item 和冻结
+Verification，但 committed WIP 没有进入 Scope/Risk/Reviewer 的当前变更集，最终因
+`no_diff` 正确 fail-closed。
+
+该缺口的窄修复已通过 PR `#63` 合入 `main@435767a`：恢复 run 同时绑定当前 WIP HEAD 和
+Task Card 的 comparison base，把 committed、staged、unstaged 与 untracked 事实统一传给
+现有 Core，并保持 HEAD 竞态和路径完整性门禁。SAG3B-03 历史结果仍是
+`gate-not-passed`，不能被修复后的单元测试覆盖。
+
+下一正式 Case 是 SAG3B-04。它必须从新的主线提交重新冻结控制源码，并在另一台物理机器只经
+Git 恢复后重新运行 Scope、Verification、Risk、Reviewer 和 Finish。在此之前 Gate 3B 与
+Gate 3C 都未通过。

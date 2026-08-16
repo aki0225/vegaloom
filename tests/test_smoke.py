@@ -3282,8 +3282,10 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     loop_skill = repo_dir / ".agents" / "skills" / "vega-loop" / "SKILL.md"
     review_skill = repo_dir / ".agents" / "skills" / "vega-review" / "SKILL.md"
+    agent_skill = repo_dir / ".agents" / "skills" / "vega-agent" / "SKILL.md"
     assert loop_skill.exists()
     assert review_skill.exists()
+    assert agent_skill.exists()
     assert legacy_skill.read_text(encoding="utf-8") == "legacy skill\n"
     assert ".agents" in result.output
     assert ".codex" not in result.output
@@ -3323,6 +3325,15 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert "同一会话不能同时充当独立 Reviewer" in protocol_text
     assert "本阶段不增加 `vega adapters init claude`" in protocol_text
     assert "vega gate" in review_skill.read_text(encoding="utf-8")
+    agent_skill_text = agent_skill.read_text(encoding="utf-8")
+    assert "vega agent capabilities" in agent_skill_text
+    assert "V1 只保留一个 `pending` Work Item" in agent_skill_text
+    assert "vega agent approve --run <agent_run> --actor human" in agent_skill_text
+    assert "vega agent run --run <agent_run> --timeout 900" in agent_skill_text
+    assert "vega watch --run <agent_run> --follow" in agent_skill_text
+    assert "vega agent finalize --run <agent_run>" in agent_skill_text
+    assert "不执行 Git 操作" in agent_skill_text
+    assert "只有可信 Core Finish 为 `ready_to_commit`" in agent_skill_text
 
     second = CliRunner().invoke(app, ["adapters", "init", "codex", "--repo", str(repo_dir)])
     assert second.exit_code == 0, second.output
