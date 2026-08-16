@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 machine-a-handoff-ready / machine-b-pending / gate-not-passed`
+> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 machine-a-handoff-ready / same-host-machine-b-simulation-blocked / physical-machine-b-not-run / gate-not-passed`
 >
 > 日期：2026-08-16
 >
@@ -829,3 +829,123 @@ remote_branch = codex/sag3b-03-wip
 Reviewer 和 Finish 均保持 `not_run` 或 historical，没有被解释为通过。只有另一台物理机器
 从远端 WIP 分支与同一控制提交独立恢复、重新完成四个 Core Gate 后，SAG3B-03 才可能通过
 Gate 3B；在此之前 Gate 3B 与 Gate 3C 均保持未通过。
+
+## 十五、2026-08-16 机器 B 同机隔离模拟
+
+本节记录一次同机、全新目录、只经 Git 接收 WIP 的机器 B 模拟。它用于验证本地恢复链和
+发现协议缺口，不等同于第七节要求的另一台物理机器，也不能把 SAG3B-03 升级为 Gate 通过。
+本次只消费远端 `codex/sag3b-03-wip`，没有复制机器 A 的 `runs/`、Trace、Checkpoint、
+控制目录、虚拟环境、Codex 会话或未提交文件。
+
+### 15.1 隔离与预检
+
+模拟目录位于项目内被忽略的 `.tmp/dogfood/`。目标仓库使用 fresh clone，并在第一次
+checkout 前显式设置 `core.autocrlf=false`；fetch URL 保留，push URL 禁用。核对结果如下：
+
+```text
+control_source_commit = be6fce26c227ac14abd1600b48ade063a01f5686
+control_repo_root_tree = ea711b8ea32e9fa25806954ded0bde195476d4e6
+control_source_pathspec_tree = 18da3944c7f42e0cdddcadec70bbdf5373a9bc0b
+control_source_file_count = 131
+remote_handoff_commit = 065a42338da5956d410b632dc0c89f9cbdd05a07
+remote_handoff_tree = f790e996fbc61ff17e4ebf240ecde6b5f33326ae
+task_card_sha256 = 0baa69e82add42b52e08917a60935cd0cc8aec3e832af579c296ea7538e761ab
+launcher_sha256 = da4c8ded7d7572168baa852266bc59cccd0f009d3109e8315bd2ff26c807e03c
+worker = gpt-5.6-sol / xhigh
+```
+
+冻结 launcher 在模拟目录内重新生成，摘要与机器 A 预注册值一致；实际 `vega.__file__`
+指向模拟控制源码，而不是目标 WIP checkout。`agent capabilities`、Codex 登录状态和目标
+分支身份均通过，目标工作树启动前干净。
+
+预检同时发现一个协议可移植性缺口：相同 commit 和 pathspec 在
+`core.autocrlf=false` 下直接执行 `git archive`，得到
+`7c66d6c6c051fdc020d4100be570247023460bb1133db12dc08b1e10e16d3f8f`，不是预注册 tar
+摘要。显式执行 `git -c core.autocrlf=true archive` 后才复现
+`9403dea789288447f5354b51c0f8e8faa57b4433fe65e060484b420464921c75`。两次导出引用同一
+Git tree，但 tar 内文本行尾不同。后续正式协议必须显式冻结 archive 的 EOL 配置，稳定
+Git tree 和 blob manifest 应作为主要源码身份，不能默认把 tar 字节摘要视为跨机器天然稳定。
+
+### 15.2 恢复与 Core 结果
+
+`agent resume --repo <target-repo>` 成功从 Git Task Card 创建新本机 run：
+
+```text
+agent_run = 20260816-144519-agent-resume
+child_run = 20260816-144638-275022-bug-loop
+operation_id = 2003fb3cd10544f194d6ae31e5df1bf0
+resume_checkpoint = checkpoint-001 / safe
+```
+
+恢复后的 task、Goal revision、Plan revision、批准摘要和当前 Work Item 均与 Task Card
+一致；旧门禁只作为 historical 信息，当前 run 没有复用机器 A 的 Verification、Risk 或
+Reviewer Artifact。目标分支相对 `handoff_base_revision` 只有 Task Card 和两个允许文件，
+没有允许路径外变更。
+
+唯一机器 B Worker 成功退出。它识别到 WIP 已实现冻结目标，执行 Ruff 和基线到 WIP 的
+`git diff --check` 后没有重复修改代码。随后 Core 重新运行三条冻结验证：
+
+```text
+pytest = 4 passed, 70 deselected
+ruff = passed
+git_diff_check = passed
+```
+
+但是本轮最终为：
+
+```text
+child_finish = needs_human
+child_current_step = no_diff
+scope_pre_verification = skipped
+scope_post_verification = skipped
+risk = skipped
+reviewer = skipped
+supervisor_phase = needs_human
+gate_result = gate-not-passed
+```
+
+根因不是冻结验证失败，而是 committed handoff WIP 的基线语义不完整。机器 B checkout 的
+当前 HEAD 已经包含机器 A 提交的实现；Core 仍把当前 HEAD 当作 workspace baseline，只检查
+未提交 Diff，因此得到 `changed_files=[]`，没有把
+`handoff_base_revision..HEAD` 作为当前应审查的变更集。结果是 Verification 命令虽然通过，
+Scope、Risk 和 Reviewer 仍因“无 Diff”被跳过，Finish 正确 fail-closed。
+
+外层 Supervisor 将该 child 结果汇总为 `Verification=blocked`，而 child Artifact 实际记录
+`verification_status=passed`。该汇总措辞不影响 fail-closed 结果，但会模糊“测试失败”和
+“验证通过但审查证据不足”的区别，后续可在不改变状态机的前提下单独修正。
+
+### 15.3 安全与现场检查
+
+- 目标 worktree 在运行后仍干净，HEAD 保持 `065a423`，没有自动 commit 或 push；
+- 所有 Worker 和 Verification owner/child PID 均已退出；
+- 运行 Artifact 中未发现凭证形态值；唯一 `Authorization` 命中是源码标识符，不是 Header
+  或 token；
+- 测试仅在目标仓库被忽略的 `.tmp` 下产生临时目录，没有写到工作区集合根目录或其他项目；
+- 没有启动第二 Writer、自动重试、人工修改 WIP、replan 或放宽 Scope。
+
+### 15.4 阶段结论与下一步
+
+本次证明了以下能力：
+
+1. 新目录可以只依赖远端 WIP 与 Git Task Card 恢复 Supervisor run；
+2. Goal、Plan、Work Item、限制和 historical Gate 能跨本机 run 重建；
+3. Worker 能识别已提交 WIP，避免重复修改；
+4. 冻结 Verification 能在恢复后重新执行并通过；
+5. 证据不完整时 Supervisor 和 Finish 会 fail-closed，而不是误报成功。
+
+本次没有证明：
+
+1. 另一台物理机器上的恢复；
+2. committed WIP 能完整进入 Scope、Risk、Reviewer 和 Finish；
+3. Gate 3B 或 Gate 3C 已通过。
+
+下一步只做两个窄修复，不扩大 Agent 功能：
+
+1. 为 `agent resume` 增加 committed handoff baseline 语义：以 Task Card 的
+   `handoff_base_revision` 为审查基线，把 `base..HEAD` 与后续 worktree 变更统一编译为
+   当前变更集；不得通过 soft reset、重写 WIP commit 或重新制造脏工作树实现；
+2. 固定控制 archive 的 EOL 参数，并让 tree/blob manifest 成为跨机器主要身份。
+
+回归测试只需覆盖一个关键场景：clean checkout 位于 handoff WIP commit，Task Card 指向旧
+base；恢复后 Scope 必须看到两个允许代码文件，Verification、Risk、Reviewer 和 Finish
+必须重新运行。完成修复后新建独立 Case，不重跑或覆盖本次 SAG3B-03 结果。
