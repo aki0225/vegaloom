@@ -827,3 +827,59 @@ SAG3B-01 判定为
 这条证据只证明当前 Supervisor 在真实 Worker 工具环境阻断且 Core Verification 失败时保持
 fail-closed，不会把 Runner 返回码 `0` 或 Worker 自述误当完成，也不会自动重试或制造跨机器
 成功叙事；它不证明跨机器接力、任务修复成功率或 Windows Codex 沙箱稳定性。
+
+## 2026-08-16 Supervisor Agent Gate 3B：SAG3B-02 机器 A Handoff
+
+本条只记录 SAG3B-02 的机器 A 本地阶段结果，不覆盖 SAG3B-01，也不提前宣称真实跨机器
+Gate 通过。控制候选基于 `main@d2c28103d352f251f1bf20d89758e666dba086ed`，使用只含
+tracked `src/` 的固定控制快照；裸 Codex workspace-write 与 Vega-owned Codex Runner
+预检均通过。脱敏后的 Codex 默认配置为 `gpt-5.6-sol / xhigh`。
+
+- Agent run：`20260816-121500-agent`；
+- child：`20260816-121529-270617-bug-loop`；
+- operation / execution：`e44ed6747d70430d8388b58d82aa5d0d`；
+- 目标分支：`codex/sag3b-02-wip`；
+- 目标 HEAD：`d2c28103d352f251f1bf20d89758e666dba086ed`。
+
+真实 Worker 只修改 `src/vega/execution_control.py` 和
+`tests/test_execution_control_safety.py`，没有未跟踪文件。实现保留同目录临时文件与
+`os.replace` 原子语义，把替换等待改为 `1.0` 秒有界截止，并增加真实 Windows 共享锁回归。
+Worker 自检得到 `4 passed / 70 deselected`、Ruff 通过、`git diff --check` 通过。
+
+控制端在 Worker 启动后约 `192.221` 秒首次观测到允许路径 Diff；约 `53.089` 秒后，在
+State 仍绑定相同 child/operation 且 execution 仍为 `running` 时发送 identity-bound stop。
+Worker 最终为 `stopped`，`termination_unconfirmed=false`，owner/child PID 均退出；
+Verification、Risk、Reviewer 和 Finish 均保持 historical `not_run`，没有第二 Writer、
+自动重试或人工补丁。
+
+原 `agent run` 返回后，控制端再次执行 stop 固化静止 Checkpoint，再用两个 run-local 审计
+Artifact 核对 Worker 事件、进程身份、Workspace 和工具范围。没有观察到外部工具调用，sandbox
+网络与额外 writable roots 关闭，目标仅有两个批准文件，因此外部副作用裁决为 `none`。
+
+随后生成：
+
+- safe Checkpoint：`checkpoint-004`；
+- Handoff Checkpoint：`checkpoint-005`；
+- `handoff_status=handoff_ready`；
+- Task Card：`.vega/tasks/2026-08/2026-08-16-sag3b-02-handoff.md`；
+- Task Card SHA-256：
+  `5e3a7d55c25d4927f672894383a3d103add93f3b05634e6c464c325908b8661d`；
+- Handoff Workspace Digest：
+  `72d07b2bfade0d0cfad7c25462d73163968019b3ed8d6edcb96b3aa245f13ec9`；
+- 机器 A WIP patch SHA-256：
+  `d1a8602d838c579fc9be819c128dd49b7e80d5a197673c20b24f7312faf81c03`。
+
+机器 A 当时的阶段判定为 `machine-a-handoff-ready / machine-b-pending`。它证明真实 Worker
+partial WIP 能够被安全停止、对账并转成可移植 Task Card；不证明 WIP 最终正确、物理跨机器
+恢复或 Gate 3B 通过。
+
+提交前最终审阅又发现：机器 A 使用的 `control-runtime-local-r3` 来自未提交工作树，而后续
+控制提交 `5d252d4b366e7a1bed1eb8370a4c599401055a21` 为通过 architecture growth 门禁，
+对 `agent_codex_adapter.py`、`agent_codex_evidence.py` 和 `loop_runtime.py` 做了行为等价的
+整理，三者不再字节一致。正式协议已预注册机器 A/B 必须来自同一 `control_source_commit`，
+不能在看到结果后放宽。
+
+因此本 Case 的最终判定收紧为
+`machine-a-handoff-ready / formal-gate-nonconforming / machine-b-not-run`。SAG3B-02
+不再继续正式机器 B，也不计入 Gate 3B 通过证据。控制修复通过 PR CI 并合入主线后，必须以
+同一主线提交预注册新 Case，再执行完整机器 A/B 接力。
