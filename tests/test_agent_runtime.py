@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -27,6 +28,9 @@ from vega.agent_task_card import (
 from vega.cli_entrypoint import app
 from vega.comparison_binding import require_comparison_binding_from_mapping
 from vega.progress import RunProgressLog
+
+
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
 def test_comparison_paths_require_comparison_base() -> None:
@@ -894,7 +898,7 @@ def test_agent_cli_status_card_and_capabilities(
     assert "finalize" in agent_help.output
     finalize_help = CliRunner().invoke(app, ["agent", "finalize", "--help"])
     assert finalize_help.exit_code == 0
-    assert "--run" in finalize_help.output
+    assert "--run" in _ANSI_ESCAPE_PATTERN.sub("", finalize_help.output)
 
 
 def test_packaged_cli_entrypoint_preserves_core_commands() -> None:
