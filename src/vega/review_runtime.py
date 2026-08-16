@@ -901,7 +901,8 @@ def _append_review_eval_outcome(
             )
         )
     elif verdict.verdict == "needs_human":
-        eval_results.append("FAIL: reviewer 输出需要人工处理")
+        if not _has_failures(eval_results):
+            eval_results.append("PASS: reviewer 输出可信的 needs_human 人工阻断结论")
     else:
         eval_results.append("PASS: reviewer 输出 verdict 可解析")
 

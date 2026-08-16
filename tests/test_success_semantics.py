@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from vega.finish_runtime import FinishRuntime
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.experimental.inspection.loop_spec import default_engineering_change_spec
 from vega.models import BriefInput
@@ -707,6 +708,70 @@ def test_failed_review_run_cannot_promote_parent_loop_to_success(
     assert "不能采用其 verdict" in (run_dir / "final-report.md").read_text(
         encoding="utf-8"
     )
+
+
+def test_trusted_needs_human_review_is_preserved_for_finish(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    review_summary = "README 变更缺少兼容性说明，需要人工确认。"
+    finding = {
+        "severity": "major",
+        "file": "README.md",
+        "line": 1,
+        "title": "兼容性说明不足",
+        "evidence": "当前 diff 改变了公开说明，但没有交代旧用法是否仍受支持。",
+        "recommendation": "补充兼容性边界，或由人工确认该变更可以接受。",
+    }
+    reviewer_output = json.dumps(
+        {
+            "verdict": "needs_human",
+            "summary": review_summary,
+            "findings": [finding],
+            "reviewed_files": ["README.md"],
+            "checked_items": ["需求覆盖", "兼容性风险", "验证证据"],
+        },
+        ensure_ascii=False,
+    )
+
+    run_dir = LoopAutomationRuntime(
+        workspace,
+        worker_runner=TrackedChangeRunner(),
+        reviewer_runner=QueueRunner([reviewer_output]),
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
+
+    state = _read_json(run_dir / "state.json")
+    iteration = state["iterations"][0]
+    review_run = workspace / "runs" / iteration["review_run"]
+    child_state = _read_json(review_run / "state.json")
+
+    assert child_state["status"] == "needs_human"
+    assert child_state["current_step"] == "done"
+    assert child_state["verdict"] == "needs_human"
+    assert not [
+        result
+        for result in child_state["eval_results"]
+        if result.startswith("FAIL:")
+    ]
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "done"
+    assert iteration["verdict"] == "needs_human"
+    assert iteration["findings_count"] == 1
+
+    FinishRuntime(workspace).run(run_dir.name)
+    finish = _read_json(run_dir / "finish-summary.json")
+    latest_verdict = finish["latest_verdict"]
+    review = finish["first_screen"]["review"]
+
+    assert finish["finish_status"] == "needs_human"
+    assert finish["loop_status"] == "needs_human"
+    assert latest_verdict["verdict"] == "needs_human"
+    assert latest_verdict["summary"] == review_summary
+    assert latest_verdict["findings"] == [finding]
+    assert latest_verdict["reviewed_files"] == ["README.md"]
+    assert review["findings"] == [finding]
+    assert review["coverage"]["complete"] is True
+    assert review["coverage"]["reviewed_files"] == ["README.md"]
 
 
 def _create_successful_loop(tmp_path: Path) -> Path:
