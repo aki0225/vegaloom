@@ -1655,7 +1655,7 @@ def test_scope_gate_checks_both_paths_of_committed_rename(tmp_path: Path) -> Non
     target = repo / "src" / "case.py"
     target.parent.mkdir()
     _git(repo, "mv", "tests/case.py", "src/case.py")
-    _git(repo, "commit", "-m", "test: commit rename")
+    _git_commit(repo, "test: commit rename")
     current_head = _git(repo, "rev-parse", "HEAD").strip()
 
     result = evaluate_scope_gate(
