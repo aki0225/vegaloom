@@ -636,8 +636,11 @@ SAG3B-02 的机器 B 结果宣称 Gate 3B 通过。
 
 ```text
 case_id = SAG3B-03
+prereg_branch = codex/supervisor-gate3b-r3
 control_source_commit = be6fce26c227ac14abd1600b48ade063a01f5686
-control_source_tree = ea711b8ea32e9fa25806954ded0bde195476d4e6
+control_repo_root_tree = ea711b8ea32e9fa25806954ded0bde195476d4e6
+control_source_pathspec = src/vega
+control_source_pathspec_tree = 18da3944c7f42e0cdddcadec70bbdf5373a9bc0b
 control_source_file_count = 131
 control_source_archive_sha256 = 9403dea789288447f5354b51c0f8e8faa57b4433fe65e060484b420464921c75
 control_source_manifest_sha256 = 480096e4f3c2f06aee907ba0566a39c7a7ae742ce4e099668805955ae3d199d4
@@ -648,6 +651,13 @@ machine_a_protocol_sha256 = e82626e518b2258de464dad15f14ffa9835c5d92b20e40dd6fd5
 launcher_sha256 = da4c8ded7d7572168baa852266bc59cccd0f009d3109e8315bd2ff26c807e03c
 target_execution_control_sha256 = 288053fa8ff0f22b9f3ed38bc9fae99510ca5f237d1102d98acc5404627d9b01
 target_execution_control_test_sha256 = 28e727c06672fad06562e7b76f86f1e3f30ba9fa16e50e6a08a0734a295b0298
+target_execution_control_bytes = 37251
+target_execution_control_test_bytes = 87052
+target_repo_head = be6fce26c227ac14abd1600b48ade063a01f5686
+target_repo_root_tree = ea711b8ea32e9fa25806954ded0bde195476d4e6
+target_branch = codex/sag3b-03-wip
+target_core_autocrlf = false
+target_push_url_disabled = true
 adapter = codex-exec
 worker = gpt-5.6-sol / xhigh
 reviewer = gpt-5.6-sol / xhigh
@@ -712,7 +722,8 @@ release、删除文件或写入长期 Memory。
 2. `agent capabilities` 通过；
 3. Plan、Runner、launcher、目标 HEAD、tree 和两个允许文件的摘要与本节完全一致；
 4. 控制工作区与目标 clone 没有旧 SAG3B-01/02 Artifact；
-5. 没有读取或记录凭据、Provider URL 或本机 Codex 配置。
+5. 不读取或记录凭据、Provider URL；只允许脱敏核对实际生效的模型与推理强度，
+   并确认其为 `gpt-5.6-sol / xhigh`。
 
 首次同时满足以下条件时，机器 A 发出身份绑定的 `agent stop`：
 
