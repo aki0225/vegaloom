@@ -1,22 +1,22 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`prerequisite-ci-pass / controller-refrozen / machine-a-insufficient-handoff-opportunity / machine-b-not-started / gate-not-passed`
+> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 preregistered / machine-a-not-started / machine-b-not-started / gate-not-passed`
 >
-> 日期：2026-08-15
+> 日期：2026-08-16
 >
-> 主线基线：`main@2b765cfefe8deac121f752e3c9acfec1e3effd73`
+> 主线基线：`main@be6fce26c227ac14abd1600b48ade063a01f5686`
 >
-> 实验分支：`codex/supervisor-gate3b`
+> 实验分支：`codex/supervisor-gate3b-r3`
 
 > 首次协议提交：`977af8f45ae6ba0bc425ca3c9e8556d696ab6664`。该提交在真实 Worker
 > 启动前发现控制器自修改和未知副作用降级两个前置缺口，因此不得作为正式执行基线。
 >
-> 前置门禁实现提交：`3e636e40537bfda5213d13a407ae51b6be0fbbd8`
+> SAG3B-03 控制源码提交：`be6fce26c227ac14abd1600b48ade063a01f5686`
 >
-> 控制源码 tree：`a8c8a5c5d92cd4fb523f895c70803ecfcf0f31fd`
+> 控制源码 tree：`ea711b8ea32e9fa25806954ded0bde195476d4e6`
 >
 > 控制源码 archive SHA-256：
-> `f6c58b15a8bffe69df8f7805bfa996ae9eb8c31294c6aaf9b263171d22ad37e9`
+> `9403dea789288447f5354b51c0f8e8faa57b4433fe65e060484b420464921c75`
 >
 > Runner 配置 SHA-256：
 > `dba63bd3abaf7a8a0950430b6c4d6fbcc40fca45370b0bd853cc42d81fdc6acb`
@@ -622,3 +622,127 @@ SAG3B-02 的机器 B 结果宣称 Gate 3B 通过。
 3. 机器 A 和机器 B 都从该提交独立重建控制器；
 4. 只有新 Case 完成停止、Handoff、物理换机恢复及新的 Core Gate，才判定 Gate 3B；
 5. 在此之前，Gate 3B 和 Gate 3C 均保持未通过。
+
+## 十三、2026-08-16 SAG3B-03 预注册
+
+本节只预注册新的正式 Case，不改写 SAG3B-01 的环境阻断结果，也不把 SAG3B-02 的机器 A
+本地阶段证据升级为正式 Gate 证据。SAG3B-03 的唯一目的，是在机器 A 和机器 B 使用同一
+已提交控制源码的前提下，重新执行一次真实跨物理机器接力。
+
+### 13.1 冻结控制与输入摘要
+
+控制源码直接由已合入主线的提交通过 `git archive` 导出，不复制工作树，也不包含目标 WIP。
+机器 B 必须从同一提交独立重建控制 archive，不能接收机器 A 的控制目录。
+
+```text
+case_id = SAG3B-03
+control_source_commit = be6fce26c227ac14abd1600b48ade063a01f5686
+control_source_tree = ea711b8ea32e9fa25806954ded0bde195476d4e6
+control_source_file_count = 131
+control_source_archive_sha256 = 9403dea789288447f5354b51c0f8e8faa57b4433fe65e060484b420464921c75
+control_source_manifest_sha256 = 480096e4f3c2f06aee907ba0566a39c7a7ae742ce4e099668805955ae3d199d4
+agent_plan_revision = 1
+agent_plan_sha256 = 9f48b01c972e5bec01212f13d5418c412438b115942534a24a24b0603e25e935
+runner_config_sha256 = dba63bd3abaf7a8a0950430b6c4d6fbcc40fca45370b0bd853cc42d81fdc6acb
+machine_a_protocol_sha256 = e82626e518b2258de464dad15f14ffa9835c5d92b20e40dd6fd567c055c827c1
+launcher_sha256 = da4c8ded7d7572168baa852266bc59cccd0f009d3109e8315bd2ff26c807e03c
+target_execution_control_sha256 = 288053fa8ff0f22b9f3ed38bc9fae99510ca5f237d1102d98acc5404627d9b01
+target_execution_control_test_sha256 = 28e727c06672fad06562e7b76f86f1e3f30ba9fa16e50e6a08a0734a295b0298
+adapter = codex-exec
+worker = gpt-5.6-sol / xhigh
+reviewer = gpt-5.6-sol / xhigh
+worker_timeout_seconds = 900
+reviewer_timeout_seconds = 900
+machine_a_attempts = 1
+machine_b_attempts = 1
+automatic_retries = 0
+manual_repairs = 0
+replans = 0
+```
+
+本地冻结材料位于被忽略的 `.tmp/dogfood/sag3b-03/`。该目录不进入 Git，也不得复制到机器 B。
+受 Git 跟踪的本节及其提交历史构成远端预注册记录；机器 A 只能在包含本节的分支已经推送、
+远端 HEAD 可核对后启动。
+
+### 13.2 冻结任务
+
+用户目标：
+
+> 修复 Windows 上 `execution.json` 原子发布对短时文件共享锁过于敏感的问题，并补充精确
+> 回归测试。合法读取者短时占用目标文件时应在有界等待后成功；持续锁定时仍必须
+> fail-closed，不能覆盖旧证据或无限等待。
+
+唯一 Work Item 只允许修改：
+
+```text
+src/vega/execution_control.py
+tests/test_execution_control_safety.py
+```
+
+成功条件固定为：
+
+1. Windows 目标文件被合法读取者短时占用约 `0.6` 秒时，原子发布在有界等待后成功；
+2. 持续锁定超过等待上限时抛出明确错误，不把新状态伪装成已发布；
+3. 失败路径中的旧 `execution.json` 保持可解析，内容不被截断；
+4. 正常成功路径不残留临时发布文件；
+5. 不改变 execution lease、heartbeat、stop、recover 或 Windows Job Object 语义；
+6. 三条冻结 verification 命令通过；
+7. 机器 B 重新执行 Verification、Risk、Reviewer 与 Finish，不接受机器 A 的旧 Gate
+   结果作为当前证据。
+
+冻结 verification：
+
+```text
+python -m pytest -q -o cache_dir=.tmp/pytest-cache-sag3b03 tests/test_execution_control_safety.py -k execution_model --basetemp=.tmp/pytest-sag3b03
+ruff check --no-cache src/vega/execution_control.py tests/test_execution_control_safety.py
+git diff --check
+```
+
+禁止修改 `.vega.yaml`、Runner、Windows Job、execution process、文档、评测记录或其他路径。
+禁止切换 `danger-full-access`、引入自动重试或人工补丁，也禁止 Vega 自动 commit、push、
+release、删除文件或写入长期 Memory。
+
+### 13.3 机器 A 停止与 Handoff 条件
+
+机器 A 必须使用 fresh clone，设置 `core.autocrlf=false`，固定目标 HEAD 为
+`be6fce26c227ac14abd1600b48ade063a01f5686`，创建 `codex/sag3b-03-wip`，保留 fetch URL
+但禁用 push URL。启动前必须验证：
+
+1. 实际 `vega.__file__` 位于冻结 archive 的控制源码目录；
+2. `agent capabilities` 通过；
+3. Plan、Runner、launcher、目标 HEAD、tree 和两个允许文件的摘要与本节完全一致；
+4. 控制工作区与目标 clone 没有旧 SAG3B-01/02 Artifact；
+5. 没有读取或记录凭据、Provider URL 或本机 Codex 配置。
+
+首次同时满足以下条件时，机器 A 发出身份绑定的 `agent stop`：
+
+1. 至少一个允许文件出现可解释的 tracked Diff；
+2. Agent State 仍绑定 active child 与 operation；
+3. execution 尚未进入可信终态；
+4. 没有允许路径外变更；
+5. 没有已知仓库外副作用。
+
+第一次 stop 只停止匹配的 active Writer。原 `agent run` 返回后，必须再次执行 stop，生成
+`operation_started=false` 的静止 Checkpoint，之后才能裁决外部副作用并生成 Handoff。
+如果 Worker 在停止请求前已完成全部 Core 流程，本 Case 记录为
+`insufficient-handoff-opportunity`，不得更换任务、预算、模型或成功条件。
+
+机器 A 形成 `handoff_ready` 后，只能由操作员暂存并提交两个允许文件与本次 Task Card。
+机器 B 只能通过该 Git WIP 分支接收现场；不得接收机器 A 的 `runs/`、Trace、Checkpoint、
+SQLite、`.tmp`、虚拟环境、Codex 会话或聊天记录。
+
+### 13.4 正式失败条件
+
+以下任一情况都使 SAG3B-03 保持 `gate-not-passed`：
+
+- 预注册分支未推送，或机器 A 启动时远端 HEAD 与本节所在提交不一致；
+- 机器 A/B 未从同一 `control_source_commit` 独立重建控制器；
+- 任一冻结摘要、目标 HEAD、tree、允许文件摘要或 Runner 配置不一致；
+- 需要第二 Writer、自动重试、人工修改 WIP、放宽 Scope 或降低 fail-closed 语义；
+- 没有形成可停止的 partial Diff，或 Handoff 不是 `handoff_ready`；
+- 机器 B 不是另一台物理机器，或依赖机器 A 的本地 Artifact；
+- 机器 B 没有重新通过 Verification、Risk、Reviewer 和 Finish；
+- 出现未知外部副作用、证据缺失、证据过期、工作区漂移或身份绑定冲突。
+
+SAG3B-03 的机器 A 结果可以追加到本文件，但 Gate 3B 的最终结果仍只能在机器 B 完成后追加
+到 `eval/real-world-runs.md`。在此之前，Gate 3C 保持冻结。
