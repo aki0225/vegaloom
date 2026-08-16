@@ -326,9 +326,12 @@ class LoopAutomationRuntime:
         note: str | None = None,
         verify: bool = True,
         rerun_worker: bool = False,
+        verification_commands: list[str] | None = None,
     ) -> Path:
         if rerun_worker and (test_log is not None or note is not None):
             raise ValueError("--rerun-worker 不能与 --test-log 或 --note 同时使用。")
+        if verification_commands is not None and (test_log is not None or not verify):
+            raise ValueError("显式验证命令只允许在 verify=true 且未提供 --test-log 时使用。")
         run_dir = resolve_run_dir(self.workspace, run)
         with RunMutationLock.acquire(run_dir, "loop.continue"):
             return self._continue_assist_locked(
@@ -340,6 +343,7 @@ class LoopAutomationRuntime:
                 note=note,
                 verify=verify,
                 rerun_worker=rerun_worker,
+                verification_commands=verification_commands,
             )
 
     def _continue_assist_locked(
@@ -352,27 +356,21 @@ class LoopAutomationRuntime:
         note: str | None = None,
         verify: bool = True,
         rerun_worker: bool = False,
+        verification_commands: list[str] | None = None,
     ) -> Path:
         state = LoopAutomationState.model_validate_json(
             run_dir.joinpath("state.json").read_text(encoding="utf-8")
         )
         if state.run_id != run_dir.name:
-            raise ValueError(
-                "loop state.run_id 与 run 目录身份不一致；"
-                "为避免在错误证据链上继续，已拒绝 continue。"
-            )
+            raise ValueError("loop state.run_id 与 run 目录身份不一致；为避免错误证据链已拒绝 continue。")
         if state.automation_mode not in {"assist", "auto"}:
             raise ValueError("只有 assist/auto loop 可以使用 continue")
         repo = repo_path.resolve()
         expected_repo = Path(state.repo_path).resolve()
         if repo != expected_repo:
-            raise ValueError(
-                f"loop continue 目标仓库不匹配：run={expected_repo}，传入={repo}"
-            )
+            raise ValueError(f"loop continue 目标仓库不匹配：run={expected_repo}，传入={repo}")
         if state.status != "needs_human":
-            raise ValueError(
-                f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}"
-            )
+            raise ValueError(f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}")
         require_assist_workspace_baseline_continuable(state)
         require_execution_recoverable(run_dir)
         require_recovery_trace_binding(run_dir, state)
@@ -516,6 +514,7 @@ class LoopAutomationRuntime:
                 iteration_dir,
                 iteration=iteration_number,
                 progress_reporter=make_execution_progress_reporter(run_dir, self.progress_reporter, iteration=iteration_number),
+                verification_commands=verification_commands,
             )
             verification_status = _verification_status(
                 verification.command_count,

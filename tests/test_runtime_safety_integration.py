@@ -489,6 +489,45 @@ def test_verification_propagates_bounded_progress_reporter(
     assert len(events) >= 2
 
 
+def test_verification_explicit_commands_override_project_defaults(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    repo.joinpath(".vega.yaml").write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "verification:",
+                "  commands:",
+                '    - python -c "raise SystemExit(9)"',
+                "  max_commands: 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    declared = [
+        'python -c "print(\'declared-one\')"',
+        'python -c "print(\'declared-two\')"',
+    ]
+
+    result = run_project_verification(
+        workspace,
+        repo,
+        workspace / "verification",
+        verification_commands=declared,
+    )
+
+    assert not result.has_failures
+    assert result.command_count == 2
+    payload = json.loads(result.result_path.read_text(encoding="utf-8"))
+    assert payload["commands"] == declared
+    assert payload["selected_command_count"] == 2
+    assert payload["skipped_commands"] == []
+
+
 def test_verification_temp_placeholder_isolates_iterations_and_commands(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -944,8 +983,9 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
         *,
         iteration: int,
         progress_reporter=None,
+        verification_commands=None,
     ):
-        del workspace_path, progress_reporter
+        del workspace_path, progress_reporter, verification_commands
         seen_iterations.append(iteration)
         output_dir.mkdir(parents=True, exist_ok=True)
         result_status = "timeout" if interruption_status == "timed_out" else "failed"
