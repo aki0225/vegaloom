@@ -22,6 +22,7 @@ from .agent_contract import (
     AgentStatusCard,
     canonical_digest,
 )
+from .agent_handoff_safety import TaskCardError
 from .agent_persistence import (
     AgentArtifactError,
     append_agent_trace,
@@ -32,6 +33,7 @@ from .agent_persistence import (
 )
 from .agent_resume_validation import (
     current_branch as current_branch,
+    require_resume_repository_identity,
     validate_resume_workspace,
 )
 from .agent_run import AgentRun
@@ -39,10 +41,10 @@ from .agent_runtime_logic import update_state
 from .agent_task_card import (
     AgentTaskCard,
     discover_handoff_task_cards,
-    load_task_card,
+    parse_task_card,
 )
 from .agent_visibility import render_agent_status_card
-from .comparison_binding import comparison_binding_from_mapping
+from .comparison_binding import require_comparison_binding_from_mapping
 from .redaction import write_redacted_json, write_redacted_text
 from .repository_identity import repository_scope
 from .run_utils import create_run_dir, resolve_run_dir
@@ -90,11 +92,19 @@ def resolve_resume_task(repo: Path, task_path: Path | None) -> tuple[Path, str]:
     return resolved_task, relative_task
 
 
+def load_task_card_with_content(path: Path) -> tuple[AgentTaskCard, str]:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError, UnicodeError) as exc:
+        raise TaskCardError(f"无法读取 Task Card：{path.name}") from exc
+    return parse_task_card(content), content
+
+
 def capture_bound_workspace(run_dir: Path) -> ReviewWorkspaceSnapshot:
     metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
     repo = Path(metadata["repo_path"]).resolve(strict=True)
     exclusions = workspace_ignored_path_exclusions(run_dir.parent.parent, repo)
-    comparison_base, comparison_paths, _ = comparison_binding_from_mapping(
+    comparison_base, comparison_paths = require_comparison_binding_from_mapping(
         metadata,
         base_key="comparison_base_revision",
     )
@@ -177,13 +187,19 @@ def resume_agent_task_card(
 ) -> AgentRun:
     repo_root = require_git_root(repo)
     resolved_task, relative_task = resolve_resume_task(repo_root, task_path)
-    card = load_task_card(resolved_task)
+    card, task_card_content = load_task_card_with_content(resolved_task)
     # 新机器不会携带空的运行目录；先重建 Vega 自己的固定根路径，再冻结新现场。
     prepare_verification_temp_root(repo_root)
     snapshot = validate_resume_workspace(
         repo_root,
         card,
         relative_task=relative_task,
+        task_card_content=task_card_content,
+    )
+    require_resume_repository_identity(
+        repo_root,
+        expected_head_sha=snapshot.head_sha,
+        expected_branch=card.branch,
     )
     run_id, run_dir = create_run_dir(
         workspace,

@@ -529,11 +529,14 @@ def collect_review_inputs(
     comparison_paths = _safe_comparison_paths(
         source_evidence.get("comparison_paths")
     )
+    capture_comparison_paths = (
+        comparison_paths if comparison_base_sha is not None else ()
+    )
     current_snapshot = capture_runtime_workspace(
         workspace,
         repo,
         comparison_base_sha=comparison_base_sha,
-        comparison_paths=comparison_paths,
+        comparison_paths=capture_comparison_paths,
     )
     full_diff, full_diff_issues, full_diff_diagnostics = _read_text_artifact(
         source_dir / "full-diff.patch",
@@ -1083,7 +1086,7 @@ def _capture_post_review_workspace(
                 comparison_base_sha=inputs["comparison_base_sha"],
                 comparison_paths=tuple(inputs["comparison_paths"]),
             ).fingerprint
-        except (OSError, RuntimeError, subprocess.SubprocessError):
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             issues.append("workspace_snapshot_failed_after_reviewer")
         else:
             if end_fingerprint != reviewer_start_fingerprint:

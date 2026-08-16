@@ -44,7 +44,12 @@ def capture_current_workspace_snapshot(
     capture_workspace: Callable[..., ReviewWorkspaceSnapshot] = capture_runtime_workspace,
 ) -> tuple[ReviewWorkspaceSnapshot | None, list[str]]:
     if current_workspace_snapshot is not None:
-        return current_workspace_snapshot, []
+        issues: list[str] = []
+        if current_workspace_snapshot.comparison_base_sha != comparison_base_sha:
+            issues.append("workspace_snapshot_comparison_base_mismatch")
+        if current_workspace_snapshot.comparison_paths != comparison_paths:
+            issues.append("workspace_snapshot_comparison_paths_mismatch")
+        return current_workspace_snapshot, issues
     try:
         snapshot = capture_workspace(
             workspace,
@@ -52,7 +57,7 @@ def capture_current_workspace_snapshot(
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
         )
-    except (OSError, RuntimeError, subprocess.SubprocessError):
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
         return None, ["workspace_snapshot_failed"]
     return snapshot, []
 

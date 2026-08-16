@@ -25,6 +25,14 @@ from vega.agent_task_card import (
     save_task_card,
 )
 from vega.cli_entrypoint import app
+from vega.comparison_binding import require_comparison_binding_from_mapping
+
+
+def test_comparison_paths_require_comparison_base() -> None:
+    with pytest.raises(ValueError, match="comparison_paths_without_base"):
+        require_comparison_binding_from_mapping(
+            {"comparison_paths": ["src/example.py"]}
+        )
 
 
 def test_fake_worker_two_items_route_next_then_finalize(

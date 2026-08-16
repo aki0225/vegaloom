@@ -299,9 +299,10 @@ def save_task_card(path: Path, card: AgentTaskCard) -> None:
 
 def load_task_card(path: Path) -> AgentTaskCard:
     try:
-        return parse_task_card(path.read_text(encoding="utf-8"))
+        content = path.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError, UnicodeError) as exc:
         raise TaskCardError(f"无法读取 Task Card：{path.name}") from exc
+    return parse_task_card(content)
 
 
 def discover_handoff_task_cards(repo: Path, *, branch: str | None = None) -> list[Path]:

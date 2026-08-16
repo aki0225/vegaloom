@@ -619,7 +619,8 @@ def test_review_snapshot_reuses_status_paths_and_preserves_rename_identity(
         "notes.txt",
     )
     assert snapshot.untracked_files == ("notes.txt",)
-    assert len(commands) == 7
+    assert len(commands) == 8
+    assert ("git", "rev-parse", "--verify", "HEAD") in commands
     assert (
         "git",
         "rev-parse",

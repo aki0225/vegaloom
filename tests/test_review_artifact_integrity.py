@@ -305,6 +305,11 @@ def test_changed_files_must_match_current_workspace_snapshot(tmp_path: Path) -> 
         ("ignored_content_complete", 1, "ignored_content_complete_invalid"),
         ("git_control_sha256", "0" * 64, "git_control_sha256_mismatch"),
         ("git_control_complete", False, "source_git_control_incomplete"),
+        (
+            "comparison_paths",
+            ["README.md"],
+            "comparison_paths_without_base",
+        ),
     ],
 )
 def test_schema_v5_evidence_fields_fail_closed(

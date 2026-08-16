@@ -242,6 +242,8 @@ def _comparison_base_issues(
         normalized_paths = normalize_comparison_paths(source_paths)
     except ValueError:
         return ["comparison_paths_invalid"]
+    if normalized_paths and source_base is None:
+        return ["comparison_paths_without_base"]
     if (
         current_snapshot is not None
         and source_base != current_snapshot.comparison_base_sha

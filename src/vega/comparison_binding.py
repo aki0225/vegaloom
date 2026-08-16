@@ -50,7 +50,25 @@ def comparison_binding_from_mapping(
         issues.append("comparison_paths_invalid")
     elif raw_paths and not paths:
         issues.append("comparison_paths_invalid")
+    if paths and base_sha is None:
+        issues.append("comparison_paths_without_base")
     return base_sha, paths, issues
+
+
+def require_comparison_binding_from_mapping(
+    payload: dict[str, Any],
+    *,
+    base_key: str = "comparison_base_sha",
+    paths_key: str = "comparison_paths",
+) -> tuple[str | None, tuple[str, ...]]:
+    base_sha, paths, issues = comparison_binding_from_mapping(
+        payload,
+        base_key=base_key,
+        paths_key=paths_key,
+    )
+    if issues:
+        raise ValueError("comparison binding 无效：" + ", ".join(issues))
+    return base_sha, paths
 
 
 def comparison_state_issues(
@@ -88,6 +106,8 @@ def capture_workspace_fingerprint(
     comparison_paths: tuple[str, ...] = (),
     capture_workspace: Callable[..., Any] = capture_runtime_workspace,
 ) -> tuple[str | None, str | None]:
+    if comparison_base_sha is None and comparison_paths:
+        return None, "ValueError"
     try:
         if comparison_base_sha is None and not comparison_paths:
             snapshot = capture_workspace(workspace, repo_path)
@@ -98,7 +118,7 @@ def capture_workspace_fingerprint(
                 comparison_base_sha=comparison_base_sha,
                 comparison_paths=comparison_paths,
             )
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         return None, type(exc).__name__
     return snapshot.fingerprint, None
 
@@ -132,8 +152,8 @@ def collect_gate_comparison_evidence(
     repo_path: Path,
     reflect_state: dict[str, Any],
 ) -> tuple[str | None, tuple[str, ...], str, str, str]:
-    comparison_base_sha, comparison_paths, _ = comparison_binding_from_mapping(
-        reflect_state
+    comparison_base_sha, comparison_paths = require_comparison_binding_from_mapping(
+        reflect_state,
     )
     diff_check = collect_gate_diff_check(
         repo_path,

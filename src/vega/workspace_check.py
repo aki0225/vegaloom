@@ -236,6 +236,7 @@ def capture_review_workspace(
         repo,
         ["--binary", "--full-index"],
         run_git=_run_git_bytes,
+        head_sha=head_sha,
     )
     committed_diff = collect_committed_diff(
         repo,
@@ -243,11 +244,13 @@ def capture_review_workspace(
         ["--binary", "--full-index"],
         run_git=_run_git_bytes,
         comparison_paths=normalized_comparison_paths,
+        comparison_head_sha=head_sha,
     )
     committed_files = collect_comparison_changed_paths(
         repo,
         resolved_comparison_base,
         comparison_paths=normalized_comparison_paths,
+        comparison_head_sha=head_sha,
     )
     status = filter_codex_runtime_porcelain_v1_status(
         repo, status, ignored_path_exclusions
@@ -283,6 +286,12 @@ def capture_review_workspace(
     staged_diff_sha256 = _sha256(staged_diff.encode("utf-8"))
     unstaged_diff_sha256 = _sha256(unstaged_diff.encode("utf-8"))
     committed_diff_sha256 = _sha256(committed_diff.encode("utf-8"))
+    final_head_sha = _run_git_bytes(
+        repo,
+        ["git", "rev-parse", "--verify", "HEAD"],
+    ).decode("utf-8", errors="replace").strip()
+    if final_head_sha != head_sha:
+        raise RuntimeError("review workspace 采集期间 Git HEAD 发生变化")
     fingerprint_payload = "\n".join(
         [
             f"head={head_sha}",

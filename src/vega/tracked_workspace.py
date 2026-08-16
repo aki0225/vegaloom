@@ -49,6 +49,7 @@ def collect_tracked_diff_parts(
     options: list[str],
     *,
     run_git: Callable[..., bytes] = run_git_bytes,
+    head_sha: str = "HEAD",
 ) -> tuple[str, str]:
     """分别读取 index 对 HEAD 与工作区对 index 的差异。"""
 
@@ -62,7 +63,7 @@ def collect_tracked_diff_parts(
             "--no-textconv",
             "--cached",
             *options,
-            "HEAD",
+            head_sha,
             "--",
         ],
         allowed_returncodes=allowed_returncodes,
@@ -82,10 +83,13 @@ def collect_committed_diff(
     *,
     run_git: Callable[..., bytes] = run_git_bytes,
     comparison_paths: tuple[str, ...] = (),
+    comparison_head_sha: str = "HEAD",
 ) -> str:
     """读取 comparison base 到当前 HEAD 的已提交 WIP 差异。"""
 
     if comparison_base_sha is None:
+        if comparison_paths:
+            raise ValueError("comparison paths 必须与 comparison base 一起使用")
         return ""
     allowed_returncodes = (0, 1, 2) if "--check" in options else (0,)
     output = run_git(
@@ -100,7 +104,7 @@ def collect_committed_diff(
             "--no-textconv",
             *options,
             comparison_base_sha,
-            "HEAD",
+            comparison_head_sha,
             "--",
             *comparison_paths,
         ],
@@ -177,7 +181,14 @@ def capture_tracked_scope_snapshot(
         repo,
         resolved_comparison_base,
         comparison_paths=normalized_comparison_paths,
+        comparison_head_sha=head_sha,
     )
+    final_head_sha = run_git_bytes(
+        repo,
+        ["git", "rev-parse", "--verify", "HEAD"],
+    ).decode("utf-8", errors="replace").strip()
+    if final_head_sha != head_sha:
+        raise RuntimeError("scope gate 采集期间 Git HEAD 发生变化")
     return TrackedScopeSnapshot(
         head_sha=head_sha,
         status_sha256=_sha256(status_after),
@@ -235,6 +246,8 @@ def collect_comparison_changed_paths(
     comparison_head_sha: str = "HEAD",
 ) -> list[str]:
     if comparison_base_sha is None:
+        if comparison_paths:
+            raise ValueError("comparison paths 必须与 comparison base 一起使用")
         return []
     payload = run_git_bytes(
         repo_path,
@@ -242,7 +255,8 @@ def collect_comparison_changed_paths(
             "git",
             "--literal-pathspecs",
             "diff",
-            "--name-only",
+            "--name-status",
+            "--find-renames",
             "-z",
             comparison_base_sha,
             comparison_head_sha,
@@ -250,11 +264,34 @@ def collect_comparison_changed_paths(
             *comparison_paths,
         ],
     )
-    return [
-        item.decode("utf-8", errors="replace")
-        for item in payload.split(b"\0")
-        if item
-    ]
+    return _parse_comparison_name_status(payload)
+
+
+def _parse_comparison_name_status(payload: bytes) -> list[str]:
+    tokens = [item for item in payload.split(b"\0") if item]
+    paths: list[str] = []
+    index = 0
+    while index < len(tokens):
+        status = tokens[index].decode("ascii", errors="replace")
+        index += 1
+        if not status or status[0] not in {"A", "B", "C", "D", "M", "R", "T", "U", "X"}:
+            raise RuntimeError("comparison diff 包含未知 name-status 记录")
+        if status[0] in {"R", "C"}:
+            if index + 1 >= len(tokens):
+                raise RuntimeError("comparison diff rename/copy 记录不完整")
+            source = tokens[index].decode("utf-8", errors="replace")
+            target = tokens[index + 1].decode("utf-8", errors="replace")
+            index += 2
+            if status[0] == "R":
+                paths.extend([source, target])
+            else:
+                paths.append(target)
+            continue
+        if index >= len(tokens):
+            raise RuntimeError("comparison diff 路径记录不完整")
+        paths.append(tokens[index].decode("utf-8", errors="replace"))
+        index += 1
+    return list(dict.fromkeys(paths))
 
 
 def normalize_comparison_paths(

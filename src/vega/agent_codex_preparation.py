@@ -4,14 +4,14 @@ from pathlib import Path
 
 from .agent_contract import AgentState
 from .agent_persistence import read_agent_trace
-from .comparison_binding import comparison_binding_from_mapping
+from .comparison_binding import require_comparison_binding_from_mapping
 from .workspace_check import ReviewWorkspaceSnapshot
 
 
 def comparison_binding_from_metadata(
     metadata: dict[str, str],
 ) -> tuple[str | None, tuple[str, ...]]:
-    comparison_base_sha, comparison_paths, _ = comparison_binding_from_mapping(
+    comparison_base_sha, comparison_paths = require_comparison_binding_from_mapping(
         metadata,
         base_key="comparison_base_revision",
     )

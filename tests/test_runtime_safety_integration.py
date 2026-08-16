@@ -1156,8 +1156,16 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
         iteration: int,
         progress_reporter=None,
         verification_commands=None,
+        comparison_base_sha=None,
+        comparison_paths=(),
     ):
-        del workspace_path, progress_reporter, verification_commands
+        del (
+            workspace_path,
+            progress_reporter,
+            verification_commands,
+            comparison_base_sha,
+            comparison_paths,
+        )
         seen_iterations.append(iteration)
         output_dir.mkdir(parents=True, exist_ok=True)
         result_status = "timeout" if interruption_status == "timed_out" else "failed"

@@ -1649,6 +1649,40 @@ def test_scope_gate_checks_both_paths_of_staged_rename(tmp_path: Path) -> None:
     ]
 
 
+def test_scope_gate_checks_both_paths_of_committed_rename(tmp_path: Path) -> None:
+    _, repo = _init_repo(tmp_path, files={"tests/case.py": "value = 1\n"})
+    comparison_base = _git(repo, "rev-parse", "HEAD").strip()
+    target = repo / "src" / "case.py"
+    target.parent.mkdir()
+    _git(repo, "mv", "tests/case.py", "src/case.py")
+    _git(repo, "commit", "-m", "test: commit rename")
+    current_head = _git(repo, "rev-parse", "HEAD").strip()
+
+    result = evaluate_scope_gate(
+        repo,
+        ScopeConfig(
+            allowed_paths=["src/**/*.py"],
+            forbidden_paths=["tests/**"],
+        ),
+        iteration=1,
+        phase="pre_verification",
+        expected_head_sha=current_head,
+        comparison_base_sha=comparison_base,
+        comparison_paths=("tests/case.py", "src/case.py"),
+    )
+
+    assert result.status == "failed"
+    assert result.committed_changed_files == ["tests/case.py", "src/case.py"]
+    assert result.changed_files == ["tests/case.py", "src/case.py"]
+    assert [violation.model_dump() for violation in result.violations] == [
+        {
+            "code": "forbidden_path",
+            "path": "tests/case.py",
+            "matched_patterns": ["tests/**"],
+        }
+    ]
+
+
 def test_scope_gate_fails_closed_without_leaking_credential_like_filename(
     tmp_path: Path,
 ) -> None:
