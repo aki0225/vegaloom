@@ -14,6 +14,7 @@ from .agent_codex_evidence import (
     build_repair_prompt,
     decision_label,
     evaluate_plan_scope,
+    evaluate_worker_claim,
     load_child_state,
     load_finish_summary,
     observation_from_child,
@@ -119,7 +120,7 @@ class SupervisorAgentCodexAdapter:
             raise ValueError("Worker timeout 必须在 60..3600 秒之间")
         run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
         validate_dispatch_artifacts(run_dir, state, plan)
-        require_single_executable_work_item(plan, state)
+        work_item = require_single_executable_work_item(plan, state)
         attempt_number = _next_attempt_number(run_dir, state)
         before = capture_bound_workspace(run_dir)
         if before.fingerprint != state.workspace_fingerprint:
@@ -154,6 +155,7 @@ class SupervisorAgentCodexAdapter:
             repo=repo,
             task_brief=task_brief,
             runner=runner,
+            verification_commands=tuple(work_item.verification),
         )
 
     def _prepare_child(
@@ -305,20 +307,17 @@ class SupervisorAgentCodexAdapter:
                 extra_evidence_refs=[plan_scope_ref],
             )
 
-        try:
-            claim = WorkerClaim.model_validate_json(result.output)
-        except ValidationError as exc:
+        claim, failure_reason = evaluate_worker_claim(result.output)
+        if failure_reason:
             return self._observe_failure(
-                executed.bound,
-                child_dir,
-                operation_id,
-                worker_record,
-                result,
-                reason=f"Worker 最终 Claim 不符合窄 Schema：{exc.errors()[0]['type']}",
+                executed.bound, child_dir, operation_id, worker_record, result,
+                reason=failure_reason,
                 external_side_effects="unknown",
+                claim=claim,
                 extra_evidence_refs=[plan_scope_ref],
             )
 
+        assert claim is not None
         try:
             self.loop_runtime.continue_assist(
                 child_run,
@@ -326,6 +325,7 @@ class SupervisorAgentCodexAdapter:
                 worker_name="codex-exec",
                 reviewer_name="codex-exec",
                 verify=True,
+                verification_commands=list(prepared.verification_commands),
             )
             self.finish_runtime.run(child_run)
             require_child_quiescent(child_dir)

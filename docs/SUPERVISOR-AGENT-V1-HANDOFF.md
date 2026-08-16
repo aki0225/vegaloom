@@ -280,10 +280,13 @@ workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
 1. 不重跑 `SAG2B-01` 或 `SAG2B-02`，保留既有冻结案例和负结果现场。
 2. 日常仍以 `vega do / loop / goal` 为默认入口；`vega agent` 继续保持 opt-in。
 3. Gate 3A 已判定为 `gate-exit-pass`，不再扩大其机械接力范围。
-4. Gate 3B 已按 [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md)
-   完成机器 A 正式 attempt；保留 `insufficient-handoff-opportunity / environment-blocked`
-   结论，不重跑 `SAG3B-01`，不启动机器 B。
-5. 不把 Claude Code、多 Work Item 或日常价值观察混入同一运行。
+4. Gate 3B 保留 `SAG3B-01` 的
+   `insufficient-handoff-opportunity / environment-blocked` 结论，不重跑该 Case。
+5. `SAG3B-02` 已形成 `machine-a-handoff-ready`：真实 Worker 只修改两个批准文件，
+   identity-bound stop 成功，外部副作用裁决为 none，并生成 `handoff_ready` Task Card。
+6. `SAG3B-02` 机器 A 使用提交前控制快照；提交前架构修复使最终控制提交与该快照不再字节
+   一致，因此不得继续把机器 B 结果计为正式 Gate 3B。
+7. 不把 Claude Code、多 Work Item 或日常价值观察混入同一运行。
 
 ## 下一 Gate 的边界
 
@@ -309,3 +312,40 @@ Claude Code Adapter 或第二套成功裁决。
 - 受信 Observation 已经 write-once；若其后的 Checkpoint 写入失败，State 会保守保留 active
   Writer，但重试需要新的 Observation ID。该路径不会开放第二 Writer，后续是否需要事务化
   Observation/Decision/Graph 由 Gate 2B 真实 Adapter 故障注入决定。
+
+## 2026-08-16 Gate 3B R2 交接状态
+
+当前开发分支为 `codex/supervisor-gate3b-r2`，基线
+`main@d2c28103d352f251f1bf20d89758e666dba086ed`。控制器修复已固定为
+`5d252d4b366e7a1bed1eb8370a4c599401055a21`，只修改 Adapter、Worker Claim、显式
+verification 下传及其回归，共 6 个文件；没有修改默认 `do / loop / goal`。
+
+SAG3B-02 机器 A：
+
+```text
+Agent run: 20260816-121500-agent
+child: 20260816-121529-270617-bug-loop
+operation: e44ed6747d70430d8388b58d82aa5d0d
+result: machine-a-handoff-ready
+changed files: 2
+external side effects: none
+handoff: ready
+machine B: not started
+```
+
+active Writer 时的第一次 `agent stop` 只发送身份绑定请求；原 `agent run` 返回后，必须再次
+执行 `agent stop` 固化 `operation_started=false` 的静止 Checkpoint，之后才能裁决 unknown
+副作用。该操作顺序已补入 Gate 3B 正式计划。
+
+最终审阅发现机器 A 的 `control-runtime-local-r3` 与上述提交在
+`agent_codex_adapter.py`、`agent_codex_evidence.py`、`loop_runtime.py` 三个控制文件上
+不再字节一致。差异属于架构门禁要求的等价整理，但正式协议禁止事后用“行为等价”替代同一
+`control_source_commit`。因此 SAG3B-02 收紧为
+`machine-a-handoff-ready / formal-gate-nonconforming / machine-b-not-run`。
+
+当前不能宣布 Gate 3B 通过，也不能把目标 clone 的 WIP 复制进控制分支。下一步：
+
+1. 推送当前分支并让 PR CI 覆盖全部四个 Python 3.12 分片；
+2. 合入主线后，从同一主线提交预注册新的 `SAG3B-03`；
+3. 新 Case 的机器 A/B 必须分别从同一控制提交重建固定控制器；
+4. 只有物理换机恢复并重新通过 Verification、Risk、Reviewer 和 Finish，才通过 Gate 3B。

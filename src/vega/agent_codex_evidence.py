@@ -13,6 +13,7 @@ from .agent_contract import (
     AgentObservation,
     AgentPlan,
     AgentState,
+    AgentWorkItem,
     GateStatus,
     canonical_digest,
 )
@@ -65,6 +66,7 @@ class PreparedCodexAttempt:
     repo: Path
     task_brief: str
     runner: Runner
+    verification_commands: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -77,10 +79,20 @@ class ExecutedCodexAttempt:
     result: RunnerResult
 
 
+def evaluate_worker_claim(output: str) -> tuple[WorkerClaim | None, str | None]:
+    try:
+        claim = WorkerClaim.model_validate_json(output)
+    except ValidationError as exc:
+        return None, f"Worker 最终 Claim 不符合窄 Schema：{exc.errors()[0]['type']}"
+    if claim.claimed_status == "blocked":
+        return claim, f"Worker 最终 Claim 明确为 blocked；未启动 Core：{claim.summary}"
+    return claim, None
+
+
 def require_single_executable_work_item(
     plan: AgentPlan,
     state: AgentState,
-) -> None:
+) -> AgentWorkItem:
     executable = [
         item
         for item in plan.work_items
@@ -94,6 +106,15 @@ def require_single_executable_work_item(
             "Gate 2B 真实 Adapter 当前只接受一个未完成 Work Item；"
             "多 Work Item 的累计 Diff 归因尚未取得可信证据"
         )
+    work_item = executable[0]
+    commands = [command.strip() for command in work_item.verification]
+    if not commands:
+        raise ValueError("真实 Adapter Work Item 必须冻结至少一个验证命令")
+    if any("\n" in command or "\r" in command for command in commands):
+        raise ValueError("真实 Adapter Work Item 的验证命令必须是单行")
+    if len(set(commands)) != len(commands):
+        raise ValueError("真实 Adapter Work Item 的验证命令不能重复")
+    return work_item
 
 
 def evaluate_plan_scope(

@@ -37,6 +37,7 @@ class _FakeLoopRuntime:
         self.start_count = 0
         self.continue_count = 0
         self.child_dir: Path | None = None
+        self.verification_commands: list[str] | None = None
 
     def start(
         self,
@@ -81,6 +82,7 @@ class _FakeLoopRuntime:
         note: str | None = None,
         verify: bool = True,
         rerun_worker: bool = False,
+        verification_commands: list[str] | None = None,
     ) -> Path:
         del (
             worker_name,
@@ -90,6 +92,7 @@ class _FakeLoopRuntime:
             verify,
             rerun_worker,
         )
+        self.verification_commands = verification_commands
         assert self.child_dir is not None
         assert run == self.child_dir.name
         self.continued = True
@@ -362,6 +365,7 @@ def test_adapter_maps_child_core_evidence_to_machine_observation(
         ).read_text(encoding="utf-8")
     )
     assert execution["execution_id"] == runner.execution_id
+    assert loop.verification_commands == ["运行定向测试"]
     observations = list((result.run_dir / "observations").glob("*.json"))
     assert len(observations) == 1
     payload = json.loads(observations[0].read_text(encoding="utf-8"))
@@ -554,6 +558,52 @@ def test_invalid_worker_claim_skips_core_and_routes_human(
     assert observation["external_side_effects"] == "unknown"
 
 
+def test_blocked_worker_claim_skips_core_and_routes_human(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(workspace)
+    blocked_claim = json.dumps(
+        {
+            "claimed_status": "blocked",
+            "summary": "Windows sandbox 无法启动本地工具",
+            "tests_claimed": [],
+            "remaining_questions": ["修复执行环境后再运行"],
+        },
+        ensure_ascii=False,
+    )
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(output=blocked_claim),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    result = adapter.run(run_id, timeout_seconds=60)
+
+    assert result.state.phase == "needs_human"
+    assert loop.continued is False
+    assert loop.child_dir is not None
+    assert not loop.child_dir.joinpath("finish-summary.json").exists()
+    observation = json.loads(
+        next((result.run_dir / "observations").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert observation["worker_claim"] == "Windows sandbox 无法启动本地工具"
+    assert observation["verification"] == "not_run"
+    assert observation["external_side_effects"] == "unknown"
+    child_summary = json.loads(
+        next((result.run_dir / "children").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert child_summary["worker"]["claim"]["claimed_status"] == "blocked"
+    assert child_summary["core"]["status"] == "not_run"
+
+
 def test_reviewer_request_changes_routes_back_to_repair(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -671,6 +721,41 @@ def test_adapter_rejects_multi_work_item_plan_before_creating_child(
     )
 
     with pytest.raises(ValueError, match="只接受一个未完成 Work Item"):
+        adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+    assert loop.child_dir is None
+
+
+@pytest.mark.parametrize(
+    ("verification", "message"),
+    [
+        ([], "至少一个验证命令"),
+        (["运行测试\n运行 Ruff"], "必须是单行"),
+        (["运行测试", " 运行测试 "], "不能重复"),
+    ],
+)
+def test_adapter_rejects_invalid_verification_before_creating_child(
+    tmp_path: Path,
+    verification: list[str],
+    message: str,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    plan = _plan().model_copy(deep=True)
+    plan.work_items[0].verification = verification
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    approved = runtime.approve(run.run_dir.name)
+    loop = _FakeLoopRuntime(workspace)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    with pytest.raises(ValueError, match=message):
         adapter.run(approved.run_dir.name, timeout_seconds=60)
 
     assert loop.child_dir is None

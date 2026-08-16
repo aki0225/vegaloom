@@ -63,11 +63,12 @@ def run_project_verification(
     max_commands: int | None = None,
     timeout_seconds: int | None = None,
     progress_reporter: Callable[[str, int], None] | None = None,
+    verification_commands: list[str] | None = None,
 ) -> VerificationRunResult:
     """按项目画像执行最小验证命令，并把结果写成可交给 reflect/reviewer 的日志。
 
-    命令只来自 Vega 自己识别出的 project profile，不接收任意外部字符串；
-    默认最多执行两个命令，避免轻量 loop 变成长时间 CI。
+    普通 loop 的命令来自 project profile 或项目配置；Supervisor 可以传入人工批准
+    Work Item 中冻结的显式命令。普通 loop 默认最多执行两个命令。
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     config_check = check_project_config(repo_path)
@@ -82,12 +83,22 @@ def run_project_verification(
 
     profile = build_project_profile(workspace, repo_path)
     config = load_project_config(repo_path)
-    command_limit = max_commands if max_commands is not None else config.verification.max_commands
+    command_limit = (
+        max_commands
+        if max_commands is not None
+        else len(verification_commands)
+        if verification_commands is not None
+        else config.verification.max_commands
+    )
     command_timeout = timeout_seconds if timeout_seconds is not None else config.verification.timeout_seconds
     commands = select_verification_commands(
         profile.test_commands,
         profile.lint_commands,
-        configured_commands=config.verification.commands,
+        configured_commands=(
+            verification_commands
+            if verification_commands is not None
+            else config.verification.commands
+        ),
         max_commands=command_limit,
     )
     run_id = _find_parent_run_id(output_dir)

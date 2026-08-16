@@ -343,6 +343,19 @@ agent_plan_sha256 = 78da4cccfaf2c24425bff29f6da8e161a165ff381eb5b0f27bed5df6de14
 }
 ```
 
+如果第一次 `agent stop` 是在 active Writer 仍运行时发出的，它只负责向匹配 execution
+写入身份绑定的停止请求。原 `agent run` 返回、State 清空 active child/operation 后，必须
+使用同一固定控制器再次执行一次 `agent stop`，把静止 Workspace 固化为
+`operation_started=false` 的新 Checkpoint：
+
+```powershell
+<frozen-vega> agent stop --run <agent-run> --reason "freeze quiescent machine-A workspace before side-effect adjudication"
+```
+
+只有 State 无 active binding、最新 Checkpoint 为 `needs_human / blocked`、
+`operation_started=false` 且 `external_side_effects=unknown` 时，才进入人工裁决。不得手工
+改写旧 Checkpoint，也不得跳过第二次 stop 直接把 unknown 改为 none。
+
 随后使用同一固定控制器执行：
 
 ```powershell
@@ -514,3 +527,98 @@ runner 配置和 Plan 摘要均与启动预检登记一致。
 不证明真实跨机器恢复。SAG3B-01 不更换任务、模型、预算或成功条件，也不进行第二次运行。
 机器 B 未启动，没有生成 Handoff Task Card 或 Handoff 提交，Gate 3B 未通过，Gate 3C
 继续冻结。
+
+## 十二、2026-08-16 SAG3B-02 机器 A 阶段结果
+
+本节追加新的机器 A 本地阶段证据，不重跑或改写 SAG3B-01。控制候选基于
+`main@d2c28103d352f251f1bf20d89758e666dba086ed`，当前位于
+`codex/supervisor-gate3b-r2`，包含两个前置合同修复：
+
+1. Worker 最终 Claim 为 `blocked` 时不再启动 Core Verification、Risk 或 Reviewer；
+2. 已批准 Work Item 的冻结 verification 命令原样下传并覆盖项目默认验证。
+
+正式控制快照 `control-runtime-local-r3` 只复制 `git ls-files src`，并设置
+`PYTHONDONTWRITEBYTECODE=1`。导入路径、`agent capabilities`、裸 `codex exec`
+workspace-write 和 Vega-owned Codex Runner 预检通过；控制源码 131 个文件，检查后没有
+`__pycache__`。当前 Codex 默认配置经脱敏核对为 `gpt-5.6-sol / xhigh`。机器 A 执行时，
+该控制快照来自尚未提交的工作树，因此本节只能形成机器 A 本地阶段证据，不能作为跨机器
+Gate 通过结论。
+
+正式运行身份：
+
+- Agent run：`20260816-121500-agent`；
+- child：`20260816-121529-270617-bug-loop`；
+- operation / execution：`e44ed6747d70430d8388b58d82aa5d0d`；
+- 目标 HEAD：`d2c28103d352f251f1bf20d89758e666dba086ed`；
+- 目标分支：`codex/sag3b-02-wip`，push URL 禁用。
+
+Worker 只修改：
+
+- `src/vega/execution_control.py`；
+- `tests/test_execution_control_safety.py`。
+
+实现把固定约 `0.2` 秒的替换重试改为单调时钟控制的 `1.0` 秒上限、`0.05` 秒间隔；
+回归测试使用真实 Windows 读取句柄覆盖约 `0.6` 秒短时锁恢复和持续锁 fail-closed。Worker
+本地执行结果为 `4 passed / 70 deselected`、Ruff 通过、`git diff --check` 通过；该结果只
+属于 Worker 自检，机器 B 仍必须重新执行 Core Verification、Risk、Reviewer 与 Finish。
+
+首次观测到允许路径 Diff 约在 Worker 启动后 `192.221` 秒；停止请求在该观测后约
+`53.089` 秒发出。此时 Worker 已完成本地检查，但尚未返回最终 Claim，execution 仍为
+`running`。Vega 只向匹配 child/operation 写入 stop request，最终 execution 为
+`stopped`，`termination_unconfirmed=false`，owner/child PID 均已退出；没有启动第二 Writer。
+
+原 `agent run` 返回后，Supervisor 清空 active binding 并进入 `needs_human`。按照上文补充的
+两阶段 stop 协议，再次执行 `agent stop` 固化静止 Checkpoint；随后用两个 run-local 审计
+Artifact 核对：
+
+- Worker 事件只包含本地命令、文件修改、计划和消息，没有外部工具调用；
+- sandbox 网络和额外 writable roots 均关闭；
+- 目标仓库只有两个允许文件，无未跟踪文件；
+- owned execution 已安全停止。
+
+外部副作用据此裁决为 `none`，`checkpoint-004` 为 `stopped / safe`。执行
+`agent checkpoint --handoff` 后生成：
+
+- `checkpoint-005`；
+- `handoff_status=handoff_ready`；
+- Task Card：`.vega/tasks/2026-08/2026-08-16-sag3b-02-handoff.md`；
+- Task Card SHA-256：
+  `5e3a7d55c25d4927f672894383a3d103add93f3b05634e6c464c325908b8661d`；
+- Handoff Workspace Digest：
+  `72d07b2bfade0d0cfad7c25462d73163968019b3ed8d6edcb96b3aa245f13ec9`。
+
+本阶段最初判定为 `machine-a-handoff-ready / machine-b-pending`。它证明真实 Worker 可以在
+允许范围内留下 WIP，Vega 能以身份绑定 stop 保留现场、完成副作用裁决并生成可移植 Task
+Card。它尚不证明物理跨机器恢复、补丁最终正确、Reviewer 通过或 Gate 3B 通过。
+
+提交前架构门禁要求既有大模块不得继续增长。控制源码随后以
+`5d252d4b366e7a1bed1eb8370a4c599401055a21` 固定，但与机器 A 的
+`control-runtime-local-r3` 对比后，以下三个控制文件不再字节一致：
+
+- `src/vega/agent_codex_adapter.py`；
+- `src/vega/agent_codex_evidence.py`；
+- `src/vega/loop_runtime.py`。
+
+差异来自 Claim 失败路径去重和等价的行数压缩，不改变本节记录的机器 A 行为；但第五节已经
+预注册“机器 A 和机器 B 必须来自同一个 `control_source_commit`”，不能事后用行为等价替代
+字节一致。因此 SAG3B-02 的最终判定收紧为
+`machine-a-handoff-ready / formal-gate-nonconforming / machine-b-not-run`。不得继续用
+SAG3B-02 的机器 B 结果宣称 Gate 3B 通过。
+
+本地提交前证据：
+
+- Adapter 两个完整分片分别为 `11 passed`；
+- Verification 相关 Runtime 分片为 `15 passed / 1 skipped`；
+- architecture growth 单测为 `42 passed`；
+- 完整节点收集为 `1259 collected`；
+- compileall、Ruff、repository hygiene、architecture growth 和 `git diff --check` 通过；
+- architecture growth 为 `C901 35→35`、Python 模块 `130→130`。
+
+下一步不是重跑 SAG3B-02，也不是把目标 WIP 复制进控制分支，而是：
+
+1. 让当前控制候选通过 PR CI 并合入主线；
+2. 从合并后的同一主线提交预注册新的 `SAG3B-03`，重新冻结
+   `control_source_commit / tree / sha256`；
+3. 机器 A 和机器 B 都从该提交独立重建控制器；
+4. 只有新 Case 完成停止、Handoff、物理换机恢复及新的 Core Gate，才判定 Gate 3B；
+5. 在此之前，Gate 3B 和 Gate 3C 均保持未通过。
