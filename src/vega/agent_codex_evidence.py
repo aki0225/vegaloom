@@ -9,12 +9,18 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
+from .agent_codex_completion import (
+    finish_evidence_untrusted as _finish_evidence_untrusted,
+    review_status as _review_status,
+    risk_status as _risk_status,
+    scope_remained_inside_plan as _scope_remained_inside_plan,
+    verification_status as _verification_status,
+)
 from .agent_contract import (
     AgentObservation,
     AgentPlan,
     AgentState,
     AgentWorkItem,
-    GateStatus,
     canonical_digest,
 )
 from .agent_persistence import load_agent_checkpoint
@@ -26,7 +32,7 @@ from .execution_control import (
     find_execution_records,
     inspect_execution_for_recovery,
 )
-from .models import LoopAutomationState, LoopIterationState
+from .models import LoopAutomationState
 from .project_config import ScopeConfig
 from .redaction import write_redacted_json_once
 from .run_utils import resolve_run_dir
@@ -67,6 +73,8 @@ class PreparedCodexAttempt:
     task_brief: str
     runner: Runner
     verification_commands: tuple[str, ...]
+    comparison_base_sha: str | None = None
+    comparison_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -123,6 +131,8 @@ def evaluate_plan_scope(
     *,
     expected_head_sha: str,
     iteration: int,
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
 ) -> ScopeGateResult:
     """把已批准 Plan 的全部路径约束作为 Adapter 额外机器门禁。"""
 
@@ -151,6 +161,8 @@ def evaluate_plan_scope(
         iteration=iteration,
         phase="pre_verification",
         expected_head_sha=expected_head_sha,
+        comparison_base_sha=comparison_base_sha,
+        comparison_paths=comparison_paths,
     )
 
 
@@ -374,7 +386,10 @@ def observation_from_child(
     verification = _verification_status(latest, finish_summary)
     risk = _risk_status(latest)
     review = _review_status(latest)
-    work_item_completed = finish_status == "ready_to_commit"
+    work_item_completed = (
+        finish_status == "ready_to_commit"
+        and not _finish_evidence_untrusted(finish_summary)
+    )
     all_work_items_completed = work_item_completed and all(
         item.work_item_id == state.current_work_item
         or item.status in {"completed", "superseded"}
@@ -427,67 +442,6 @@ def decision_label(result: AgentRun, observation: AgentObservation) -> str:
     if result.state.phase == "ready":
         return "next" if observation.work_item_completed else "repair"
     return result.state.phase
-
-
-def _verification_status(
-    latest: LoopIterationState | None,
-    finish_summary: dict[str, object],
-) -> GateStatus:
-    if finish_summary.get("latest_verification_failed") is True:
-        return "failed"
-    if latest is not None and latest.verification_status == "failed":
-        return "failed"
-    if _finish_evidence_untrusted(finish_summary):
-        return "blocked"
-    if finish_summary.get("verification_passed") is True:
-        return "passed"
-    return "not_run"
-
-
-def _risk_status(latest: LoopIterationState | None) -> GateStatus:
-    if latest is None or latest.risk_gate_status == "skipped":
-        return "not_run"
-    if latest.risk_gate_status == "failed":
-        return "failed"
-    if latest.risk_gate_recommendation == "human-review":
-        return "blocked"
-    return "passed"
-
-
-def _review_status(latest: LoopIterationState | None) -> GateStatus:
-    if latest is None or latest.reviewer_status == "skipped":
-        return "not_run"
-    if latest.reviewer_status != "success":
-        return "blocked"
-    if latest.verdict == "approve":
-        return "passed"
-    if latest.verdict == "request_changes":
-        return "failed"
-    return "blocked"
-
-
-def _scope_remained_inside_plan(latest: LoopIterationState) -> bool:
-    statuses = (
-        latest.scope_gate_status,
-        latest.scope_gate_post_verification_status,
-        latest.scope_gate_pre_review_status,
-    )
-    return all(status in {"skipped", "success"} for status in statuses) and not (
-        latest.scope_gate_violations
-        or latest.scope_gate_post_verification_violations
-        or latest.scope_gate_pre_review_violations
-    )
-
-
-def _finish_evidence_untrusted(finish_summary: dict[str, object]) -> bool:
-    integrity = finish_summary.get("artifact_integrity")
-    freshness = finish_summary.get("evidence_freshness")
-    return (
-        not isinstance(integrity, dict)
-        or integrity.get("valid") is not True
-        or not isinstance(freshness, dict)
-        or freshness.get("fresh") is not True
-    )
 
 
 def _sha256_file(path: Path) -> str:

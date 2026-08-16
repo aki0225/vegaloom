@@ -8,6 +8,11 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+from .artifact_rendering import render_review_context
+from .comparison_binding import (
+    safe_comparison_base as _safe_comparison_base,
+    safe_comparison_paths as _safe_comparison_paths,
+)
 from .execution_control import RunnerExecutionContext
 from .models import (
     BriefState, GateResult,
@@ -268,7 +273,12 @@ class ReviewRuntime:
         authorization_issues = list(initial_authorization_issues)
         try:
             current_policy_snapshot = project_policy_snapshot(repo_path)
-            authorization_snapshot = capture_runtime_workspace(self.workspace, repo_path)
+            authorization_snapshot = capture_runtime_workspace(
+                self.workspace,
+                repo_path,
+                comparison_base_sha=inputs["comparison_base_sha"],
+                comparison_paths=inputs["comparison_paths"],
+            )
         except Exception:  # noqa: BLE001 - reviewer 授权快照失败时不得启动外部 runner
             authorization_issues.append("review_authorization_snapshot_failed")
         else:
@@ -509,10 +519,24 @@ def collect_review_inputs(
         source_dir / "state.json",
         "source_state",
     )
-    current_snapshot = capture_runtime_workspace(workspace, repo)
     source_evidence, evidence_read_issues, evidence_read_diagnostics = _read_json_artifact(
         source_dir / "review-evidence.json",
         "source_evidence",
+    )
+    comparison_base_sha = _safe_comparison_base(
+        source_evidence.get("comparison_base_sha")
+    )
+    comparison_paths = _safe_comparison_paths(
+        source_evidence.get("comparison_paths")
+    )
+    capture_comparison_paths = (
+        comparison_paths if comparison_base_sha is not None else ()
+    )
+    current_snapshot = capture_runtime_workspace(
+        workspace,
+        repo,
+        comparison_base_sha=comparison_base_sha,
+        comparison_paths=capture_comparison_paths,
     )
     full_diff, full_diff_issues, full_diff_diagnostics = _read_text_artifact(
         source_dir / "full-diff.patch",
@@ -638,6 +662,8 @@ def collect_review_inputs(
         "repo_name": repo.name,
         "source_run": source_run,
         "source_run_dir": str(source_dir),
+        "comparison_base_sha": comparison_base_sha,
+        "comparison_paths": list(comparison_paths),
         "source_brief": source_brief,
         "reflection": reflection,
         "diff_summary": diff_summary,
@@ -806,40 +832,6 @@ def render_review_prompt(inputs: dict[str, Any]) -> str:
         ]
     ).rstrip() + "\n"
     return redact_text(text)
-
-
-def render_review_context(inputs: dict[str, Any]) -> dict[str, Any]:
-    context = {
-        "repo_path": inputs["repo_path"],
-        "repo_name": inputs["repo_name"],
-        "source_run": inputs["source_run"],
-        "source_run_dir": inputs["source_run_dir"],
-        "changed_files": inputs["changed_files"],
-        "agents_files": inputs["agents_files"],
-        "memory_hit_count": inputs["memory_hit_count"],
-        "contains_worker_chat": False,
-        "truncated_sections": inputs["truncated_sections"],
-        "evidence_consistent": inputs["evidence_consistent"],
-        "evidence_issues": inputs["evidence_issues"],
-        "evidence_diagnostics": inputs["evidence_diagnostics"],
-        "source_snapshot_id": inputs["source_snapshot_id"],
-        "source_workspace_fingerprint": inputs["source_workspace_fingerprint"],
-        "current_workspace_fingerprint": inputs["current_workspace_fingerprint"],
-        "current_index_flags_sha256": inputs["current_index_flags_sha256"],
-        "current_unsafe_index_paths": inputs["current_unsafe_index_paths"],
-        "source_untracked_content_complete": inputs[
-            "source_untracked_content_complete"
-        ],
-        "current_untracked_content_complete": inputs[
-            "current_untracked_content_complete"
-        ],
-        "reviewer_start_workspace_fingerprint": inputs["reviewer_start_workspace_fingerprint"],
-        "reviewer_end_workspace_fingerprint": inputs["reviewer_end_workspace_fingerprint"],
-        "workspace_changed_during_review": inputs["workspace_changed_during_review"],
-        "review_execution_issues": inputs["review_execution_issues"],
-        "risk_gate": inputs.get("risk_gate"),
-    }
-    return redact_value(context)
 
 
 def parse_review_verdict(output: str, error: str | None = None) -> ReviewVerdict:
@@ -1088,8 +1080,13 @@ def _capture_post_review_workspace(
         issues.append("reviewer_termination_unconfirmed")
     elif reviewer_started:
         try:
-            end_fingerprint = capture_runtime_workspace(workspace, repo_path).fingerprint
-        except (OSError, RuntimeError, subprocess.SubprocessError):
+            end_fingerprint = capture_runtime_workspace(
+                workspace,
+                repo_path,
+                comparison_base_sha=inputs["comparison_base_sha"],
+                comparison_paths=tuple(inputs["comparison_paths"]),
+            ).fingerprint
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
             issues.append("workspace_snapshot_failed_after_reviewer")
         else:
             if end_fingerprint != reviewer_start_fingerprint:

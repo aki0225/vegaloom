@@ -9,6 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .artifact_rendering import render_workspace_check
 from .codex_workspace import (
     filter_codex_runtime_ignored_paths,
     filter_codex_runtime_porcelain_v1_status,
@@ -27,9 +28,13 @@ from .project_config import load_project_config
 from .redaction import redact_text, redact_value
 from .tracked_workspace import (
     capture_tracked_scope_snapshot,
+    collect_committed_diff,
+    collect_comparison_changed_paths,
     collect_tracked_diff_parts,
     render_tracked_diff_sections,
     unsafe_index_paths as _unsafe_index_paths,
+    normalize_comparison_paths,
+    validate_comparison_base,
 )
 from .workspace_inventory import (
     ContentManifestBudget,
@@ -37,7 +42,7 @@ from .workspace_inventory import (
     WorkspaceSnapshot,
     build_content_manifest,
     hash_tracked_diff,
-    ignored_coverage_level,
+    ignored_coverage_level as ignored_coverage_level,
     safe_git_status as _safe_git_status,
     safe_path_for_report as _safe_path_for_report,
     untracked_paths as _untracked_paths,
@@ -45,6 +50,7 @@ from .workspace_inventory import (
 from .workspace_status import (
     parse_porcelain_v1_paths as _parse_porcelain_v1_paths,
 )
+from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
 MAX_IGNORED_METADATA_FILES = 4096
@@ -55,36 +61,6 @@ MAX_UNTRACKED_CONTENT_FILES = MAX_IGNORED_CONTENT_FILES
 MAX_UNTRACKED_FILE_BYTES = MAX_IGNORED_FILE_BYTES
 MAX_UNTRACKED_CONTENT_BYTES = MAX_IGNORED_CONTENT_BYTES
 MAX_GIT_CONTROL_FILE_BYTES = 1024 * 1024
-
-
-@dataclass(frozen=True)
-class ReviewWorkspaceSnapshot:
-    fingerprint: str
-    head_sha: str
-    status_sha256: str
-    staged_diff_sha256: str
-    unstaged_diff_sha256: str
-    untracked_manifest_sha256: str
-    ignored_manifest_sha256: str
-    index_flags_sha256: str
-    full_diff: str
-    staged_diff: str
-    unstaged_diff: str
-    changed_files: tuple[str, ...]
-    untracked_files: tuple[str, ...]
-    unsafe_index_paths: tuple[str, ...] = ()
-    untracked_content_complete: bool = False
-    ignored_manifest_complete: bool = False
-    ignored_content_complete: bool = False
-    git_control_sha256: str = ""
-    git_control_complete: bool = False
-
-    @property
-    def ignored_coverage_level(self) -> str:
-        return ignored_coverage_level(
-            self.ignored_manifest_complete,
-            self.ignored_content_complete,
-        )
 
 
 class WorkspaceCheckResult(BaseModel):
@@ -232,7 +208,11 @@ def snapshot_worker_workspace(
 
 
 def capture_review_workspace(
-    repo_path: Path, *, ignored_path_exclusions: frozenset[str] = frozenset()
+    repo_path: Path,
+    *,
+    ignored_path_exclusions: frozenset[str] = frozenset(),
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
 ) -> ReviewWorkspaceSnapshot:
     """捕获 reviewer 使用的确定性工作区快照，不修改 Git index。"""
     repo = repo_path.resolve()
@@ -240,6 +220,14 @@ def capture_review_workspace(
         "utf-8",
         errors="replace",
     ).strip()
+    resolved_comparison_base = validate_comparison_base(
+        repo,
+        comparison_base_sha,
+        head_sha=head_sha,
+    )
+    normalized_comparison_paths = normalize_comparison_paths(
+        comparison_paths
+    )
     status = _run_git_bytes(
         repo,
         ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -248,6 +236,21 @@ def capture_review_workspace(
         repo,
         ["--binary", "--full-index"],
         run_git=_run_git_bytes,
+        head_sha=head_sha,
+    )
+    committed_diff = collect_committed_diff(
+        repo,
+        resolved_comparison_base,
+        ["--binary", "--full-index"],
+        run_git=_run_git_bytes,
+        comparison_paths=normalized_comparison_paths,
+        comparison_head_sha=head_sha,
+    )
+    committed_files = collect_comparison_changed_paths(
+        repo,
+        resolved_comparison_base,
+        comparison_paths=normalized_comparison_paths,
+        comparison_head_sha=head_sha,
     )
     status = filter_codex_runtime_porcelain_v1_status(
         repo, status, ignored_path_exclusions
@@ -258,7 +261,12 @@ def capture_review_workspace(
     unsafe_index_paths = _unsafe_index_paths(index_flags)
     # 未跟踪文件只参与工作区指纹，不把其内容带入 reflect/reviewer 输入。
     # ignored 普通小文件使用有界内容指纹；敏感文件只记录增强元数据，绝不读取内容。
-    full_diff = render_tracked_diff_sections(staged_diff, unstaged_diff)
+    full_diff = render_tracked_diff_sections(
+        staged_diff,
+        unstaged_diff,
+        committed_diff=committed_diff,
+        comparison_base_sha=resolved_comparison_base,
+    )
     untracked_manifest_sha256, untracked_content_complete = _untracked_manifest(
         repo,
         untracked_files,
@@ -277,11 +285,21 @@ def capture_review_workspace(
     full_diff_sha256 = _sha256(full_diff.encode("utf-8"))
     staged_diff_sha256 = _sha256(staged_diff.encode("utf-8"))
     unstaged_diff_sha256 = _sha256(unstaged_diff.encode("utf-8"))
+    committed_diff_sha256 = _sha256(committed_diff.encode("utf-8"))
+    final_head_sha = _run_git_bytes(
+        repo,
+        ["git", "rev-parse", "--verify", "HEAD"],
+    ).decode("utf-8", errors="replace").strip()
+    if final_head_sha != head_sha:
+        raise RuntimeError("review workspace 采集期间 Git HEAD 发生变化")
     fingerprint_payload = "\n".join(
         [
             f"head={head_sha}",
+            f"comparison_base={resolved_comparison_base or ''}",
+            f"comparison_paths={json.dumps(normalized_comparison_paths)}",
             f"status={status_sha256}",
             f"full_diff={full_diff_sha256}",
+            f"committed_diff={committed_diff_sha256}",
             f"staged_diff={staged_diff_sha256}",
             f"unstaged_diff={unstaged_diff_sha256}",
             f"untracked={untracked_manifest_sha256}",
@@ -306,7 +324,11 @@ def capture_review_workspace(
         full_diff=full_diff,
         staged_diff=staged_diff,
         unstaged_diff=unstaged_diff,
-        changed_files=tuple(dict.fromkeys([*tracked_files, *untracked_files])),
+        changed_files=tuple(
+            dict.fromkeys(
+                [*committed_files, *tracked_files, *untracked_files]
+            )
+        ),
         untracked_files=tuple(untracked_files),
         unsafe_index_paths=tuple(unsafe_index_paths),
         untracked_content_complete=untracked_content_complete,
@@ -314,6 +336,11 @@ def capture_review_workspace(
         ignored_content_complete=ignored_content_complete,
         git_control_sha256=git_control_sha256,
         git_control_complete=git_control_complete,
+        comparison_base_sha=resolved_comparison_base,
+        comparison_paths=normalized_comparison_paths,
+        committed_diff_sha256=committed_diff_sha256,
+        committed_diff=committed_diff,
+        committed_files=tuple(committed_files),
     )
 
 
@@ -594,47 +621,6 @@ def _assess_untracked_budget(
     assessment.reasons.append(
         f"新增未跟踪文件数量在预算内：{len(new_untracked)} <= {max_new_files}。"
     )
-
-
-def render_workspace_check(result: WorkspaceCheckResult) -> str:
-    lines = [
-        "# Workspace Check",
-        "",
-        f"- 仓库：`{result.repo_path}`",
-        f"- 状态：`{result.status}`",
-        f"- 新增未跟踪文件：`{result.new_untracked_count}`",
-        f"- 启动前已有 tracked diff：`{str(result.baseline_tracked_changes_present).lower()}`",
-        f"- 启动前未跟踪文件发生变化：`{str(result.baseline_untracked_changed).lower()}`",
-        f"- ignored 路径发生变化：`{str(result.baseline_ignored_changed).lower()}`",
-        f"- ignored 基线清单完整：`{str(result.baseline_ignored_manifest_complete).lower()}`",
-        f"- ignored 当前清单完整：`{str(result.current_ignored_manifest_complete).lower()}`",
-        f"- ignored 基线内容完整：`{str(result.baseline_ignored_content_complete).lower()}`",
-        f"- ignored 当前内容完整：`{str(result.current_ignored_content_complete).lower()}`",
-        f"- Git 控制文件发生变化：`{str(result.git_control_changed).lower()}`",
-        f"- Git 控制文件完整：`{str(result.git_control_complete).lower()}`",
-        f"- 执行期间 HEAD 发生变化：`{str(result.baseline_head_changed).lower()}`",
-        f"- 预算上限：`{result.max_new_files if result.max_new_files is not None else '未配置'}`",
-        "",
-        "## 结论",
-        "",
-    ]
-    lines.extend(f"- {reason}" for reason in result.reasons)
-    lines.extend(["", "## 启动前 tracked diff", ""])
-    if result.baseline_tracked_files:
-        lines.extend(f"- `{path}`" for path in result.baseline_tracked_files[:50])
-        if len(result.baseline_tracked_files) > 50:
-            lines.append(f"- ... 另有 {len(result.baseline_tracked_files) - 50} 个文件")
-    else:
-        lines.append("- 无")
-    lines.extend(["", "## 新增未跟踪文件", ""])
-    if result.new_untracked_files:
-        lines.extend(f"- `{path}`" for path in result.new_untracked_files[:50])
-        if len(result.new_untracked_files) > 50:
-            lines.append(f"- ... 另有 {len(result.new_untracked_files) - 50} 个文件")
-    else:
-        lines.append("- 无")
-    lines.extend(["", "## Git Status", "", "```text", result.raw_status.strip() or "<clean>", "```"])
-    return "\n".join(lines).rstrip() + "\n"
 
 
 def read_head_sha(repo_path: Path) -> str:

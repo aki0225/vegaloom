@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .agents_proposal import render_agents_md_proposals
+from .comparison_binding import collect_git_reflection
 from .memory_artifacts import MemoryProposalStore, make_memory_proposal_id
 from .models import BriefInput, BriefState, MemoryProposal, ProjectKnowledge, ReflectState
 from .project_config import load_project_config
@@ -18,11 +19,7 @@ from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir, resolve_run_dir
 from .runtime_workspace import capture_runtime_workspace
 from .trace import TraceWriter
-from .workspace_check import (
-    ReviewWorkspaceSnapshot,
-    collect_tracked_diff_parts,
-    render_tracked_diff_sections,
-)
+from .workspace_check import ReviewWorkspaceSnapshot
 
 REFLECT_ARTIFACTS = [
     "state.json",
@@ -49,6 +46,8 @@ class ReflectRuntime:
         test_log: Path | None = None,
         note: str | None = None,
         lesson: str | None = None,
+        comparison_base_sha: str | None = None,
+        comparison_paths: tuple[str, ...] = (),
     ) -> Path:
         repo = repo_path.resolve()
         test_text = _read_optional_log(
@@ -67,14 +66,27 @@ class ReflectRuntime:
             run_id=run_id,
             repo_path=str(repo),
             source_run=safe_source_run,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=list(comparison_paths),
             status="running",
         )
         state.current_step = "collect"
         state.save(run_dir / "state.json")
         trace.write("reflect_started", repo_path=str(repo), source_run=safe_source_run)
 
-        git_data = collect_git_reflection(repo)
-        workspace_snapshot = capture_runtime_workspace(self.workspace, repo)
+        workspace_snapshot = capture_runtime_workspace(
+            self.workspace,
+            repo,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=comparison_paths,
+        )
+        state.comparison_base_sha = workspace_snapshot.comparison_base_sha
+        state.comparison_paths = list(workspace_snapshot.comparison_paths)
+        git_data = collect_git_reflection(
+            repo,
+            comparison_base_sha=workspace_snapshot.comparison_base_sha,
+            comparison_paths=workspace_snapshot.comparison_paths,
+        )
         changed_files = _tracked_changed_files(workspace_snapshot)
         untracked_files = [redact_text(path) for path in workspace_snapshot.untracked_files]
         state.changed_files = changed_files
@@ -243,19 +255,6 @@ class ReflectRuntime:
             repo=repository_scope(repo_path),
             paths=changed_files,
         )
-
-
-def collect_git_reflection(repo_path: Path) -> dict[str, str]:
-    """以 staged + unstaged 双事实流收集 Reflect 的确定性检查结果。
-
-    不能只使用 ``git diff HEAD``：同一文件处于 ``MM`` 时，HEAD 到工作区的净差异
-    可能抵消 index 中已有修改。完整 diff 和文件列表已经由 review workspace snapshot
-    提供，这里只保留不能从 snapshot 推导的 ``diff --check``。
-    """
-    staged_check, unstaged_check = collect_tracked_diff_parts(repo_path, ["--check"])
-    return {
-        "check": redact_text(render_tracked_diff_sections(staged_check, unstaged_check)),
-    }
 
 
 def render_diff_summary(

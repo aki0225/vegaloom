@@ -10,11 +10,14 @@ import pytest
 from typer.testing import CliRunner
 
 import vega.agent_handoff as agent_handoff_module
+import vega.agent_resume_validation as agent_resume_validation_module
+import vega.agent_runtime_support as agent_runtime_support_module
+import vega.workspace_check as workspace_check_module
 from vega.agent_contract import AgentPlan, AgentWorkItem
 from vega.agent_persistence import load_agent_state, read_agent_trace
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_runtime import SupervisorAgentRuntime
-from vega.agent_task_card import TaskCardError, load_task_card
+from vega.agent_task_card import TaskCardError, load_task_card, render_task_card
 from vega.cli_entrypoint import app
 
 
@@ -126,6 +129,238 @@ def test_handoff_round_trip_between_isolated_clones(tmp_path: Path) -> None:
     assert "Verification：尚未运行" in status_card
     assert "Risk：尚未运行" in status_card
     assert "Reviewer：尚未运行" in status_card
+
+
+def test_resume_rejects_head_change_after_handoff_history_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    result = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证恢复校验与发布快照绑定同一 HEAD",
+    )
+    _git(
+        repo,
+        "add",
+        "src/example.py",
+        result.task_card_path.relative_to(repo).as_posix(),
+    )
+    _git(repo, "commit", "-m", "测试：提交 Handoff WIP")
+    original_validate = agent_resume_validation_module.validate_handoff_history
+
+    def advance_head(repo_path, card, relative_task):
+        validated_head = original_validate(repo_path, card, relative_task)
+        repo_path.joinpath("unexpected.py").write_text(
+            "unexpected = True\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        _git(repo_path, "add", "unexpected.py")
+        _git(repo_path, "commit", "-m", "测试：模拟恢复期间并发提交")
+        return validated_head
+
+    monkeypatch.setattr(
+        agent_resume_validation_module,
+        "validate_handoff_history",
+        advance_head,
+    )
+    next_workspace = tmp_path / "next-workspace-race"
+    next_workspace.mkdir()
+
+    with pytest.raises(ValueError, match="Git HEAD 已漂移"):
+        SupervisorAgentRuntime(next_workspace).resume_task_card(repo)
+
+    assert not list((next_workspace / "runs").glob("*-agent-resume*"))
+
+
+def test_resume_rejects_head_change_during_workspace_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    result = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证快照采集期间 HEAD 不能漂移",
+    )
+    _git(
+        repo,
+        "add",
+        "src/example.py",
+        result.task_card_path.relative_to(repo).as_posix(),
+    )
+    _git(repo, "commit", "-m", "测试：提交 Handoff WIP")
+    original_collect = workspace_check_module.collect_committed_diff
+    advanced = False
+
+    def advance_head(*args, **kwargs):
+        nonlocal advanced
+        committed_diff = original_collect(*args, **kwargs)
+        if not advanced:
+            repo.joinpath("unexpected.py").write_text(
+                "unexpected = True\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            _git(repo, "add", "unexpected.py")
+            _git(repo, "commit", "-m", "测试：在快照采集中推进 HEAD")
+            advanced = True
+        return committed_diff
+
+    monkeypatch.setattr(
+        workspace_check_module,
+        "collect_committed_diff",
+        advance_head,
+    )
+    next_workspace = tmp_path / "next-workspace-capture-race"
+    next_workspace.mkdir()
+
+    with pytest.raises(ValueError, match="Git HEAD 已漂移"):
+        SupervisorAgentRuntime(next_workspace).resume_task_card(repo)
+
+    assert not list((next_workspace / "runs").glob("*-agent-resume*"))
+
+
+def test_resume_rejects_task_card_changed_after_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    result = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证 Task Card 内容绑定 Handoff HEAD",
+    )
+    relative_task = result.task_card_path.relative_to(repo).as_posix()
+    _git(repo, "add", "src/example.py", relative_task)
+    _git(repo, "commit", "-m", "测试：提交 Handoff WIP")
+    original_load = agent_runtime_support_module.load_task_card_with_content
+
+    def advance_task_card(path: Path):
+        card, content = original_load(path)
+        updated = card.model_copy(
+            update={"progress_notes": [*card.progress_notes, "并发更新 Task Card"]}
+        )
+        path.write_text(
+            render_task_card(updated),
+            encoding="utf-8",
+            newline="\n",
+        )
+        _git(repo, "add", relative_task)
+        _git(repo, "commit", "-m", "测试：读取后更新 Task Card")
+        return card, content
+
+    monkeypatch.setattr(
+        agent_runtime_support_module,
+        "load_task_card_with_content",
+        advance_task_card,
+    )
+    next_workspace = tmp_path / "next-workspace-card-race"
+    next_workspace.mkdir()
+
+    with pytest.raises(ValueError, match="Task Card 内容与当前 Handoff 提交不一致"):
+        SupervisorAgentRuntime(next_workspace).resume_task_card(repo)
+
+    assert not list((next_workspace / "runs").glob("*-agent-resume*"))
+
+
+def test_resume_rejects_branch_change_during_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    result = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证恢复发布前分支身份不漂移",
+    )
+    _git(
+        repo,
+        "add",
+        "src/example.py",
+        result.task_card_path.relative_to(repo).as_posix(),
+    )
+    _git(repo, "commit", "-m", "测试：提交 Handoff WIP")
+    original_capture = agent_resume_validation_module.capture_review_workspace
+
+    def switch_branch(*args, **kwargs):
+        snapshot = original_capture(*args, **kwargs)
+        _git(repo, "switch", "-c", "concurrent-resume-branch")
+        return snapshot
+
+    monkeypatch.setattr(
+        agent_resume_validation_module,
+        "capture_review_workspace",
+        switch_branch,
+    )
+    next_workspace = tmp_path / "next-workspace-branch-race"
+    next_workspace.mkdir()
+
+    with pytest.raises(ValueError, match="Git 分支已漂移"):
+        SupervisorAgentRuntime(next_workspace).resume_task_card(repo)
+
+    assert not list((next_workspace / "runs").glob("*-agent-resume*"))
+
+
+def test_resume_preserves_both_paths_of_committed_rename(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "repo")
+    source = repo / "src" / "old_name.py"
+    source.parent.mkdir()
+    source.write_text("value = 1\n", encoding="utf-8", newline="\n")
+    _git(repo, "add", source.relative_to(repo).as_posix())
+    _git(repo, "commit", "-m", "测试：提交 rename 源文件")
+    target = repo / "src" / "new_name.py"
+    _git(
+        repo,
+        "mv",
+        source.relative_to(repo).as_posix(),
+        target.relative_to(repo).as_posix(),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    plan = AgentPlan(
+        task_id="task-rename-handoff",
+        user_goal="跨机器恢复已提交 rename",
+        success_conditions=["rename 两端都进入范围证据"],
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="保留 rename 的源路径与目标路径",
+                allowed_paths=["src/old_name.py", "src/new_name.py"],
+                verification=["检查 rename 后文件存在"],
+            )
+        ],
+    )
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    approved = runtime.approve(run.run_dir.name)
+    stopped = SupervisorAgentRecovery(workspace).stop(
+        approved.run_dir.name,
+        reason="准备提交 rename handoff",
+    )
+    result = runtime.handoff(
+        stopped.run_dir.name,
+        reason="把 rename 现场转移到新机器",
+    )
+    card = load_task_card(result.task_card_path)
+    assert card.resume_capsule is not None
+    assert card.resume_capsule.changed_files == [
+        "src/old_name.py",
+        "src/new_name.py",
+    ]
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "测试：提交 rename Handoff")
+    next_workspace = tmp_path / "next-workspace-rename"
+    next_workspace.mkdir()
+
+    restored = SupervisorAgentRuntime(next_workspace).resume_task_card(repo)
+
+    assert restored.state.phase == "ready"
+    metadata = json.loads(
+        (restored.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    assert metadata["comparison_paths"] == [
+        "src/old_name.py",
+        "src/new_name.py",
+    ]
 
 
 def test_needs_human_handoff_remains_blocked_after_clone(tmp_path: Path) -> None:

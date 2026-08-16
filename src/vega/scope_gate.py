@@ -9,6 +9,7 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from .comparison_binding import scope_gate_comparison_issues
 from .models import LoopIterationState, ScopeGateViolation
 from .project_config import ScopeConfig, scope_policy_sha256
 from .redaction import redact_text
@@ -16,6 +17,11 @@ from .scope_path_matching import (
     matching_patterns as _matching_patterns,
     path_matches_pattern as _match_scope_path_pattern,
     scope_paths_are_case_insensitive as _scope_paths_are_case_insensitive,
+)
+from .scope_gate_reporting import (
+    REPORT_BINDING_END,
+    REPORT_BINDING_START,
+    render_scope_gate_report as _render_scope_gate_report,
 )
 from .trace import TraceWriter
 from .workspace_check import capture_tracked_scope_snapshot
@@ -26,8 +32,6 @@ SCOPE_GATE_POST_VERIFICATION_RESULT_ARTIFACT = "scope-gate-post-verification-res
 SCOPE_GATE_POST_VERIFICATION_REPORT_ARTIFACT = "scope-gate-post-verification-report.md"
 SCOPE_GATE_PRE_REVIEW_RESULT_ARTIFACT = "scope-gate-pre-review-result.json"
 SCOPE_GATE_PRE_REVIEW_REPORT_ARTIFACT = "scope-gate-pre-review-report.md"
-REPORT_BINDING_START = "<!-- vega-scope-gate-binding\n"
-REPORT_BINDING_END = "\n-->"
 ScopeGatePhase = Literal["pre_verification", "post_verification", "pre_review"]
 
 
@@ -43,11 +47,14 @@ class ScopeGateResult(BaseModel):
     scope_policy_sha256: str | None = None
     expected_head_sha: str | None = None
     current_head_sha: str | None = None
+    comparison_base_sha: str | None = None
+    comparison_paths: list[str] = Field(default_factory=list)
     workspace_status_sha256: str | None = None
     index_flags_sha256: str | None = None
     changed_paths_sha256: str | None = None
     allowed_paths: list[str] = Field(default_factory=list)
     forbidden_paths: list[str] = Field(default_factory=list)
+    committed_changed_files: list[str] = Field(default_factory=list)
     staged_changed_files: list[str] = Field(default_factory=list)
     unstaged_changed_files: list[str] = Field(default_factory=list)
     untracked_changed_files: list[str] = Field(default_factory=list)
@@ -89,6 +96,8 @@ def evaluate_scope_gate(
     phase: ScopeGatePhase,
     expected_head_sha: str | None = None,
     expected_policy_sha256: str | None = None,
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
 ) -> ScopeGateResult:
     """读取 staged、unstaged 与 untracked 变更，并按精确仓库相对 glob 判定范围。
 
@@ -98,7 +107,12 @@ def evaluate_scope_gate(
     policy_sha256 = scope_policy_sha256(scope)
     try:
         repo = repo_path.resolve()
-        snapshot = capture_tracked_scope_snapshot(repo, include_untracked=True)
+        snapshot = capture_tracked_scope_snapshot(
+            repo,
+            include_untracked=True,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=comparison_paths,
+        )
         case_sensitive = not _scope_paths_are_case_insensitive(repo)
     except Exception as exc:  # noqa: BLE001 - Git 读取失败必须停止后续自动流程
         return ScopeGateResult(
@@ -113,10 +127,14 @@ def evaluate_scope_gate(
             diagnostic=redact_text(f"{type(exc).__name__}: {exc}")[:1000],
         )
 
+    raw_committed_files = list(snapshot.committed_files)
     raw_staged_files = list(snapshot.staged_files)
     raw_unstaged_files = list(snapshot.unstaged_files)
     raw_untracked_files = list(snapshot.untracked_files)
     changed_paths_sha256 = snapshot.changed_paths_sha256
+    committed_files, committed_redacted = _safe_machine_paths(
+        raw_committed_files
+    )
     staged_files, staged_redacted = _safe_machine_paths(raw_staged_files)
     unstaged_files, unstaged_redacted = _safe_machine_paths(raw_unstaged_files)
     untracked_files, untracked_redacted = _safe_machine_paths(raw_untracked_files)
@@ -124,7 +142,14 @@ def evaluate_scope_gate(
         list(snapshot.unsafe_index_paths)
     )
     changed_files = list(
-        dict.fromkeys([*staged_files, *unstaged_files, *untracked_files])
+        dict.fromkeys(
+            [
+                *committed_files,
+                *staged_files,
+                *unstaged_files,
+                *untracked_files,
+            ]
+        )
     )
     result_context = {
         "iteration": iteration,
@@ -132,11 +157,14 @@ def evaluate_scope_gate(
         "scope_policy_sha256": policy_sha256,
         "expected_head_sha": expected_head_sha,
         "current_head_sha": snapshot.head_sha,
+        "comparison_base_sha": snapshot.comparison_base_sha,
+        "comparison_paths": list(snapshot.comparison_paths),
         "workspace_status_sha256": snapshot.status_sha256,
         "index_flags_sha256": snapshot.index_flags_sha256,
         "changed_paths_sha256": changed_paths_sha256,
         "allowed_paths": list(scope.allowed_paths),
         "forbidden_paths": list(scope.forbidden_paths),
+        "committed_changed_files": committed_files,
         "staged_changed_files": staged_files,
         "unstaged_changed_files": unstaged_files,
         "untracked_changed_files": untracked_files,
@@ -167,7 +195,12 @@ def evaluate_scope_gate(
                 "Git 状态无法作为完整范围证据。"
             ),
         )
-    if staged_redacted or unstaged_redacted or untracked_redacted:
+    if (
+        committed_redacted
+        or staged_redacted
+        or unstaged_redacted
+        or untracked_redacted
+    ):
         return ScopeGateResult(
             status="failed",
             **result_context,
@@ -235,6 +268,8 @@ def write_loop_scope_gate_evidence(
     phase: ScopeGatePhase,
     expected_head_sha: str | None = None,
     expected_policy_sha256: str | None = None,
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
 ) -> LoopScopeGateEvidence:
     """执行 scope gate，并把结果、报告和 trace 与当前 iteration 绑定。"""
     result = evaluate_scope_gate(
@@ -244,6 +279,8 @@ def write_loop_scope_gate_evidence(
         phase=phase,
         expected_head_sha=expected_head_sha,
         expected_policy_sha256=expected_policy_sha256,
+        comparison_base_sha=comparison_base_sha,
+        comparison_paths=comparison_paths,
     )
     result_text = json.dumps(
         result.model_dump(mode="json"),
@@ -320,6 +357,8 @@ def validate_iteration_scope_gate_artifacts(
     required: bool = False,
     expected_head_sha: str | None = None,
     expected_policy_sha256: str | None = None,
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
 ) -> LoopScopeGateArtifactIntegrity:
     """校验 scope gate 的 result/report/state/trace，并对最新 iteration 重算。
 
@@ -387,6 +426,14 @@ def validate_iteration_scope_gate_artifacts(
         issues.append("scope_gate_policy_hash_mismatch")
     if expected_head_sha is not None and result.expected_head_sha != expected_head_sha:
         issues.append("scope_gate_expected_head_mismatch")
+    issues.extend(
+        scope_gate_comparison_issues(
+            result.comparison_base_sha,
+            result.comparison_paths,
+            comparison_base_sha,
+            comparison_paths,
+        )
+    )
     if result.changed_files != state_fields["changed_files"]:
         issues.append("scope_gate_changed_files_mismatch")
     if _violations_payload(result.violations) != _violations_payload(state_fields["violations"]):
@@ -416,6 +463,8 @@ def validate_iteration_scope_gate_artifacts(
         issues,
         expected_head_sha=expected_head_sha,
         expected_policy_sha256=expected_policy_sha256,
+        comparison_base_sha=comparison_base_sha,
+        comparison_paths=comparison_paths,
     )
     return _integrity(issues, evaluated=True, result=result)
 
@@ -457,86 +506,6 @@ def _is_safe_repo_relative_path(path: str) -> bool:
     if len(path) >= 2 and path[0].isalpha() and path[1] == ":":
         return False
     return all(segment not in {"", ".", ".."} for segment in path.split("/"))
-
-
-def _render_scope_gate_report(result: ScopeGateResult, result_sha256: str) -> str:
-    lines = [
-        "# 精确路径范围门禁报告",
-        "",
-        f"- iteration：`{result.iteration:02d}`",
-        f"- 阶段：`{result.phase}`",
-        f"- 状态：`{result.status}`",
-        f"- 启动 HEAD：`{result.expected_head_sha or '未绑定'}`",
-        f"- 当前 HEAD：`{result.current_head_sha or '无法读取'}`",
-        f"- scope policy SHA-256：`{result.scope_policy_sha256 or '未绑定'}`",
-        f"- index flags SHA-256：`{result.index_flags_sha256 or '无法读取'}`",
-        f"- staged tracked 文件数：`{len(result.staged_changed_files)}`",
-        f"- unstaged tracked 文件数：`{len(result.unstaged_changed_files)}`",
-        f"- untracked 文件数：`{len(result.untracked_changed_files)}`",
-        "",
-        "## 规则",
-        "",
-        "- allowed_paths："
-        + (
-            "、".join(f"`{item}`" for item in result.allowed_paths)
-            if result.allowed_paths
-            else "未配置"
-        ),
-        "- forbidden_paths："
-        + (
-            "、".join(f"`{item}`" for item in result.forbidden_paths)
-            if result.forbidden_paths
-            else "未配置"
-        ),
-        "",
-        "## 当前工作区变更",
-        "",
-    ]
-    if result.changed_files:
-        lines.extend(f"- `{path}`" for path in result.changed_files)
-    else:
-        lines.append("- 无。")
-    if result.unsafe_index_paths:
-        lines.extend(["", "## 不安全 index 标记", ""])
-        lines.extend(f"- `{path}`" for path in result.unsafe_index_paths)
-    lines.extend(["", "## 结论", ""])
-    if result.status == "skipped":
-        lines.append("- 未配置精确路径范围；为兼容既有项目，本轮未限制工作区变更。")
-    elif result.status == "success":
-        lines.append("- 当前工作区变更全部符合精确路径范围，可进入当前阶段的后续流程。")
-    elif result.violations:
-        lines.append("- 检测到越界工作区变更；Vega 已停止当前阶段的后续流程。")
-        for violation in result.violations:
-            patterns = (
-                "、".join(f"`{item}`" for item in violation.matched_patterns)
-                if violation.matched_patterns
-                else "无匹配 allowlist"
-            )
-            lines.append(f"- `{violation.code}`：`{violation.path}`；规则：{patterns}")
-    else:
-        lines.append("- scope gate 无法给出可放行结论；Vega 已 fail-closed。")
-        if result.failure_code:
-            lines.append(f"- failure code：`{result.failure_code}`")
-        lines.append(f"- 诊断：{result.diagnostic or '未提供'}")
-
-    binding = {
-        "schema_version": 1,
-        "status": result.status,
-        "iteration": result.iteration,
-        "phase": result.phase,
-        "result_sha256": result_sha256,
-    }
-    lines.extend(
-        [
-            "",
-            "## 证据绑定",
-            "",
-            REPORT_BINDING_START.rstrip(),
-            json.dumps(binding, ensure_ascii=False, sort_keys=True),
-            REPORT_BINDING_END,
-        ]
-    )
-    return redact_text("\n".join(lines).rstrip() + "\n")
 
 
 def _artifact_names(phase: ScopeGatePhase) -> tuple[str, str]:
@@ -865,6 +834,8 @@ def _validate_recomputed_result(
     *,
     expected_head_sha: str | None,
     expected_policy_sha256: str | None,
+    comparison_base_sha: str | None,
+    comparison_paths: tuple[str, ...],
 ) -> None:
     if repo_path is None:
         return
@@ -879,6 +850,8 @@ def _validate_recomputed_result(
             phase=result.phase,
             expected_head_sha=expected_head_sha,
             expected_policy_sha256=expected_policy_sha256,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=comparison_paths,
         )
     except Exception:  # noqa: BLE001 - 无法重算时不信任旧的 scope 结论
         issues.append("scope_gate_recomputation_failed")
@@ -894,11 +867,14 @@ def _result_semantics(result: ScopeGateResult) -> tuple[object, ...]:
         result.scope_policy_sha256,
         result.expected_head_sha,
         result.current_head_sha,
+        result.comparison_base_sha,
+        tuple(result.comparison_paths),
         result.workspace_status_sha256,
         result.index_flags_sha256,
         result.changed_paths_sha256,
         tuple(result.allowed_paths),
         tuple(result.forbidden_paths),
+        tuple(result.committed_changed_files),
         tuple(result.staged_changed_files),
         tuple(result.unstaged_changed_files),
         tuple(result.untracked_changed_files),

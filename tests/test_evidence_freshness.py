@@ -12,11 +12,13 @@ import vega.loop_evidence as loop_evidence_module
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime, evaluate_risk
 from vega.experimental.goal_runtime import GoalRuntime
+from vega.loop_evidence_support import capture_current_workspace_snapshot
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput
 from vega.reflect_runtime import ReflectRuntime
 from vega.review_runtime import ReviewRuntime
 from vega.runner import RunnerResult
+from vega.workspace_check import capture_review_workspace
 
 
 class StaticRunner:
@@ -65,6 +67,55 @@ class TrackedChangeRunner(StaticRunner):
             newline="\n",
         )
         return result
+
+
+def test_reused_workspace_snapshot_must_match_comparison_binding(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+    snapshot = capture_review_workspace(
+        repo,
+        comparison_base_sha=head_sha,
+        comparison_paths=("README.md",),
+    )
+
+    reused, issues = capture_current_workspace_snapshot(
+        tmp_path,
+        repo,
+        snapshot,
+    )
+
+    assert reused is snapshot
+    assert issues == [
+        "workspace_snapshot_comparison_base_mismatch",
+        "workspace_snapshot_comparison_paths_mismatch",
+    ]
+
+
+def test_workspace_snapshot_rejects_comparison_paths_without_base(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_clean_git_repo(repo)
+
+    snapshot, issues = capture_current_workspace_snapshot(
+        tmp_path,
+        repo,
+        None,
+        comparison_paths=("README.md",),
+    )
+
+    assert snapshot is None
+    assert issues == ["workspace_snapshot_failed"]
 
 
 def test_finish_rejects_workspace_changes_after_approved_review(tmp_path: Path) -> None:

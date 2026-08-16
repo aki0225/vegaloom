@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from .comparison_binding import collect_gate_comparison_evidence
 from .git_read import run_git_text
 from .loop_evidence import validate_reflect_evidence_freshness
 from .models import GateReason, GateResult, GateState
@@ -23,10 +24,9 @@ from .risk_review import (
 )
 from .risk_review_evidence import required_review_policy_consistent
 from .risk_review_reporting import render_gate_report
-from .risk_gate_evidence import collect_gate_diff_check, validated_reflect_changed_files
+from .risk_gate_evidence import validated_reflect_changed_files
 from .run_utils import create_run_dir, resolve_run_dir
 from .trace import TraceWriter
-from .workspace_check import collect_tracked_diff_parts, render_tracked_diff_sections
 
 GATE_ARTIFACTS = ["state.json", "trace.jsonl", "gate-report.md", "gate-result.json", "eval.md"]
 HIGH_RISK_PATH_KEYWORDS = [
@@ -235,22 +235,13 @@ def evaluate_risk(
             + ", ".join(freshness.issues)
         )
     reflect_state = _read_json(source_dir / "state.json")
-    diff_check = collect_gate_diff_check(repo)
+    _, _, diff_check, name_status, numstat = collect_gate_comparison_evidence(
+        repo,
+        reflect_state,
+    )
     status_all = _git(repo, ["git", "status", "--short", "--untracked-files=all"])
     diff_files = validated_reflect_changed_files(reflect_state)
     changed_files = _dedupe([*diff_files, *_status_paths(status_all)])
-    # 必须与 Reflect/review snapshot 使用相同的 staged + unstaged 双事实流。
-    # `git diff HEAD` 在 MM 场景只会给出净差异，预算、删除检查会漏掉 index 中内容。
-    staged_name_status, unstaged_name_status = collect_tracked_diff_parts(
-        repo,
-        ["--name-status"],
-    )
-    staged_numstat, unstaged_numstat = collect_tracked_diff_parts(repo, ["--numstat"])
-    name_status = render_tracked_diff_sections(
-        staged_name_status,
-        unstaged_name_status,
-    )
-    numstat = render_tracked_diff_sections(staged_numstat, unstaged_numstat)
     test_summary = _read_text(source_dir / "test-summary.md")
     reflection = _read_text(source_dir / "reflection.md")
     config = load_project_config(repo)

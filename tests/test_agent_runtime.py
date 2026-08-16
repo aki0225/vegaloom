@@ -25,6 +25,14 @@ from vega.agent_task_card import (
     save_task_card,
 )
 from vega.cli_entrypoint import app
+from vega.comparison_binding import require_comparison_binding_from_mapping
+
+
+def test_comparison_paths_require_comparison_base() -> None:
+    with pytest.raises(ValueError, match="comparison_paths_without_base"):
+        require_comparison_binding_from_mapping(
+            {"comparison_paths": ["src/example.py"]}
+        )
 
 
 def test_fake_worker_two_items_route_next_then_finalize(
@@ -893,6 +901,17 @@ def test_resume_tracked_task_card_rebuilds_local_run(
     assert restored.state.phase == "ready"
     assert published_states == [restored.run_dir / "agent-state.json"]
     assert restored.state.handoff_status == "handoff_ready"
+    metadata = json.loads(
+        (restored.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    assert metadata["comparison_base_revision"] == card.handoff_base_revision
+    assert metadata["comparison_paths"] == ["src/example.py"]
+    checkpoint = json.loads(
+        next((restored.run_dir / "checkpoints").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert checkpoint["data"]["changed_files"] == ["src/example.py"]
     assert "先重新验证当前实现" in (
         restored.run_dir / "status-card.md"
     ).read_text(encoding="utf-8")

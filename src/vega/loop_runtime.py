@@ -17,6 +17,10 @@ from .loop_continue_support import (
     require_recovery_trace_binding,
 )
 from .loop_evidence import validate_loop_evidence_snapshot
+from .loop_eval_checks import (
+    interrupted_iteration_evidence_checks as _interrupted_iteration_evidence_checks_impl,
+    loop_iteration_evidence_checks as _loop_iteration_evidence_checks_impl,
+)
 from .loop_failure_reporting import (
     write_execution_interruption_report as _write_execution_interruption_report,
     write_runner_error_report as _write_runner_error_report,
@@ -67,9 +71,8 @@ from .risk_gate_evidence import (
     project_policy_snapshot_eval_results,
     render_risk_gate_report_binding,
     sha256_text,
-    validate_iteration_risk_gate_artifacts,
 )
-from .risk_review_evidence import gate_blocks_reviewer_before_execution, required_review_iteration_eval_results
+from .risk_review_evidence import gate_blocks_reviewer_before_execution
 from .risk_review_reporting import render_final_review_details
 from .run_lock import RunMutationLock
 from .run_utils import create_run_dir, resolve_run_dir, run_name
@@ -77,10 +80,10 @@ from .runner import Runner, RunnerResult, RunnerStatus, make_runner
 from .scope_gate import (
     LoopScopeGateEvidence,
     scope_gate_state_fields,
-    validate_iteration_scope_gate_artifacts,
     write_loop_scope_gate_evidence,
 )
 from .trace import TraceWriter, active_run_finished_indices, read_trace_items
+from .tracked_workspace import normalize_comparison_paths, validate_comparison_base
 from .verification import VerificationRunResult, run_project_verification
 from .worker_rerun import worker_rerun_eval_results
 from .worker_rerun_planning import (
@@ -156,11 +159,23 @@ class LoopAutomationRuntime:
         max_iterations: int = 2,
         verify: bool = True,
         on_run_created: Callable[[Path], None] | None = None,
+        comparison_base_sha: str | None = None,
+        comparison_paths: tuple[str, ...] = (),
     ) -> Path:
         repo_path = Path(brief_input.repo_path).resolve()
         config, policy_snapshot, initial_head_sha = _load_stable_start_policy(
             repo_path
         )
+        resolved_comparison_base = validate_comparison_base(
+            repo_path,
+            comparison_base_sha,
+            head_sha=initial_head_sha,
+        )
+        normalized_comparison_paths = normalize_comparison_paths(
+            comparison_paths
+        )
+        if normalized_comparison_paths and resolved_comparison_base is None:
+            raise ValueError("comparison paths 必须与 comparison base 一起使用")
         worker_name, reviewer_name = _apply_runner_defaults(
             config,
             worker_name,
@@ -181,6 +196,8 @@ class LoopAutomationRuntime:
                 config,
                 policy_snapshot,
                 initial_head_sha,
+                resolved_comparison_base,
+                normalized_comparison_paths,
             )
 
     def _start_locked(
@@ -196,6 +213,8 @@ class LoopAutomationRuntime:
         config: ProjectConfig,
         policy_snapshot: dict[str, str | None],
         initial_head_sha: str,
+        comparison_base_sha: str | None,
+        comparison_paths: tuple[str, ...],
     ) -> Path:
         trace = TraceWriter(run_dir / "trace.jsonl")
         state = LoopAutomationState(
@@ -207,6 +226,8 @@ class LoopAutomationRuntime:
             status="running",
             max_iterations=max_iterations,
             initial_head_sha=initial_head_sha,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=list(comparison_paths),
             project_policy_snapshot=policy_snapshot,
             project_policy_snapshot_sha256=sha256_text(
                 _project_policy_snapshot_text(policy_snapshot)
@@ -222,6 +243,8 @@ class LoopAutomationRuntime:
             task_mode=brief_input.mode,
             automation_mode=automation_mode,
             repo_path=brief_input.repo_path,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=list(comparison_paths),
         )
         _write_project_policy_snapshot(run_dir, state.project_policy_snapshot)
         brief_run = BriefRuntime(self.workspace).run(brief_input)
@@ -476,6 +499,8 @@ class LoopAutomationRuntime:
             phase="pre_verification",
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
+            comparison_base_sha=state.comparison_base_sha,
+            comparison_paths=tuple(state.comparison_paths),
         )
         iteration_state = _update_iteration_state(
             iteration_state,
@@ -515,6 +540,8 @@ class LoopAutomationRuntime:
                 iteration=iteration_number,
                 progress_reporter=make_execution_progress_reporter(run_dir, self.progress_reporter, iteration=iteration_number),
                 verification_commands=verification_commands,
+                comparison_base_sha=state.comparison_base_sha,
+                comparison_paths=tuple(state.comparison_paths),
             )
             verification_status = _verification_status(
                 verification.command_count,
@@ -592,6 +619,8 @@ class LoopAutomationRuntime:
             phase="post_verification",
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
+            comparison_base_sha=state.comparison_base_sha,
+            comparison_paths=tuple(state.comparison_paths),
         )
         iteration_state = _update_iteration_state(
             iteration_state,
@@ -631,6 +660,8 @@ class LoopAutomationRuntime:
             source_run=state.brief_run,
             test_log=auto_test_log.resolve() if auto_test_log else None,
             note=note,
+            comparison_base_sha=state.comparison_base_sha,
+            comparison_paths=tuple(state.comparison_paths),
         )
         _record_reflect(iteration_dir, reflect_run)
         iteration_state = _update_iteration_state(
@@ -697,6 +728,8 @@ class LoopAutomationRuntime:
             phase="pre_review",
             expected_head_sha=state.initial_head_sha,
             expected_policy_sha256=state.scope_policy_sha256,
+            comparison_base_sha=state.comparison_base_sha,
+            comparison_paths=tuple(state.comparison_paths),
         )
         iteration_state = _update_iteration_state(
             iteration_state,
@@ -1355,6 +1388,8 @@ class LoopAutomationRuntime:
                 phase="pre_verification",
                 expected_head_sha=state.initial_head_sha,
                 expected_policy_sha256=state.scope_policy_sha256,
+                comparison_base_sha=state.comparison_base_sha,
+                comparison_paths=tuple(state.comparison_paths),
             )
             iteration_state = _update_iteration_state(
                 iteration_state,
@@ -1394,6 +1429,8 @@ class LoopAutomationRuntime:
                     iteration_dir,
                     iteration=iteration_number,
                     progress_reporter=make_execution_progress_reporter(run_dir, self.progress_reporter, iteration=iteration_number),
+                    comparison_base_sha=state.comparison_base_sha,
+                    comparison_paths=tuple(state.comparison_paths),
                 )
                 verification_log = verification.summary_path
                 verification_status = _verification_status(
@@ -1472,6 +1509,8 @@ class LoopAutomationRuntime:
                 phase="post_verification",
                 expected_head_sha=state.initial_head_sha,
                 expected_policy_sha256=state.scope_policy_sha256,
+                comparison_base_sha=state.comparison_base_sha,
+                comparison_paths=tuple(state.comparison_paths),
             )
             iteration_state = _update_iteration_state(
                 iteration_state,
@@ -1513,6 +1552,8 @@ class LoopAutomationRuntime:
                 source_run=state.brief_run,
                 test_log=verification_log,
                 note=f"auto loop 第 {iteration_number} 轮执行后复盘",
+                comparison_base_sha=state.comparison_base_sha,
+                comparison_paths=tuple(state.comparison_paths),
             )
             _record_reflect(iteration_dir, reflect_run)
             iteration_state = _update_iteration_state(
@@ -1578,6 +1619,8 @@ class LoopAutomationRuntime:
                 phase="pre_review",
                 expected_head_sha=state.initial_head_sha,
                 expected_policy_sha256=state.scope_policy_sha256,
+                comparison_base_sha=state.comparison_base_sha,
+                comparison_paths=tuple(state.comparison_paths),
             )
             iteration_state = _update_iteration_state(
                 iteration_state,
@@ -2246,6 +2289,8 @@ def run_loop_eval(
                 scope_gate_required=state.scope_gate_required,
                 expected_head_sha=state.initial_head_sha,
                 expected_policy_sha256=state.scope_policy_sha256,
+                comparison_base_sha=state.comparison_base_sha,
+                comparison_paths=tuple(state.comparison_paths),
             )
         )
     if state.current_iteration != state.iterations[-1].iteration:
@@ -2396,133 +2441,21 @@ def _loop_iteration_evidence_checks(
     scope_gate_required: bool = False,
     expected_head_sha: str | None = None,
     expected_policy_sha256: str | None = None,
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
 ) -> list[str]:
-    results: list[str] = []
-    if not iteration_dir.exists():
-        return [f"FAIL: iteration artifact 目录不存在：{iteration.iteration:02d}"]
-
-    if iteration.reflect_run:
-        reflect_ref = _read_optional_text(iteration_dir / "reflect-run.txt").strip()
-        if not reflect_ref:
-            results.append("FAIL: iteration 声明 reflect_run 但缺少 reflect-run.txt")
-        elif Path(reflect_ref).name != iteration.reflect_run:
-            results.append("FAIL: reflect-run.txt 与 iteration.reflect_run 不一致")
-
-    results.extend(_verification_iteration_state_checks(iteration))
-    if iteration.verification_status in {"passed", "failed"}:
-        if not (iteration_dir / "verification-summary.md").exists():
-            results.append("FAIL: verification 状态已记录但缺少 verification-summary.md")
-        if not (iteration_dir / "test-summary.md").exists():
-            results.append("FAIL: verification 状态已记录但缺少 test-summary.md")
-
-    scope_gate_integrity = validate_iteration_scope_gate_artifacts(
-        iteration_dir,
-        iteration,
-        phase="pre_verification",
-        # verification 本身可以合法修改工作区；pre-verification 只校验落盘绑定，
-        # 不能拿最终 diff 重算，否则会把后续证据误判成 pre gate 被篡改。
-        repo_path=None,
-        trace_path=trace_path,
-        required=scope_gate_required,
-        expected_head_sha=expected_head_sha,
-        expected_policy_sha256=expected_policy_sha256,
-    )
-    if scope_gate_integrity.valid and scope_gate_integrity.evaluated:
-        results.append("PASS: pre-verification scope gate artifact 与 iteration 一致")
-    else:
-        results.extend(f"FAIL: {issue}" for issue in scope_gate_integrity.issues)
-
-    post_scope_gate_integrity = validate_iteration_scope_gate_artifacts(
-        iteration_dir,
-        iteration,
-        phase="post_verification",
-        # Reflect 之后还会有 pre-review gate；post-verification 只校验其历史绑定，
-        # 不能用后续工作区重算。
-        repo_path=None,
-        trace_path=trace_path,
-        required=scope_gate_required,
-        expected_head_sha=expected_head_sha,
-        expected_policy_sha256=expected_policy_sha256,
-    )
-    if post_scope_gate_integrity.valid and post_scope_gate_integrity.evaluated:
-        results.append("PASS: post-verification scope gate artifact 与 iteration 一致")
-    else:
-        results.extend(
-            f"FAIL: post_verification_{issue}" for issue in post_scope_gate_integrity.issues
-        )
-
-    review_scope_gate_integrity = validate_iteration_scope_gate_artifacts(
-        iteration_dir,
-        iteration,
-        phase="pre_review",
-        repo_path=repo_path,
-        trace_path=trace_path,
-        required=scope_gate_required,
-        expected_head_sha=expected_head_sha,
-        expected_policy_sha256=expected_policy_sha256,
-    )
-    if review_scope_gate_integrity.valid and review_scope_gate_integrity.evaluated:
-        results.append("PASS: pre-review scope gate artifact 与 iteration 一致")
-    else:
-        results.extend(f"FAIL: pre_review_{issue}" for issue in review_scope_gate_integrity.issues)
-
-    gate_integrity = validate_iteration_risk_gate_artifacts(
+    return _loop_iteration_evidence_checks_impl(
         iteration_dir,
         iteration,
         workspace=workspace,
         repo_path=repo_path,
         trace_path=trace_path,
+        scope_gate_required=scope_gate_required,
+        expected_head_sha=expected_head_sha,
+        expected_policy_sha256=expected_policy_sha256,
+        comparison_base_sha=comparison_base_sha,
+        comparison_paths=comparison_paths,
     )
-    if gate_integrity.valid and iteration.risk_gate_status != "skipped":
-        results.append("PASS: risk gate artifact 与 iteration 一致")
-    else:
-        results.extend(f"FAIL: {issue}" for issue in gate_integrity.issues)
-
-    if iteration.verdict is None:
-        return results
-    verdict_path = iteration_dir / "review-verdict.json"
-    if not verdict_path.exists():
-        results.append("FAIL: iteration 声明 verdict 但缺少 review-verdict.json")
-        return results
-    try:
-        verdict = ReviewVerdict.model_validate_json(
-            verdict_path.read_text(encoding="utf-8")
-        )
-    except Exception as exc:  # noqa: BLE001 - eval 必须报告损坏 verdict
-        results.append(f"FAIL: review-verdict.json 不合法：{type(exc).__name__}")
-        return results
-    if verdict.verdict != iteration.verdict:
-        results.append("FAIL: review-verdict.json 与 iteration.verdict 不一致")
-    else:
-        results.append("PASS: reviewer verdict artifact 与 iteration 一致")
-    results.extend(required_review_iteration_eval_results(gate_integrity.result, verdict))
-
-    context_path = iteration_dir / "review-context.json"
-    if not context_path.exists():
-        results.append("FAIL: iteration 声明 verdict 但缺少 review-context.json")
-        return results
-    try:
-        context = json.loads(context_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        results.append(f"FAIL: review-context.json 不合法：{exc.msg}")
-        return results
-    if iteration.reflect_run and context.get("source_run") != iteration.reflect_run:
-        results.append("FAIL: review-context.json 与 iteration.reflect_run 不一致")
-    return results
-
-
-def _verification_iteration_state_checks(
-    iteration: LoopIterationState,
-) -> list[str]:
-    results: list[str] = []
-    if iteration.verification_failed_count and iteration.verification_status != "failed":
-        results.append("FAIL: verification 失败计数与状态不一致")
-    if (
-        iteration.verification_failure_kind is not None
-        and iteration.verification_status != "failed"
-    ):
-        results.append("FAIL: verification failure_kind 与状态不一致")
-    return results
 
 
 def render_eval(results: list[str]) -> str:
@@ -2533,30 +2466,7 @@ def _interrupted_iteration_evidence_checks(
     iteration_dir: Path,
     iteration: LoopIterationState,
 ) -> list[str]:
-    results: list[str] = []
-    if not iteration_dir.is_dir():
-        return [f"FAIL: interrupted iteration 目录不存在：{iteration.iteration:02d}"]
-    if not iteration.interrupted_step:
-        results.append("FAIL: interrupted iteration 缺少 interrupted_step")
-    if not iteration.interrupted_at:
-        results.append("FAIL: interrupted iteration 缺少 interrupted_at")
-    report_path = iteration_dir / "interruption-report.md"
-    if not report_path.is_file():
-        results.append("FAIL: interrupted iteration 缺少 interruption-report.md")
-        return results
-    report = _read_optional_text(report_path)
-    if f"- 迭代：`{iteration.iteration}`" not in report:
-        results.append("FAIL: interruption-report.md 与 iteration 编号不一致")
-    if (
-        iteration.interrupted_step
-        and f"- 原步骤：`{iteration.interrupted_step}`" not in report
-    ):
-        results.append("FAIL: interruption-report.md 与 interrupted_step 不一致")
-    if iteration.interrupted_at and iteration.interrupted_at not in report:
-        results.append("FAIL: interruption-report.md 与 interrupted_at 不一致")
-    if not results:
-        results.append("PASS: interrupted iteration 证据已保留且不参与成功判定")
-    return results
+    return _interrupted_iteration_evidence_checks_impl(iteration_dir, iteration)
 
 
 def _iteration_dir(run_dir: Path, iteration: int) -> Path:

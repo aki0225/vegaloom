@@ -28,8 +28,13 @@ from .agent_codex_evidence import (
     write_child_summary,
     write_plan_scope_evidence,
 )
-from .agent_contract import AgentObservation, AgentState
-from .agent_persistence import read_agent_trace
+from .agent_codex_preparation import (
+    comparison_binding_from_metadata,
+    next_attempt_number as _next_attempt_number,
+    read_task_brief as _read_task_brief,
+    validate_prepared_workspace,
+)
+from .agent_contract import AgentObservation
 from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import (
@@ -118,24 +123,27 @@ class SupervisorAgentCodexAdapter:
     ) -> PreparedCodexAttempt:
         if not 60 <= timeout_seconds <= 3600:
             raise ValueError("Worker timeout 必须在 60..3600 秒之间")
-        run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
+        run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
         validate_dispatch_artifacts(run_dir, state, plan)
         work_item = require_single_executable_work_item(plan, state)
         attempt_number = _next_attempt_number(run_dir, state)
         before = capture_bound_workspace(run_dir)
-        if before.fingerprint != state.workspace_fingerprint:
-            raise ValueError("创建 child 前 Workspace 已漂移，必须先重新对账")
-        if attempt_number == 1 and before.changed_files:
-            raise ValueError(
-                "Gate 2B 首次真实 Worker 要求干净 Workspace；"
-                "已有 Diff 的跨机器接力和累计归因属于后续 Gate"
-            )
+        validate_prepared_workspace(
+            before,
+            expected_fingerprint=state.workspace_fingerprint,
+            attempt_number=attempt_number,
+        )
         repo = bound_repo(run_dir)
+        comparison_base_sha, comparison_paths = comparison_binding_from_metadata(
+            metadata
+        )
         initial_plan_scope = evaluate_plan_scope(
             repo,
             plan,
             expected_head_sha=before.head_sha,
             iteration=attempt_number,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=comparison_paths,
         )
         if initial_plan_scope.status == "failed":
             raise ValueError(plan_scope_failure(initial_plan_scope))
@@ -156,6 +164,8 @@ class SupervisorAgentCodexAdapter:
             task_brief=task_brief,
             runner=runner,
             verification_commands=tuple(work_item.verification),
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=comparison_paths,
         )
 
     def _prepare_child(
@@ -175,6 +185,8 @@ class SupervisorAgentCodexAdapter:
                 reviewer_name="codex-exec",
                 max_iterations=2,
                 verify=True,
+                comparison_base_sha=prepared.comparison_base_sha,
+                comparison_paths=prepared.comparison_paths,
             )
             require_waiting_child(child_dir, prepared.repo)
             prompt = (child_dir / "worker-prompt.md").read_text(encoding="utf-8")
@@ -254,6 +266,8 @@ class SupervisorAgentCodexAdapter:
             plan,
             expected_head_sha=before.head_sha,
             iteration=attempt_number,
+            comparison_base_sha=prepared.comparison_base_sha,
+            comparison_paths=prepared.comparison_paths,
         )
         plan_scope_ref = write_plan_scope_evidence(
             run_dir,
@@ -350,6 +364,8 @@ class SupervisorAgentCodexAdapter:
             plan,
             expected_head_sha=before.head_sha,
             iteration=attempt_number,
+            comparison_base_sha=prepared.comparison_base_sha,
+            comparison_paths=prepared.comparison_paths,
         )
         final_plan_scope_ref = write_plan_scope_evidence(
             run_dir,
@@ -468,28 +484,3 @@ class SupervisorAgentCodexAdapter:
     def _event(self, message: str) -> None:
         if self.event_reporter is not None:
             self.event_reporter(message)
-
-
-def _read_task_brief(run_dir: Path) -> str:
-    try:
-        content = (run_dir / "task-brief.md").read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ValueError("无法读取当前 Task Brief") from exc
-    if not content.strip():
-        raise ValueError("当前 Task Brief 为空")
-    return content
-
-
-def _next_attempt_number(run_dir: Path, state: AgentState) -> int:
-    attempts = sum(
-        1
-        for item in read_agent_trace(run_dir / "trace.jsonl")
-        if item.get("event") == "worker_dispatch_committed"
-        and item.get("work_item") == state.current_work_item
-    )
-    if attempts >= 2:
-        raise ValueError(
-            "当前 Work Item 已用完一次初始 attempt 和一次 repair attempt；"
-            "必须由人工修改 Plan 或停止任务"
-        )
-    return attempts + 1

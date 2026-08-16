@@ -112,7 +112,7 @@ def validate_handoff_history(
     repo: Path,
     card: _HandoffCard,
     relative_task: str,
-) -> None:
+) -> str:
     head = run_git_capture(repo, ["git", "rev-parse", "--verify", "HEAD"])
     if head.returncode != 0:
         raise ValueError("无法读取当前 Git HEAD")
@@ -141,6 +141,7 @@ def validate_handoff_history(
         )
         if ancestor.returncode != 0:
             raise ValueError(f"{label}不属于当前仓库的 Handoff 历史")
+    return head_sha
 
 
 def _require_plain_task_card_directory(repo: Path, path: Path) -> None:

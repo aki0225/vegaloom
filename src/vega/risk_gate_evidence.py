@@ -13,6 +13,7 @@ from .risk_review_evidence import (
     gate_blocks_reviewer_before_execution,
     gate_result_semantics,
 )
+from .tracked_workspace import collect_committed_diff
 from .workspace_check import collect_tracked_diff_parts, render_tracked_diff_sections
 
 
@@ -58,10 +59,28 @@ def project_policy_snapshot_eval_results(
     return results
 
 
-def collect_gate_diff_check(repo_path: Path) -> str:
+def collect_gate_diff_check(
+    repo_path: Path,
+    *,
+    comparison_base_sha: str | None = None,
+    comparison_paths: tuple[str, ...] = (),
+) -> str:
     """独立收集 staged/unstaged 空白错误，避免沿用可被篡改的 Reflect 文本。"""
     staged, unstaged = collect_tracked_diff_parts(repo_path, ["--check"])
-    return redact_text(render_tracked_diff_sections(staged, unstaged))
+    committed = collect_committed_diff(
+        repo_path,
+        comparison_base_sha,
+        ["--check"],
+        comparison_paths=comparison_paths,
+    )
+    return redact_text(
+        render_tracked_diff_sections(
+            staged,
+            unstaged,
+            committed_diff=committed,
+            comparison_base_sha=comparison_base_sha,
+        )
+    )
 
 
 def validated_reflect_changed_files(reflect_state: dict[str, object]) -> list[str]:
