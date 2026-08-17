@@ -49,6 +49,41 @@ def _create_directory_link(link_path: Path, target_path: Path) -> None:
     link_path.symlink_to(target_path, target_is_directory=True)
 
 
+def _open_windows_reader_without_delete_sharing(path: Path) -> tuple[object, int]:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    create_file.restype = ctypes.c_void_p
+    handle = create_file(
+        str(path),
+        0x80000000,
+        0x00000001 | 0x00000002,
+        None,
+        3,
+        0x00000080,
+        None,
+    )
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    return kernel32, int(handle)
+
+
+def _close_windows_handle(kernel32: object, handle: int) -> None:
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [ctypes.c_void_p]
+    close_handle.restype = ctypes.c_int
+    if not close_handle(handle):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
 def test_execution_model_temp_path_preserves_windows_path_budget(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -71,6 +106,66 @@ def test_execution_model_temp_path_preserves_windows_path_budget(
     assert temp_path.parent == execution_path.parent
     assert temp_path.name == ".e.7fffffff.aaaaaaaa"
     assert len(str(temp_path)) < 260
+
+
+@pytest.mark.skipif(os.name != "nt", reason="仅 Windows 存在目标文件共享删除锁")
+def test_execution_model_atomic_waits_for_transient_windows_reader_lock(
+    tmp_path: Path,
+) -> None:
+    execution_path = tmp_path / "execution.json"
+    old_lease = _execution_lease_for_atomic_publish("old")
+    new_lease = _execution_lease_for_atomic_publish("new")
+    execution_path.write_text(old_lease.model_dump_json(indent=2), encoding="utf-8")
+    kernel32, handle = _open_windows_reader_without_delete_sharing(execution_path)
+    released = threading.Event()
+
+    def release_reader() -> None:
+        time.sleep(0.6)
+        _close_windows_handle(kernel32, handle)
+        released.set()
+
+    release_thread = threading.Thread(target=release_reader)
+    release_thread.start()
+    started = time.monotonic()
+    try:
+        execution_control._write_model_atomic(execution_path, new_lease)
+    finally:
+        release_thread.join(2)
+        if not released.is_set():
+            _close_windows_handle(kernel32, handle)
+
+    elapsed = time.monotonic() - started
+    persisted = ExecutionLease.model_validate_json(
+        execution_path.read_text(encoding="utf-8")
+    )
+    assert 0.5 <= elapsed < 1.5
+    assert persisted.execution_id == "new"
+    assert list(tmp_path.glob(".e.*")) == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="仅 Windows 存在目标文件共享删除锁")
+def test_execution_model_atomic_fails_closed_for_persistent_windows_reader_lock(
+    tmp_path: Path,
+) -> None:
+    execution_path = tmp_path / "execution.json"
+    old_lease = _execution_lease_for_atomic_publish("old")
+    new_lease = _execution_lease_for_atomic_publish("new")
+    execution_path.write_text(old_lease.model_dump_json(indent=2), encoding="utf-8")
+    kernel32, handle = _open_windows_reader_without_delete_sharing(execution_path)
+    started = time.monotonic()
+
+    try:
+        with pytest.raises(PermissionError, match="等待约 1 秒"):
+            execution_control._write_model_atomic(execution_path, new_lease)
+    finally:
+        _close_windows_handle(kernel32, handle)
+
+    elapsed = time.monotonic() - started
+    persisted = ExecutionLease.model_validate_json(
+        execution_path.read_text(encoding="utf-8")
+    )
+    assert 0.9 <= elapsed < 1.5
+    assert persisted.execution_id == "old"
 
 
 def test_execution_prepare_rejects_linked_descendant_before_launch(tmp_path: Path) -> None:
@@ -2605,3 +2700,19 @@ def _install_fake_windows_process_api(
 def _write_execution(path: Path, lease: ExecutionLease) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(lease.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _execution_lease_for_atomic_publish(execution_id: str) -> ExecutionLease:
+    now = datetime.now(UTC)
+    return ExecutionLease(
+        run_id="atomic-publish",
+        execution_id=execution_id,
+        step="worker",
+        owner_pid=os.getpid(),
+        command=["worker"],
+        started_at=now.isoformat(),
+        last_heartbeat=now.isoformat(),
+        lease_expires_at=(now + timedelta(minutes=1)).isoformat(),
+        deadline=(now + timedelta(minutes=2)).isoformat(),
+        status="running",
+    )

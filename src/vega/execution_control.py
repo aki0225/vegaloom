@@ -974,17 +974,17 @@ def _write_model_atomic(
         encoding="utf-8",
         newline="\n",
     )
-    last_error: OSError | None = None
-    for _ in range(10):
+    last_error: PermissionError | None = None
+    for _ in range(50):
         try:
             os.replace(temp_path, path)
             return
         except PermissionError as exc:
-            # Windows 读取方短暂持有文件句柄时 replace 可能失败，有限重试避免误判 runner error。
+            # Windows 读取方短暂持有文件句柄时 replace 可能失败，最多等待约 1 秒。
             last_error = exc
             time.sleep(0.02)
     assert last_error is not None
-    raise last_error
+    raise PermissionError("原子发布文件持续被占用或无替换权限，等待约 1 秒后仍未成功") from last_error
 
 
 def _execution_model_temp_path(path: Path) -> Path:
