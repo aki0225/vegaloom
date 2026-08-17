@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04 workspace-check-failed-preserved / SAG3B-05 mcp-isolation-failed-preserved / SAG3B-06 reviewer-isolation-blocked-preserved / SAG3B-07 machine-b-timeout-preserved / gate-not-passed`
+> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04 workspace-check-failed-preserved / SAG3B-05 mcp-isolation-failed-preserved / SAG3B-06 reviewer-isolation-blocked-preserved / SAG3B-07 machine-b-timeout-preserved / SAG3B-08 machine-a-known-side-effect / gate-not-passed`
 >
 > 日期：2026-08-17
 >
@@ -1931,3 +1931,70 @@ false_success = 0
 
 全部条件满足时，Gate 3B 判定为 `gate-exit-pass`，下一步才是 Gate 3C 的少量日常价值观察。
 否则如实记录唯一阻断点，Gate 3B 保持未通过，默认不继续扩建基础设施。
+
+### 23.6 machine A 实际结果与停止判定
+
+SAG3B-08 使用预注册提交
+`a816be2385766003c4351fd4a7674f24fbb5c523`，两份独立控制 archive 的 SHA-256 均为
+`b0712e70df565c9b727fe76035fa0f8a64e68a71ece093e7bf59cfc2faed6f81`。machine A 在
+Python `3.12.10`、pytest `8.4.2`、pytest-timeout `2.4.0` 和 Ruff `0.15.20` 环境中连续
+三次通过冻结预检，耗时分别为 `17.726s`、`2.895s` 和 `2.848s`；每次都没有 Workspace
+漂移或残留目标进程。
+
+正式运行身份为：
+
+```text
+agent_run = 20260817-235358-agent
+child_run = 20260817-235421-789385-bug-loop
+operation = c7e74fd678f9410f8378ae881bc90cf6
+```
+
+真实 Worker 只修改：
+
+```text
+src/vega/agent_codex_preparation.py
+tests/test_agent_codex_adapter.py
+```
+
+修改保持原有脏 Workspace 拒绝判断，只更新用户可见错误文本，并补充精确断言。Ruff 和
+`git diff --check` 自检通过。Worker 的定向 pytest 首次运行继承了控制端
+`VEGA_GIT_SAFE_DIRECTORY`，与测试创建的 fixture 仓库不一致，因此在进入目标断言前失败。
+Worker 随后启动移除该环境变量后的重跑，但身份绑定 stop 在该命令完成前生效。
+
+停止后 execution 为 `stopped`，`termination_unconfirmed=false`；Agent State 无 active
+child 或 operation，目标 HEAD 未改变，Workspace 只有两个允许文件。第二次静止 stop 生成
+`checkpoint-003 / needs_human / blocked / operation_started=false`。
+
+人工核对同时确认：Worker 把 pytest `--basetemp` 指向系统 `%TEMP%`，并遗留一个
+`vega-worker-sag3b08-*` 目录，其中包含 pytest fixture、临时 Git 仓库和测试 Workspace。
+这违反了 Worker Prompt 的“自检不得额外留下文件”约束，也不符合本 Case “所有现场位于
+`.tmp/dogfood/sag3b-08/`”的冻结边界。该事实不能裁决为 `none`；人工裁决追加：
+
+```text
+checkpoint = checkpoint-004
+phase = needs_human
+status = blocked
+external_side_effects = known
+handoff_status = none
+```
+
+因此没有执行 `agent checkpoint --handoff`，没有生成 SAG3B-08 Task Card、Handoff 提交或
+machine B clone，也没有自动重试、repair、replan、commit、push 或长期 Memory 写入。
+
+最终判定：
+
+```text
+stable_environment_preflight = pass
+machine_a_partial_diff = pass
+worker_ignored_workspace_change = fail
+external_side_effects_machine_a = known
+git_only_isolated_handoff = 0
+machine_b_started = 0
+workspace_scope_verification_risk_review_finish = not_run
+gate_3b = gate-not-passed
+```
+
+该结果证明稳定 Python 环境消除了 SAG3B-07 的预检超时，但没有证明跨机器完整恢复。它同时
+暴露一个更直接的产品边界：Prompt 对 Worker 自检临时文件位置的约束不是确定性执行隔离。
+按照第 23.1 节停止线，不自动追加 SAG3B-09，也不为本次结果扩大 Runtime；后续是否继续
+Gate 3B 必须重新决策。

@@ -6,7 +6,7 @@
 >
 > 实施基线：`main@70282d1`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-07 timeout-preserved / runtime-compat-fix-merged / SAG3B-08 preregistered / Gate 3C 冻结`
+> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-08 machine-a-known-side-effect / gate-not-passed / Gate 3C 冻结`
 
 ## 当前结论
 
@@ -46,8 +46,10 @@ run。PR `#60` 的 9 项 CI 与两轮独立本地审阅均无剩余阻断项，G
 `gate-exit-pass`。Gate 3B 已执行 SAG3B-01～07：committed handoff、Git-only fresh clone
 恢复、Writer/Reviewer MCP 隔离和 dispatch 身份门禁均已进入主线；SAG3B-07 的 machine B
 Worker 在冻结环境中超时，没有形成新的完整 Core Gate Artifact。PR `#68` 已以
-`main@70282d1` 合入 Windows batch launcher 与 replan attempt epoch 修复，但历史 Case 仍保持
-`gate-not-passed`。下一次只执行 SAG3B-08 稳定环境 Case，Gate 3C 继续冻结。
+`main@70282d1` 合入 Windows batch launcher 与 replan attempt epoch 修复。SAG3B-08 随后在
+稳定 Python 3.12 环境通过三轮预检并形成允许范围内 partial Diff，但 Worker 自检在系统
+`%TEMP%` 留下 pytest fixture 和临时 Git 仓库，人工副作用裁决为 `known`，因此没有发布
+Handoff 或启动 machine B。Gate 3B 保持 `gate-not-passed`，Gate 3C 继续冻结。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。
@@ -422,8 +424,34 @@ SAG3B-04～07 已经实际执行，旧的“下一正式 Case 是 SAG3B-04”只
 PR `#68` 的 9 个 CI job 已全部通过，并以 `70282d1` 合入主线。它只修复 Windows
 `codex.CMD` / `.bat` 启动和人工 replan 后的新 attempt epoch，不把 SAG3B-07 改写为成功。
 
-下一步是唯一一次 SAG3B-08：使用两个独立 fresh clone 和独立 Python 3.12.10 /
+预注册时的唯一下一步是 SAG3B-08：使用两个独立 fresh clone 和独立 Python 3.12.10 /
 pytest 8.4.2 环境，先完成可终止预检，再执行 A→Git Task Card→B 的同一 Work Item 恢复。
 若 machine B 没有重新形成 Workspace、Scope、Verification、Risk、Reviewer 与 Finish 的
 完整 Artifact，Gate 3B 继续保持未通过；本轮不因此增加 daemon、数据库、自动重试或新的
 Runner 抽象。
+
+## 2026-08-17 SAG3B-08 实际结果与当前停止点
+
+上节计划已经执行。machine A 的三次冻结预检全部在 60 秒内退出，控制 archive、依赖版本和
+目标 Workspace 均一致。真实 Worker 只修改两个允许文件，身份绑定 stop 成功，进程与 HEAD
+均完成对账。
+
+阻断点不是 WIP 路径，而是 Worker 自检副作用：pytest 被放到系统 `%TEMP%`，遗留了测试
+fixture、临时 Git 仓库和 Workspace。该行为违反冻结协议与 Worker Prompt，不能裁决为
+`external_side_effects=none`。当前权威状态为：
+
+```text
+agent_run = 20260817-235358-agent
+checkpoint = checkpoint-004
+phase = needs_human
+status = blocked
+external_side_effects = known
+handoff_status = none
+machine_b = not_started
+```
+
+因此 SAG3B-08 是
+`stable-environment-preflight-pass / machine-a-known-side-effect / gate-not-passed`。
+没有提交 Worker WIP，没有生成 Task Card，也没有启动第二次 attempt。按预注册停止线，
+后续不自动创建 SAG3B-09；若继续 Gate 3B，需要先重新决定是否用确定性临时目录隔离替代
+Prompt 约束，不能在本 Case 内事后放宽标准。

@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-07 timeout-preserved / runtime-compat-fix-merged / SAG3B-08 preregistered / Gate 3C 冻结`
+> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-08 machine-a-known-side-effect / gate-not-passed / Gate 3C 冻结`
 >
 > 计划日期：2026-08-13
 >
@@ -18,7 +18,10 @@
 > SAG3B-07 已完成 Git-only 双 fresh clone 恢复，但 machine B 在 Python 3.14.3 /
 > pytest 9.0.2 环境中超过冻结 Worker 预算。相关安全修复已进入主线，Windows
 > `codex.CMD` 启动与人工 replan attempt epoch 又通过 PR `#68` 合入 `main@70282d1`。
-> 历史 Case 均保持原判定；下一次只执行预注册的 SAG3B-08 稳定环境 Case，Gate 3C 仍冻结。
+> SAG3B-08 在稳定 Python 3.12 环境通过 machine A 预检并形成允许范围内 partial Diff，但
+> Worker 在系统 `%TEMP%` 遗留 pytest fixture 和临时 Git 仓库，人工副作用裁决为 `known`，
+> 未发布 Handoff 或启动 machine B。Gate 3B 保持未通过，不自动追加 SAG3B-09，Gate 3C
+> 仍冻结。
 
 ## 一、产品决定
 
@@ -1092,9 +1095,12 @@ reviewer_worker_context_leak = 0
 SAG2C-02 已判定为 `gate-exit-pass`；第 7 项 Gate 3A 已完成实现、本地往返、PR CI 与
 合并前审阅，判定为 `gate-exit-pass`。Gate 3B 已执行 SAG3B-01～07，Git-only Task Card
 Handoff、fresh clone 恢复、committed baseline、Writer/Reviewer MCP 隔离和 dispatch 身份
-门禁均已形成真实证据。SAG3B-07 的 machine B Worker 在冻结环境中超时，历史结果保持
-`gate-not-passed`。PR `#68` 已将 Windows `codex.CMD` 启动和 replan attempt epoch 修复合入
-`main@70282d1`；下一次只执行 SAG3B-08 稳定 Python 3.12 环境 Case，Gate 3C 仍冻结。
+门禁均已形成真实证据。SAG3B-07 的 machine B Worker 在冻结环境中超时。PR `#68` 已将
+Windows `codex.CMD` 启动和 replan attempt epoch 修复合入 `main@70282d1`。SAG3B-08 随后
+在稳定 Python 3.12 环境完成 machine A 预检和 partial Diff，但 Worker 自检在系统
+`%TEMP%` 留下测试目录，人工裁决为 `external_side_effects=known`。Vega 正确保留
+`needs_human / blocked`，没有发布 Handoff 或启动 machine B。Gate 3B 仍为
+`gate-not-passed`，不自动追加 SAG3B-09，Gate 3C 继续冻结。
 
 2026-08-16 另行补齐了 V1 已承诺但此前未完整发布的三个产品合同：可信 Core Finish 到父
 Agent `completed` 的终态发布、`$vega-agent` 主会话 Skill、父 Agent 的通用

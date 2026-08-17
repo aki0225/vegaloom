@@ -19,7 +19,7 @@
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
 | 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
-| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | SAG3B-07 machine B 超时，Gate 保持未通过 |
+| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | SAG3B-08 machine A 已知副作用，Gate 保持未通过 |
 | 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | V1 当前交接 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -62,10 +62,12 @@ Gate 2C 首次运行因 pytest 加载了控制环境中的 `packaging` 而记为
 SAG3B-03 完成 machine A 和同机隔离 B 模拟，暴露 committed handoff comparison baseline
 缺口；窄修复已通过 PR `#63` 合入 `main@435767a`。SAG3B-04～06 又分别暴露 Workspace、
 Writer MCP 和 Reviewer MCP 边界缺口。SAG3B-07 已完成 Git-only 双独立 clone 接力，但
-machine B 的真实 Worker 在冻结的 900 秒预算内没有取得可信终态，未进入新的 Verification、
-Risk、Reviewer 与 Finish。随后 PR `#68` 已把 Windows `codex.CMD` 启动和人工 replan
-attempt epoch 修复合入 `main@70282d1`。历史 Case 均保持 `gate-not-passed`；下一次只执行
-固定 Python 3.12 环境的 SAG3B-08，Gate 3C 继续冻结。
+machine B 的真实 Worker 在冻结的 900 秒预算内没有取得可信终态。随后 PR `#68` 已把
+Windows `codex.CMD` 启动和人工 replan attempt epoch 修复合入 `main@70282d1`。SAG3B-08
+在固定 Python 3.12 环境通过 machine A 三轮预检并形成允许范围内 partial Diff，但 Worker
+自检在系统 `%TEMP%` 遗留 pytest fixture 和临时 Git 仓库；人工副作用裁决为 `known`，
+因此没有发布 Handoff 或启动 machine B。Gate 3B 保持 `gate-not-passed`，不自动追加
+SAG3B-09，Gate 3C 继续冻结。
 
 ### 真实日常使用观察
 
@@ -75,8 +77,8 @@ Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist�
 
 Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 已完成两个冻结真实案例，
 最终分支 CI 和合并前审阅均已通过，Gate 2C R2 已完成并通过，Gate 3A 已取得本地往返证据；
-Gate 3B 已执行到 SAG3B-07：Git-only 双独立 clone 恢复成功，但 machine B Worker 超时，
-没有形成完整 Core Gate 证据。
+Gate 3B 已执行到 SAG3B-08：稳定环境预检和 machine A partial Diff 成功，但 Worker 留下
+仓库外 pytest 临时文件，Handoff 被正确阻断，没有形成 machine B 的完整 Core Gate 证据。
 `v0.1.5` 继续按现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
 空 Scope 展示和 Workspace 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。
 当前状态与历史停止条件见：

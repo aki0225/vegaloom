@@ -19,7 +19,9 @@
 > Writer MCP 和 Reviewer MCP 边界缺口；SAG3B-07 已完成 Git-only 双独立 clone 恢复，
 > 但 machine B Worker 在冻结预算内超时，没有形成新的 Verification、Risk、Reviewer 与
 > Finish。PR `#68` 已以 `70282d1` 合入 Windows batch launcher 与 replan attempt epoch
-> 修复。历史 Case 均保持 `gate-not-passed`，下一次只执行 SAG3B-08，Gate 3C 仍冻结。既有
+> 修复。SAG3B-08 在稳定 Python 3.12 环境通过预检并形成 machine A partial Diff，但 Worker
+> 在系统 `%TEMP%` 遗留 pytest fixture 和临时 Git 仓库，副作用裁决为 `known`，Handoff
+> 未发布。Gate 3B 保持 `gate-not-passed`，不自动追加 SAG3B-09，Gate 3C 仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。2026-08-16 已补齐既有 V1 合同中的父
 > Agent 终态、`$vega-agent` 主会话 Skill 和通用 `status/watch`，相关实现已进入主线。
@@ -59,7 +61,7 @@ v0.1.5 发布（完成）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
   -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
   -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
-  -> Gate 3B 单 Work Item Git-only 接力（SAG3B-07 machine B 超时；SAG3B-08 已预注册）
+  -> Gate 3B 单 Work Item Git-only 接力（SAG3B-08 machine A known side effect；未通过）
   -> Gate 3C 小规模日常价值观察（冻结）
   -> V1 产品合同补全：父终态、主会话 Skill、父 run status/watch（已进入主线）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
@@ -868,14 +870,16 @@ SAG3B-04～07 已连续证明 Git-only Handoff、fresh clone 恢复和多项 fai
 冻结预算内退出，不是 Task Card 恢复失败。
 
 PR `#68` 已以 `70282d1` 合入 Windows `codex.CMD` 启动和人工 replan attempt epoch 修复。
-该修复不改写 SAG3B-07，也不自动解封 Gate 3C。下一步只执行一次预注册的 SAG3B-08：
+该修复不改写 SAG3B-07，也不自动解封 Gate 3C。预注册的 SAG3B-08 已实际执行：
 
-1. 两个 fresh clone 分别建立 Python 3.12.10、pytest 8.4.2 的独立环境；
-2. 模型派发前先证明冻结测试可重复终止且没有残留 pytest/Python 子进程；
-3. 继续使用单 Work Item、零自动重试、零自动 replan 和人工 Git Handoff；
-4. machine B 必须重新形成全部 Core Gate Artifact，才能判定 Gate 3B 通过；
-5. 若该 Case 仍失败，保留真实结果并停止继续追加 Gate 3B 基础设施，另行决定是否维持
-   opt-in 实验状态。
+1. machine A 在 Python 3.12.10、pytest 8.4.2 环境中连续三次通过可终止预检；
+2. Worker 只形成两个允许文件的 partial Diff，身份绑定 stop 和进程对账成功；
+3. Worker 自检在系统 `%TEMP%` 遗留 pytest fixture 和临时 Git 仓库；
+4. 人工副作用裁决为 `known`，Vega 保持 `needs_human / blocked`，没有发布 Handoff；
+5. machine B 未启动，Gate 3B 保持 `gate-not-passed`。
+
+当前不自动追加 SAG3B-09，也不继续建设新的恢复基础设施。若未来继续 Gate 3B，先单独决策
+是否需要确定性的 Worker 临时目录执行隔离；在此之前维持 opt-in 实验状态和既有主线行为。
 
 ## 七、更新规则
 
