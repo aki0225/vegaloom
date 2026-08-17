@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -156,7 +157,7 @@ def test_mcp_probe_uses_shared_subprocess_compat_command(
         windows: bool,
     ) -> list[str] | str:
         assert command == [logical_executable, "mcp", "list", "--json"]
-        assert windows is True
+        assert windows is (os.name == "nt")
         return invocation
 
     def run(command, **kwargs):

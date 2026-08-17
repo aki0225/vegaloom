@@ -108,7 +108,7 @@ def test_owned_process_uses_compat_command_but_preserves_logical_lease(
         windows: bool,
     ) -> list[str] | str:
         assert command == logical
-        assert windows is True
+        assert windows is (os.name == "nt")
         return invocation
 
     def popen(command, *args, **kwargs):
