@@ -280,6 +280,95 @@ def test_agent_status_rejects_observation_operation_trace_mismatch(
     assert f"Worker：{child_run}" in status_path.read_text(encoding="utf-8")
 
 
+def test_reconcile_rejects_trace_operation_mismatch_before_artifact_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    run = runtime.approve(run.run_dir.name)
+    run = _started_worker(
+        workspace,
+        run.run_dir.name,
+        child_run="attempt-trace-mismatch",
+        operation_id="operation-current",
+    )
+    trace_path = run.run_dir / "trace.jsonl"
+    trace_items = read_agent_trace(trace_path)
+    dispatch = next(
+        item
+        for item in trace_items
+        if item.get("event") == "worker_dispatch_committed"
+    )
+    dispatch["operation_id"] = "operation-tampered"
+    trace_path.write_text(
+        "".join(
+            json.dumps(item, ensure_ascii=False) + "\n"
+            for item in trace_items
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    checkpoint_path = (
+        run.run_dir
+        / "checkpoints"
+        / f"{run.state.latest_checkpoint_id}.json"
+    )
+    protected_paths = [
+        run.run_dir / "agent-plan.json",
+        run.run_dir / "agent-state.json",
+        trace_path,
+        run.run_dir / "status-card.md",
+        checkpoint_path,
+    ]
+    original_bytes = {
+        path: path.read_bytes()
+        for path in protected_paths
+    }
+    original_observations = set((run.run_dir / "observations").glob("*.json"))
+    original_decisions = set((run.run_dir / "decisions").glob("*.json"))
+    original_checkpoints = set((run.run_dir / "checkpoints").glob("*.json"))
+
+    with pytest.raises(
+        ValueError,
+        match="active operation 与最近可信 dispatch Trace 不一致",
+    ):
+        runtime.observe_machine(
+            run.run_dir.name,
+            AgentObservation(
+                observation_id="obs-trace-mismatch",
+                work_item_id="W1",
+                child_run="attempt-trace-mismatch",
+                operation_id="operation-current",
+                machine_summary="机器已重新采集全部门禁证据",
+                workspace_fingerprint="0" * 64,
+                evidence_refs=["children/trace-mismatch.json"],
+                work_item_completed=True,
+                all_work_items_completed=True,
+                verification="passed",
+                risk="passed",
+                review="passed",
+            ),
+        )
+
+    assert {
+        path: path.read_bytes()
+        for path in protected_paths
+    } == original_bytes
+    assert set((run.run_dir / "observations").glob("*.json")) == (
+        original_observations
+    )
+    assert set((run.run_dir / "decisions").glob("*.json")) == original_decisions
+    assert set((run.run_dir / "checkpoints").glob("*.json")) == (
+        original_checkpoints
+    )
+
+
 def test_agent_parent_watch_includes_bound_child_safe_progress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
