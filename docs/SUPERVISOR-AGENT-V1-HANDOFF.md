@@ -1,12 +1,12 @@
 # Supervisor Agent V1 当前交接
 
-> 日期：2026-08-16
+> 日期：2026-08-17
 >
-> 当前实施分支：`codex/supervisor-agent-v1-completion`
+> 当前实施分支：`codex/sag3b-08-stable-env`
 >
-> 实施基线：`main@435767a`
+> 实施基线：`main@70282d1`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04-not-run / physical-machine-b-not-run / Gate 3C 冻结 / 2026-08-16 V1 产品合同补全：本地验证通过 / PR CI pending`
+> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-08 machine-a-known-side-effect / gate-not-passed / Gate 3C 冻结`
 
 ## 当前结论
 
@@ -43,10 +43,13 @@ Gate 3A 已实现 Handoff 生产端，并完成同机两个隔离 clone 的机�
 Handoff Checkpoint、Resume Capsule、Task Card、manifest 和人工 Git 清单；人工只提交 WIP
 与 Task Card。B 侧不复制旧 `runs/`、Trace、SQLite 或聊天，仅凭 Git Task Card 重建新本机
 run。PR `#60` 的 9 项 CI 与两轮独立本地审阅均无剩余阻断项，Gate 3A 判定为
-`gate-exit-pass`。Gate 3B 的 SAG3B-01 没有形成 WIP；SAG3B-02 形成 Handoff，但控制源码
-身份不符合预注册协议；SAG3B-03 完成机器 A 和同机隔离 B 模拟，并暴露 committed handoff
-基线缺口。窄修复已通过 PR `#63` 合入 `main@435767a`，但历史 Case 仍保持
-`gate-not-passed`。SAG3B-04 与另一台物理机器 B 尚未运行，Gate 3C 继续冻结。
+`gate-exit-pass`。Gate 3B 已执行 SAG3B-01～07：committed handoff、Git-only fresh clone
+恢复、Writer/Reviewer MCP 隔离和 dispatch 身份门禁均已进入主线；SAG3B-07 的 machine B
+Worker 在冻结环境中超时，没有形成新的完整 Core Gate Artifact。PR `#68` 已以
+`main@70282d1` 合入 Windows batch launcher 与 replan attempt epoch 修复。SAG3B-08 随后在
+稳定 Python 3.12 环境通过三轮预检并形成允许范围内 partial Diff，但 Worker 自检在系统
+`%TEMP%` 留下 pytest fixture 和临时 Git 仓库，人工副作用裁决为 `known`，因此没有发布
+Handoff 或启动 machine B。Gate 3B 保持 `gate-not-passed`，Gate 3C 继续冻结。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
 语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。
@@ -404,3 +407,51 @@ Task Card 的 comparison base，把 committed、staged、unstaged 与 untracked 
 下一正式 Case 是 SAG3B-04。它必须从新的主线提交重新冻结控制源码，并在另一台物理机器只经
 Git 恢复后重新运行 Scope、Verification、Risk、Reviewer 和 Finish。在此之前 Gate 3B 与
 Gate 3C 都未通过。
+
+## 2026-08-17 SAG3B-07 与 PR #68 后的当前状态
+
+SAG3B-04～07 已经实际执行，旧的“下一正式 Case 是 SAG3B-04”只保留为历史记录：
+
+- SAG3B-04 完成 Git-only 恢复，但 Worker 自检产生新的 ignored pytest 目录，Workspace Gate
+  正确阻断；
+- SAG3B-05 发现 Supervisor Writer 会继承用户 MCP 配置，Worker 在产生 Diff 前被安全停止；
+- SAG3B-06 证明 Writer MCP 隔离有效，但 Reviewer 尚未复用同一隔离预检，因此没有启动
+  machine B；
+- SAG3B-07 已完成 machine A Handoff 和 machine B fresh clone 恢复，Writer/Reviewer 隔离及
+  dispatch 身份门禁均已进入固定控制器，但 machine B Worker 在 Python 3.14.3 /
+  pytest 9.0.2 环境中超过 900 秒预算。
+
+PR `#68` 的 9 个 CI job 已全部通过，并以 `70282d1` 合入主线。它只修复 Windows
+`codex.CMD` / `.bat` 启动和人工 replan 后的新 attempt epoch，不把 SAG3B-07 改写为成功。
+
+预注册时的唯一下一步是 SAG3B-08：使用两个独立 fresh clone 和独立 Python 3.12.10 /
+pytest 8.4.2 环境，先完成可终止预检，再执行 A→Git Task Card→B 的同一 Work Item 恢复。
+若 machine B 没有重新形成 Workspace、Scope、Verification、Risk、Reviewer 与 Finish 的
+完整 Artifact，Gate 3B 继续保持未通过；本轮不因此增加 daemon、数据库、自动重试或新的
+Runner 抽象。
+
+## 2026-08-17 SAG3B-08 实际结果与当前停止点
+
+上节计划已经执行。machine A 的三次冻结预检全部在 60 秒内退出，控制 archive、依赖版本和
+目标 Workspace 均一致。真实 Worker 只修改两个允许文件，身份绑定 stop 成功，进程与 HEAD
+均完成对账。
+
+阻断点不是 WIP 路径，而是 Worker 自检副作用：pytest 被放到系统 `%TEMP%`，遗留了测试
+fixture、临时 Git 仓库和 Workspace。该行为违反冻结协议与 Worker Prompt，不能裁决为
+`external_side_effects=none`。当前权威状态为：
+
+```text
+agent_run = 20260817-235358-agent
+checkpoint = checkpoint-004
+phase = needs_human
+status = blocked
+external_side_effects = known
+handoff_status = none
+machine_b = not_started
+```
+
+因此 SAG3B-08 是
+`stable-environment-preflight-pass / machine-a-known-side-effect / gate-not-passed`。
+没有提交 Worker WIP，没有生成 Task Card，也没有启动第二次 attempt。按预注册停止线，
+后续不自动创建 SAG3B-09；若继续 Gate 3B，需要先重新决定是否用确定性临时目录隔离替代
+Prompt 约束，不能在本 Case 内事后放宽标准。
