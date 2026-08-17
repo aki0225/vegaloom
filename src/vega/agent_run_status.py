@@ -27,6 +27,7 @@ _TRACE_PROGRESS = {
     "plan_revised": ("agent", "plan_updated"),
     "plan_invalidated_by_steer": ("agent", "plan_updated"),
     "worker_dispatch_committed": ("worker", "started"),
+    "worker_dispatch_reconciled": ("worker", "binding_reconciled"),
     "supervisor_next": ("agent", "supervisor_next"),
     "supervisor_repair": ("agent", "supervisor_repair"),
     "supervisor_replan": ("agent", "supervisor_replan"),
@@ -49,6 +50,10 @@ _TRACE_STATUS = {
     "agent_recovery_blocked": "needs_human",
     "agent_recovery_execution_blocked": "needs_human",
 }
+
+
+class AgentTraceReadError(ValueError):
+    """Trace 无法读取时的专用错误，便于诊断卡安全降级。"""
 
 
 def load_agent_status_state(
@@ -100,16 +105,7 @@ def latest_trusted_child_run(
 ) -> str | None:
     """从当前绑定或可信 dispatch Trace 恢复最近一次真实 child。"""
 
-    try:
-        trace_items = read_agent_trace(run_dir / "trace.jsonl")
-    except (OSError, ValueError) as exc:
-        raise ValueError(
-            f"Agent run `{run_dir.name}` 的 trace.jsonl 无法安全读取。"
-        ) from exc
-    traced_execution = _latest_dispatched_execution(
-        trace_items,
-        expected_run_id=state.run_id,
-    )
+    traced_execution = latest_dispatch_binding(run_dir, state)
     traced_child_run = traced_execution[0] if traced_execution is not None else None
     traced_operation_id = traced_execution[1] if traced_execution is not None else None
     if state.active_child_run is not None:
@@ -127,6 +123,52 @@ def latest_trusted_child_run(
             )
         return observation.child_run
     return traced_child_run
+
+
+def latest_dispatch_binding(
+    run_dir: Path,
+    state: AgentState,
+) -> tuple[str, str] | None:
+    """读取最近一次可验证的 Writer dispatch 绑定。
+
+    `worker_dispatch_reconciled` 只在 recovery 已经同时拿到保留的 operation
+    身份和 execution 证据时追加，因此仍然属于同一条可审计绑定链，而不是
+    用 Worker 自述补写一个“看起来成功”的 dispatch。
+    """
+
+    try:
+        trace_items = read_agent_trace(run_dir / "trace.jsonl")
+    except (OSError, ValueError) as exc:
+        raise AgentTraceReadError(
+            f"Agent run `{run_dir.name}` 的 trace.jsonl 无法安全读取。"
+        ) from exc
+    return _latest_dispatched_execution(
+        trace_items,
+        expected_run_id=state.run_id,
+    )
+
+
+def trusted_worker_label(
+    run_dir: Path,
+    state: AgentState,
+    *,
+    observation: AgentObservation | None,
+    checkpoint_status: str | None,
+) -> str:
+    """为状态卡生成不越过证据边界的 Worker 标签。"""
+
+    try:
+        return latest_trusted_child_run(
+            run_dir,
+            state,
+            observation=observation,
+        ) or "未启动"
+    except AgentTraceReadError:
+        if checkpoint_status != "blocked":
+            raise
+        # Trace 损坏时只能说明 binding 仍被保留，不能把未验证 child
+        # 当成可信证据展示；详细原因由 Checkpoint 和 recovery 报告承载。
+        return "未验证（保留 binding）"
 
 
 def agent_status_lines(payload: dict[str, Any]) -> list[str]:
@@ -280,7 +322,10 @@ def _latest_dispatched_execution(
     latest_execution: tuple[str, str] | None = None
     operation_bindings: dict[str, str] = {}
     for item in trace_items:
-        if item.get("event") != "worker_dispatch_committed":
+        if item.get("event") not in {
+            "worker_dispatch_committed",
+            "worker_dispatch_reconciled",
+        }:
             continue
         if item.get("run_id") != expected_run_id or item.get("phase") != "acting":
             raise ValueError("worker dispatch Trace 与 Agent run 身份不一致")

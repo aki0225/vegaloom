@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from .agent_contract import AgentObservation, AgentPlan, AgentState, canonical_digest
+from .agent_contract import AgentObservation, canonical_digest
 from .agent_execution_bridge import (
     resolve_bound_execution_run_dir,
     resolve_bound_worker_execution,
@@ -18,8 +18,11 @@ from .agent_persistence import (
 from .agent_recovery_request import AgentRecoveryRequest
 from .agent_recovery_support import (
     agent_trace_issue,
+    block_on_execution_issue,
+    block_on_trace_issue,
     blocked_recovery_reason,
     latest_checkpoint,
+    reconcile_missing_dispatch_trace,
     require_recovery_request,
     validate_resume_checkpoint,
     write_load_failure_report,
@@ -36,7 +39,6 @@ from .agent_runtime_support import (
 from .execution_control import inspect_execution_for_recovery
 from .redaction import write_redacted_json_once
 from .run_utils import resolve_run_dir
-from .workspace_check import ReviewWorkspaceSnapshot
 
 
 class SupervisorAgentRecovery:
@@ -62,7 +64,7 @@ class SupervisorAgentRecovery:
             )
             process_inspection = inspect_execution_for_recovery(execution_run_dir)
         except ValueError as exc:
-            return _block_on_execution_issue(
+            return block_on_execution_issue(
                 run_dir,
                 state,
                 plan,
@@ -73,7 +75,7 @@ class SupervisorAgentRecovery:
         if not process_inspection.can_recover:
             raise ValueError(process_inspection.summary)
         if not state.operation_started:
-            return _block_on_execution_issue(
+            return block_on_execution_issue(
                 run_dir,
                 state,
                 plan,
@@ -91,7 +93,7 @@ class SupervisorAgentRecovery:
                 state.active_operation_id,
             )
         except ValueError as exc:
-            return _block_on_execution_issue(
+            return block_on_execution_issue(
                 run_dir,
                 state,
                 plan,
@@ -107,7 +109,7 @@ class SupervisorAgentRecovery:
             and actual.git_control_complete
         )
         if trace_issue is not None:
-            return _block_on_trace_issue(
+            return block_on_trace_issue(
                 run_dir,
                 state,
                 plan,
@@ -131,6 +133,20 @@ class SupervisorAgentRecovery:
                 bound_record,
             )
         )
+        trace_reconcile_issue = reconcile_missing_dispatch_trace(
+            run_dir,
+            state,
+            evidence_refs,
+        )
+        if trace_reconcile_issue is not None:
+            return block_on_trace_issue(
+                run_dir,
+                state,
+                plan,
+                actual,
+                request,
+                trace_reconcile_issue,
+            )
         observation = AgentObservation(
             observation_id=f"recovery-{uuid4().hex[:12]}",
             work_item_id=state.current_work_item,
@@ -406,95 +422,3 @@ class SupervisorAgentRecovery:
             ),
         )
         return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
-
-
-def _block_on_trace_issue(
-    run_dir: Path,
-    state: AgentState,
-    plan: AgentPlan,
-    actual: ReviewWorkspaceSnapshot,
-    request: AgentRecoveryRequest,
-    issue: str,
-) -> AgentRun:
-    # Trace 只负责审计。损坏时保留 active binding，避免新 Writer 与未知旧 Writer 并发。
-    next_state = update_state(
-        state,
-        phase="needs_human",
-        state_version=state.state_version + 1,
-        workspace_fingerprint=actual.fingerprint,
-        allowed_actions=["human"],
-    )
-    checkpoint = write_checkpoint(
-        run_dir,
-        next_state,
-        actual,
-        reason=f"{issue}；已保留原 Writer binding，禁止自动接管",
-        status="blocked",
-        pending_actions=["human"],
-        failed_attempts=[],
-        operation_started=state.operation_started,
-        external_side_effects=request.external_side_effects,
-    )
-    next_state = update_state(
-        next_state,
-        latest_checkpoint_id=checkpoint.checkpoint_id,
-        state_version=next_state.state_version + 1,
-    )
-    save_agent_state(run_dir / "agent-state.json", next_state)
-    write_status_card(
-        run_dir,
-        next_state,
-        plan,
-        checkpoint=checkpoint,
-        next_step=f"{issue}；人工核对旧 Writer、Workspace 和原始 Artifact",
-    )
-    return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
-
-
-def _block_on_execution_issue(
-    run_dir: Path,
-    state: AgentState,
-    plan: AgentPlan,
-    actual: ReviewWorkspaceSnapshot,
-    request: AgentRecoveryRequest,
-    issue: str,
-) -> AgentRun:
-    # execution 证据损坏时也保留旧 Writer binding；否则人工误判后可能启动第二 Writer。
-    next_state = update_state(
-        state,
-        phase="needs_human",
-        state_version=state.state_version + 1,
-        workspace_fingerprint=actual.fingerprint,
-        allowed_actions=["human"],
-    )
-    checkpoint = write_checkpoint(
-        run_dir,
-        next_state,
-        actual,
-        reason=f"{issue}；已保留原 Writer binding，禁止自动接管",
-        status="blocked",
-        pending_actions=["human"],
-        operation_started=state.operation_started,
-        external_side_effects=request.external_side_effects,
-    )
-    next_state = update_state(
-        next_state,
-        latest_checkpoint_id=checkpoint.checkpoint_id,
-        state_version=next_state.state_version + 1,
-    )
-    save_agent_state(run_dir / "agent-state.json", next_state)
-    append_agent_trace(
-        run_dir / "trace.jsonl",
-        event="agent_recovery_execution_blocked",
-        state=next_state,
-        route_reason=checkpoint.reason,
-        artifact_refs=[f"checkpoints/{checkpoint.checkpoint_id}.json"],
-    )
-    write_status_card(
-        run_dir,
-        next_state,
-        plan,
-        checkpoint=checkpoint,
-        next_step=f"{issue}；人工核对旧 Worker、进程与 Workspace",
-    )
-    return AgentRun(run_dir=run_dir, state=next_state, plan=plan)

@@ -37,7 +37,7 @@ from .agent_resume_validation import (
     validate_resume_workspace,
 )
 from .agent_run import AgentRun
-from .agent_run_status import latest_trusted_child_run
+from .agent_run_status import trusted_worker_label
 from .agent_runtime_logic import update_state
 from .agent_task_card import (
     AgentTaskCard,
@@ -414,6 +414,12 @@ def write_status_card(
         ),
         0,
     )
+    worker_label = trusted_worker_label(
+        run_dir,
+        state,
+        observation=observation,
+        checkpoint_status=checkpoint.status if checkpoint else None,
+    )
     card = AgentStatusCard(
         run_id=state.run_id,
         task_id=state.task_id,
@@ -424,14 +430,7 @@ def write_status_card(
             if state.current_work_item
             else "尚未选择"
         ),
-        worker_label=(
-            latest_trusted_child_run(
-                run_dir,
-                state,
-                observation=observation,
-            )
-            or "未启动"
-        ),
+        worker_label=worker_label,
         changed_files=(
             observation.changed_files
             if observation is not None

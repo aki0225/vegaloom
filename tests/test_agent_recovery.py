@@ -321,6 +321,10 @@ def test_terminal_execution_requires_replan_before_new_dispatch(
             encoding="utf-8"
         )
     )
+    assert [item["event"] for item in read_agent_trace(run_dir / "trace.jsonl")][-2:] == [
+        "worker_dispatch_reconciled",
+        "agent_recovery_blocked",
+    ]
     assert "executions/worker/execution.json" in recovery_observation["evidence_refs"]
     assert any(
         item.startswith("operations/")
