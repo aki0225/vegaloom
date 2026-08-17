@@ -30,8 +30,7 @@ from .execution_output import (
 )
 from .execution_paths import ExecutionPathGuard
 from .execution_process import (
-    ProcessProbe,
-    ProcessTerminationResult,
+    ProcessProbe, ProcessTerminationResult, prepare_subprocess_command,
     activate_windows_job_process as _activate_windows_job_process,
     add_windows_job_creation_flag as _add_windows_job_creation_flag,
     close_windows_job as _close_windows_job,
@@ -360,7 +359,7 @@ def run_owned_process(
                 windows_job,
             )
             process = subprocess.Popen(
-                command,
+                prepare_subprocess_command(command, windows=_is_windows_platform()),
                 cwd=cwd,
                 stdin=input_file,
                 stdout=output_capture.popen_stdout,

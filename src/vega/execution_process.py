@@ -27,6 +27,7 @@ _ERROR_ACCESS_DENIED = 5
 _ERROR_INVALID_PARAMETER = 87
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _STILL_ACTIVE = 259
+_WINDOWS_BATCH_SUFFIXES = {".bat", ".cmd"}
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,30 @@ class ProcessProbe:
 class ProcessTerminationResult:
     succeeded: bool
     detail: str
+
+
+def prepare_subprocess_command(
+    command: list[str] | str,
+    *,
+    windows: bool,
+) -> list[str] | str:
+    """让 Windows batch launcher 可由 subprocess 可靠启动。"""
+
+    if (
+        isinstance(command, str)
+        or not command
+        or not windows
+        or Path(command[0]).suffix.lower() not in _WINDOWS_BATCH_SUFFIXES
+    ):
+        return command
+    return [
+        os.environ.get("COMSPEC") or "cmd.exe",
+        "/d",
+        "/v:off",
+        "/s",
+        "/c",
+        subprocess.list2cmdline(command),
+    ]
 
 
 def process_group_options(*, windows: bool) -> dict[str, object]:

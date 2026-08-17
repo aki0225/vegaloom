@@ -33,6 +33,7 @@ from vega.execution_output import (
     ProcessOutputCapture,
     redact_jsonl_output,
 )
+from vega.execution_process import prepare_subprocess_command
 from vega.runner import CodexExecRunner
 
 
@@ -48,6 +49,108 @@ def _create_directory_link(link_path: Path, target_path: Path) -> None:
             pytest.skip("当前 Windows 环境不能创建 junction")
         return
     link_path.symlink_to(target_path, target_is_directory=True)
+
+
+def test_windows_batch_command_uses_comspec_without_changing_exe_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "COMSPEC",
+        "C:/Windows/System32/cmd.exe",  # repo-path-policy: allow-test-fixture
+    )
+    logical = [
+        "C:/Program Files/OpenAI/codex.CMD",  # repo-path-policy: allow-test-fixture
+        "exec",
+        "--model",
+        "gpt test",
+    ]
+
+    assert prepare_subprocess_command(logical, windows=True) == [
+        "C:/Windows/System32/cmd.exe",  # repo-path-policy: allow-test-fixture
+        "/d",
+        "/v:off",
+        "/s",
+        "/c",
+        subprocess.list2cmdline(logical),
+    ]
+    executable = [
+        "C:/Program Files/OpenAI/codex.exe",  # repo-path-policy: allow-test-fixture
+        "exec",
+    ]
+    assert prepare_subprocess_command(executable, windows=True) is executable
+
+
+def test_owned_process_uses_compat_command_but_preserves_logical_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logical = [
+        "C:/Tools/codex.CMD",  # repo-path-policy: allow-test-fixture
+        "exec",
+    ]
+    invocation = ["cmd.exe", "/d", "/s", "/c", "wrapped-codex"]
+    captured: dict[str, object] = {}
+
+    class FinishedProcess:
+        pid = 4401
+        returncode = 0
+
+        def poll(self) -> int:
+            return 0
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return 0
+
+    def prepare(
+        command: list[str] | str,
+        *,
+        windows: bool,
+    ) -> list[str] | str:
+        assert command == logical
+        assert windows is (os.name == "nt")
+        return invocation
+
+    def popen(command, *args, **kwargs):
+        del args, kwargs
+        captured["command"] = command
+        return FinishedProcess()
+
+    monkeypatch.setattr(execution_control, "prepare_subprocess_command", prepare)
+    monkeypatch.setattr(execution_control.subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        execution_control,
+        "_create_windows_job_for_execution",
+        lambda *_: None,
+    )
+    monkeypatch.setattr(
+        execution_control,
+        "_add_windows_job_creation_flag",
+        lambda options, _job: options,
+    )
+    monkeypatch.setattr(execution_control, "_activate_windows_job_process", lambda *_: None)
+    monkeypatch.setattr(execution_control, "_process_group_options", lambda: {})
+    monkeypatch.setattr(execution_control, "_get_process_creation_token", lambda _: 1)
+    monkeypatch.setattr(
+        execution_control,
+        "_owned_process_tree_is_active",
+        lambda *_args, **_kwargs: False,
+    )
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "cmd-wrapper" / "executions" / "worker",
+        run_id="cmd-wrapper",
+        step="worker",
+    )
+
+    result = run_owned_process(logical, "", tmp_path, 5, context)
+    lease = ExecutionLease.model_validate_json(
+        (context.execution_dir / "execution.json").read_text(encoding="utf-8")
+    )
+
+    assert result.status == "success"
+    assert captured["command"] == invocation
+    assert lease.command == logical
 
 
 def _open_windows_reader_without_delete_sharing(path: Path) -> tuple[object, int]:

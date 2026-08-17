@@ -40,11 +40,13 @@ class _FakeLoopRuntime:
         workspace: Path,
         *,
         finish_status: str = "ready_to_commit",
+        verification_status: str = "passed",
         core_mutation_relative: str | None = None,
         prepare_runtime_root: bool = False,
     ) -> None:
         self.workspace = workspace
         self.finish_status = finish_status
+        self.verification_status = verification_status
         self.core_mutation_relative = core_mutation_relative
         self.prepare_runtime_root = prepare_runtime_root
         self.continued = False
@@ -74,7 +76,12 @@ class _FakeLoopRuntime:
         self.start_count += 1
         self.comparison_base_sha = comparison_base_sha
         self.comparison_paths = comparison_paths
-        child_dir = self.workspace / "runs" / "fake-assist-child"
+        child_name = (
+            "fake-assist-child"
+            if self.start_count == 1
+            else f"fake-assist-child-{self.start_count}"
+        )
+        child_dir = self.workspace / "runs" / child_name
         child_dir.mkdir(parents=True)
         LoopAutomationState(
             run_id=child_dir.name,
@@ -134,7 +141,7 @@ class _FakeLoopRuntime:
                     scope_gate_status="success",
                     scope_gate_post_verification_status="success",
                     scope_gate_pre_review_status="success",
-                    verification_status="passed",
+                    verification_status=self.verification_status,
                     risk_gate_status="success",
                     risk_gate_risk="low",
                     risk_gate_recommendation="isolated-review",
@@ -152,7 +159,7 @@ class _FakeLoopRuntime:
                     scope_gate_status="success",
                     scope_gate_post_verification_status="success",
                     scope_gate_pre_review_status="success",
-                    verification_status="passed",
+                    verification_status=self.verification_status,
                     risk_gate_status="success",
                     risk_gate_risk="low",
                     risk_gate_recommendation="isolated-review",
@@ -189,8 +196,10 @@ class _FakeFinishRuntime:
                 {
                     "run_id": run,
                     "finish_status": self.loop.finish_status,
-                    "verification_passed": True,
-                    "latest_verification_failed": False,
+                    "verification_passed": self.loop.verification_status == "passed",
+                    "latest_verification_failed": (
+                        self.loop.verification_status == "failed"
+                    ),
                     "artifact_integrity": {"valid": self.evidence_trusted},
                     "evidence_freshness": {"fresh": self.evidence_trusted},
                     "latest_verdict": {
@@ -999,6 +1008,49 @@ def test_adapter_rejects_third_attempt_before_creating_child(
         adapter.run(run_id, timeout_seconds=60)
 
     assert loop.child_dir is None
+
+
+def test_replan_starts_new_initial_child_without_discarding_old_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(
+        workspace,
+        finish_status="needs_human",
+        verification_status="failed",
+    )
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    first = adapter.run(run_id, timeout_seconds=60)
+    assert first.state.phase == "planning"
+
+    revised = SupervisorAgentRuntime(workspace).update_plan(
+        first.run_dir.name,
+        _plan(task_id=first.plan.task_id),
+    )
+    approved = SupervisorAgentRuntime(workspace).approve(revised.run_dir.name)
+    second = adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+    dispatches = [
+        item
+        for item in read_agent_trace(second.run_dir / "trace.jsonl")
+        if item.get("event") == "worker_dispatch_committed"
+    ]
+    assert second.state.phase == "planning"
+    assert loop.start_count == 2
+    assert len(dispatches) == 2
+    assert dispatches[0]["child_run"] != dispatches[1]["child_run"]
+    assert all(
+        (workspace / "runs" / str(item["child_run"])).is_dir()
+        for item in dispatches
+    )
 
 
 def test_repair_attempt_reuses_child_and_preserves_execution_history(

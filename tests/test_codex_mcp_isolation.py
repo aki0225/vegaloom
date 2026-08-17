@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -138,3 +139,41 @@ def test_build_mcp_disable_overrides_does_not_echo_failed_probe_output(
         build_mcp_disable_overrides("codex", tmp_path, profile=None)
 
     assert secret not in str(exc_info.value)
+
+
+def test_mcp_probe_uses_shared_subprocess_compat_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logical_executable = (
+        "C:/Tools/codex.CMD"  # repo-path-policy: allow-test-fixture
+    )
+    invocation = ["cmd.exe", "/d", "/s", "/c", "wrapped-codex-mcp"]
+    captured: list[list[str] | str] = []
+
+    def prepare(
+        command: list[str] | str,
+        *,
+        windows: bool,
+    ) -> list[str] | str:
+        assert command == [logical_executable, "mcp", "list", "--json"]
+        assert windows is (os.name == "nt")
+        return invocation
+
+    def run(command, **kwargs):
+        del kwargs
+        captured.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(
+        "vega.codex_mcp_isolation.prepare_subprocess_command",
+        prepare,
+    )
+    monkeypatch.setattr("vega.codex_mcp_isolation.subprocess.run", run)
+
+    assert build_mcp_disable_overrides(
+        logical_executable,
+        tmp_path,
+        profile=None,
+    ) == ()
+    assert captured == [invocation]
