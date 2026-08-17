@@ -1372,3 +1372,153 @@ false_success = 0
 ```
 
 SAG3B-05 未通过前，Gate 3B 继续保持未通过，不能发布 `v0.2.0`。
+
+## 十九、SAG3B-05 实际结果与 SAG3B-06 预注册
+
+### 19.1 SAG3B-05 实际结果
+
+SAG3B-05 的 machine A 使用独立 fresh clone，并从预注册提交独立导出固定控制源码：
+
+```text
+control_source_commit = 11ec47d8b918ac764e76d81085214e95a4cd217b
+control_source_tree = e549487608a74fb835599b03e46db82b6b467aeb
+control_source_archive_sha256 = 09ac0c7979b38e6c574f0606191aa5d5e3a92345709a54911301b6343fa6cb31
+plan_sha256 = 7325cfa9e6b5e44e859873c3d9f5af533e55ead4ecd71f62482bfd11efd049b3
+machine_a_agent_run = 20260817-122655-agent
+machine_a_child_run = 20260817-123446-775354-bug-loop
+machine_a_operation = d5c8624601484bbab2984e2d9d061878
+```
+
+真实 Codex Worker 启动后，进程树显示它仍继承并启动了用户配置中的外部 MCP Server。现有
+Runner 虽然已禁用 hooks、memories、plugins、多 Agent、sandbox shell 网络和额外可写根
+目录，但这些开关不会自动关闭 `mcp_servers`。外部 MCP 的启动参数还可能携带敏感连接配置，
+因此不能把该现场裁决为 `external_side_effects=none`。
+
+发现后立即向身份绑定的 Worker 发送 stop，并在没有 tracked Diff 的情况下完成进程与
+Workspace 对账：
+
+```text
+worker = stopped
+tracked_diff = none
+phase = needs_human
+checkpoint = checkpoint-002
+external_side_effects = unknown
+verification = not_run
+risk = not_run
+reviewer = not_run
+finish = not_run
+```
+
+因此本 Case 的判定固定为：
+
+```text
+fresh_clone_machine_a = pass
+real_worker_dispatch = pass
+mcp_isolation = failed
+git_handoff = not_run
+machine_b_resume = not_run
+workspace_scope_verification_risk_review_finish = not_run
+gate_3b = not_passed
+false_success = 0
+```
+
+该结果不重跑、不改写成预检失败，也不把 Worker 被及时停止解释为无外部副作用。原始运行
+Artifact 只留在本机，外部 MCP 名称、启动参数和敏感配置不进入公开文档。
+
+### 19.2 MCP 隔离修复边界
+
+SAG3B-05 暴露的是 Supervisor Writer 启动边界缺口，不是状态身份任务本身的失败。修复只
+作用于 `single_writer` 的 Supervisor Worker：
+
+1. 在 Worker 子进程启动前调用 Codex 自身的 MCP 配置解析命令；
+2. 只从输出中读取 Server 名称和启用状态，不记录 transport、命令、参数、环境变量或
+   stderr；
+3. 对每个有效 Server 生成 `mcp_servers.<name>.enabled=false` 覆盖；
+4. 使用相同 profile 和覆盖再次解析，确认 Server 集合没有变化且全部关闭；
+5. 解析失败、超时、标识不受支持、集合变化或仍有启用项时，写入 preflight failure，
+   不启动 Worker。
+
+不采用 `mcp_servers={}`：Codex 配置层使用合并语义，空表不能证明已经继承的 Server 被
+移除。当前修复也不扩展为通用工具策略引擎，不修改普通 Loop 的 Worker/Reviewer 行为，
+不读取或复制 MCP 的敏感配置。
+
+### 19.3 SAG3B-06 冻结任务
+
+Case ID：`SAG3B-06`
+
+目标分支继续使用 `codex/sag3b-04-status-visibility`。包含本节和 MCP 隔离修复的提交必须
+先推送并核对远端 HEAD；该提交随后作为 machine A/B 唯一固定控制源码。
+
+用户目标保持不变：
+
+> 加固 Agent 状态展示的执行身份核对：状态卡和通用 status/watch 在保留最近 child 时，
+> 必须同时验证 operation 绑定。State 或可信 Observation 只要 operation 与最近一次
+> `worker_dispatch_committed` Trace 不一致，就拒绝展示，不能只比较 child ID。
+
+唯一 Work Item：
+
+```yaml
+id: W1
+objective: 让历史 child 展示同时核对 child 与 operation 身份
+allowed_paths:
+  - src/vega/agent_run_status.py
+  - tests/test_agent_runtime.py
+  - tests/test_agent_codex_adapter.py
+forbidden_paths:
+  - src/vega/agent_contract.py
+  - src/vega/agent_persistence.py
+  - src/vega/agent_runtime_support.py
+  - src/vega/agent_worker.py
+  - src/vega/runner.py
+  - src/vega/codex_mcp_isolation.py
+  - docs/**
+  - eval/**
+verification:
+  - python -m pytest -q -p no:cacheprovider -o cache_dir={{vega_verification_temp}}/cache --basetemp={{vega_verification_temp}}/runs tests/test_agent_runtime.py::test_generic_status_retains_latest_child_after_binding_is_cleared tests/test_agent_runtime.py::test_agent_status_rejects_active_operation_trace_mismatch tests/test_agent_runtime.py::test_agent_status_rejects_observation_operation_trace_mismatch tests/test_agent_codex_adapter.py::test_agent_success_path_preserves_completed_worker_in_status_card
+  - ruff check --no-cache src/vega/agent_run_status.py tests/test_agent_runtime.py tests/test_agent_codex_adapter.py
+  - git diff --check
+```
+
+machine A 在派发前必须先看到 MCP 隔离 preflight 通过。真实 Worker 运行期间只观察进程身份、
+存活状态和 Artifact，不再读取完整命令行；如出现未知外部工具进程、外部副作用无法裁决或
+隔离配置漂移，本 Case 立即保持失败。
+
+### 19.4 SAG3B-06 固定预算与通过标准
+
+```text
+adapter = codex-exec
+work_item_count = 1
+machine_a_attempts = 1
+machine_b_attempts = 1
+automatic_retries = 0
+manual_repairs = 0
+replans = 0
+worker_timeout_seconds = 900
+reviewer_timeout_seconds = 900
+```
+
+执行顺序继续使用第十七节的 Git-only 双 fresh clone 协议。除原通过条件外，新增以下硬条件：
+
+```text
+mcp_isolation_preflight = pass
+inherited_mcp_process_started = 0
+external_side_effects_machine_a = none
+external_side_effects_machine_b = none
+tracked_secret_or_mcp_config = 0
+```
+
+SAG3B-06 只有同时满足以下条件才通过：
+
+```text
+git_only_isolated_handoff = 1
+fresh_clone_count = 2
+control_source_commit_match = 1
+task_card_only_resume = 1
+duplicate_writer_start = 0
+worker_ignored_workspace_change = 0
+workspace_scope_verification_risk_review_finish = pass
+automatic_git_write = 0
+false_success = 0
+```
+
+SAG3B-06 未通过前，Gate 3B 继续保持未通过，不能发布 `v0.2.0`。

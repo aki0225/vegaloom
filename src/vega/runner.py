@@ -15,6 +15,10 @@ from .execution_control import (
 )
 from .execution_output import MAX_JSONL_LINE_CHARS
 from .execution_paths import ExecutionPathGuard
+from .codex_mcp_isolation import (
+    CodexMcpIsolationError,
+    build_mcp_disable_overrides,
+)
 from .project_config import CodexExecOptions
 from .redaction import redact_text
 
@@ -312,7 +316,28 @@ class CodexExecRunner:
         if self.single_writer:
             # Supervisor 只允许一个 Writer。目标仓库不能通过项目级 Codex 配置
             # 再启用子代理并发写入、网络或额外可写根目录，也不能让无关的
-            # 多代理参数阻断真实 Worker。
+            # 多代理参数阻断真实 Worker。用户级与项目级 MCP 也不属于已批准
+            # 的任务能力，必须在子进程启动前逐项关闭并复查。
+            try:
+                mcp_overrides = build_mcp_disable_overrides(
+                    resolved,
+                    repo_path,
+                    profile=self.options.profile,
+                )
+            except CodexMcpIsolationError as exc:
+                error = str(exc)
+                _record_preflight_failure(
+                    context,
+                    command,
+                    timeout_seconds,
+                    error,
+                )
+                return RunnerResult(
+                    status="error",
+                    output="",
+                    error=error,
+                    command=command,
+                )
             command.extend(
                 [
                     "--config",
@@ -325,6 +350,8 @@ class CodexExecRunner:
                     "multi_agent_v2",
                 ]
             )
+            for override in mcp_overrides:
+                command.extend(["--config", override])
         if self.options.profile:
             command.extend(["--profile", self.options.profile])
         if self.options.model:
