@@ -1470,7 +1470,13 @@ def test_review_runtime_turns_invalid_json_into_needs_human(tmp_path) -> None:
 
     run_dir = ReviewRuntime(tmp_path, runner=runner).run(repo_dir, reflect_run.name)
 
+    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
     verdict = json.loads(run_dir.joinpath("review-verdict.json").read_text(encoding="utf-8"))
+    assert state["status"] == "failed"
+    assert not any(
+        result.startswith("PASS: reviewer 输出")
+        for result in state["eval_results"]
+    )
     assert verdict["verdict"] == "needs_human"
     assert "无法解析" in verdict["summary"]
 
