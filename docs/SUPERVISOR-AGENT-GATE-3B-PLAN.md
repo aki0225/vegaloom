@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04-preregistered`
+> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04 workspace-check-failed-preserved / SAG3B-05-preregistered`
 >
 > 日期：2026-08-17
 >
@@ -1194,3 +1194,181 @@ false_success = 0
 
 并且 machine B 的 Scope、Verification、Risk、Reviewer 与 Finish 全部形成新的、彼此一致的
 Artifact。真实物理换机不再是 Gate 3B 和 `v0.2.0` 的硬前置条件。
+
+## 十八、SAG3B-04 实际结果与 SAG3B-05 预注册
+
+### 18.1 SAG3B-04 实际结果
+
+SAG3B-04 按第十七节使用两个独立 fresh clone 执行，没有共享 `.git`、`runs/`、`.tmp/`、
+Checkpoint、Trace、虚拟环境或聊天。两端均从同一控制提交独立导出固定控制源码：
+
+```text
+control_source_commit = e4ca7c31c18f5c362b97dccf711a607f08470e11
+control_source_tree = fa8c3df541cb3df7ea6b80678c2d5bea387601c1
+control_source_archive_sha256 = 6e6e304d4e587ad08e4fb62c28b857a2a15a92391ecd824cc8d87d8f08b35e15
+machine_a_agent_run = 20260817-113413-agent
+machine_a_child_run = 20260817-113539-074896-bug-loop
+machine_a_operation = f859f3a632d645dcb5d09b76d3352810
+handoff_commit = 8848541261e466220f9e68076207b06961039af0
+task_card_sha256 = 52729d5616b9bd463ae660fbbdce5c7800368d1f1ce867e303740290e356d900
+machine_b_agent_run = 20260817-114943-agent-resume
+machine_b_child_run = 20260817-115021-127727-bug-loop
+machine_b_operation = 4776b8fe19674275bc20fd450ee4a8de
+```
+
+机器 A 在允许路径出现首个 tracked Diff 后发送身份绑定的 stop，等待 owned Worker 退出，
+完成 Workspace 与外部副作用人工裁决，并生成 Git Task Card。人工只提交四个允许文件与
+Task Card；机器 B 只通过远端分支取得这些内容，并成功执行 `agent resume`，建立新的本机
+Agent run、Checkpoint、Task Brief 和真实 Codex child。旧 Verification、Risk 与 Reviewer
+均保持 historical，没有被当作当前通过证据。
+
+机器 B 的真实 Worker 返回 `completed` Claim，且没有再修改 tracked 文件。但现有 Core 在
+Verification 前执行 Workspace Gate 时得到：
+
+```text
+status = needs_human
+current_step = workspace_check_failed
+baseline_tracked_changes_present = false
+baseline_untracked_changed = false
+baseline_ignored_changed = true
+git_control_changed = false
+verification = skipped
+risk = skipped
+reviewer = skipped
+```
+
+新增 ignored 路径来自 Worker 自检：
+
+```text
+.tmp/pytest/runs/pytest-28816/
+```
+
+本仓库 `tests/conftest.py` 会在未显式提供 `--basetemp` 时，把 pytest 临时目录放到
+`.tmp/pytest/runs/`。SAG3B-04 冻结命令没有使用 `{{vega_verification_temp}}`，真实 Worker
+按任务中的 pytest 命令自检后改变了 ignored 清单。普通 `git status` 没有显示该变化，但
+Vega 的 ignored Workspace 证据正确发现并阻断了后续 Gate。
+
+因此本 Case 的判定固定为：
+
+```text
+git_only_isolated_handoff = pass
+task_card_only_resume = pass
+fresh_child_dispatch = pass
+workspace_gate = failed
+verification_risk_review_finish = not_run
+gate_3b = not_passed
+false_success = 0
+```
+
+该结果不重跑、不清理后继续，也不改写为“基本通过”。它证明了 Git-only 交接和恢复路径，
+同时暴露了预注册验证命令与 Worker ignored 现场约束不兼容。SAG3B-04 的失败 Artifact 保留
+在本机；公开文档只记录必要摘要，不提交原始运行日志或本机路径。
+
+### 18.2 为什么不放宽 ignored Workspace Gate
+
+备选方案是把整个 `.tmp/pytest/` 加入 Workspace Gate 豁免。该方案会让任意 Worker 写入
+普通 ignored 测试目录而不被发现，扩大了当前明确的 harness-owned 豁免边界，因此拒绝。
+
+SAG3B-05 使用现有受控机制解决：
+
+1. pytest 冻结命令显式使用 `{{vega_verification_temp}}`；
+2. Worker Prompt 已明确禁止 Worker 自行运行包含该占位符的 harness-owned 命令；
+3. 只有 Vega Core 在 Verification 阶段展开占位符并创建独占临时目录；
+4. `.tmp/pytest/` 等其他 ignored 路径继续参与 Workspace Gate。
+
+这只修正实验协议，不修改 Workspace、Verification 或 fail-closed 的生产语义。
+
+### 18.3 SAG3B-05 冻结任务
+
+Case ID：`SAG3B-05`
+
+目标分支继续使用 `codex/sag3b-04-status-visibility`，不再创建额外功能分支。冻结起点为
+SAG3B-04 Handoff 提交 `8848541261e466220f9e68076207b06961039af0`；包含本节的预注册
+提交在真实 Worker 启动前推送并登记为两端唯一控制源码提交。
+
+用户目标：
+
+> 加固 Agent 状态展示的执行身份核对：状态卡和通用 status/watch 在保留最近 child 时，
+> 必须同时验证 operation 绑定。State 或可信 Observation 只要 operation 与最近一次
+> `worker_dispatch_committed` Trace 不一致，就拒绝展示，不能只比较 child ID。
+
+唯一 Work Item：
+
+```yaml
+id: W1
+objective: 让历史 child 展示同时核对 child 与 operation 身份
+allowed_paths:
+  - src/vega/agent_run_status.py
+  - tests/test_agent_runtime.py
+  - tests/test_agent_codex_adapter.py
+forbidden_paths:
+  - src/vega/agent_contract.py
+  - src/vega/agent_persistence.py
+  - src/vega/agent_runtime_support.py
+  - src/vega/agent_worker.py
+  - docs/**
+  - eval/**
+verification:
+  - python -m pytest -q -p no:cacheprovider -o cache_dir={{vega_verification_temp}}/cache --basetemp={{vega_verification_temp}}/runs tests/test_agent_runtime.py::test_generic_status_retains_latest_child_after_binding_is_cleared tests/test_agent_runtime.py::test_agent_status_rejects_active_operation_trace_mismatch tests/test_agent_runtime.py::test_agent_status_rejects_observation_operation_trace_mismatch tests/test_agent_codex_adapter.py::test_agent_success_path_preserves_completed_worker_in_status_card
+  - ruff check --no-cache src/vega/agent_run_status.py tests/test_agent_runtime.py tests/test_agent_codex_adapter.py
+  - git diff --check
+```
+
+成功条件：
+
+1. active child 与最近 dispatch Trace 的 child 或 operation 任一不一致时，状态读取
+   fail-closed；
+2. 可信 Observation 与最近 dispatch Trace 的 child 或 operation 任一不一致时，状态卡写入
+   fail-closed；
+3. `external_claim` 仍不能成为可信完成或身份来源；
+4. 同一 child 在 repair 中使用新的 operation 时，以最近一次 dispatch 绑定为准，不误报历史
+   operation；
+5. 正常 active child、已清除 active binding 的最近 child，以及从未启动 Worker 的状态展示
+   保持原行为；
+6. 不新增 State 字段、Schema、事件账本、自动重试或新的成功语义；
+7. machine B 重新形成 Workspace、Scope、Verification、Risk、Reviewer 与 Finish Artifact。
+
+### 18.4 SAG3B-05 固定预算与通过标准
+
+```text
+adapter = codex-exec
+work_item_count = 1
+machine_a_attempts = 1
+machine_b_attempts = 1
+automatic_retries = 0
+manual_repairs = 0
+replans = 0
+worker_timeout_seconds = 900
+reviewer_timeout_seconds = 900
+```
+
+执行方式继续遵循第十七节：
+
+```text
+machine A fresh clone
+  → 真实 Codex Worker 形成首个允许范围 tracked Diff
+  → 身份绑定 stop、进程与 Workspace 对账、人工副作用裁决
+  → Handoff Task Card
+  → 人工 commit/push
+machine B fresh clone
+  → 只从远端 Git 拉取
+  → 显式选择 SAG3B-05 Task Card 执行 resume
+  → 新真实 Codex child
+  → 重新执行全部 Core Gate
+```
+
+SAG3B-05 只有同时满足以下条件才通过：
+
+```text
+git_only_isolated_handoff = 1
+fresh_clone_count = 2
+control_source_commit_match = 1
+task_card_only_resume = 1
+duplicate_writer_start = 0
+worker_ignored_workspace_change = 0
+workspace_scope_verification_risk_review_finish = pass
+automatic_git_write = 0
+false_success = 0
+```
+
+SAG3B-05 未通过前，Gate 3B 继续保持未通过，不能发布 `v0.2.0`。
