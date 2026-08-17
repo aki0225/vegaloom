@@ -29,6 +29,7 @@ from vega.execution_control import ExecutionController, RunnerExecutionContext
 from vega.finish_runtime import FinishRuntime
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
+from vega.project_config import ProjectConfig
 from vega.runner import CodexExecRunner, RunnerResult
 from vega.workspace_inventory import prepare_verification_temp_root
 
@@ -201,6 +202,21 @@ class _FakeFinishRuntime:
             encoding="utf-8",
         )
         return self.loop.child_dir
+
+
+def test_adapter_configures_mcp_isolated_default_reviewer(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    adapter = SupervisorAgentCodexAdapter(workspace)
+
+    adapter._ensure_isolated_reviewer(ProjectConfig())
+
+    reviewer = adapter.loop_runtime.reviewer_runner
+    assert isinstance(reviewer, CodexExecRunner)
+    assert reviewer.isolate_mcp is True
+    assert reviewer.single_writer is False
 
 
 def test_adapter_serializes_child_creation_before_writer_binding(

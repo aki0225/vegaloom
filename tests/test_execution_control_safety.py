@@ -536,6 +536,64 @@ def test_codex_exec_runner_single_writer_fails_closed_when_mcp_isolation_fails(
     assert secret not in (result.error or "")
 
 
+def test_codex_exec_runner_can_isolate_reviewer_mcp_without_writer_restrictions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, stream_context, **kwargs
+    ):
+        del input_text, cwd, timeout_seconds, stream_context, kwargs
+        captured["command"] = command
+        payload = {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": '{"verdict":"approve"}',
+            },
+        }
+        return OwnedProcessResult(
+            status="success",
+            output=json.dumps(payload),
+            error=None,
+            returncode=0,
+        )
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+    monkeypatch.setattr(
+        "vega.runner.build_mcp_disable_overrides",
+        lambda *args, **kwargs: ("mcp_servers.safe-review.enabled=false",),
+    )
+
+    result = CodexExecRunner(isolate_mcp=True).run(
+        "review prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "success"
+    command = captured["command"]
+    disabled = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--disable"
+    ]
+    assert disabled == ["hooks", "memories", "plugins"]
+    config_values = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--config"
+    ]
+    assert "mcp_servers.safe-review.enabled=false" in config_values
+    assert "sandbox_workspace_write.network_access=false" not in config_values
+
+
 def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

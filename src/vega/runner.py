@@ -255,11 +255,13 @@ class CodexExecRunner:
         output_schema: dict[str, Any] | None = None,
         *,
         single_writer: bool = False,
+        isolate_mcp: bool = False,
     ) -> None:
         self.executable = executable
         self.options = options or CodexExecOptions()
         self.output_schema = output_schema
         self.single_writer = single_writer
+        self.isolate_mcp = isolate_mcp or single_writer
 
     def run(
         self,
@@ -313,11 +315,8 @@ class CodexExecRunner:
             "--disable",
             "plugins",
         ]
-        if self.single_writer:
-            # Supervisor 只允许一个 Writer。目标仓库不能通过项目级 Codex 配置
-            # 再启用子代理并发写入、网络或额外可写根目录，也不能让无关的
-            # 多代理参数阻断真实 Worker。用户级与项目级 MCP 也不属于已批准
-            # 的任务能力，必须在子进程启动前逐项关闭并复查。
+        mcp_overrides: tuple[str, ...] = ()
+        if self.isolate_mcp:
             try:
                 mcp_overrides = build_mcp_disable_overrides(
                     resolved,
@@ -338,6 +337,10 @@ class CodexExecRunner:
                     error=error,
                     command=command,
                 )
+        if self.single_writer:
+            # Supervisor 只允许一个 Writer。目标仓库不能通过项目级 Codex 配置
+            # 再启用子代理并发写入、网络或额外可写根目录，也不能让无关的
+            # 多代理参数阻断真实 Worker。
             command.extend(
                 [
                     "--config",
@@ -350,8 +353,8 @@ class CodexExecRunner:
                     "multi_agent_v2",
                 ]
             )
-            for override in mcp_overrides:
-                command.extend(["--config", override])
+        for override in mcp_overrides:
+            command.extend(["--config", override])
         if self.options.profile:
             command.extend(["--profile", self.options.profile])
         if self.options.model:

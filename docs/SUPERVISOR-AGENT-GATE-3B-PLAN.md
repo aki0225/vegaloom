@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04 workspace-check-failed-preserved / SAG3B-05 mcp-isolation-failed-preserved / SAG3B-06-preregistered`
+> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04 workspace-check-failed-preserved / SAG3B-05 mcp-isolation-failed-preserved / SAG3B-06 reviewer-isolation-blocked-preserved / SAG3B-07-preregistered`
 >
 > 日期：2026-08-17
 >
@@ -1522,3 +1522,183 @@ false_success = 0
 ```
 
 SAG3B-06 未通过前，Gate 3B 继续保持未通过，不能发布 `v0.2.0`。
+
+## 二十、SAG3B-06 实际结果与 Reviewer 隔离补充
+
+### 20.1 machine A 结果
+
+SAG3B-06 machine A 使用独立 fresh clone 和固定控制源码：
+
+```text
+control_source_commit = 7f1a3989da58e51761e043850fcf4e8d8a6380a8
+control_source_tree = a290413ba9176a967f73a8b78e9e171af09c5b39
+control_source_archive_sha256 = eaef0fe169b392c6bec89fce12f73c7b92fe9923ca4a2e0025632eddc28def28
+plan_sha256 = c8b163084a9a672086f86ca5296ff31df4721539f782625a63009fc09b50afc2
+machine_a_agent_run = 20260817-132935-agent
+machine_a_child_run = 20260817-133147-913617-bug-loop
+machine_a_operation = 241db9a22b374b51adc9e32ebe1ca29b
+handoff_commit = 49faf18766e232d56fc2693efb0b06d422000acd
+task_card_sha256 = de9b12fd011bd839d4954c8022561e21d9bc22195be3c5e615731769000de469
+```
+
+Writer 启动前，MCP 探针发现 5 个有效配置项；逐项覆盖后复查为 0 个启用项。owned execution
+命令包含 5 个禁用覆盖。两次进程树快照只看到 Codex 自身启动链和 Worker 的短生命周期
+PowerShell，没有额外持久 MCP Server。Codex JSONL 也没有 MCP、Web、浏览器或其他外部
+工具事件。
+
+第一次出现允许路径 tracked Diff 且 Writer 仍 active 时，操作员发送身份绑定 stop。Worker
+可靠停止，`termination_unconfirmed=false`，Workspace 只有以下两个允许文件：
+
+```text
+src/vega/agent_run_status.py
+tests/test_agent_runtime.py
+```
+
+人工核对本机进程、命令类型、Workspace 和 Worker 自检临时目录后，将本次 operation 的
+外部副作用裁决为 `none`，随后生成 Handoff Task Card。操作员只提交上述两个 WIP 文件与
+Task Card；远端 Handoff 提交的父节点为固定控制提交。
+
+### 20.2 为什么没有启动 machine B
+
+machine B 会在 Worker 完成后进入现有 Core Reviewer。复核固定控制源码后确认：
+
+1. Supervisor Writer 使用 `CodexExecRunner(single_writer=True)`，会执行新增的 MCP 隔离；
+2. `LoopAutomationRuntime` 的默认 Reviewer 没有注入独立 runner；
+3. Reviewer 因此仍由普通 `CodexExecRunner` 创建，不会执行 `single_writer` 分支中的 MCP
+   探针；
+4. read-only sandbox 只约束 Workspace 写入，不能证明外部 MCP Server 不会启动或产生外部
+   副作用。
+
+SAG3B-06 的硬条件要求 machine A/B 都不得启动继承 MCP。继续启动 machine B 必然使用已知
+不满足该条件的固定控制器，因此本 Case 在 machine B 派发前 fail-closed：
+
+```text
+machine_a_mcp_isolation = pass
+machine_a_handoff = pass
+machine_b_fresh_clone = not_run
+machine_b_worker = not_run
+machine_b_reviewer = not_run
+workspace_scope_verification_risk_review_finish = not_run
+gate_3b = not_passed
+false_success = 0
+```
+
+该结果不通过临时修改用户全局 Codex 配置、复制认证目录或放宽外部副作用标准绕过。machine A
+Handoff 保留在远端作为本次实验记录，但不得被后续 Case 当作已完成 Gate。
+
+### 20.3 Reviewer 隔离修复边界
+
+下一次正式 Case 前必须把 MCP 隔离与 Writer 专属限制分开：
+
+1. `CodexExecRunner` 增加独立的 MCP 隔离开关；
+2. `single_writer` 仍隐含启用 MCP 隔离，并继续关闭网络、额外可写根目录和多 Agent；
+3. Supervisor 默认 `LoopAutomationRuntime` 为 Reviewer 注入
+   `CodexExecRunner(isolate_mcp=True)`；
+4. Reviewer 仍使用 read-only sandbox，不继承 Writer 对话，也不取得 Writer 专属写权限；
+5. 用户显式注入的测试或替代 Runtime 不被静默覆盖；
+6. MCP 探针失败时 Reviewer 也必须在启动前 fail-closed。
+
+该修复不改变普通 `vega do` 或现有 Loop 的 runner 选择，不增加通用工具策略引擎。
+
+## 二十一、SAG3B-07 预注册
+
+### 21.1 冻结任务
+
+Case ID：`SAG3B-07`
+
+目标分支继续使用 `codex/sag3b-04-status-visibility`。包含本节和 Supervisor Reviewer MCP
+隔离修复的提交必须先推送并核对远端 HEAD；该提交随后作为 machine A/B 唯一固定控制源码。
+
+用户目标：
+
+> 在 Supervisor 接受真实机器 Observation 并发布 Decision、Checkpoint、State 与 Trace 前，
+> 先验证当前 active child/operation 与最近一次 `worker_dispatch_committed` Trace 完全一致。
+> 如 Trace 的 operation 被篡改、截断或与 State 冲突，必须在任何新的权威状态发布前
+> fail-closed，不能等到最后写状态卡时才发现。
+
+唯一 Work Item：
+
+```yaml
+id: W1
+objective: 把 dispatch Trace 身份验证前移到 Supervisor reconcile 的发布边界
+allowed_paths:
+  - src/vega/agent_run_status.py
+  - src/vega/agent_runtime.py
+  - tests/test_agent_runtime.py
+  - tests/test_agent_codex_adapter.py
+forbidden_paths:
+  - src/vega/agent_contract.py
+  - src/vega/agent_persistence.py
+  - src/vega/agent_runtime_logic.py
+  - src/vega/agent_worker.py
+  - src/vega/runner.py
+  - src/vega/codex_mcp_isolation.py
+  - .vega/**
+  - docs/**
+  - eval/**
+verification:
+  - python -m pytest -q -p no:cacheprovider -o cache_dir={{vega_verification_temp}}/cache --basetemp={{vega_verification_temp}}/runs tests/test_agent_runtime.py::test_agent_status_rejects_active_operation_trace_mismatch tests/test_agent_runtime.py::test_agent_status_rejects_observation_operation_trace_mismatch tests/test_agent_runtime.py::test_reconcile_rejects_trace_operation_mismatch_before_artifact_publication tests/test_agent_codex_adapter.py::test_agent_success_path_preserves_completed_worker_in_status_card
+  - ruff check --no-cache src/vega/agent_run_status.py src/vega/agent_runtime.py tests/test_agent_runtime.py tests/test_agent_codex_adapter.py
+  - git diff --check
+```
+
+成功条件：
+
+1. `observe_machine()` 在写入新的 Observation、Decision、LangGraph route、Checkpoint、Plan、
+   State、Trace 或状态卡之前，验证 active child/operation 与最近 dispatch Trace；
+2. Trace operation 不一致时，原 `agent-plan.json`、`agent-state.json`、`trace.jsonl`、
+   `status-card.md` 和已有 Checkpoint 字节保持不变；
+3. 不产生新的 Observation、Decision 或 Checkpoint；
+4. 正常绑定、同一 child 的合法 repair 新 operation、历史 child 展示和现有成功路径保持；
+5. 不新增 State 字段、第二套身份数据库、自动修复 Trace 或新的成功语义；
+6. machine B 重新形成 Workspace、Scope、Verification、Risk、Reviewer 与 Finish Artifact。
+
+### 21.2 固定执行协议
+
+```text
+adapter = codex-exec
+work_item_count = 1
+machine_a_attempts = 1
+machine_b_attempts = 1
+automatic_retries = 0
+manual_repairs = 0
+replans = 0
+worker_timeout_seconds = 900
+reviewer_timeout_seconds = 900
+```
+
+machine A/B 继续使用两个无共享 `.git`、`runs/`、`.tmp/` 或聊天的 fresh clone。双方固定控制
+源码必须相同，并在 Worker/Reviewer 启动前分别确认：
+
+```text
+writer_mcp_isolation_preflight = pass
+reviewer_mcp_isolation_configured = 1
+```
+
+machine A 在首次出现允许路径 tracked Diff 且 Writer 仍 active 时停止并生成新 Handoff。
+由于分支保留 SAG3B-06 Task Card，machine B 必须显式选择本 Case 的 Task Card：
+
+```text
+vega agent resume --repo . --task .vega/tasks/2026-08/<sag3b-07-task-card>
+```
+
+不得让自动发现歧义替代显式任务选择，也不得删除或改写 SAG3B-06 历史 Task Card。
+
+### 21.3 通过标准
+
+```text
+git_only_isolated_handoff = 1
+fresh_clone_count = 2
+control_source_commit_match = 1
+task_card_only_resume = 1
+duplicate_writer_start = 0
+writer_inherited_mcp_process_started = 0
+reviewer_inherited_mcp_process_started = 0
+external_side_effects_machine_a = none
+external_side_effects_machine_b = none
+workspace_scope_verification_risk_review_finish = pass
+automatic_git_write = 0
+false_success = 0
+```
+
+SAG3B-07 未通过前，Gate 3B 继续保持未通过，不能发布 `v0.2.0`。

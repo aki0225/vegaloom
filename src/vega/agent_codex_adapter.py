@@ -51,7 +51,7 @@ from .execution_control import (
 from .finish_runtime import FinishRuntime
 from .loop_runtime import LoopAutomationRuntime
 from .models import BriefInput, LoopAutomationState
-from .project_config import load_project_config
+from .project_config import ProjectConfig, load_project_config
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 from .runner import CodexExecRunner, Runner, RunnerResult
@@ -149,6 +149,7 @@ class SupervisorAgentCodexAdapter:
             raise ValueError(plan_scope_failure(initial_plan_scope))
         task_brief = _read_task_brief(run_dir)
         config = load_project_config(repo)
+        self._ensure_isolated_reviewer(config)
         runner = self.worker_runner or CodexExecRunner(
             options=config.runner.codex_exec.worker,
             output_schema=WorkerClaim.model_json_schema(),
@@ -167,6 +168,18 @@ class SupervisorAgentCodexAdapter:
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
         )
+
+    def _ensure_isolated_reviewer(self, config: ProjectConfig) -> None:
+        """Supervisor 的独立 Reviewer 也不得继承用户 MCP。"""
+
+        if (
+            isinstance(self.loop_runtime, LoopAutomationRuntime)
+            and self.loop_runtime.reviewer_runner is None
+        ):
+            self.loop_runtime.reviewer_runner = CodexExecRunner(
+                options=config.runner.codex_exec.reviewer,
+                isolate_mcp=True,
+            )
 
     def _prepare_child(
         self,
