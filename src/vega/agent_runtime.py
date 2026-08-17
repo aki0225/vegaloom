@@ -17,7 +17,6 @@ from .agent_persistence import append_agent_trace, save_agent_state
 from .agent_graph import langgraph_available, record_supervisor_route
 from .agent_mutation import agent_mutation
 from .agent_run import AgentRun
-from .agent_run_status import latest_trusted_child_run
 from .agent_routing import decide_next_action, transition_state
 from .agent_runtime_logic import (
     apply_work_item_progress,
@@ -26,6 +25,7 @@ from .agent_runtime_logic import (
     next_pending_work_item,
     reconcile_observation,
     update_state,
+    validate_machine_trace_binding,
     validate_observation_binding,
 )
 from .agent_runtime_support import (
@@ -275,12 +275,7 @@ class SupervisorAgentRuntime:
         validate_observation_binding(state, observation, authority)
         # 真实现场只能在当前 State 与已提交 dispatch Trace 同时证明执行身份后发布；
         # 否则后续 Observation、Decision 与 Checkpoint 会把篡改现场固化为权威状态。
-        if authority == "machine_reconcile":
-            latest_trusted_child_run(
-                run_dir,
-                state,
-                observation=observation,
-            )
+        validate_machine_trace_binding(run_dir, state, observation, authority)
         attempt = state.active_child_run
         actual = capture_bound_workspace(run_dir)
         reconciled = reconcile_observation(

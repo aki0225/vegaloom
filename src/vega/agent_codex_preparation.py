@@ -5,6 +5,9 @@ from pathlib import Path
 from .agent_contract import AgentState
 from .agent_persistence import read_agent_trace
 from .comparison_binding import require_comparison_binding_from_mapping
+from .loop_runtime import LoopAutomationRuntime
+from .project_config import ProjectConfig
+from .runner import CodexExecRunner
 from .workspace_check import ReviewWorkspaceSnapshot
 
 
@@ -60,3 +63,19 @@ def next_attempt_number(run_dir: Path, state: AgentState) -> int:
             "必须由人工修改 Plan 或停止任务"
         )
     return attempts + 1
+
+
+def ensure_isolated_reviewer(
+    loop_runtime: object,
+    config: ProjectConfig,
+) -> None:
+    """只为默认 Core Reviewer 注入 MCP 隔离，不覆盖显式测试或替代 runner。"""
+
+    if (
+        isinstance(loop_runtime, LoopAutomationRuntime)
+        and loop_runtime.reviewer_runner is None
+    ):
+        loop_runtime.reviewer_runner = CodexExecRunner(
+            options=config.runner.codex_exec.reviewer,
+            isolate_mcp=True,
+        )

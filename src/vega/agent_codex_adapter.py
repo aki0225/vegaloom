@@ -30,6 +30,7 @@ from .agent_codex_evidence import (
 )
 from .agent_codex_preparation import (
     comparison_binding_from_metadata,
+    ensure_isolated_reviewer,
     next_attempt_number as _next_attempt_number,
     read_task_brief as _read_task_brief,
     validate_prepared_workspace,
@@ -170,16 +171,7 @@ class SupervisorAgentCodexAdapter:
         )
 
     def _ensure_isolated_reviewer(self, config: ProjectConfig) -> None:
-        """Supervisor 的独立 Reviewer 也不得继承用户 MCP。"""
-
-        if (
-            isinstance(self.loop_runtime, LoopAutomationRuntime)
-            and self.loop_runtime.reviewer_runner is None
-        ):
-            self.loop_runtime.reviewer_runner = CodexExecRunner(
-                options=config.runner.codex_exec.reviewer,
-                isolate_mcp=True,
-            )
+        ensure_isolated_reviewer(self.loop_runtime, config)
 
     def _prepare_child(
         self,
