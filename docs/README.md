@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-16
+> 更新时间：2026-08-17
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -19,7 +19,7 @@
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
 | 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
-| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | SAG3B-03 保持未通过；SAG3B-04 未运行 |
+| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | SAG3B-07 machine B 超时，Gate 保持未通过 |
 | 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | V1 当前交接 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -59,9 +59,11 @@ Gate 2C 首次运行因 pytest 加载了控制环境中的 `packaging` 而记为
 同机双隔离副本往返、PR CI 与合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，
 固定控制器、未知副作用继承和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结到
 `3e636e4`，并修复仓库内 workspace 把自有 `runs/` artifact 误判为漂移的问题。后续
-SAG3B-03 完成机器 A 和同机隔离 B 模拟，暴露 committed handoff comparison baseline 缺口；
-窄修复已通过 PR `#63` 合入 `main@435767a`。历史 Case 保持 `gate-not-passed`，
-SAG3B-04 与另一台物理机器 B 尚未运行。Gate 3C 仍冻结，不改变既有默认命令行为和成功语义。
+SAG3B-03 完成 machine A 和同机隔离 B 模拟，暴露 committed handoff comparison baseline
+缺口；窄修复已通过 PR `#63` 合入 `main@435767a`。SAG3B-04～06 又分别暴露 Workspace、
+Writer MCP 和 Reviewer MCP 边界缺口。SAG3B-07 已完成 Git-only 双独立 clone 接力，但
+machine B 的真实 Worker 在冻结的 900 秒预算内没有取得可信终态，未进入新的 Verification、
+Risk、Reviewer 与 Finish。历史 Case 均保持 `gate-not-passed`，Gate 3C 继续冻结。
 
 ### 真实日常使用观察
 
@@ -71,8 +73,8 @@ Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist�
 
 Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 已完成两个冻结真实案例，
 最终分支 CI 和合并前审阅均已通过，Gate 2C R2 已完成并通过，Gate 3A 已取得本地往返证据；
-Gate 3B 已执行到 SAG3B-03 同机隔离 B 模拟；committed handoff 修复已进入主线，但新的
-SAG3B-04 和另一台物理机器 B 尚未运行。
+Gate 3B 已执行到 SAG3B-07：Git-only 双独立 clone 恢复成功，但 machine B Worker 超时，
+没有形成完整 Core Gate 证据。
 `v0.1.5` 继续按现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
 空 Scope 展示和 Workspace 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。
 当前状态与历史停止条件见：

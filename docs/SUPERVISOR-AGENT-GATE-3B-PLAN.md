@@ -1,6 +1,6 @@
 # Supervisor Agent Gate 3B 真实跨机器接力协议
 
-> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04 workspace-check-failed-preserved / SAG3B-05 mcp-isolation-failed-preserved / SAG3B-06 reviewer-isolation-blocked-preserved / SAG3B-07-preregistered`
+> 状态：`SAG3B-02 formal-gate-nonconforming / SAG3B-03 gate-not-passed-preserved / committed-handoff-fix-merged / SAG3B-04 workspace-check-failed-preserved / SAG3B-05 mcp-isolation-failed-preserved / SAG3B-06 reviewer-isolation-blocked-preserved / SAG3B-07 machine-b-timeout-preserved / gate-not-passed`
 >
 > 日期：2026-08-17
 >
@@ -1702,3 +1702,91 @@ false_success = 0
 ```
 
 SAG3B-07 未通过前，Gate 3B 继续保持未通过，不能发布 `v0.2.0`。
+
+## 二十二、SAG3B-07 实际结果
+
+### 22.1 machine A Handoff
+
+SAG3B-07 machine A 使用独立 fresh clone，并从同一提交导出固定控制源码：
+
+```text
+control_source_commit = e35cffcb3c0bc3669a5be401cfb8c84beaaa2487
+control_source_tree = e19fe0e23ef61e3792585936c6fdb42d4aa1614f
+control_source_archive_sha256 = c288dd576d86dfbc7418145aa7aa6af2c49aa8d98fcf2c9c65facfff86a8a860
+plan_sha256 = 53035d1a70ee91e0497d911d51a72faaaca533334bc6797d8b4fcc0eed38883f
+machine_a_agent_run = 20260817-140316-agent
+machine_a_child_run = 20260817-140425-408345-bug-loop
+machine_a_operation = 4803e1062038442e8e1ffb132ab9ff04
+handoff_commit = 976fc359de306153837c8d809b05ed6bdd8513e5
+task_card_sha256 = 5c0cdfd4f3096346dfbbc5aa6ebc9e6aae35797bce714200ae8168d019f49389
+```
+
+Writer 启动前 MCP 隔离复查通过，owned command 包含 5 个逐项禁用覆盖。进程树只出现
+Codex 自身启动链与短生命周期 PowerShell；JSONL 没有 MCP、Web、浏览器或外部基础设施
+工具事件。首次出现允许路径 tracked Diff 后，操作员按绑定身份停止 Writer；最终只有：
+
+```text
+src/vega/agent_runtime.py
+tests/test_agent_runtime.py
+```
+
+人工核对 owned 进程、命令类型和 Workspace 后，将 machine A 外部副作用裁决为 `none`。
+随后只提交两个 WIP 文件和新的 Task Card。远端 Handoff 提交的父节点为固定控制提交，
+Task Card 中旧 Verification、Risk 与 Reviewer 仍明确标记为 historical `not_run`。
+
+### 22.2 machine B 恢复与超时
+
+machine B 从远端 Handoff 提交建立第二个独立 fresh clone，没有共享 `.git`、`runs/`、
+`.tmp/` 或聊天。它重新导出固定控制源码并得到与 machine A 相同的 archive SHA-256，
+随后显式选择 SAG3B-07 Task Card 执行恢复：
+
+```text
+machine_b_head = 976fc359de306153837c8d809b05ed6bdd8513e5
+machine_b_agent_run = 20260817-141631-agent-resume
+machine_b_child_run = 20260817-141708-799856-bug-loop
+machine_b_operation = bb646171185747e685e4f25fda8ea761
+writer_timeout_seconds = 900
+```
+
+恢复成功重建 Goal、批准 Plan、当前 Work Item、Handoff 基线和 Workspace 约束；新 run 没有
+复用 machine A 的 State、Trace、SQLite 或运行目录。Writer 启动命令包含 5 个 MCP 禁用
+覆盖，进程树只出现 Codex、命令执行器、PowerShell 和 Python。109 条 Codex JSONL 事件中
+只有 reasoning、todo 与 command，没有 MCP、Web、浏览器、网络或 Git 写入事件，也没有
+最终 `agent_message` 或 `turn.completed`。
+
+Worker 没有修改 Handoff 提交以外的新文件。它在当前 Python 3.14.3 / pytest 9.0.2 环境中
+反复调查测试进程不退出的问题，多次 pytest 自检被有界命令超时终止，最终超过冻结的
+900 秒 Worker 预算。Vega 将 execution 记为：
+
+```text
+worker_status = timed_out
+returncode = 1
+termination_unconfirmed = false
+machine_b_workspace_new_drift = 0
+verification = not_run
+risk = not_run
+reviewer = not_run
+finish = not_run
+supervisor_action = human
+external_side_effects = unknown
+```
+
+Supervisor 发布 machine Observation 后确定性进入 `needs_human`，没有启动第二 Writer、
+自动重试、repair、commit、push、release 或长期 Memory 写入。Worker、命令子进程与控制
+进程均已退出。因为没有获得可信 Worker 终态，也没有形成新的 Verification、Risk、Reviewer
+和 Finish Artifact，SAG3B-07 判定为：
+
+```text
+machine_a_handoff = pass
+machine_b_git_only_resume = pass
+machine_b_worker = timeout
+workspace_scope_verification_risk_review_finish = not_run
+gate_3b = not_passed
+false_success = 0
+```
+
+该 Case 不重跑，也不通过延长预算或事后补造成功 Artifact 改写。单独诊断中，同一 4 个
+定向测试节点在另一个已存在的隔离开发环境中得到 `4 passed`；这只支持当前 WIP 的代码
+正确性审查，不属于冻结 machine B 的 Gate 证据，也没有证明 pytest 进程不退出的唯一根因。
+下一正式 Case 必须在预注册前先冻结可终止、可复现的项目测试环境；不能把环境修正偷换成
+SAG3B-07 通过。
