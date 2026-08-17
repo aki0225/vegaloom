@@ -17,6 +17,7 @@ from vega.agent_contract import (
 )
 from vega.agent_graph import compile_gate1_graph
 from vega.agent_persistence import load_agent_state, read_agent_trace
+from vega.agent_run_status import load_agent_status_state
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_worker import SupervisorAgentWorker
 from vega.agent_task_card import (
@@ -71,11 +72,86 @@ def test_generic_status_latest_and_watch_recognize_agent_parent_run(
     assert status_payload["status"] == "paused"
     assert status_payload["current_step"] == "awaiting_approval"
     assert status_payload["agent_phase"] == "awaiting_approval"
+    assert status_payload["active_child_run"] is None
+    assert status_payload["last_child_run"] is None
     assert latest_payload["run_id"] == run.run_dir.name
     assert f"run={run.run_dir.name} status=paused step=awaiting_approval" in (
         watch.output
     )
     assert "agent / 已启动" in watch.output
+
+
+def test_generic_status_retains_latest_child_after_binding_is_cleared(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    run = runtime.approve(run.run_dir.name)
+    child_run = "20260816-120000-child-loop"
+    run = _started_worker(
+        workspace,
+        run.run_dir.name,
+        child_run=child_run,
+        operation_id="operation-completed-child",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir()
+    RunProgressLog(child_dir).append(
+        "worker.command_completed",
+        elapsed_seconds=3,
+    )
+    (repo / "src").mkdir()
+    (repo / "src" / "example.py").write_text("value = 1\n", encoding="utf-8")
+
+    result = runtime.observe_fake_worker(
+        run.run_dir.name,
+        AgentObservation(
+            observation_id="obs-completed-child",
+            work_item_id="W1",
+            child_run=child_run,
+            operation_id="operation-completed-child",
+            machine_summary="Worker 与全部门禁已完成",
+            workspace_fingerprint="0" * 64,
+            work_item_completed=True,
+            all_work_items_completed=True,
+            verification="passed",
+            risk="passed",
+            review="passed",
+        ),
+    )
+
+    status = CliRunner().invoke(
+        app,
+        ["status", "--run", result.run_dir.name, "--json"],
+    )
+    latest = CliRunner().invoke(app, ["latest", "--kind", "agent", "--json"])
+    watch = CliRunner().invoke(
+        app,
+        ["watch", "--run", result.run_dir.name, "--no-follow"],
+    )
+    loaded = load_agent_status_state(
+        result.run_dir,
+        ordinary_state_exists=False,
+    )
+
+    assert result.state.phase == "finalizing"
+    assert result.state.active_child_run is None
+    assert status.exit_code == 0, status.output
+    assert latest.exit_code == 0, latest.output
+    assert watch.exit_code == 0, watch.output
+    status_payload = json.loads(status.output)
+    latest_payload = json.loads(latest.output)
+    assert status_payload["active_child_run"] is None
+    assert status_payload["last_child_run"] == child_run
+    assert latest_payload["active_child_run"] is None
+    assert latest_payload["last_child_run"] == child_run
+    assert loaded["brief_run"] == child_run
+    assert f"child={child_run}" in watch.output
 
 
 def test_agent_parent_watch_includes_bound_child_safe_progress(

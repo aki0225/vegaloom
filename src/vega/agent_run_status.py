@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .agent_contract import AgentObservation, AgentState
 from .agent_persistence import AgentArtifactError, load_agent_state, read_agent_trace
 from .progress import PROGRESS_VERSION, RunProgressLog, safe_run_id
 from .run_utils import resolve_run_dir
@@ -72,6 +73,7 @@ def load_agent_status_state(
             "agent-state.json run_id 与 run 目录身份不一致；"
             "为避免展示错误证据链，已拒绝读取。"
         )
+    latest_child_run = latest_trusted_child_run(run_dir, state)
     return {
         "_run_kind": "agent",
         "automation_mode": None,
@@ -82,12 +84,41 @@ def load_agent_status_state(
         "task_id": state.task_id,
         "current_work_item": state.current_work_item,
         "active_child_run": state.active_child_run,
-        "last_child_run": state.active_child_run,
-        "brief_run": state.active_child_run,
+        "last_child_run": latest_child_run,
+        "brief_run": latest_child_run,
         "latest_checkpoint_id": state.latest_checkpoint_id,
         "allowed_actions": list(state.allowed_actions),
         "terminal_status": state.terminal_status,
     }
+
+
+def latest_trusted_child_run(
+    run_dir: Path,
+    state: AgentState,
+    *,
+    observation: AgentObservation | None = None,
+) -> str | None:
+    """从当前绑定或可信 dispatch Trace 恢复最近一次真实 child。"""
+
+    try:
+        trace_items = read_agent_trace(run_dir / "trace.jsonl")
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"Agent run `{run_dir.name}` 的 trace.jsonl 无法安全读取。"
+        ) from exc
+    traced_child_run = _latest_dispatched_child_run(
+        trace_items,
+        expected_run_id=state.run_id,
+    )
+    if state.active_child_run is not None:
+        if traced_child_run != state.active_child_run:
+            raise ValueError("active child 与最近可信 dispatch Trace 不一致")
+        return state.active_child_run
+    if observation is not None and observation.authority != "external_claim":
+        if observation.child_run != traced_child_run:
+            raise ValueError("可信 Observation 与最近 dispatch Trace 的 child 不一致")
+        return observation.child_run
+    return traced_child_run
 
 
 def agent_status_lines(payload: dict[str, Any]) -> list[str]:
@@ -177,9 +208,7 @@ def agent_progress_items(
         for item in trace_items
         if (progress := _trace_progress_item(item)) is not None
     ]
-    child_run = status_payload.get("active_child_run") or _latest_child_run(
-        trace_items
-    )
+    child_run = status_payload.get("last_child_run")
     items.extend(_child_progress_items(workspace, child_run))
     return sorted(items, key=lambda item: str(item.get("ts") or ""))
 
@@ -235,9 +264,29 @@ def _copy_valid_timestamp(
     target["ts"] = timestamp
 
 
-def _latest_child_run(trace_items: list[dict[str, object]]) -> str | None:
-    for item in reversed(trace_items):
+def _latest_dispatched_child_run(
+    trace_items: list[dict[str, object]],
+    *,
+    expected_run_id: str,
+) -> str | None:
+    latest_child_run: str | None = None
+    operation_bindings: dict[str, str] = {}
+    for item in trace_items:
+        if item.get("event") != "worker_dispatch_committed":
+            continue
+        if item.get("run_id") != expected_run_id or item.get("phase") != "acting":
+            raise ValueError("worker dispatch Trace 与 Agent run 身份不一致")
         child_run = item.get("child_run")
-        if isinstance(child_run, str) and safe_run_id(child_run) != "unknown-run":
-            return child_run
-    return None
+        operation_id = item.get("operation_id")
+        if (
+            not isinstance(child_run, str)
+            or not child_run.strip()
+            or not isinstance(operation_id, str)
+            or not operation_id.strip()
+        ):
+            raise ValueError("worker dispatch Trace 缺少完整执行绑定")
+        existing_child_run = operation_bindings.setdefault(operation_id, child_run)
+        if existing_child_run != child_run:
+            raise ValueError("worker dispatch Trace 存在 operation 身份冲突")
+        latest_child_run = child_run
+    return latest_child_run

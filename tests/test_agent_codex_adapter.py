@@ -554,7 +554,7 @@ def test_resumed_committed_handoff_runs_core_with_capsule_diff(
     assert scope["committed_changed_files"] == list(changed_files)
 
 
-def test_adapter_maps_child_core_evidence_to_machine_observation(
+def test_agent_success_path_preserves_completed_worker_in_status_card(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -600,6 +600,8 @@ def test_adapter_maps_child_core_evidence_to_machine_observation(
     )
     status_card = (result.run_dir / "status-card.md").read_text(encoding="utf-8")
     assert "阶段：已完成" in status_card
+    assert f"Worker：{loop.child_dir.name}" in status_card
+    assert "Worker：未启动" not in status_card
     assert "Finish：`ready_to_commit`" in status_card
     assert payload["changed_files"] == ["src/example.py"]
 
