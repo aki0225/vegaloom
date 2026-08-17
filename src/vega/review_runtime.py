@@ -871,8 +871,7 @@ def _append_review_eval_outcome(
     risk_disclosure_issues: list[str],
 ) -> None:
     eval_results.extend(
-        f"FAIL: required risk disclosure：{issue}"
-        for issue in risk_disclosure_issues
+        f"FAIL: required risk disclosure：{issue}" for issue in risk_disclosure_issues
     )
     if result.termination_unconfirmed:
         eval_results.append(
