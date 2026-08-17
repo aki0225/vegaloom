@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
+
+from .execution_process import prepare_subprocess_command
 
 
 _MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -76,7 +79,7 @@ def _list_mcp_servers(
 
     try:
         completed = subprocess.run(
-            command,
+            prepare_subprocess_command(command, windows=os.name == "nt"),
             cwd=repo_path,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,

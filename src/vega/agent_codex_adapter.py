@@ -31,7 +31,7 @@ from .agent_codex_evidence import (
 from .agent_codex_preparation import (
     comparison_binding_from_metadata,
     ensure_isolated_reviewer,
-    next_attempt_number as _next_attempt_number,
+    next_attempt_context as _next_attempt_context,
     read_task_brief as _read_task_brief,
     validate_prepared_workspace,
 )
@@ -127,12 +127,12 @@ class SupervisorAgentCodexAdapter:
         run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
         validate_dispatch_artifacts(run_dir, state, plan)
         work_item = require_single_executable_work_item(plan, state)
-        attempt_number = _next_attempt_number(run_dir, state)
+        attempt_number, requires_clean_workspace = _next_attempt_context(run_dir, state)
         before = capture_bound_workspace(run_dir)
         validate_prepared_workspace(
             before,
             expected_fingerprint=state.workspace_fingerprint,
-            attempt_number=attempt_number,
+            requires_clean_workspace=requires_clean_workspace,
         )
         repo = bound_repo(run_dir)
         comparison_base_sha, comparison_paths = comparison_binding_from_metadata(

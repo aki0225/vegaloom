@@ -25,11 +25,11 @@ def validate_prepared_workspace(
     snapshot: ReviewWorkspaceSnapshot,
     *,
     expected_fingerprint: str,
-    attempt_number: int,
+    requires_clean_workspace: bool,
 ) -> None:
     if snapshot.fingerprint != expected_fingerprint:
         raise ValueError("创建 child 前 Workspace 已漂移，必须先重新对账")
-    if attempt_number == 1 and (
+    if requires_clean_workspace and (
         snapshot.staged_diff.strip()
         or snapshot.unstaged_diff.strip()
         or snapshot.untracked_files
@@ -50,10 +50,19 @@ def read_task_brief(run_dir: Path) -> str:
     return content
 
 
-def next_attempt_number(run_dir: Path, state: AgentState) -> int:
+def next_attempt_context(run_dir: Path, state: AgentState) -> tuple[int, bool]:
+    trace = read_agent_trace(run_dir / "trace.jsonl")
+    epoch_indexes = [
+        index
+        for index, item in enumerate(trace)
+        if item.get("event") in {"plan_approved", "task_card_resumed"}
+    ]
+    if not epoch_indexes:
+        raise ValueError("当前 Plan 缺少可验证的 attempt epoch，拒绝启动 Worker")
+    epoch_index = epoch_indexes[-1]
     attempts = sum(
         1
-        for item in read_agent_trace(run_dir / "trace.jsonl")
+        for item in trace[epoch_index + 1 :]
         if item.get("event") == "worker_dispatch_committed"
         and item.get("work_item") == state.current_work_item
     )
@@ -62,7 +71,14 @@ def next_attempt_number(run_dir: Path, state: AgentState) -> int:
             "当前 Work Item 已用完一次初始 attempt 和一次 repair attempt；"
             "必须由人工修改 Plan 或停止任务"
         )
-    return attempts + 1
+    has_historical_dispatch = any(
+        item.get("event") == "worker_dispatch_committed" for item in trace
+    )
+    requires_clean_workspace = (
+        not has_historical_dispatch
+        and trace[epoch_index].get("event") == "plan_approved"
+    )
+    return attempts + 1, requires_clean_workspace
 
 
 def ensure_isolated_reviewer(
