@@ -16,7 +16,12 @@ from vega.agent_contract import (
     AgentWorkItem,
 )
 from vega.agent_graph import compile_gate1_graph
-from vega.agent_persistence import load_agent_state, read_agent_trace
+from vega.agent_persistence import (
+    append_agent_trace,
+    load_agent_state,
+    read_agent_trace,
+    save_agent_state,
+)
 from vega.agent_run_status import load_agent_status_state
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_worker import SupervisorAgentWorker
@@ -152,6 +157,127 @@ def test_generic_status_retains_latest_child_after_binding_is_cleared(
     assert latest_payload["last_child_run"] == child_run
     assert loaded["brief_run"] == child_run
     assert f"child={child_run}" in watch.output
+
+
+def test_agent_status_rejects_active_operation_trace_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    approved = runtime.approve(run.run_dir.name)
+    bound = _started_worker(
+        workspace,
+        approved.run_dir.name,
+        child_run="attempt-current",
+        operation_id="operation-traced",
+    )
+    mismatched_state = bound.state.model_copy(
+        update={"active_operation_id": "operation-state"}
+    )
+    save_agent_state(
+        bound.run_dir / "agent-state.json",
+        mismatched_state,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="active operation 与最近可信 dispatch Trace 不一致",
+    ):
+        load_agent_status_state(
+            bound.run_dir,
+            ordinary_state_exists=False,
+        )
+
+    for command in (
+        ["status", "--run", bound.run_dir.name, "--json"],
+        ["watch", "--run", bound.run_dir.name, "--no-follow"],
+    ):
+        result = CliRunner().invoke(app, command)
+
+        assert result.exit_code != 0
+        assert "active operation" in _ANSI_ESCAPE_PATTERN.sub("", result.output)
+
+
+def test_agent_status_rejects_observation_operation_trace_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    approved = runtime.approve(run.run_dir.name)
+    child_run = "attempt-reused"
+    bound = _started_worker(
+        workspace,
+        approved.run_dir.name,
+        child_run=child_run,
+        operation_id="operation-original",
+    )
+    repair_state = bound.state.model_copy(
+        update={
+            "state_version": bound.state.state_version + 1,
+            "active_operation_id": "operation-repair",
+        }
+    )
+    append_agent_trace(
+        bound.run_dir / "trace.jsonl",
+        event="worker_dispatch_committed",
+        state=repair_state,
+        observation_summary="同一 child 的 repair 已绑定新 operation",
+    )
+    display_state = repair_state.model_copy(
+        update={
+            "phase": "ready",
+            "active_child_run": None,
+            "active_operation_id": None,
+            "operation_started": False,
+        }
+    )
+    stale_observation = AgentObservation(
+        observation_id="obs-stale-operation",
+        work_item_id="W1",
+        child_run=child_run,
+        operation_id="operation-original",
+        machine_summary="旧 operation 的可信 Observation",
+        workspace_fingerprint="0" * 64,
+        authority="machine_reconcile",
+    )
+    status_path = bound.run_dir / "status-card.md"
+    original_status = status_path.read_bytes()
+
+    with pytest.raises(
+        ValueError,
+        match="可信 Observation 与最近 dispatch Trace 的 operation 不一致",
+    ):
+        agent_runtime_support_module.write_status_card(
+            bound.run_dir,
+            display_state,
+            bound.plan,
+            observation=stale_observation,
+        )
+
+    assert status_path.read_bytes() == original_status
+    current_observation = stale_observation.model_copy(
+        update={
+            "observation_id": "obs-current-operation",
+            "operation_id": "operation-repair",
+        }
+    )
+    agent_runtime_support_module.write_status_card(
+        bound.run_dir,
+        display_state,
+        bound.plan,
+        observation=current_observation,
+    )
+    assert f"Worker：{child_run}" in status_path.read_text(encoding="utf-8")
 
 
 def test_agent_parent_watch_includes_bound_child_safe_progress(

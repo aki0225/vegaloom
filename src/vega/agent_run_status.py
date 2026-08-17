@@ -106,17 +106,25 @@ def latest_trusted_child_run(
         raise ValueError(
             f"Agent run `{run_dir.name}` 的 trace.jsonl 无法安全读取。"
         ) from exc
-    traced_child_run = _latest_dispatched_child_run(
+    traced_execution = _latest_dispatched_execution(
         trace_items,
         expected_run_id=state.run_id,
     )
+    traced_child_run = traced_execution[0] if traced_execution is not None else None
+    traced_operation_id = traced_execution[1] if traced_execution is not None else None
     if state.active_child_run is not None:
         if traced_child_run != state.active_child_run:
             raise ValueError("active child 与最近可信 dispatch Trace 不一致")
+        if traced_operation_id != state.active_operation_id:
+            raise ValueError("active operation 与最近可信 dispatch Trace 不一致")
         return state.active_child_run
     if observation is not None and observation.authority != "external_claim":
         if observation.child_run != traced_child_run:
             raise ValueError("可信 Observation 与最近 dispatch Trace 的 child 不一致")
+        if observation.operation_id != traced_operation_id:
+            raise ValueError(
+                "可信 Observation 与最近 dispatch Trace 的 operation 不一致"
+            )
         return observation.child_run
     return traced_child_run
 
@@ -264,12 +272,12 @@ def _copy_valid_timestamp(
     target["ts"] = timestamp
 
 
-def _latest_dispatched_child_run(
+def _latest_dispatched_execution(
     trace_items: list[dict[str, object]],
     *,
     expected_run_id: str,
-) -> str | None:
-    latest_child_run: str | None = None
+) -> tuple[str, str] | None:
+    latest_execution: tuple[str, str] | None = None
     operation_bindings: dict[str, str] = {}
     for item in trace_items:
         if item.get("event") != "worker_dispatch_committed":
@@ -288,5 +296,5 @@ def _latest_dispatched_child_run(
         existing_child_run = operation_bindings.setdefault(operation_id, child_run)
         if existing_child_run != child_run:
             raise ValueError("worker dispatch Trace 存在 operation 身份冲突")
-        latest_child_run = child_run
-    return latest_child_run
+        latest_execution = (child_run, operation_id)
+    return latest_execution
