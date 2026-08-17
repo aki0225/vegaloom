@@ -1790,3 +1790,144 @@ false_success = 0
 正确性审查，不属于冻结 machine B 的 Gate 证据，也没有证明 pytest 进程不退出的唯一根因。
 下一正式 Case 必须在预注册前先冻结可终止、可复现的项目测试环境；不能把环境修正偷换成
 SAG3B-07 通过。
+
+## 二十三、2026-08-17 SAG3B-08 稳定执行环境预注册
+
+### 23.1 Case 目的与停止线
+
+SAG3B-08 只验证一个剩余问题：
+
+> 在两个不共享 `.git`、`runs/`、`.tmp/`、虚拟环境或聊天的 fresh clone 中，使用已经证明
+> 可终止的 Python 3.12 环境，能否完成真实 Worker partial Diff、Git Task Card Handoff、
+> machine B 恢复，以及新的 Workspace、Scope、Verification、Risk、Reviewer 与 Finish。
+
+本 Case 不新增 Runtime 机制。PR `#68` 已以 `main@70282d1` 合入 Windows batch launcher
+兼容和人工 replan attempt epoch；这些能力只能作为当前产品前置事实，SAG3B-08 的正式证据
+仍固定为零自动重试、零 repair、零 replan。
+
+SAG3B-08 是当前 Gate 3B 的唯一下一 Case。若它仍因环境或新的 Harness 边界未通过，保留
+真实结果并停止自动追加 SAG3B-09；后续是否继续 Gate 3B 必须另行决策。
+
+### 23.2 冻结任务
+
+Case ID：`SAG3B-08`
+
+控制基线：`main@70282d1`
+
+协议与目标分支：`codex/sag3b-08-stable-env`
+
+用户目标：
+
+> 修正首次真实 Worker 拒绝脏 Workspace 时的过期错误提示。拒绝逻辑保持不变，但提示必须
+> 说明 staged、unstaged 或 untracked 变更需要先处理；已经完成 comparison baseline 对账的
+> committed Task Card handoff 走独立恢复路径，不能继续声称跨机器接力属于“后续 Gate”。
+
+唯一 Work Item：
+
+```yaml
+id: W1
+objective: 让首次 Worker 的脏 Workspace 错误提示符合当前 committed handoff 合同
+allowed_paths:
+  - src/vega/agent_codex_preparation.py
+  - tests/test_agent_codex_adapter.py
+forbidden_paths:
+  - src/vega/agent_codex_adapter.py
+  - src/vega/agent_contract.py
+  - src/vega/agent_persistence.py
+  - src/vega/agent_recovery.py
+  - src/vega/agent_runtime.py
+  - src/vega/loop_runtime.py
+  - docs/**
+  - eval/**
+verification:
+  - python -m pytest -q -p no:cacheprovider -o cache_dir={{vega_verification_temp}}/cache --basetemp={{vega_verification_temp}}/runs tests/test_agent_codex_adapter.py::test_adapter_rejects_dirty_initial_workspace_before_creating_child
+  - ruff check --no-cache src/vega/agent_codex_preparation.py tests/test_agent_codex_adapter.py
+  - git diff --check
+```
+
+成功条件：
+
+1. 首次 plan-approved Worker 遇到 staged、unstaged 或 untracked 变更时仍 fail-closed；
+2. 错误文本不再包含“跨机器接力和累计归因属于后续 Gate”；
+3. 新文本明确区分未对账的工作区变更与已验证的 committed Task Card handoff；
+4. Task Card resume、comparison baseline、attempt 计数和成功语义均不改变；
+5. 只修改两个允许文件，不新增 Schema、状态字段或恢复分支。
+
+### 23.3 冻结执行环境
+
+两端均使用本机现有 `Python 3.12.10` 和 `codex-cli 0.147.0`，但不得共享虚拟环境：
+
+```text
+python = 3.12.10
+pytest = 8.4.2
+pytest-timeout = 2.4.0
+ruff = 0.15.20
+worker_timeout_seconds = 900
+reviewer_timeout_seconds = 900
+automatic_retries = 0
+manual_repairs = 0
+replans = 0
+```
+
+所有现场只能位于仓库内被忽略的 `.tmp/dogfood/sag3b-08/`：
+
+```text
+.tmp/dogfood/sag3b-08/
+  machine-a-target/
+  machine-b-target/
+  control-a/
+  control-b/
+  envs/
+  protocol/
+  evidence/
+```
+
+每端分别从包含本节的已推送提交导出固定控制源码，并建立独立 control venv 与 target venv。
+控制命令使用 control venv 的 Python；其子进程 `PATH` 只优先指向对应 target venv，确保
+Worker 自检和 Core Verification 使用目标 clone 的依赖环境，而不是用户全局 Python。
+
+正式模型派发前，两端必须各自连续三次执行冻结 pytest 节点，每次在 60 秒内明确退出，并确认：
+
+- exit code 为 0；
+- 没有残留 pytest、目标 venv Python 或 Vega owned process；
+- target Workspace 字节、HEAD、index、tracked、untracked 和 ignored 清单没有变化；
+- `python -VV`、pytest、pytest-timeout 和 Ruff 版本与本节一致。
+
+任一预检失败，Case 记为 `invalid-harness`，不得启动真实 Worker。
+
+### 23.4 machine A/B 固定协议
+
+machine A：
+
+1. 从远端协议分支建立 fresh clone；
+2. 用固定控制器创建并批准单 Work Item Plan；
+3. 后台启动一次真实 `agent run`；
+4. 首次出现允许路径 tracked Diff 且 active child/operation 仍有效时，立即发送身份绑定 stop；
+5. 等待原控制进程退出，再执行静止 Workspace stop、外部副作用人工裁决和 Handoff；
+6. 人工只提交两个允许文件与本次新 Task Card，并推送同一目标分支。
+
+machine B：
+
+1. 从远端 Handoff HEAD 建立第二个 fresh clone，不复制 machine A 本地 Artifact；
+2. 显式选择 SAG3B-08 Task Card 执行 `agent resume`；
+3. 使用独立固定控制器和 target venv 启动一次真实 Worker；
+4. 重新运行 Workspace、Scope、Verification、Risk、Reviewer 与 Finish；
+5. 不复用 machine A 的 Gate 结果，不自动 commit、push、repair、replan 或重试。
+
+### 23.5 通过标准
+
+```text
+stable_environment_preflight = pass
+fresh_clone_count = 2
+git_only_isolated_handoff = 1
+control_source_commit_match = 1
+task_card_only_resume = 1
+duplicate_writer_start = 0
+worker_ignored_workspace_change = 0
+workspace_scope_verification_risk_review_finish = pass
+automatic_git_write = 0
+false_success = 0
+```
+
+全部条件满足时，Gate 3B 判定为 `gate-exit-pass`，下一步才是 Gate 3C 的少量日常价值观察。
+否则如实记录唯一阻断点，Gate 3B 保持未通过，默认不继续扩建基础设施。

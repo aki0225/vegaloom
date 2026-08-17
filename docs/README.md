@@ -63,7 +63,9 @@ SAG3B-03 完成 machine A 和同机隔离 B 模拟，暴露 committed handoff co
 缺口；窄修复已通过 PR `#63` 合入 `main@435767a`。SAG3B-04～06 又分别暴露 Workspace、
 Writer MCP 和 Reviewer MCP 边界缺口。SAG3B-07 已完成 Git-only 双独立 clone 接力，但
 machine B 的真实 Worker 在冻结的 900 秒预算内没有取得可信终态，未进入新的 Verification、
-Risk、Reviewer 与 Finish。历史 Case 均保持 `gate-not-passed`，Gate 3C 继续冻结。
+Risk、Reviewer 与 Finish。随后 PR `#68` 已把 Windows `codex.CMD` 启动和人工 replan
+attempt epoch 修复合入 `main@70282d1`。历史 Case 均保持 `gate-not-passed`；下一次只执行
+固定 Python 3.12 环境的 SAG3B-08，Gate 3C 继续冻结。
 
 ### 真实日常使用观察
 

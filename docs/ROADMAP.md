@@ -18,11 +18,12 @@
 > 基线修复已通过 PR `#63` 合入 `main@435767a`。SAG3B-04～06 分别暴露 Workspace、
 > Writer MCP 和 Reviewer MCP 边界缺口；SAG3B-07 已完成 Git-only 双独立 clone 恢复，
 > 但 machine B Worker 在冻结预算内超时，没有形成新的 Verification、Risk、Reviewer 与
-> Finish。历史 Case 均保持 `gate-not-passed`，Gate 3C 仍冻结。既有
+> Finish。PR `#68` 已以 `70282d1` 合入 Windows batch launcher 与 replan attempt epoch
+> 修复。历史 Case 均保持 `gate-not-passed`，下一次只执行 SAG3B-08，Gate 3C 仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。2026-08-16 已补齐既有 V1 合同中的父
-> Agent 终态、`$vega-agent` 主会话 Skill 和通用 `status/watch`；当前状态为
-> “本地验证通过 / PR CI pending”。这不改变 Gate 3B/3C 的实验结论。
+> Agent 终态、`$vega-agent` 主会话 Skill 和通用 `status/watch`，相关实现已进入主线。
+> 这不改变 Gate 3B/3C 的实验结论。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -58,9 +59,9 @@ v0.1.5 发布（完成）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
   -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
   -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
-  -> Gate 3B 单 Work Item 跨机器接力（SAG3B-03 保持未通过；修复已合并；SAG3B-04 未运行）
+  -> Gate 3B 单 Work Item Git-only 接力（SAG3B-07 machine B 超时；SAG3B-08 已预注册）
   -> Gate 3C 小规模日常价值观察（冻结）
-  -> V1 产品合同补全：父终态、主会话 Skill、父 run status/watch（本地验证通过 / PR CI pending）
+  -> V1 产品合同补全：父终态、主会话 Skill、父 run status/watch（已进入主线）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
 
@@ -858,6 +859,23 @@ committed handoff comparison baseline、HEAD 竞态和证据传播的窄修复�
 
 本轮明确不做多 Work Item 连续派发、Planner、Memory、Claude Adapter、Provider SDK、Web UI
 或自动 Git。当前状态为“本地验证通过 / PR CI pending”；Gate 3B 与 Gate 3C 状态不变。
+
+### 2026-08-17：Gate 3B 稳定环境 Case
+
+SAG3B-04～07 已连续证明 Git-only Handoff、fresh clone 恢复和多项 fail-closed 边界，但尚未
+取得 machine B 重新完成 Workspace、Scope、Verification、Risk、Reviewer 与 Finish 的完整
+成功证据。SAG3B-07 的直接阻断是 Python 3.14.3 / pytest 9.0.2 环境中的测试进程无法在
+冻结预算内退出，不是 Task Card 恢复失败。
+
+PR `#68` 已以 `70282d1` 合入 Windows `codex.CMD` 启动和人工 replan attempt epoch 修复。
+该修复不改写 SAG3B-07，也不自动解封 Gate 3C。下一步只执行一次预注册的 SAG3B-08：
+
+1. 两个 fresh clone 分别建立 Python 3.12.10、pytest 8.4.2 的独立环境；
+2. 模型派发前先证明冻结测试可重复终止且没有残留 pytest/Python 子进程；
+3. 继续使用单 Work Item、零自动重试、零自动 replan 和人工 Git Handoff；
+4. machine B 必须重新形成全部 Core Gate Artifact，才能判定 Gate 3B 通过；
+5. 若该 Case 仍失败，保留真实结果并停止继续追加 Gate 3B 基础设施，另行决定是否维持
+   opt-in 实验状态。
 
 ## 七、更新规则
 
