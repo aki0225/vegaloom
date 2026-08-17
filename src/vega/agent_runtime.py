@@ -25,6 +25,7 @@ from .agent_runtime_logic import (
     next_pending_work_item,
     reconcile_observation,
     update_state,
+    validate_machine_trace_binding,
     validate_observation_binding,
 )
 from .agent_runtime_support import (
@@ -272,6 +273,9 @@ class SupervisorAgentRuntime:
     ) -> AgentRun:
         run_dir, state, plan, _ = self._load_run(run)
         validate_observation_binding(state, observation, authority)
+        # 真实现场只能在当前 State 与已提交 dispatch Trace 同时证明执行身份后发布；
+        # 否则后续 Observation、Decision 与 Checkpoint 会把篡改现场固化为权威状态。
+        validate_machine_trace_binding(run_dir, state, observation, authority)
         attempt = state.active_child_run
         actual = capture_bound_workspace(run_dir)
         reconciled = reconcile_observation(

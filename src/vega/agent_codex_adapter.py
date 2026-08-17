@@ -30,6 +30,7 @@ from .agent_codex_evidence import (
 )
 from .agent_codex_preparation import (
     comparison_binding_from_metadata,
+    ensure_isolated_reviewer,
     next_attempt_number as _next_attempt_number,
     read_task_brief as _read_task_brief,
     validate_prepared_workspace,
@@ -51,7 +52,7 @@ from .execution_control import (
 from .finish_runtime import FinishRuntime
 from .loop_runtime import LoopAutomationRuntime
 from .models import BriefInput, LoopAutomationState
-from .project_config import load_project_config
+from .project_config import ProjectConfig, load_project_config
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 from .runner import CodexExecRunner, Runner, RunnerResult
@@ -149,6 +150,7 @@ class SupervisorAgentCodexAdapter:
             raise ValueError(plan_scope_failure(initial_plan_scope))
         task_brief = _read_task_brief(run_dir)
         config = load_project_config(repo)
+        self._ensure_isolated_reviewer(config)
         runner = self.worker_runner or CodexExecRunner(
             options=config.runner.codex_exec.worker,
             output_schema=WorkerClaim.model_json_schema(),
@@ -167,6 +169,9 @@ class SupervisorAgentCodexAdapter:
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
         )
+
+    def _ensure_isolated_reviewer(self, config: ProjectConfig) -> None:
+        ensure_isolated_reviewer(self.loop_runtime, config)
 
     def _prepare_child(
         self,

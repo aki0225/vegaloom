@@ -1,6 +1,6 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-16
+> 更新时间：2026-08-17
 > 当前稳定基线：`v0.1.5`
 > 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
@@ -14,10 +14,11 @@
 > 路线复核后，Gate 2C 用于补一条当前主线真实完整成功路径。SAG2C-01 因验证入口加载了
 > 控制环境中的 Python 包而记为 `invalid-harness`；修正后的 SAG2C-02 已完成并判定为
 > `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、同机双隔离副本往返、PR CI 和
-> 合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已执行 SAG3B-01～03；SAG3B-03 的机器 A
-> 和同机隔离 B 模拟暴露 committed handoff 基线缺口，窄修复已通过 PR `#63` 合入
-> `main@435767a`。历史 Case 保持 `gate-not-passed`，SAG3B-04 与另一台物理机器 B 尚未运行，
-> Gate 3C 仍冻结。既有
+> 合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已执行 SAG3B-01～07；committed handoff
+> 基线修复已通过 PR `#63` 合入 `main@435767a`。SAG3B-04～06 分别暴露 Workspace、
+> Writer MCP 和 Reviewer MCP 边界缺口；SAG3B-07 已完成 Git-only 双独立 clone 恢复，
+> 但 machine B Worker 在冻结预算内超时，没有形成新的 Verification、Risk、Reviewer 与
+> Finish。历史 Case 均保持 `gate-not-passed`，Gate 3C 仍冻结。既有
 > `vega do / loop / goal`、Reviewer 和成功语义
 > 保持不变，顶层 CLI 仅扩展 opt-in `agent`。2026-08-16 已补齐既有 V1 合同中的父
 > Agent 终态、`$vega-agent` 主会话 Skill 和通用 `status/watch`；当前状态为

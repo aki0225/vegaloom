@@ -209,6 +209,7 @@ jobs:
             test_timeout: 58
             files: >-
               tests/test_adapter_realpath_boundary.py
+              tests/test_codex_mcp_isolation.py
               tests/test_execution_control_safety.py
               tests/test_finish_artifact_integrity.py
               tests/test_recovery_chaos.py

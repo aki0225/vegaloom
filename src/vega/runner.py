@@ -15,6 +15,10 @@ from .execution_control import (
 )
 from .execution_output import MAX_JSONL_LINE_CHARS
 from .execution_paths import ExecutionPathGuard
+from .codex_mcp_isolation import (
+    CodexMcpIsolationError,
+    build_mcp_disable_overrides,
+)
 from .project_config import CodexExecOptions
 from .redaction import redact_text
 
@@ -251,42 +255,27 @@ class CodexExecRunner:
         output_schema: dict[str, Any] | None = None,
         *,
         single_writer: bool = False,
+        isolate_mcp: bool = False,
     ) -> None:
         self.executable = executable
         self.options = options or CodexExecOptions()
         self.output_schema = output_schema
         self.single_writer = single_writer
+        self.isolate_mcp = isolate_mcp or single_writer
 
-    def run(
+    def _prepare_command(
         self,
-        prompt: str,
         repo_path: Path,
-        *,
         sandbox: str,
+        context: RunnerExecutionContext,
         timeout_seconds: int,
-        execution_context: RunnerExecutionContext | None = None,
-    ) -> RunnerResult:
-        standalone_root = Path.cwd()
-        context = execution_context or RunnerExecutionContext(
-            execution_root=standalone_root,
-            execution_dir=standalone_root
-            / "runs"
-            / "_standalone-executions"
-            / f"codex-{uuid4().hex[:12]}",
-            run_id="standalone-runner",
-            step="codex-exec",
-        )
+    ) -> tuple[list[str] | None, RunnerResult | None]:
         resolved = shutil.which(self.executable)
         if not resolved:
             command = [self.executable, "exec"]
             error = f"未找到 {self.executable}，无法启动 codex exec。"
-            _record_preflight_failure(
-                context,
-                command,
-                timeout_seconds,
-                error,
-            )
-            return RunnerResult(
+            _record_preflight_failure(context, command, timeout_seconds, error)
+            return None, RunnerResult(
                 status="error",
                 output="",
                 error=error,
@@ -309,10 +298,26 @@ class CodexExecRunner:
             "--disable",
             "plugins",
         ]
+        mcp_overrides: tuple[str, ...] = ()
+        if self.isolate_mcp:
+            try:
+                mcp_overrides = build_mcp_disable_overrides(
+                    resolved,
+                    repo_path,
+                    profile=self.options.profile,
+                )
+            except CodexMcpIsolationError as exc:
+                error = str(exc)
+                _record_preflight_failure(context, command, timeout_seconds, error)
+                return None, RunnerResult(
+                    status="error",
+                    output="",
+                    error=error,
+                    command=command,
+                )
         if self.single_writer:
             # Supervisor 只允许一个 Writer。目标仓库不能通过项目级 Codex 配置
-            # 再启用子代理并发写入、网络或额外可写根目录，也不能让无关的
-            # 多代理参数阻断真实 Worker。
+            # 再启用子代理并发写入、网络或额外可写根目录。
             command.extend(
                 [
                     "--config",
@@ -325,6 +330,8 @@ class CodexExecRunner:
                     "multi_agent_v2",
                 ]
             )
+        for override in mcp_overrides:
+            command.extend(["--config", override])
         if self.options.profile:
             command.extend(["--profile", self.options.profile])
         if self.options.model:
@@ -338,6 +345,36 @@ class CodexExecRunner:
             )
         if self.options.ephemeral:
             command.append("--ephemeral")
+        return command, None
+
+    def run(
+        self,
+        prompt: str,
+        repo_path: Path,
+        *,
+        sandbox: str,
+        timeout_seconds: int,
+        execution_context: RunnerExecutionContext | None = None,
+    ) -> RunnerResult:
+        standalone_root = Path.cwd()
+        context = execution_context or RunnerExecutionContext(
+            execution_root=standalone_root,
+            execution_dir=standalone_root
+            / "runs"
+            / "_standalone-executions"
+            / f"codex-{uuid4().hex[:12]}",
+            run_id="standalone-runner",
+            step="codex-exec",
+        )
+        command, failure = self._prepare_command(
+            repo_path,
+            sandbox,
+            context,
+            timeout_seconds,
+        )
+        if failure is not None:
+            return failure
+        assert command is not None
         if self.output_schema is not None:
             schema_path = context.execution_dir / "output-schema.json"
             try:

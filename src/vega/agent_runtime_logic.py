@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .agent_contract import (
     AgentObservation,
@@ -9,6 +10,7 @@ from .agent_contract import (
     AgentWorkItem,
     ObservationAuthority,
 )
+from .agent_run_status import latest_trusted_child_run
 from .workspace_check import ReviewWorkspaceSnapshot
 
 
@@ -42,6 +44,22 @@ def validate_observation_binding(
         raise ValueError("Worker 仍存活时不能接受 Work Item 完成 Observation")
     if observation.operation_started != state.operation_started:
         raise ValueError("Observation 与持久化 operation_started 不一致")
+
+
+def validate_machine_trace_binding(
+    run_dir: Path,
+    state: AgentState,
+    observation: AgentObservation,
+    authority: ObservationAuthority,
+) -> None:
+    """真实机器对账必须在发布任何新 Artifact 前同时核对 dispatch Trace。"""
+
+    if authority == "machine_reconcile":
+        latest_trusted_child_run(
+            run_dir,
+            state,
+            observation=observation,
+        )
 
 
 def reconcile_observation(

@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .agent_contract import AgentObservation, AgentState
 from .agent_persistence import AgentArtifactError, load_agent_state, read_agent_trace
 from .progress import PROGRESS_VERSION, RunProgressLog, safe_run_id
 from .run_utils import resolve_run_dir
@@ -26,6 +27,7 @@ _TRACE_PROGRESS = {
     "plan_revised": ("agent", "plan_updated"),
     "plan_invalidated_by_steer": ("agent", "plan_updated"),
     "worker_dispatch_committed": ("worker", "started"),
+    "worker_dispatch_reconciled": ("worker", "binding_reconciled"),
     "supervisor_next": ("agent", "supervisor_next"),
     "supervisor_repair": ("agent", "supervisor_repair"),
     "supervisor_replan": ("agent", "supervisor_replan"),
@@ -50,6 +52,10 @@ _TRACE_STATUS = {
 }
 
 
+class AgentTraceReadError(ValueError):
+    """Trace 无法读取时的专用错误，便于诊断卡安全降级。"""
+
+
 def load_agent_status_state(
     run_dir: Path,
     *,
@@ -72,6 +78,7 @@ def load_agent_status_state(
             "agent-state.json run_id 与 run 目录身份不一致；"
             "为避免展示错误证据链，已拒绝读取。"
         )
+    latest_child_run = latest_trusted_child_run(run_dir, state)
     return {
         "_run_kind": "agent",
         "automation_mode": None,
@@ -82,12 +89,86 @@ def load_agent_status_state(
         "task_id": state.task_id,
         "current_work_item": state.current_work_item,
         "active_child_run": state.active_child_run,
-        "last_child_run": state.active_child_run,
-        "brief_run": state.active_child_run,
+        "last_child_run": latest_child_run,
+        "brief_run": latest_child_run,
         "latest_checkpoint_id": state.latest_checkpoint_id,
         "allowed_actions": list(state.allowed_actions),
         "terminal_status": state.terminal_status,
     }
+
+
+def latest_trusted_child_run(
+    run_dir: Path,
+    state: AgentState,
+    *,
+    observation: AgentObservation | None = None,
+) -> str | None:
+    """从当前绑定或可信 dispatch Trace 恢复最近一次真实 child。"""
+
+    traced_execution = latest_dispatch_binding(run_dir, state)
+    traced_child_run = traced_execution[0] if traced_execution is not None else None
+    traced_operation_id = traced_execution[1] if traced_execution is not None else None
+    if state.active_child_run is not None:
+        if traced_child_run != state.active_child_run:
+            raise ValueError("active child 与最近可信 dispatch Trace 不一致")
+        if traced_operation_id != state.active_operation_id:
+            raise ValueError("active operation 与最近可信 dispatch Trace 不一致")
+        return state.active_child_run
+    if observation is not None and observation.authority != "external_claim":
+        if observation.child_run != traced_child_run:
+            raise ValueError("可信 Observation 与最近 dispatch Trace 的 child 不一致")
+        if observation.operation_id != traced_operation_id:
+            raise ValueError(
+                "可信 Observation 与最近 dispatch Trace 的 operation 不一致"
+            )
+        return observation.child_run
+    return traced_child_run
+
+
+def latest_dispatch_binding(
+    run_dir: Path,
+    state: AgentState,
+) -> tuple[str, str] | None:
+    """读取最近一次可验证的 Writer dispatch 绑定。
+
+    `worker_dispatch_reconciled` 只在 recovery 已经同时拿到保留的 operation
+    身份和 execution 证据时追加，因此仍然属于同一条可审计绑定链，而不是
+    用 Worker 自述补写一个“看起来成功”的 dispatch。
+    """
+
+    try:
+        trace_items = read_agent_trace(run_dir / "trace.jsonl")
+    except (OSError, ValueError) as exc:
+        raise AgentTraceReadError(
+            f"Agent run `{run_dir.name}` 的 trace.jsonl 无法安全读取。"
+        ) from exc
+    return _latest_dispatched_execution(
+        trace_items,
+        expected_run_id=state.run_id,
+    )
+
+
+def trusted_worker_label(
+    run_dir: Path,
+    state: AgentState,
+    *,
+    observation: AgentObservation | None,
+    checkpoint_status: str | None,
+) -> str:
+    """为状态卡生成不越过证据边界的 Worker 标签。"""
+
+    try:
+        return latest_trusted_child_run(
+            run_dir,
+            state,
+            observation=observation,
+        ) or "未启动"
+    except AgentTraceReadError:
+        if checkpoint_status != "blocked":
+            raise
+        # Trace 损坏时只能说明 binding 仍被保留，不能把未验证 child
+        # 当成可信证据展示；详细原因由 Checkpoint 和 recovery 报告承载。
+        return "未验证（保留 binding）"
 
 
 def agent_status_lines(payload: dict[str, Any]) -> list[str]:
@@ -177,9 +258,7 @@ def agent_progress_items(
         for item in trace_items
         if (progress := _trace_progress_item(item)) is not None
     ]
-    child_run = status_payload.get("active_child_run") or _latest_child_run(
-        trace_items
-    )
+    child_run = status_payload.get("last_child_run")
     items.extend(_child_progress_items(workspace, child_run))
     return sorted(items, key=lambda item: str(item.get("ts") or ""))
 
@@ -235,9 +314,32 @@ def _copy_valid_timestamp(
     target["ts"] = timestamp
 
 
-def _latest_child_run(trace_items: list[dict[str, object]]) -> str | None:
-    for item in reversed(trace_items):
+def _latest_dispatched_execution(
+    trace_items: list[dict[str, object]],
+    *,
+    expected_run_id: str,
+) -> tuple[str, str] | None:
+    latest_execution: tuple[str, str] | None = None
+    operation_bindings: dict[str, str] = {}
+    for item in trace_items:
+        if item.get("event") not in {
+            "worker_dispatch_committed",
+            "worker_dispatch_reconciled",
+        }:
+            continue
+        if item.get("run_id") != expected_run_id or item.get("phase") != "acting":
+            raise ValueError("worker dispatch Trace 与 Agent run 身份不一致")
         child_run = item.get("child_run")
-        if isinstance(child_run, str) and safe_run_id(child_run) != "unknown-run":
-            return child_run
-    return None
+        operation_id = item.get("operation_id")
+        if (
+            not isinstance(child_run, str)
+            or not child_run.strip()
+            or not isinstance(operation_id, str)
+            or not operation_id.strip()
+        ):
+            raise ValueError("worker dispatch Trace 缺少完整执行绑定")
+        existing_child_run = operation_bindings.setdefault(operation_id, child_run)
+        if existing_child_run != child_run:
+            raise ValueError("worker dispatch Trace 存在 operation 身份冲突")
+        latest_execution = (child_run, operation_id)
+    return latest_execution

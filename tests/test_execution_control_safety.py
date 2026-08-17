@@ -18,6 +18,7 @@ import pytest
 import vega.execution_control as execution_control
 import vega.execution_feedback as execution_feedback
 import vega.execution_process as execution_process
+from vega.codex_mcp_isolation import CodexMcpIsolationError
 from vega.execution_control import (
     ExecutionController,
     ExecutionLease,
@@ -455,6 +456,13 @@ def test_codex_exec_runner_single_writer_disables_target_multi_agent(
 
     monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
     monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+    monkeypatch.setattr(
+        "vega.runner.build_mcp_disable_overrides",
+        lambda *args, **kwargs: (
+            "mcp_servers.safe-server.enabled=false",
+            "mcp_servers.already_disabled.enabled=false",
+        ),
+    )
 
     result = CodexExecRunner(single_writer=True).run(
         "test prompt",
@@ -484,6 +492,106 @@ def test_codex_exec_runner_single_writer_disables_target_multi_agent(
     ]
     assert "sandbox_workspace_write.network_access=false" in config_values
     assert "sandbox_workspace_write.writable_roots=[]" in config_values
+    assert "mcp_servers.safe-server.enabled=false" in config_values
+    assert "mcp_servers.already_disabled.enabled=false" in config_values
+
+
+def test_codex_exec_runner_single_writer_fails_closed_when_mcp_isolation_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    secret = "fake-mcp-password"
+
+    def fail_isolation(*args, **kwargs):
+        del args, kwargs
+        raise CodexMcpIsolationError(
+            "无法读取 Codex MCP 配置，拒绝启动 Supervisor Worker。"
+        )
+
+    def unexpected_process_start(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("隔离检查失败后不得启动 Codex Worker")
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr(
+        "vega.runner.build_mcp_disable_overrides",
+        fail_isolation,
+    )
+    monkeypatch.setattr(
+        "vega.runner.run_owned_process",
+        unexpected_process_start,
+    )
+
+    result = CodexExecRunner(single_writer=True).run(
+        f"不得泄露 {secret}",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "error"
+    assert "拒绝启动 Supervisor Worker" in (result.error or "")
+    assert secret not in (result.error or "")
+
+
+def test_codex_exec_runner_can_isolate_reviewer_mcp_without_writer_restrictions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_owned_process(
+        command, input_text, cwd, timeout_seconds, stream_context, **kwargs
+    ):
+        del input_text, cwd, timeout_seconds, stream_context, kwargs
+        captured["command"] = command
+        payload = {
+            "type": "item.completed",
+            "item": {
+                "type": "agent_message",
+                "text": '{"verdict":"approve"}',
+            },
+        }
+        return OwnedProcessResult(
+            status="success",
+            output=json.dumps(payload),
+            error=None,
+            returncode=0,
+        )
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.runner.run_owned_process", fake_run_owned_process)
+    monkeypatch.setattr(
+        "vega.runner.build_mcp_disable_overrides",
+        lambda *args, **kwargs: ("mcp_servers.safe-review.enabled=false",),
+    )
+
+    result = CodexExecRunner(isolate_mcp=True).run(
+        "review prompt",
+        repo,
+        sandbox="read-only",
+        timeout_seconds=5,
+    )
+
+    assert result.status == "success"
+    command = captured["command"]
+    disabled = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--disable"
+    ]
+    assert disabled == ["hooks", "memories", "plugins"]
+    config_values = [
+        command[index + 1]
+        for index, value in enumerate(command[:-1])
+        if value == "--config"
+    ]
+    assert "mcp_servers.safe-review.enabled=false" in config_values
+    assert "sandbox_workspace_write.network_access=false" not in config_values
 
 
 def test_codex_exec_runner_emits_only_sanitized_jsonl_progress(
