@@ -536,13 +536,20 @@ def test_codex_exec_runner_single_writer_disables_target_multi_agent(
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    captured: dict[str, list[str]] = {}
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "writer" / "executions" / "worker",
+        run_id="writer",
+        step="worker",
+    )
+    captured: dict[str, object] = {}
 
     def fake_run_owned_process(
         command, input_text, cwd, timeout_seconds, stream_context, **kwargs
     ):
-        del input_text, cwd, timeout_seconds, stream_context, kwargs
+        del input_text, cwd, timeout_seconds, stream_context
         captured["command"] = command
+        captured["environment"] = kwargs["environment"]
         payload = {
             "type": "item.completed",
             "item": {
@@ -572,10 +579,12 @@ def test_codex_exec_runner_single_writer_disables_target_multi_agent(
         repo,
         sandbox="workspace-write",
         timeout_seconds=5,
+        execution_context=context,
     )
 
     assert result.status == "success"
     command = captured["command"]
+    assert isinstance(command, list)
     disabled = [
         command[index + 1]
         for index, value in enumerate(command[:-1])
@@ -594,9 +603,71 @@ def test_codex_exec_runner_single_writer_disables_target_multi_agent(
         if value == "--config"
     ]
     assert "sandbox_workspace_write.network_access=false" in config_values
-    assert "sandbox_workspace_write.writable_roots=[]" in config_values
+    worker_temp = context.execution_dir / "worker-temp"
+    assert (
+        "sandbox_workspace_write.writable_roots="
+        f"[{json.dumps(worker_temp.as_posix(), ensure_ascii=True)}]"
+        in config_values
+    )
     assert "mcp_servers.safe-server.enabled=false" in config_values
     assert "mcp_servers.already_disabled.enabled=false" in config_values
+    assert worker_temp.is_dir()
+    assert captured["environment"] == {
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TEMP": str(worker_temp),
+        "TMP": str(worker_temp),
+        "TMPDIR": str(worker_temp),
+    }
+
+
+def test_codex_exec_runner_single_writer_rejects_invalid_temp_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    context = RunnerExecutionContext(
+        execution_root=tmp_path,
+        execution_dir=tmp_path / "runs" / "writer" / "executions" / "worker",
+        run_id="writer",
+        step="worker",
+    )
+    context.execution_dir.mkdir(parents=True)
+    (context.execution_dir / "worker-temp").write_text(
+        "not a directory",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("vega.runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr(
+        "vega.runner.build_mcp_disable_overrides",
+        lambda *args, **kwargs: (),
+    )
+
+    def unexpected_process_start(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("临时目录不可信时不得启动 Codex Worker")
+
+    monkeypatch.setattr(
+        "vega.runner.run_owned_process",
+        unexpected_process_start,
+    )
+
+    result = CodexExecRunner(single_writer=True).run(
+        "test prompt",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=5,
+        execution_context=context,
+    )
+
+    lease = ExecutionLease.model_validate_json(
+        (context.execution_dir / "execution.json").read_text(encoding="utf-8")
+    )
+    assert result.status == "error"
+    assert result.error == "无法准备 Worker 隔离临时目录：OSError"
+    assert lease.status == "failed"
+    assert lease.child_pid is None
 
 
 def test_codex_exec_runner_single_writer_fails_closed_when_mcp_isolation_fails(
