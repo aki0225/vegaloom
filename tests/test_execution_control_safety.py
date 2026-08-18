@@ -18,6 +18,7 @@ import pytest
 import vega.execution_control as execution_control
 import vega.execution_feedback as execution_feedback
 import vega.execution_process as execution_process
+import vega.windows_command as windows_command
 from vega.codex_mcp_isolation import CodexMcpIsolationError
 from vega.execution_control import (
     ExecutionController,
@@ -78,6 +79,68 @@ def test_windows_batch_command_uses_comspec_without_changing_exe_commands(
         "exec",
     ]
     assert prepare_subprocess_command(executable, windows=True) is executable
+
+
+def test_windows_codex_npm_shim_preserves_quoted_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher_dir = tmp_path / "Codex Tools"
+    launcher_dir.mkdir()
+    launcher = launcher_dir / "codex.CMD"
+    launcher.write_text("@echo off\n", encoding="utf-8")
+    script = (
+        launcher_dir
+        / "node_modules"
+        / "@openai"
+        / "codex"
+        / "bin"
+        / "codex.js"
+    )
+    script.parent.mkdir(parents=True)
+    script.write_text("// test shim\n", encoding="utf-8")
+    node = tmp_path / "Node Tools" / "node.exe"
+    node.parent.mkdir()
+    node.write_bytes(b"test node")
+    monkeypatch.setattr(
+        windows_command.shutil,
+        "which",
+        lambda name: str(node) if name == "node" else None,
+    )
+    worker_temp = tmp_path / "space and O'Connor" / "worker-temp"
+    config = (
+        "sandbox_workspace_write.writable_roots="
+        f"[{json.dumps(worker_temp.as_posix(), ensure_ascii=True)}]"
+    )
+    logical = [str(launcher), "exec", "--config", config]
+
+    assert prepare_subprocess_command(logical, windows=True) == [
+        str(node),
+        str(script),
+        "exec",
+        "--config",
+        config,
+    ]
+
+
+def test_windows_nonstandard_codex_batch_rejects_quoted_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    launcher = tmp_path / "codex.CMD"
+    launcher.write_text("@echo off\n", encoding="utf-8")
+    monkeypatch.setattr(windows_command.shutil, "which", lambda _: None)
+
+    with pytest.raises(OSError, match="无法安全传递带双引号"):
+        prepare_subprocess_command(
+            [
+                str(launcher),
+                "exec",
+                "--config",
+                'sandbox_workspace_write.writable_roots=["worker-temp"]',
+            ],
+            windows=True,
+        )
 
 
 def test_owned_process_uses_compat_command_but_preserves_logical_lease(
