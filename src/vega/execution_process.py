@@ -10,6 +10,7 @@ from typing import Literal
 
 from ctypes import wintypes
 
+from .windows_command import prepare_windows_command
 from .windows_job import (
     CREATE_SUSPENDED,
     NamedWindowsJob,
@@ -27,7 +28,6 @@ _ERROR_ACCESS_DENIED = 5
 _ERROR_INVALID_PARAMETER = 87
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _STILL_ACTIVE = 259
-_WINDOWS_BATCH_SUFFIXES = {".bat", ".cmd"}
 
 
 @dataclass(frozen=True)
@@ -53,17 +53,9 @@ def prepare_subprocess_command(
         isinstance(command, str)
         or not command
         or not windows
-        or Path(command[0]).suffix.lower() not in _WINDOWS_BATCH_SUFFIXES
     ):
         return command
-    return [
-        os.environ.get("COMSPEC") or "cmd.exe",
-        "/d",
-        "/v:off",
-        "/s",
-        "/c",
-        subprocess.list2cmdline(command),
-    ]
+    return prepare_windows_command(command)
 
 
 def process_group_options(*, windows: bool) -> dict[str, object]:
