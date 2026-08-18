@@ -493,5 +493,8 @@ def state_from_task_card(
         current_work_item=card.current_work_item,
         workspace_fingerprint=snapshot.fingerprint,
         allowed_actions=allowed_actions,
-        handoff_status=card.handoff_status,
+        # Task Card 里的 Handoff 已在创建本机 run 时被消费。新 run 必须从
+        # “尚未发布交接”开始，否则后续 429/断网等失败会被误判成旧 run
+        # 已发布 Handoff，进而阻断人工副作用裁决和本机恢复。
+        handoff_status="none",
     )

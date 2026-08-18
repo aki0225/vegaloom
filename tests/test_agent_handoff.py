@@ -14,9 +14,18 @@ import vega.agent_resume_validation as agent_resume_validation_module
 import vega.agent_runtime_support as agent_runtime_support_module
 import vega.workspace_check as workspace_check_module
 from vega.agent_contract import AgentPlan, AgentWorkItem
-from vega.agent_persistence import load_agent_state, read_agent_trace
+from vega.agent_persistence import (
+    load_agent_checkpoint,
+    load_agent_state,
+    read_agent_trace,
+    save_agent_checkpoint,
+)
 from vega.agent_recovery import SupervisorAgentRecovery
+from vega.agent_recovery_request import AgentRecoveryRequest
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_side_effect_adjudication import (
+    SupervisorAgentSideEffectAdjudicator,
+)
 from vega.agent_task_card import TaskCardError, load_task_card, render_task_card
 from vega.cli_entrypoint import app
 
@@ -120,7 +129,7 @@ def test_handoff_round_trip_between_isolated_clones(tmp_path: Path) -> None:
     restored = SupervisorAgentRuntime(next_workspace).resume_task_card(clone)
 
     assert restored.state.phase == "ready"
-    assert restored.state.handoff_status == "handoff_ready"
+    assert restored.state.handoff_status == "none"
     assert restored.state.current_work_item == "W1"
     assert "重新对账" in (
         next_workspace / "runs" / restored.run_dir.name / "status-card.md"
@@ -129,6 +138,57 @@ def test_handoff_round_trip_between_isolated_clones(tmp_path: Path) -> None:
     assert "Verification：尚未运行" in status_card
     assert "Risk：尚未运行" in status_card
     assert "Reviewer：尚未运行" in status_card
+
+
+def test_resumed_run_can_adjudicate_new_unknown_side_effects(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    result = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证恢复后仍可处理新的 Worker 失败",
+    )
+    _git(repo, "add", "src/example.py", result.task_card_path.relative_to(repo).as_posix())
+    _git(repo, "commit", "-m", "测试：提交待恢复 WIP")
+    clone = tmp_path / "clone-new-failure"
+    _git(tmp_path, "-c", "core.autocrlf=false", "clone", str(repo), str(clone))
+    _git(clone, "config", "core.autocrlf", "false")
+    next_workspace = tmp_path / "next-workspace-new-failure"
+    next_workspace.mkdir()
+
+    restored = SupervisorAgentRuntime(next_workspace).resume_task_card(clone)
+    checkpoint_path = next(
+        (restored.run_dir / "checkpoints").glob("checkpoint-*.json")
+    )
+    checkpoint = load_agent_checkpoint(checkpoint_path)
+    payload = checkpoint.model_dump(mode="json")
+    payload["external_side_effects"] = "unknown"
+    save_agent_checkpoint(checkpoint_path, checkpoint.model_validate(payload))
+    stopped = SupervisorAgentRecovery(next_workspace).stop(
+        restored.run_dir.name,
+        reason="新 Worker 已退出，等待核对外部副作用",
+    )
+    evidence_path = (
+        stopped.run_dir / "manual-evidence" / "side-effects-reviewed.md"
+    )
+    evidence_path.parent.mkdir()
+    evidence_path.write_text(
+        "已核对新 Worker 的执行记录；本次只有仓库内修改。\n",
+        encoding="utf-8",
+    )
+
+    adjudicated = SupervisorAgentSideEffectAdjudicator(next_workspace).adjudicate(
+        stopped.run_dir.name,
+        AgentRecoveryRequest(
+            reason="恢复后的新 Worker 未执行仓库外写入",
+            external_side_effects="none",
+            actor="operator",
+            evidence_refs=["manual-evidence/side-effects-reviewed.md"],
+        ),
+    )
+
+    assert adjudicated.state.phase == "stopped"
+    assert adjudicated.state.handoff_status == "none"
 
 
 def test_resume_rejects_head_change_after_handoff_history_validation(

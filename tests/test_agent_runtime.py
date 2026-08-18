@@ -1277,7 +1277,7 @@ def test_resume_tracked_task_card_rebuilds_local_run(
 
     assert restored.state.phase == "ready"
     assert published_states == [restored.run_dir / "agent-state.json"]
-    assert restored.state.handoff_status == "handoff_ready"
+    assert restored.state.handoff_status == "none"
     metadata = json.loads(
         (restored.run_dir / "agent-run.json").read_text(encoding="utf-8")
     )
