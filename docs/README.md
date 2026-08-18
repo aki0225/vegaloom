@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-17
+> 更新时间：2026-08-18
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -30,6 +30,7 @@
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
 | 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
 | 查看工作区规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 当前规范 |
+| 查看历史实验归档 Tag | [`EXPERIMENT-ARCHIVES.md`](EXPERIMENT-ARCHIVES.md) | 已结束实验，只读复核 |
 
 ## 当前工作
 
