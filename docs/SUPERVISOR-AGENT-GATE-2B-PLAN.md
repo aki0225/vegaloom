@@ -151,7 +151,8 @@ Adapter 复用 `CodexExecRunner`，固定：
 - `--sandbox workspace-write`；
 - Supervisor 单 Writer 调用显式覆盖
   `sandbox_workspace_write.network_access=false` 与
-  `sandbox_workspace_write.writable_roots=[]`，不继承目标项目或用户配置中的额外网络和写目录；
+  `sandbox_workspace_write.writable_roots=[<execution-owned-worker-temp>]`，
+  `TEMP`、`TMP`、`TMPDIR` 同时绑定该目录；不继承目标项目或用户配置中的额外网络和写目录；
 - `--json` 与最终输出 Schema；
 - 禁用 hooks、memories、plugins 和 notify；
 - 不使用 `danger-full-access` 或任何 bypass 参数；

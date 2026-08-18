@@ -21,6 +21,7 @@ from .codex_mcp_isolation import (
 )
 from .project_config import CodexExecOptions
 from .redaction import redact_text
+from .worker_temp import prepare_single_writer_environment
 
 
 RunnerStatus = Literal["success", "error", "timed_out", "stopped", "skipped"]
@@ -317,13 +318,12 @@ class CodexExecRunner:
                 )
         if self.single_writer:
             # Supervisor 只允许一个 Writer。目标仓库不能通过项目级 Codex 配置
-            # 再启用子代理并发写入、网络或额外可写根目录。
+            # 再启用子代理并发写入或网络。额外可写根由当前 execution
+            # 在启动前收敛为唯一的 Worker 临时目录。
             command.extend(
                 [
                     "--config",
                     "sandbox_workspace_write.network_access=false",
-                    "--config",
-                    "sandbox_workspace_write.writable_roots=[]",
                     "--disable",
                     "multi_agent",
                     "--disable",
@@ -375,6 +375,17 @@ class CodexExecRunner:
         if failure is not None:
             return failure
         assert command is not None
+        environment = {"PYTHONDONTWRITEBYTECODE": "1"}
+        if self.single_writer:
+            error = prepare_single_writer_environment(command, environment, context)
+            if error is not None:
+                _record_preflight_failure(context, command, timeout_seconds, error)
+                return RunnerResult(
+                    status="error",
+                    output="",
+                    error=error,
+                    command=command,
+                )
         if self.output_schema is not None:
             schema_path = context.execution_dir / "output-schema.json"
             try:
@@ -427,7 +438,7 @@ class CodexExecRunner:
             repo_path,
             timeout_seconds,
             context,
-            environment={"PYTHONDONTWRITEBYTECODE": "1"},
+            environment=environment,
         )
         status = result.status
         error = result.error
