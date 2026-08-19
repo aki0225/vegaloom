@@ -15,11 +15,11 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | Gate 3A `gate-exit-pass` |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | V1 已实现，v0.2.0 发布候选验收通过 |
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
 | 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
-| 查看 Gate 3B 跨机器协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | SAG3B-08 machine A 已知副作用，Gate 保持未通过 |
+| 查看 Gate 3B 历史协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | SAG3B-01～08 原始结果保留 |
 | 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | V1 当前交接 |
 | 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
 | 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
@@ -34,55 +34,37 @@
 
 ## 当前工作
 
-### 进行中：Supervisor Agent V1 实验
+### 当前发布候选：Supervisor Agent V1
 
-Vega 下一阶段的主线方向是一个轻量但完整的软件工程 Supervisor Agent：宿主主会话负责只读调查
-并提交结构化计划，Coding Agent 继续读代码和修改文件；Vega 负责计划校验与批准、派发、
-Workspace 对账、检查点、恢复、主会话进度展示，以及最终可信完成判断。完整链路和范围见
-[`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)。
+`v0.2.0` 发布候选增加 opt-in Supervisor Agent V1。宿主主会话负责只读调查和提交结构化 Plan，
+Coding Agent 继续读代码和修改文件；Vega 负责 Plan revision 与人工批准、单 Writer、
+Workspace 对账、Checkpoint、Git Task Card、恢复、主会话状态展示，以及复用现有 Core 的
+最终可信完成判断。
 
-实施计划已经批准。Gate 0 已冻结状态权威与数据合同，Gate 1 已接入最小 LangGraph 控制循环，
-Gate 2A 已完成中断、恢复、单 Writer、故障注入和独立代码审查。PR `#57` 最终文档 HEAD
-`8ca75f2` 已通过 workflow `31718680069` 的 9 项 CI，并以 `6a5c927` 合并到 `main`。
-Gate 2B 实验分支已经实现真实 Codex Adapter 的机械合同：`agent run`、显式 operation/execution
-身份、批准 Plan 路径门禁、assist child Core 对账，以及 active child 的精确 stop/recover。
-Reviewer 打回后的 repair 复用同一 child；多 Work Item 的累计 Diff 归因尚未证明，因此当前
-Adapter 会在创建 child 前拒绝该形态，不放宽既有 baseline 门禁。
-打包 CLI 仍是 opt-in `agent` 子命令，`v0.1.5` 的既有默认命令行为和成功语义不变。
+Gate 0～3A 的状态权威、最小 LangGraph 控制、真实 Codex Adapter、父终态和 Handoff 生产端
+已经进入主线。SAG3B-01～08 的失败、超时和副作用阻断保持原始记录，没有事后改写。
+2026-08-18 另行批准的发布验收使用真实设置页并发缺陷，完成 partial WIP 停止、Git-only
+fresh clone 恢复、Provider 429 fail-closed、Reviewer 打回、人工 Plan revision 2、重新执行
+完整 Verification/Risk/Reviewer/Finish 和人工 PR 合入，正式判定为
+`release-acceptance-pass`。
 
-Gate 2B 的 Adapter 信任边界、两个真实案例、预算、停止条件和代码变更上限已经整理到
-[`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md)。`SAG2B-01` 已证明
-真实 Worker 的成功 Claim 不会越过未跟踪文件门禁；`SAG2B-02` 已证明带 partial Diff 的
-owned execution 能由身份绑定的 `agent stop` 停止并交还人工。当前状态为
-`gate-exit-pass`：两个冻结真实案例、最终 PR CI 和合并前审阅均满足 Gate 2B 的退出门槛。
-Gate 2C 首次运行因 pytest 加载了控制环境中的 `packaging` 而记为 `invalid-harness`；
-修正验证入口的 Gate 2C R2 已完成并判定为 `gate-exit-pass`。Gate 3A 已完成 Handoff 生产端、
-同机双隔离副本往返、PR CI 与合并前审阅，状态为 `gate-exit-pass`。Gate 3B 已获批准，
-固定控制器、未知副作用继承和人工副作用裁决门禁均已通过 PR CI；控制器已重新冻结到
-`3e636e4`，并修复仓库内 workspace 把自有 `runs/` artifact 误判为漂移的问题。后续
-SAG3B-03 完成 machine A 和同机隔离 B 模拟，暴露 committed handoff comparison baseline
-缺口；窄修复已通过 PR `#63` 合入 `main@435767a`。SAG3B-04～06 又分别暴露 Workspace、
-Writer MCP 和 Reviewer MCP 边界缺口。SAG3B-07 已完成 Git-only 双独立 clone 接力，但
-machine B 的真实 Worker 在冻结的 900 秒预算内没有取得可信终态。随后 PR `#68` 已把
-Windows `codex.CMD` 启动和人工 replan attempt epoch 修复合入 `main@70282d1`。SAG3B-08
-在固定 Python 3.12 环境通过 machine A 三轮预检并形成允许范围内 partial Diff，但 Worker
-自检在系统 `%TEMP%` 遗留 pytest fixture 和临时 Git 仓库；人工副作用裁决为 `known`，
-因此没有发布 Handoff 或启动 machine B。Gate 3B 保持 `gate-not-passed`，不自动追加
-SAG3B-09，Gate 3C 继续冻结。
+当前 Adapter 仍只接受一个未完成 Work Item，并在创建第二 Writer 前 fail-closed。打包 CLI
+通过显式 `vega agent` 暴露 V1，不改变 `vega do / loop / goal` 和现有成功语义。完整链路、
+历史 Gate 与当前交接分别见：
+
+- [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)
+- [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md)
+- [`../eval/real-world-runs.md`](../eval/real-world-runs.md)
 
 ### 真实日常使用观察
 
-`v0.1.5` 已发布。CRWP-V1、Plan-first、Finish 第一屏、Reviewer 覆盖和 Goal P1 显式
-Worker 重跑都已有实现或真实证据；Codex assist、Claude Code assist、`vega do`、Reviewer
-打回和 fail-closed 场景均有记录。
+`v0.2.0` 发布后进入真实日常使用观察。CRWP-V1、Plan-first、Finish 第一屏、Reviewer 覆盖、
+Goal P1 显式 Worker 重跑和 Supervisor Agent V1 都已有实现或真实证据；Codex assist、
+Claude Code assist、`vega do`、Reviewer 打回、Provider 失败和 Git-only 恢复场景均有记录。
 
-Supervisor Agent V1 继续按 Gate 推进；Gate 2A 已进入主线，Gate 2B 已完成两个冻结真实案例，
-最终分支 CI 和合并前审阅均已通过，Gate 2C R2 已完成并通过，Gate 3A 已取得本地往返证据；
-Gate 3B 已执行到 SAG3B-08：稳定环境预检和 machine A partial Diff 成功，但 Worker 留下
-仓库外 pytest 临时文件，Handoff 被正确阻断，没有形成 machine B 的完整 Core Gate 证据。
-`v0.1.5` 继续按现有日常使用合同维护，不把实验入口零散接入默认 Runtime。Finish 第一屏尚有测试名称缺失、
-空 Scope 展示和 Workspace 汇总不一致等观察项；只有这些问题重复造成误判时才做最小修正。
-当前状态与历史停止条件见：
+下一阶段不增加多 Work Item、Memory、Provider 平台或新 Runtime。只记录恢复耗时、重复调查、
+人工步骤、误判和再次使用意愿；测试名称缺失、空 Scope 展示和 Workspace 汇总不一致等观察项
+只有在重复造成误判时才做最小修正。当前状态与历史停止条件见：
 
 - [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md)：已完成阶段与验收记录。
 - [`ROADMAP.md`](ROADMAP.md)：当前观察期和冻结方向。
@@ -117,6 +99,8 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 
 ### 已完成的当前阶段
 
+- `v0.2.0` 发布候选已完成真实任务验收和本机 package smoke，正在等待 PR CI、Tag 和
+  GitHub Release 门禁；远端 Tag 与 Release 创建前不记为已发布。
 - `v0.1.5` annotated Tag 与 GitHub Release 已发布；该版本汇总日常使用协议、Finish 展示、
   Reviewer 可信度修复和显式 Worker 重跑的恢复边界。
 - `v0.1.4` annotated Tag 与 GitHub Release 已发布；精确 Tag smoke 已登记在
@@ -137,6 +121,8 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
   运行前控制登记，不替代 Handoff。
 - [`../eval/real-world-runs.md`](../eval/real-world-runs.md)：
   真实运行证据，只允许追加。
+- [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md)：v0.2.0 详细变更。
+- [`RELEASE-SUMMARY-0.2.0.md`](RELEASE-SUMMARY-0.2.0.md)：v0.2.0 GitHub Release 文案。
 - [`RELEASE-NOTES-0.1.5.md`](RELEASE-NOTES-0.1.5.md)：v0.1.5 详细变更。
 - [`RELEASE-SUMMARY-0.1.5.md`](RELEASE-SUMMARY-0.1.5.md)：GitHub Release 文案。
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)：发布门禁记录。
@@ -155,10 +141,11 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 | [`LEAN-CORE-PLAN.md`](LEAN-CORE-PLAN.md) | 轻量核心清单和增长约束决策 |
 | [`LONG-RUNNING-GOALS.md`](LONG-RUNNING-GOALS.md) | Goal P0 与单 checkpoint P1 实验边界 |
 
-## 发布历史
+## 发布文档
 
 | 版本 | 发布说明 | 发布摘要 |
 |---|---|---|
+| `v0.2.0` 候选 | [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md) | [`RELEASE-SUMMARY-0.2.0.md`](RELEASE-SUMMARY-0.2.0.md) |
 | `v0.1.5` | [`RELEASE-NOTES-0.1.5.md`](RELEASE-NOTES-0.1.5.md) | [`RELEASE-SUMMARY-0.1.5.md`](RELEASE-SUMMARY-0.1.5.md) |
 | `v0.1.4` | [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md) | [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md) |
 | `v0.1.3` | [`RELEASE-NOTES-0.1.3.md`](RELEASE-NOTES-0.1.3.md) | [`RELEASE-SUMMARY-0.1.3.md`](RELEASE-SUMMARY-0.1.3.md) |

@@ -11,13 +11,14 @@
 - CLI：`vega`
 - 稳定公共 Python API：仅 `vega.__version__`
 - 日常入口：`vega do`、`vega loop`、`vega status`、`vega finish`
+- opt-in Agent 入口：`vega agent`、`vega adapters init codex`
 - 只读 inspection 入口：`vega run engineering-change`
 
 不在本清单中验证：
 
 - 自动 commit、push、release 或部署。
 - 生产数据库迁移或生产 backfill。
-- LangGraph、Memory、Goal P1 或多 Reviewer 默认集成。
+- 多 Work Item 自动派发、长期 Memory、Provider 平台或多 Reviewer 默认集成。
 - 操作系统级 sandbox 或容器隔离。
 
 ## 二、干净工作区检查
@@ -41,9 +42,11 @@ git check-ignore -v .env .tmp .local-validation runs memory .agents .claude .cod
 常规验证：
 
 ```powershell
-python -m compileall src
-ruff check src tests scripts
+python -m compileall src scripts/check_repository_hygiene.py
+python scripts/check_repository_hygiene.py --base-ref origin/main
+ruff check src tests scripts/check_repository_hygiene.py
 python -m pytest --collect-only -q
+git diff --check
 ```
 
 如果要做完整本地测试，优先让 pytest 使用项目内临时目录：
@@ -90,12 +93,23 @@ Push-Location $smokeDir
 & ".\.venv\Scripts\vega.exe" --version
 & ".\.venv\Scripts\vega.exe" list-loops
 Pop-Location
+
+$agentSmokeDir = Join-Path $root "agent-package-smoke"
+python -m venv (Join-Path $agentSmokeDir ".venv")
+$agentSmokePython = Join-Path $agentSmokeDir ".venv\Scripts\python.exe"
+& $agentSmokePython -m pip install --upgrade pip
+$agentWheel = "$($wheel.FullName)[agent]"
+& $agentSmokePython -m pip install $agentWheel
+Push-Location $agentSmokeDir
+& ".\.venv\Scripts\vega.exe" agent capabilities
+Pop-Location
 ```
 
 期望：
 
 - `vega --version` 输出当前版本。
 - `vega list-loops` 在源码树外仍能看到包内 baseline loop。
+- 安装 `agent` extra 后，`vega agent capabilities` 显示 LangGraph 与 SQLite checkpoint 可用。
 - 生成的 `.tmp/release-readiness/`、`build/` 和 egg-info 中间产物不提交。
 - 如果系统 PATH 上已有旧版 `vega`，以当前 venv 或 smoke venv 中的 `vega.exe` 为准。
 
@@ -153,6 +167,23 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 如果 Codex CLI 没有及时输出 JSONL、进程超时、终态消息缺失或证据不一致，本次 smoke 必须
 记为未通过并保留现场；不得仅凭单元测试、CI 或安全终止行为创建 Tag。
 
+### Supervisor Agent V1 发布验收
+
+包含 `vega agent` 产品变更的发布候选还必须完成一个真实单 Work Item 案例。通过条件：
+
+- Plan、Non-goals、成功条件、允许路径、验证命令和风险说明由人工显式批准。
+- Writer 只有一个绑定的 child/operation；Provider 失败、进程消失或 unknown 副作用不会
+  自动重试。
+- Handoff 只提交 WIP 与 Task Card；新的隔离 clone 不复制旧 `runs/`、Trace、SQLite、
+  虚拟环境、临时目录或聊天。
+- 恢复侧重新生成 Workspace、Scope、Verification、Risk、独立 Reviewer 和 Finish。
+- Reviewer 可以打回 Worker 的完成 Claim；人工修订 Plan 后使用新的 attempt，不覆盖旧证据。
+- 最终 `Agent phase=completed` 且 `terminal_status=ready_to_commit`，目标变更再由人工 PR 处理。
+
+如果最新真实验收使用的 Runtime commit 与发布候选之间只有版本号、CI 版本断言、发布文档和
+对应版本测试差异，可以复用该真实运行解释模型边界；候选提交仍必须通过完整 CI、wheel/sdist
+安装和 `vega agent capabilities` package smoke。
+
 ## 六、CI 与标签门禁
 
 正式标签前必须确认 GitHub Actions 主线同一 commit 的任务全部成功：
@@ -171,6 +202,7 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 可以说：
 
 - Vega 是本地优先的 AI 编码工作流 harness。
+- Vega 提供 opt-in、单 Work Item 的 Supervisor Agent 控制层。
 - worker 与 reviewer 使用独立会话边界，reviewer 在只读视图中结合证据审查。
 - 结构化验证、workspace snapshot、risk gate 和 finish evidence 共同决定是否可交付。
 - Assurance Stage 1/2/3 是公开可复核的实验与证据，不等于默认 Runtime 能力。
@@ -178,6 +210,7 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 不要说：
 
 - Vega 是通用 Agent 框架或多 Agent 平台。
+- Vega 已支持多 Worker 自治、完整 Provider 平台或无人值守长期运行。
 - Vega 提供操作系统级 sandbox。
 - Vega 自动提交、部署、发布或修改生产数据库。
 - Stage 3 已经证明通用生产 backfill 安全。

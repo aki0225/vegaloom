@@ -960,3 +960,111 @@ machine-b-not-started / gate-not-passed`。
 
 这条证据说明稳定依赖版本并不足以保证可接力：Worker Prompt 不能确定性约束自检临时文件。
 按预注册停止线不自动追加 SAG3B-09，也不把清理临时目录追溯解释为副作用从未发生。
+
+## 2026-08-18 Supervisor Agent v0.2.0 发布验收：Echo Vault 设置页并发竞态
+
+本条是单独批准的 v0.2.0 发布验收，不命名为 SAG3B-09，也不覆盖 SAG3B-01～08 的历史
+判定。目标是验证当前产品合同能否在真实代码任务中完成：
+
+```text
+partial WIP
+→ identity-bound stop
+→ Workspace 与副作用对账
+→ Git Task Card
+→ 独立 fresh clone 恢复
+→ 新 Worker
+→ Verification / Risk / 独立 Reviewer / Finish
+→ 人工 PR
+```
+
+目标任务是修复设置页用户名修改与密码修改可并发提交的竞态。批准范围只有
+`frontend/src/ui/pages/SettingsPage.tsx` 和
+`frontend/src/ui/pages/SettingsPage.test.tsx`；明确禁止修改后端 API、数据库、权限、登录
+流程、密码规则、依赖和页面视觉体系。
+
+前序机器 A 已形成两个允许文件的 WIP，经身份绑定 stop、进程与 Workspace 对账、人工副作用
+裁决后生成 Git Task Card。后续验收 clone 只从任务分支读取 committed WIP 与 Task Card，
+没有复制旧 `runs/`、Trace、LangGraph SQLite、虚拟环境、临时目录或聊天。
+
+### Provider 429 与恢复状态缺口
+
+恢复 run `20260818-221144-agent-resume` 启动 child
+`20260818-221159-167783-bug-loop` 后，Provider 返回 429，外部 runner 退出码为 `1`，没有
+Worker Claim。Vega 记录：
+
+- `work_item_completed=false`；
+- `worker_alive=false`；
+- `external_side_effects=unknown`；
+- Verification、Risk、Reviewer 和 Finish 均为 `not_run`；
+- Supervisor 确定性选择 `human`，最终保持 `needs_human`，没有自动重试或第二 Writer。
+
+人工完成静止现场对账时又发现一个真实控制缺口：新 run 从 Task Card 恢复后仍继承
+`handoff_status=handoff_ready`，导致已消费的旧交接状态阻断本次新的副作用裁决。修复提交
+`aa096c014fd00807aeb1a0c6cb088341a264b280` 让恢复 run 从 `handoff_status=none` 开始，并增加
+“恢复后出现新的 unknown 副作用仍可裁决”的回归。该修复不降低 unknown 副作用门禁，也不
+把 429 attempt 改写为成功。
+
+### Fresh clone 重新执行
+
+最终验收使用从远端 `release/v0.2.0@aa096c0` 重建的非 editable Vega 控制环境，以及从远端
+任务分支重建的独立目标 clone。恢复 run 为 `20260818-231923-agent-resume`，初始
+`handoff_status=none`。
+
+第一条 child `20260818-231952-765911-bug-loop` 正常退出，四项前端门禁通过，但独立
+Reviewer 返回 `needs_human`：
+
+1. 原测试先等待 busy 状态渲染，再尝试重复提交，不能证明 React 状态提交前的同一事件批次
+   竞态，也不能证明同步 ref 锁确实必要；
+2. 目标仓库 `AGENTS.md` 要求提交前提供后端测试证据，当前 Plan 没有包含该命令。
+
+Supervisor 采用 Machine Observation
+`observation-d6021f324102`，选择 `human`，没有用 Worker 的 `completed` Claim 覆盖
+Reviewer finding。人工随后批准 Plan revision 2，只增加同批次竞态测试要求与后端验证，
+没有扩大产品文件范围。
+
+第二条 child `20260818-233820-287105-bug-loop` 绑定 operation
+`899b517a30514f8891ff3148c2fcbc9f`。Worker 只修改批准的测试文件，在同一个 React `act`
+批次内连续派发首次、重复和交叉提交。Worker 还报告了一次负向突变检查：临时移除同步 ref
+守卫后，两条新测试均观察到 API 被调用 `3` 次；该自述只作为 Claim 保存，不替代后续门禁。
+
+当前 Workspace 的确定性验证为：
+
+- 后端完整测试：`361 passed`；
+- 设置页定向测试：`7 passed`；
+- 前端完整测试：`14` 个测试文件、`180 passed`；
+- `tsconfig.app.json` 与 `tsconfig.node.json` 类型检查通过；
+- Vite 输出到受控 verification 临时目录，构建通过；
+- `git diff --check` 通过；
+- 测试前后 ignored Workspace 指纹一致，没有新增未知文件。
+
+Risk Gate 将两个设置页文件识别为前端并发与异步风险，独立 Reviewer 复核同批次重复提交、
+交叉提交、成功恢复和失败恢复后返回 `approve`，没有 finding。Machine Observation
+`observation-12c501123134` 记录 `work_item_completed=true`、
+`worker_alive=false`、`external_side_effects=none`；Supervisor 选择 `finalize`。
+
+最终父状态为：
+
+```text
+agent_run = 20260818-231923-agent-resume
+plan_revision = 2
+checkpoint = checkpoint-006
+phase = completed
+verification = passed
+risk = passed
+reviewer = approve
+terminal_status = ready_to_commit
+finish_sha256 = 979b1cee1fc342b6086953f93d217dc0ffbea9b7ec2b901b4a6220c7c3a0b977
+```
+
+人工随后归档目标仓库任务记录、删除临时 `.vega.yaml` 和 Task Card，重新执行相同的后端、
+前端、类型检查、隔离构建与 Diff 门禁，并通过 PR `#1` Squash Merge 到目标主线提交
+`593007bc9aa9667f37e74658a1085b1c0e37ac87`。Vega 没有执行 commit、push、PR 或 merge。
+
+本 Case 判定为：
+
+`git-only-resume-pass / provider-failure-fail-closed / reviewer-rejection-pass /
+human-replan-pass / full-core-pass / target-pr-merged / release-acceptance-pass`。
+
+这项结果证明单 Work Item 的真实 WIP 可以只经 Git Task Card 在独立 clone 中恢复，并允许
+Reviewer 推翻 Worker Claim、要求人工修订 Plan 后重新完成 Core Gate。它不证明多 Work Item
+自治、物理机安全隔离、通用 Provider 稳定性、Claude Code 原生 Writer 或无人值守长时间运行。

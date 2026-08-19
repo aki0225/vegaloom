@@ -1998,3 +1998,18 @@ gate_3b = gate-not-passed
 暴露一个更直接的产品边界：Prompt 对 Worker 自检临时文件位置的约束不是确定性执行隔离。
 按照第 23.1 节停止线，不自动追加 SAG3B-09，也不为本次结果扩大 Runtime；后续是否继续
 Gate 3B 必须重新决策。
+
+## 二十四、2026-08-18 发布验收的关系
+
+人工没有在 SAG3B-08 内放宽冻结标准，也没有把后续真实任务命名为 SAG3B-09。
+SAG3B-01～08 的原始输入、失败、超时、副作用和 `gate-not-passed` 判定全部保留。
+
+v0.2.0 使用一条单独批准的发布验收回答更贴近日常使用的问题：在现有控制器已经完成多轮
+边界修复后，一个真实 partial WIP 能否只经 Git Task Card 在独立 fresh clone 中恢复，
+允许 Provider 失败安全停止、允许 Reviewer 打回 Worker Claim，并在人工修订 Plan 后重新
+形成完整 Verification、Risk、Reviewer 与 Finish。
+
+该 Case 最终判定为 `release-acceptance-pass`，详细追加式证据见
+[`../eval/real-world-runs.md`](../eval/real-world-runs.md)。它是 v0.2.0 的产品发布依据，不是
+对 SAG3B-01～08 的追溯重跑，也不证明另一台物理机器、系统级隔离、多 Work Item 或长期
+无人值守自治。

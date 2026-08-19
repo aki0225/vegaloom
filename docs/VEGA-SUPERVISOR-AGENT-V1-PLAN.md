@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`approved / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-08 machine-a-known-side-effect / gate-not-passed / Gate 3C 冻结`
+> 状态：`implemented / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / SAG3B-01～08 历史结果保留 / v0.2.0 release-acceptance-pass`
 >
 > 计划日期：2026-08-13
 >
@@ -20,8 +20,11 @@
 > `codex.CMD` 启动与人工 replan attempt epoch 又通过 PR `#68` 合入 `main@70282d1`。
 > SAG3B-08 在稳定 Python 3.12 环境通过 machine A 预检并形成允许范围内 partial Diff，但
 > Worker 在系统 `%TEMP%` 遗留 pytest fixture 和临时 Git 仓库，人工副作用裁决为 `known`，
-> 未发布 Handoff 或启动 machine B。Gate 3B 保持未通过，不自动追加 SAG3B-09，Gate 3C
-> 仍冻结。
+> 未发布 Handoff 或启动 machine B。该预注册系列保持历史 `gate-not-passed`，没有事后
+> 改写或自动追加 SAG3B-09。2026-08-18 经人工另行批准，使用真实 Echo Vault 并发缺陷完成
+> v0.2.0 发布验收：Git-only fresh clone 恢复、Provider 失败 fail-closed、Reviewer 打回、
+> Plan revision 2、完整 Core Gate 与人工 PR 均已走通，判定为
+> `release-acceptance-pass`。该结果作为 V1 发布依据，不覆盖 SAG3B-01～08。
 
 ## 一、产品决定
 
@@ -1102,6 +1105,14 @@ Windows `codex.CMD` 启动和 replan attempt epoch 修复合入 `main@70282d1`�
 `needs_human / blocked`，没有发布 Handoff 或启动 machine B。Gate 3B 仍为
 `gate-not-passed`，不自动追加 SAG3B-09，Gate 3C 继续冻结。
 
+2026-08-18 人工决定不在 SAG3B-08 内放宽标准，也不机械增加 SAG3B-09，而是单独执行
+v0.2.0 发布验收。该 Case 使用真实前端并发缺陷，从既有 partial WIP 和 Git Task Card 在
+独立 fresh clone 中恢复。Provider 429 attempt 保持 `needs_human`；恢复状态缺口修复后，
+新的隔离 clone 先被 Reviewer 因测试与后端证据不足打回，再经人工批准 Plan revision 2、
+新 child、五项确定性验证、Risk 与独立 Reviewer 得到 `completed / ready_to_commit`。
+目标变更随后由人工 PR 合入。该结果判定为 `release-acceptance-pass`，是第 8 项能力目标的
+产品发布证据，但不覆盖 SAG3B-01～08 的历史实验结论。
+
 2026-08-16 另行补齐了 V1 已承诺但此前未完整发布的三个产品合同：可信 Core Finish 到父
 Agent `completed` 的终态发布、`$vega-agent` 主会话 Skill、父 Agent 的通用
 `status/watch`。它们属于既有 V1 合同，不代表 Gate 3B 已通过，也不新增多 Work Item、
@@ -1114,13 +1125,14 @@ Planner、Memory、Provider SDK 或自动 Git。
 5. Gate 2A 通过后才连接真实 Codex；
 6. Gate 2B 通过后先完成 Gate 2C 当前主线真实完整成功路径（已完成，`gate-exit-pass`）；
 7. 获得单独批准后实现 Gate 3A Handoff 生产端并完成本地往返；
-8. Gate 3A 通过后做 Gate 3B 单 Work Item 跨机器接力；
-9. Gate 3B 通过后做 Gate 3C 小规模日常价值观察；
+8. Gate 3A 通过后验证单 Work Item Git-only 接力；SAG3B 历史 Case 如实保留，最终由单独
+   批准的 v0.2.0 发布验收完成产品级端到端证据；
+9. v0.2.0 发布后进入少量日常价值观察，不把观察期设为继续增加 Runtime 的理由；
 10. 每个 Gate 都先给用户看证据和下一步，不一次性跨过全部阶段。
 
 ## 十四、已确认的决定
 
-截至 2026-08-15 已确认：
+截至 2026-08-18 已确认：
 
 1. Vega 的主线定位为轻量、可恢复、主会话可控的软件工程 Supervisor Agent；
 2. Task Card 进入 Git，运行状态、Checkpoint 和 Trace 默认留在本机；
@@ -1130,7 +1142,10 @@ Planner、Memory、Provider SDK 或自动 Git。
    新分支；合并后删除；
 6. Gate 2C 先证明当前主线完整成功路径，再进入 Handoff 实现；
 7. 多 Work Item、Memory Proposal 和 Provider 平台不属于 Supervisor Agent V1 必过范围。
-8. Gate 3A 只证明同机机械接力；真实跨机器继续执行和日常价值分别属于 Gate 3B、Gate 3C。
+8. Gate 3A 只证明同机机械接力；v0.2.0 发布验收已经证明独立 fresh clone 的 Git-only
+   真实 Worker 恢复与完整 Core Gate。另一台物理机器不再是发布硬门槛，仍可作为更强观察；
+9. SAG3B-01～08 的失败和阻断记录保持不变，发布验收不追溯改写它们；
+10. V1 发布后先真实使用，不继续增加多 Work Item、Memory、Provider 平台或新 Runtime。
 
 本文与当前代码或产品契约冲突时，在新版本发布前仍以已发布代码、
 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 和真实运行证据为准。

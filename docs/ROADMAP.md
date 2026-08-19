@@ -1,8 +1,9 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-17
-> 当前稳定基线：`v0.1.5`
-> 发布记录：annotated Tag 与 GitHub Release 已发布
+> 更新时间：2026-08-19
+> 当前已发布稳定基线：`v0.1.5`
+> 当前发布候选：`v0.2.0`（真实验收与本机 package smoke 通过，PR CI 待完成）
+> 发布记录：以远端 annotated Tag 与 GitHub Release 为准
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
 > 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式 `--rerun-worker`
@@ -21,11 +22,13 @@
 > Finish。PR `#68` 已以 `70282d1` 合入 Windows batch launcher 与 replan attempt epoch
 > 修复。SAG3B-08 在稳定 Python 3.12 环境通过预检并形成 machine A partial Diff，但 Worker
 > 在系统 `%TEMP%` 遗留 pytest fixture 和临时 Git 仓库，副作用裁决为 `known`，Handoff
-> 未发布。Gate 3B 保持 `gate-not-passed`，不自动追加 SAG3B-09，Gate 3C 仍冻结。既有
-> `vega do / loop / goal`、Reviewer 和成功语义
-> 保持不变，顶层 CLI 仅扩展 opt-in `agent`。2026-08-16 已补齐既有 V1 合同中的父
-> Agent 终态、`$vega-agent` 主会话 Skill 和通用 `status/watch`，相关实现已进入主线。
-> 这不改变 Gate 3B/3C 的实验结论。
+> 未发布。SAG3B-01～08 保持历史 `gate-not-passed`，不自动追加 SAG3B-09。既有
+> `vega do / loop / goal`、Reviewer 和成功语义保持不变，顶层 CLI 扩展 opt-in `agent`。
+> 2026-08-16 已补齐 V1 合同中的父 Agent 终态、`$vega-agent` 主会话 Skill 和通用
+> `status/watch`。2026-08-18 经人工另行批准的 v0.2.0 发布验收使用真实前端并发缺陷，
+> 完成 Git-only fresh clone 恢复、Provider 失败 fail-closed、Reviewer 打回、Plan revision 2、
+> 完整 Core Gate 和人工 PR 合入，判定为 `release-acceptance-pass`。该结果不覆盖历史
+> SAG3B Case；另一台物理机器和长期价值观察不再阻断 v0.2.0，转为发布后的增强证据。
 
 本文是 Vega 当前路线的统一入口，只回答：
 
@@ -61,8 +64,10 @@ v0.1.5 发布（完成）
   -> Gate 2B 真实 Codex（完成，gate-exit-pass）
   -> Gate 2C 当前主线真实完整成功路径（SAG2C-01 invalid-harness；SAG2C-02 gate-exit-pass）
   -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
-  -> Gate 3B 单 Work Item Git-only 接力（SAG3B-08 machine A known side effect；未通过）
-  -> Gate 3C 小规模日常价值观察（冻结）
+  -> Gate 3B 预注册系列（SAG3B-01～08 历史结果保留）
+  -> v0.2.0 单 Work Item Git-only 发布验收（完成，release-acceptance-pass）
+  -> v0.2.0 Supervisor Agent V1 发布（候选门禁进行中）
+  -> 小规模日常价值观察（发布后进行，不新增 Runtime）
   -> V1 产品合同补全：父终态、主会话 Skill、父 run status/watch（已进入主线）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
 ```
@@ -880,6 +885,35 @@ PR `#68` 已以 `70282d1` 合入 Windows `codex.CMD` 启动和人工 replan atte
 
 当前不自动追加 SAG3B-09，也不继续建设新的恢复基础设施。若未来继续 Gate 3B，先单独决策
 是否需要确定性的 Worker 临时目录执行隔离；在此之前维持 opt-in 实验状态和既有主线行为。
+
+### 2026-08-18：Supervisor Agent v0.2.0 发布验收
+
+人工决定不在 SAG3B-08 内事后放宽副作用标准，也不机械创建 SAG3B-09。v0.2.0 改用一条
+单独批准的真实发布验收，目标是证明已经实现的 V1 合同能完成日常代码任务，而不是继续增加
+恢复基础设施。
+
+验收使用真实设置页并发竞态：
+
+1. 机器 A 的真实 Worker 在批准范围内形成 partial WIP，经身份绑定 stop、Workspace 与副作用
+   对账后生成 Git Task Card；
+2. 后续环境只从远端 Git 重建目标 clone 和 Vega 控制环境，不复制旧 `runs/`、Trace、SQLite、
+   虚拟环境或聊天；
+3. Provider 429 attempt 保持 `needs_human`，并暴露恢复 run 继承旧 Handoff 状态的缺口；
+4. 修复提交 `aa096c0` 重置已消费的本机 Handoff 状态，没有降低 unknown 副作用门禁；
+5. fresh clone 的首次完整 Core 被 Reviewer 因同批次竞态测试和后端证据不足打回；
+6. 人工批准 Plan revision 2 后，新 child 通过后端 `361` 项、定向前端 `7` 项、完整前端
+   `180` 项、TypeScript、隔离构建、Risk 和 Reviewer，父 Agent 得到
+   `completed / ready_to_commit`；
+7. 目标变更随后由人工 PR 合入，Vega 没有执行 commit、push 或 merge。
+
+正式判定为
+`git-only-resume-pass / reviewer-rejection-pass / human-replan-pass /
+full-core-pass / release-acceptance-pass`。详细证据追加在
+[`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
+
+v0.2.0 发布后不继续增加多 Work Item、Memory、Provider 平台或新 Runtime。下一阶段只做
+真实日常使用观察：记录恢复耗时、重复调查、人工步骤、误判和是否愿意再次使用；出现重复、
+可复现的产品缺口时才做最小修正。
 
 ## 七、更新规则
 
