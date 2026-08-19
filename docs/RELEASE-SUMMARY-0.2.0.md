@@ -1,6 +1,8 @@
 # Vega v0.2.0 发布摘要
 
 > 版本：v0.2.0
+>
+> 状态：已发布
 
 这份摘要用于 GitHub Release 文案。详细变更见
 [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md)，发布步骤见

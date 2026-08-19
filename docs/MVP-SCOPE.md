@@ -210,7 +210,7 @@ future optional: SQLite + FTS5 memory ledger、replay UI
 当前产品范围以 `docs/PRODUCT-CONTRACT.md` 为准：核心是上下文编译、受控执行、确定性验证、
 隔离审查和证据化恢复；Memory、Goal P0 与 adapter 保持实验状态。
 
-当前已发布稳定版本为 `v0.1.5`。`v0.2.0` 发布候选保留既有核心成功语义，并增加 opt-in
-Supervisor Agent V1：单 Work Item、人工批准、单 Writer、可恢复 Checkpoint、Git Task
-Card、机器 Observation 以及现有 Verification、Risk、独立 Reviewer 和 Finish。多 Work
-Item 自动推进、长期 Memory、Provider 平台和自动 Git 仍不在当前范围。
+当前稳定版本为 `v0.2.0`。它保留既有核心成功语义，并发布 opt-in Supervisor Agent V1：
+单 Work Item、人工批准、单 Writer、可恢复 Checkpoint、Git Task Card、机器 Observation
+以及现有 Verification、Risk、独立 Reviewer 和 Finish。多 Work Item 自动推进、长期
+Memory、Provider 平台和自动 Git 仍不在当前范围。
