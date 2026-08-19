@@ -1,9 +1,13 @@
 # Assurance Stage 2 expand/backfill/contract 双生实验
 
 > 实验：`AV-STAGE2-002`
-> 状态：本地候选已运行；2026-07-24 独立审查修正后等待 PR CI
+> 状态：已完成并冻结；PR `#10` 已 squash 合并，合并后主线 CI 通过
 > Threat：`T-DB-MIG-COMPAT`
 > 结论上限：`continue-experiment / requires_staged_rollout`
+>
+> 当前说明：该实验只作为 SQLite migration 证据保留，不接入默认 Runtime，也不证明生产
+> 数据库迁移安全。完整的 PR 与主线结果见 `eval/assurance-validation.md` 中
+> `AV-STAGE2-002` 的追加记录。
 
 ## 一、目的与边界
 

@@ -1,15 +1,128 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import subprocess
 from collections.abc import Iterator
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_ROOT = Path("examples/evidence")
 DEFAULT_OUTPUT = Path("site/data/cases.json")
+PUBLIC_AGENT_SOURCES = {
+    "release": {
+        "label": "v0.2.0 发布说明",
+        "path": "docs/RELEASE-NOTES-0.2.0.md",
+    },
+    "run": {
+        "label": "发布验收记录",
+        "path": "eval/real-world-runs.md",
+    },
+    "summary": {
+        "label": "发布摘要",
+        "path": "docs/RELEASE-SUMMARY-0.2.0.md",
+    },
+}
+
+_RELEASE = {
+    "tag": "v0.2.0",
+    "commit": "2fb1bd856df55907a4d3ef1039ea62658b30b2b4",
+}
+_PROVIDER_FAILURE_RUN_ID = "20260818-221144-agent-resume"
+_FINAL_RUN_ID = "20260818-231923-agent-resume"
+_SCENARIO_FIELDS = {
+    "id",
+    "index",
+    "label",
+    "title",
+    "summary",
+    "run_ids",
+    "duration_ms",
+    "result",
+    "events",
+}
+_EVENT_FIELDS = {
+    "id",
+    "at_ms",
+    "type",
+    "tone",
+    "message",
+    "detail",
+    "source_refs",
+    "status_card",
+}
+_STATUS_CARD_FIELDS = {
+    "phase",
+    "work_item",
+    "worker",
+    "workspace",
+    "checkpoint",
+    "verification",
+    "risk",
+    "reviewer",
+    "allowed_actions",
+    "next_step",
+    "finish",
+}
+_ALLOWED_EVENT_TYPES = {
+    "plan",
+    "worker",
+    "workspace",
+    "checkpoint",
+    "verification",
+    "reviewer",
+    "decision",
+    "finish",
+}
+_ALLOWED_EVENT_TONES = {"neutral", "warning", "danger", "success"}
+_EXPECTED_SCENARIOS = (
+    {
+        "id": "handoff-and-provider-failure",
+        "index": 1,
+        "result": "needs_human",
+        "run_ids": (_PROVIDER_FAILURE_RUN_ID,),
+        "events": (
+            ("partial-wip", "worker", "warning", ("release", "run")),
+            ("identity-bound-stop", "checkpoint", "warning", ("release", "run")),
+            ("git-task-card", "workspace", "neutral", ("release", "summary", "run")),
+            ("fresh-clone-resume", "workspace", "neutral", ("release", "summary", "run")),
+            ("provider-429", "worker", "danger", ("release", "summary", "run")),
+            ("fail-closed-human", "decision", "warning", ("release", "summary", "run")),
+        ),
+    },
+    {
+        "id": "reviewer-rejection-and-replan",
+        "index": 2,
+        "result": "replanned",
+        "run_ids": (_FINAL_RUN_ID,),
+        "events": (
+            ("front-end-gates-passed", "verification", "success", ("run",)),
+            ("reviewer-finding", "reviewer", "danger", ("release", "summary", "run")),
+            ("claim-cannot-override-finding", "decision", "warning", ("run",)),
+            ("human-replan", "plan", "warning", ("release", "summary", "run")),
+            ("plan-revision-2-approved", "plan", "neutral", ("release", "summary", "run")),
+            ("resume-with-new-evidence", "decision", "neutral", ("release", "summary", "run")),
+        ),
+    },
+    {
+        "id": "evidence-to-finish",
+        "index": 3,
+        "result": "ready_to_commit",
+        "run_ids": (_FINAL_RUN_ID,),
+        "events": (
+            ("second-child-started", "worker", "neutral", ("run",)),
+            ("backend-361-passed", "verification", "success", ("release", "summary", "run")),
+            ("settings-7-passed", "verification", "success", ("release", "summary", "run")),
+            ("frontend-180-passed", "verification", "success", ("release", "summary", "run")),
+            ("core-gates-and-reviewer", "reviewer", "success", ("run",)),
+            ("core-finish-ready-to-commit", "finish", "success", ("release", "summary", "run")),
+        ),
+    },
+)
 
 _ALLOWED_STATUS = {"ready_to_commit", "request_changes", "needs_human"}
 _PATH_PATTERNS = (
@@ -83,9 +196,113 @@ _SOURCE_CHECKS = {
     ),
 }
 
+_AGENT_SOURCE_ANCHORS = {
+    "release": (
+        "Worker 在允许范围内形成 WIP，经身份绑定 stop、现场对账和人工副作用裁决后生成 Task Card；",
+        "Provider 429 的恢复 attempt 保持 `needs_human`，没有自动重试或虚假成功；",
+        "首次完整 Core 被独立 Reviewer 打回：原测试没有覆盖 React 状态提交前的同批次竞态，",
+        "人工批准 Plan revision 2 后，新 child 补强同批次回归，重新执行全部门禁并得到",
+        "目标仓库最终验证为后端 `361 passed`、设置页 `7 passed`、前端完整 `180 passed`，",
+    ),
+    "summary": (
+        "Git Task Card 可以把 WIP、计划、约束和下一步带到新的 clone；本机 Trace、SQLite 和凭据",
+        "Provider 429 attempt 保持 `needs_human`；首次 Reviewer 因测试与后端证据不足选择打回，",
+        "Plan revision 2、重新执行与可信 Finish。",
+        "最终门禁：后端 `361 passed`、定向前端 `7 passed`、完整前端 `180 passed`、TypeScript、",
+        "`ready_to_commit` 仍只表示进入人工提交前检查。",
+    ),
+    "run": (
+        "partial WIP",
+        "Git Task Card",
+        "恢复 run `20260818-221144-agent-resume` 启动 child",
+        "`20260818-221159-167783-bug-loop` 后，Provider 返回 429",
+        "provider-failure-fail-closed",
+        "Reviewer finding",
+        "人工随后批准 Plan revision 2，只增加同批次竞态测试要求与后端验证，",
+        "后端完整测试：`361 passed`；",
+        "设置页定向测试：`7 passed`；",
+        "前端完整测试：`14` 个测试文件、`180 passed`；",
+        "agent_run = 20260818-231923-agent-resume",
+        "checkpoint = checkpoint-006",
+        "terminal_status = ready_to_commit",
+    ),
+}
+
 
 def _read_json(relative_path: str) -> dict[str, Any]:
-    return json.loads((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
+    return json.loads(_read_release_source(relative_path))
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    """生成跨平台稳定的 JSON 字节串，用于公开回放证据的完整性校验。"""
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _build_replay_proof(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "format": "structured-event-replay-v1",
+        "event_count": sum(len(scenario["events"]) for scenario in scenarios),
+        "duration_ms": sum(scenario["duration_ms"] for scenario in scenarios),
+        "sha256": hashlib.sha256(_canonical_json_bytes(scenarios)).hexdigest(),
+        "disclosure": (
+            "这是发布验收证据编排的低频状态回放，不是原始 Trace，也不是浏览器实时录制。"
+        ),
+    }
+
+
+def _status_card(
+    *,
+    phase: str,
+    worker: str,
+    workspace: str,
+    checkpoint: str,
+    verification: str,
+    risk: str,
+    reviewer: str,
+    allowed_actions: list[str],
+    next_step: str,
+    finish: str,
+) -> dict[str, Any]:
+    return {
+        "phase": phase,
+        "work_item": "单项任务",
+        "worker": worker,
+        "workspace": workspace,
+        "checkpoint": checkpoint,
+        "verification": verification,
+        "risk": risk,
+        "reviewer": reviewer,
+        "allowed_actions": allowed_actions,
+        "next_step": next_step,
+        "finish": finish,
+    }
+
+
+def _replay_event(
+    event_id: str,
+    at_ms: int,
+    event_type: str,
+    tone: str,
+    message: str,
+    detail: str,
+    source_refs: list[str],
+    status_card: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "id": event_id,
+        "at_ms": at_ms,
+        "type": event_type,
+        "tone": tone,
+        "message": message,
+        "detail": detail,
+        "source_refs": source_refs,
+        "status_card": status_card,
+    }
 
 
 def _source_links(base_path: str) -> list[dict[str, str]]:
@@ -255,7 +472,7 @@ def build_payload() -> dict[str, Any]:
         },
         {
             "id": "click-2939-success",
-            "kind": "标准闭环",
+            "kind": "完整验证通过",
             "title": "Click #2939",
             "subtitle": "真实 Diff、独立 oracle 与完整测试",
             "issue_url": "https://github.com/pallets/click/issues/2939",
@@ -304,27 +521,537 @@ def build_payload() -> dict[str, Any]:
         },
     ]
 
+    scenarios = [
+        {
+            "id": "handoff-and-provider-failure",
+            "index": 1,
+            "label": "中断后换 clone",
+            "title": "partial WIP、Task Card 和 Provider 429",
+            "summary": (
+                "Writer 修改了 2 个批准文件后停止。Vega 生成 Task Card，并在 fresh clone "
+                "恢复。第一个恢复 child 收到 429，状态停在 needs_human。"
+            ),
+            "run_ids": [_PROVIDER_FAILURE_RUN_ID],
+            "duration_ms": 54_000,
+            "result": "needs_human",
+            "events": [
+                _replay_event(
+                    "partial-wip",
+                    0,
+                    "worker",
+                    "warning",
+                    "Writer 修改了 2 个批准文件",
+                    "这是 partial WIP。尚未执行验证，不能进入 Finish。",
+                    ["release", "run"],
+                    _status_card(
+                        phase="acting",
+                        worker="active",
+                        workspace="allowed_diff",
+                        checkpoint="not_created",
+                        verification="not_run",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["stop", "checkpoint"],
+                        next_step="按 child 与 operation 身份停止 Writer。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "identity-bound-stop",
+                    9_000,
+                    "checkpoint",
+                    "warning",
+                    "停止 Writer 并核对工作区",
+                    "进程已停止，Diff 原样保留。人工完成副作用裁决后生成交接记录。",
+                    ["release", "run"],
+                    _status_card(
+                        phase="stopped",
+                        worker="stopped",
+                        workspace="reconciled",
+                        checkpoint="created",
+                        verification="not_run",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["handoff", "inspect_workspace"],
+                        next_step="生成可移植的 Git Task Card。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "git-task-card",
+                    18_000,
+                    "workspace",
+                    "neutral",
+                    "生成 Git Task Card",
+                    "Task Card 记录 committed WIP、Plan、约束和下一步。本机 State、Trace 与聊天不进入 Git。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="handoff_ready",
+                        worker="stopped",
+                        workspace="git_task_card_created",
+                        checkpoint="handoff_created",
+                        verification="historical",
+                        risk="historical",
+                        reviewer="historical",
+                        allowed_actions=["resume"],
+                        next_step="在新的隔离 clone 中重建任务现场。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "fresh-clone-resume",
+                    29_000,
+                    "workspace",
+                    "neutral",
+                    "在 fresh clone 读取 WIP 和 Task Card",
+                    "新 run 重建 Goal、Plan、Work Item 和比较基线。旧门禁标记为 historical。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="resumed",
+                        worker="starting",
+                        workspace="fresh_clone",
+                        checkpoint="historical",
+                        verification="not_run",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["start_worker"],
+                        next_step="启动恢复后的第一条 child。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "provider-429",
+                    41_000,
+                    "worker",
+                    "danger",
+                    "恢复 child 收到 Provider 429",
+                    "Runner 返回非零，且没有 Worker Claim。外部副作用状态为 unknown。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="needs_human",
+                        worker="stopped",
+                        workspace="not_disclosed",
+                        checkpoint="not_disclosed",
+                        verification="not_run",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["inspect_side_effects", "human_decision"],
+                        next_step="人工裁决未知副作用并决定后续动作。",
+                        finish="needs_human",
+                    ),
+                ),
+                _replay_event(
+                    "fail-closed-human",
+                    54_000,
+                    "decision",
+                    "warning",
+                    "Supervisor 返回 needs_human",
+                    "当前 attempt 不会自动重试，也不会启动第二个 Writer。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="needs_human",
+                        worker="stopped",
+                        workspace="not_disclosed",
+                        checkpoint="not_disclosed",
+                        verification="not_run",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["human_decision"],
+                        next_step="保留现场，等待人工决定是否重新执行。",
+                        finish="needs_human",
+                    ),
+                ),
+            ],
+        },
+        {
+            "id": "reviewer-rejection-and-replan",
+            "index": 2,
+            "label": "Reviewer 要求补测试",
+            "title": "前端检查通过，但证据不够",
+            "summary": (
+                "4 项前端检查通过。Reviewer 发现同批次竞态没有覆盖，Plan 里也缺少项目要求的"
+                "后端测试。Plan revision 2 增加这两项验证，允许修改文件不变。"
+            ),
+            "run_ids": [_FINAL_RUN_ID],
+            "duration_ms": 50_000,
+            "result": "replanned",
+            "events": [
+                _replay_event(
+                    "front-end-gates-passed",
+                    0,
+                    "verification",
+                    "success",
+                    "4 项前端检查通过",
+                    "这些检查没有覆盖同一 React 批次内的重复提交。",
+                    ["run"],
+                    _status_card(
+                        phase="reviewing",
+                        worker="stopped",
+                        workspace="allowed_diff",
+                        checkpoint="not_disclosed",
+                        verification="passed",
+                        risk="not_disclosed",
+                        reviewer="not_disclosed",
+                        allowed_actions=["review"],
+                        next_step="由独立只读 Reviewer 检查 Diff 与测试证据。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "reviewer-finding",
+                    9_000,
+                    "reviewer",
+                    "danger",
+                    "Reviewer 要求补同批次回归和后端测试",
+                    "当前证据无法说明同步 ref 锁是否必要，Plan 也没有运行项目要求的后端测试。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="needs_human",
+                        worker="stopped",
+                        workspace="allowed_diff",
+                        checkpoint="not_disclosed",
+                        verification="passed",
+                        risk="not_disclosed",
+                        reviewer="needs_human",
+                        allowed_actions=["replan", "human_decision"],
+                        next_step="人工修订 Plan 后再启动新的 child。",
+                        finish="needs_human",
+                    ),
+                ),
+                _replay_event(
+                    "claim-cannot-override-finding",
+                    19_000,
+                    "decision",
+                    "warning",
+                    "Supervisor 忽略 completed Claim",
+                    "Reviewer 已记录 finding，因此当前状态保持 needs_human。",
+                    ["run"],
+                    _status_card(
+                        phase="needs_human",
+                        worker="stopped",
+                        workspace="allowed_diff",
+                        checkpoint="not_disclosed",
+                        verification="passed",
+                        risk="not_disclosed",
+                        reviewer="needs_human",
+                        allowed_actions=["replan"],
+                        next_step="记录 finding 并请求人工调整验证合同。",
+                        finish="needs_human",
+                    ),
+                ),
+                _replay_event(
+                    "human-replan",
+                    29_000,
+                    "plan",
+                    "warning",
+                    "Plan revision 2 增加两项验证",
+                    "新增同批次竞态回归和后端测试命令。允许修改的 2 个产品文件不变。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="planning",
+                        worker="stopped",
+                        workspace="allowed_diff",
+                        checkpoint="not_disclosed",
+                        verification="historical",
+                        risk="historical",
+                        reviewer="historical",
+                        allowed_actions=["approve_plan"],
+                        next_step="审核 Plan revision 2。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "plan-revision-2-approved",
+                    39_000,
+                    "plan",
+                    "neutral",
+                    "Plan revision 2 已批准",
+                    "仍然只有 1 个 Work Item 和 1 个 Writer。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="awaiting_execution",
+                        worker="not_started",
+                        workspace="approved_scope",
+                        checkpoint="not_disclosed",
+                        verification="not_run",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["start_worker"],
+                        next_step="在 revision 2 下启动新的 child。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "resume-with-new-evidence",
+                    50_000,
+                    "decision",
+                    "neutral",
+                    "旧门禁结果标记为 historical",
+                    "Verification、Risk 和 Reviewer 将在当前工作区重新运行。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="replanned",
+                        worker="not_started",
+                        workspace="approved_scope",
+                        checkpoint="not_disclosed",
+                        verification="not_run",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["start_worker"],
+                        next_step="按 revision 2 开始新的完整执行。",
+                        finish="not_run",
+                    ),
+                ),
+            ],
+        },
+        {
+            "id": "evidence-to-finish",
+            "index": 3,
+            "label": "重新跑完验证",
+            "title": "后端 361、定向 7、前端 180",
+            "summary": (
+                "revision 2 的 child 只修改批准的测试文件。后端、设置页和完整前端测试通过后，"
+                "Risk Gate、Reviewer 和 Core Finish 依次运行。"
+            ),
+            "run_ids": [_FINAL_RUN_ID],
+            "duration_ms": 65_000,
+            "result": "ready_to_commit",
+            "events": [
+                _replay_event(
+                    "second-child-started",
+                    0,
+                    "worker",
+                    "neutral",
+                    "启动 revision 2 child",
+                    "child 在同一个 React act 批次内补充重复提交和交叉提交回归。",
+                    ["run"],
+                    _status_card(
+                        phase="acting",
+                        worker="active",
+                        workspace="approved_scope",
+                        checkpoint="not_disclosed",
+                        verification="running",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["wait_for_verification"],
+                        next_step="完成 revision 2 的验证合同。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "backend-361-passed",
+                    11_000,
+                    "verification",
+                    "success",
+                    "后端完整测试：361 passed",
+                    "这是目标仓库 AGENTS.md 要求的后端测试。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="verifying",
+                        worker="stopped",
+                        workspace="allowed_diff",
+                        checkpoint="not_disclosed",
+                        verification="backend_passed",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["run_settings_tests"],
+                        next_step="运行设置页定向测试。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "settings-7-passed",
+                    22_000,
+                    "verification",
+                    "success",
+                    "设置页定向测试：7 passed",
+                    "7 个用例包含同批次重复提交和交叉提交。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="verifying",
+                        worker="stopped",
+                        workspace="allowed_diff",
+                        checkpoint="not_disclosed",
+                        verification="settings_passed",
+                        risk="not_run",
+                        reviewer="not_run",
+                        allowed_actions=["run_frontend_suite"],
+                        next_step="运行完整前端测试。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "frontend-180-passed",
+                    34_000,
+                    "verification",
+                    "success",
+                    "前端完整测试：180 passed",
+                    "14 个测试文件通过。类型检查、隔离构建和 git diff --check 也通过。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="verifying",
+                        worker="stopped",
+                        workspace="reconciled",
+                        checkpoint="not_disclosed",
+                        verification="passed",
+                        risk="running",
+                        reviewer="not_run",
+                        allowed_actions=["run_risk_gate"],
+                        next_step="完成 Risk Gate 并交给 Reviewer。",
+                        finish="not_run",
+                    ),
+                ),
+                _replay_event(
+                    "core-gates-and-reviewer",
+                    47_000,
+                    "reviewer",
+                    "success",
+                    "Risk Gate passed，Reviewer approve",
+                    "Reviewer 复核新增回归后没有报告 finding。",
+                    ["run"],
+                    _status_card(
+                        phase="finalizing",
+                        worker="stopped",
+                        workspace="reconciled",
+                        checkpoint="not_disclosed",
+                        verification="passed",
+                        risk="passed",
+                        reviewer="approve",
+                        allowed_actions=["finalize"],
+                        next_step="由 Core Finish 校验 Artifact 与证据新鲜度。",
+                        finish="pending",
+                    ),
+                ),
+                _replay_event(
+                    "core-finish-ready-to-commit",
+                    65_000,
+                    "finish",
+                    "success",
+                    "Core Finish 返回 ready_to_commit",
+                    "Verification、Risk、Reviewer、Artifact 完整性和证据新鲜度均通过。Git 提交仍由人工执行。",
+                    ["release", "summary", "run"],
+                    _status_card(
+                        phase="completed",
+                        worker="stopped",
+                        workspace="reconciled",
+                        checkpoint="checkpoint-006",
+                        verification="passed",
+                        risk="passed",
+                        reviewer="approve",
+                        allowed_actions=["inspect_evidence", "human_commit"],
+                        next_step="人工检查 Diff 与发布验收证据后决定是否提交。",
+                        finish="ready_to_commit",
+                    ),
+                ),
+            ],
+        },
+    ]
+
+    agent_replay = {
+        "id": "echo-vault-concurrency-resume",
+        "kind": "v0.2.0 发布验收",
+        "title": "设置页并发竞态",
+        "final_run_id": _FINAL_RUN_ID,
+        "related_run_ids": [_PROVIDER_FAILURE_RUN_ID],
+        "terminal_status": "ready_to_commit",
+        "summary": (
+            "设置页并发缺陷的发布验收。多个 run 串联 partial WIP、Git Task Card、fresh clone、"
+            "Provider 429、Reviewer 打回和 Plan revision 2。"
+        ),
+        "release": dict(_RELEASE),
+        "scenarios": scenarios,
+        "proof": _build_replay_proof(scenarios),
+        "source_links": [
+            {"kind": kind, **source}
+            for kind, source in PUBLIC_AGENT_SOURCES.items()
+        ],
+        "limitations": [
+            "该运行只有 1 个 Work Item 和 1 个 Writer。",
+            "前序 Handoff 的公开记录未列出 Agent run ID；场景 1 的 Run 引用从 Provider 429 开始。",
+            "公开文件不包含完整 state、Trace、命令日志或模型会话。",
+            "页面 SHA-256 只覆盖三个 scenarios 的规范化 JSON，不是完整 cases.json 或源证据文件的哈希。",
+            "本案例没有覆盖多 Work Item、操作系统隔离、Provider 稳定性或无人值守运行。",
+        ],
+    }
+
     return {
-        "schema_version": 2,
+        "schema_version": 4,
         "generated_from": [
             "examples/evidence/real-world-pycodestyle-1187",
             "examples/evidence/real-world-click-2939",
+            "docs/RELEASE-NOTES-0.2.0.md",
+            "docs/RELEASE-SUMMARY-0.2.0.md",
+            "eval/real-world-runs.md",
         ],
-        "evidence_through": "2026-08-04",
+        "evidence_through": "2026-08-19",
+        "agent_replay": agent_replay,
         "cases": cases,
     }
 
 
-def _validate_source_path(relative_path: str) -> Path:
+def _validate_source_path(
+    relative_path: str,
+    *,
+    allow_agent_source: bool = False,
+) -> Path:
     if Path(relative_path).is_absolute():
         raise ValueError("公开证据路径必须是仓库相对路径")
     resolved = (REPO_ROOT / relative_path).resolve()
     evidence_root = (REPO_ROOT / EVIDENCE_ROOT).resolve()
-    if not resolved.is_relative_to(evidence_root):
-        raise ValueError(f"公开证据路径逃逸 examples/evidence：{relative_path}")
+    approved_agent_sources = {
+        (REPO_ROOT / source["path"]).resolve()
+        for source in PUBLIC_AGENT_SOURCES.values()
+    }
+    in_evidence_root = resolved.is_relative_to(evidence_root)
+    is_approved_agent_source = resolved in approved_agent_sources
+    if not in_evidence_root and not (
+        allow_agent_source and is_approved_agent_source
+    ):
+        raise ValueError(f"公开证据路径越过允许目录：{relative_path}")
     if not resolved.is_file():
         raise ValueError(f"公开证据文件不存在：{relative_path}")
     return resolved
+
+
+def _run_git(*args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="strict",
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise ValueError(f"读取发布证据失败：git {' '.join(args)}；{detail}")
+    return result.stdout
+
+
+@lru_cache(maxsize=1)
+def _validate_release_ref() -> None:
+    actual_commit = _run_git("rev-list", "-n", "1", _RELEASE["tag"]).strip()
+    if actual_commit != _RELEASE["commit"]:
+        raise ValueError(
+            "发布证据 Tag 指向的提交与人工核准清单不一致："
+            f"{_RELEASE['tag']} -> {actual_commit}"
+        )
+
+
+@lru_cache(maxsize=None)
+def _read_release_source(
+    relative_path: str,
+    *,
+    allow_agent_source: bool = False,
+) -> str:
+    """读取页面实际链接的发布 Tag 内容，避免用当前工作区替代固定证据。"""
+    _validate_source_path(
+        relative_path,
+        allow_agent_source=allow_agent_source,
+    )
+    _validate_release_ref()
+    return _run_git("show", f"{_RELEASE['tag']}:{relative_path}")
 
 
 def _iter_strings(value: Any) -> Iterator[str]:
@@ -338,13 +1065,254 @@ def _iter_strings(value: Any) -> Iterator[str]:
             yield from _iter_strings(item)
 
 
+def _validate_exact_keys(
+    value: Any,
+    expected_fields: set[str],
+    label: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} 必须是对象")
+    actual_fields = set(value)
+    if actual_fields != expected_fields:
+        missing = sorted(expected_fields - actual_fields)
+        unexpected = sorted(actual_fields - expected_fields)
+        raise ValueError(
+            f"{label} 字段不匹配：缺少 {missing}；额外 {unexpected}"
+        )
+    return value
+
+
+def _is_nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def validate_payload(payload: dict[str, Any]) -> None:
-    if payload.get("schema_version") != 2:
-        raise ValueError("展示案例 schema_version 必须为 2")
+    if payload.get("schema_version") != 4:
+        raise ValueError("展示案例 schema_version 必须为 4")
+
+    agent_replay = _validate_exact_keys(
+        payload.get("agent_replay"),
+        {
+            "id",
+            "kind",
+            "title",
+            "final_run_id",
+            "related_run_ids",
+            "terminal_status",
+            "summary",
+            "release",
+            "scenarios",
+            "proof",
+            "source_links",
+            "limitations",
+        },
+        "Agent 回放",
+    )
+    for field in {
+        "id",
+        "kind",
+        "title",
+        "final_run_id",
+        "terminal_status",
+        "summary",
+    }:
+        if not _is_nonempty_string(agent_replay[field]):
+            raise ValueError(f"Agent 回放字段必须是非空字符串：{field}")
+    if agent_replay["final_run_id"] != _FINAL_RUN_ID:
+        raise ValueError("Agent 回放必须绑定 v0.2.0 最终验收 run")
+    if agent_replay["related_run_ids"] != [_PROVIDER_FAILURE_RUN_ID]:
+        raise ValueError("Agent 回放必须披露 Provider 失败的关联 run")
+    if agent_replay["terminal_status"] != "ready_to_commit":
+        raise ValueError("Agent 回放终态被改写")
+
+    release = _validate_exact_keys(
+        agent_replay["release"],
+        {"tag", "commit"},
+        "Agent 回放 release",
+    )
+    if release != _RELEASE:
+        raise ValueError("Agent 回放 release 必须匹配 v0.2.0 发布提交")
+
+    replay_sources = agent_replay["source_links"]
+    expected_sources = [
+        {"kind": kind, **source}
+        for kind, source in PUBLIC_AGENT_SOURCES.items()
+    ]
+    if replay_sources != expected_sources:
+        raise ValueError("Agent 回放证据链接必须匹配人工核准清单")
+    for source in replay_sources:
+        _validate_source_path(source["path"], allow_agent_source=True)
+
+    limitations = agent_replay["limitations"]
+    if (
+        not isinstance(limitations, list)
+        or not limitations
+        or any(not _is_nonempty_string(item) for item in limitations)
+    ):
+        raise ValueError("Agent 回放必须披露证据限制")
+
+    for source_key, anchors in _AGENT_SOURCE_ANCHORS.items():
+        source_path = PUBLIC_AGENT_SOURCES[source_key]["path"]
+        source_text = _read_release_source(
+            source_path,
+            allow_agent_source=True,
+        )
+        for anchor in anchors:
+            if anchor not in source_text:
+                raise ValueError(
+                    f"Agent 回放来源证据缺失 {source_key} 锚点：{anchor!r}"
+                )
+
+    scenarios = agent_replay["scenarios"]
+    if not isinstance(scenarios, list) or len(scenarios) != len(_EXPECTED_SCENARIOS):
+        raise ValueError("Agent 回放必须恰好包含 3 段发布验收场景")
+
+    seen_event_ids: set[str] = set()
+    total_event_count = 0
+    total_duration_ms = 0
+    for scenario, expected_scenario in zip(scenarios, _EXPECTED_SCENARIOS, strict=True):
+        scenario = _validate_exact_keys(scenario, _SCENARIO_FIELDS, "回放场景")
+        for field in {"id", "label", "title", "summary", "result"}:
+            if not _is_nonempty_string(scenario[field]):
+                raise ValueError(f"回放场景字段必须是非空字符串：{field}")
+        if type(scenario["index"]) is not int:
+            raise ValueError("回放场景 index 必须是整数")
+        if type(scenario["duration_ms"]) is not int or scenario["duration_ms"] <= 0:
+            raise ValueError("回放场景 duration_ms 必须是正整数")
+        if scenario["id"] != expected_scenario["id"]:
+            raise ValueError("回放场景顺序与发布验收不一致")
+        if scenario["index"] != expected_scenario["index"]:
+            raise ValueError("回放场景 index 与发布验收不一致")
+        if scenario["result"] != expected_scenario["result"]:
+            raise ValueError("回放场景结果与发布验收不一致")
+        run_ids = scenario["run_ids"]
+        if (
+            not isinstance(run_ids, list)
+            or any(not _is_nonempty_string(run_id) for run_id in run_ids)
+            or run_ids != list(expected_scenario["run_ids"])
+        ):
+            raise ValueError("回放场景 run_ids 与公开发布验收不一致")
+
+        events = scenario["events"]
+        expected_events = expected_scenario["events"]
+        if not isinstance(events, list) or len(events) != len(expected_events):
+            raise ValueError("每段发布验收场景必须保留 6 个事件")
+
+        previous_at_ms: int | None = None
+        for event, expected_event in zip(events, expected_events, strict=True):
+            event = _validate_exact_keys(event, _EVENT_FIELDS, "回放事件")
+            for field in {"id", "message", "detail"}:
+                if not _is_nonempty_string(event[field]):
+                    raise ValueError(f"回放事件字段必须是非空字符串：{field}")
+            if type(event["at_ms"]) is not int:
+                raise ValueError("回放事件 at_ms 必须是整数")
+            if event["at_ms"] < 0:
+                raise ValueError("回放事件 at_ms 不能为负数")
+            if previous_at_ms is None:
+                if event["at_ms"] != 0:
+                    raise ValueError("每段回放的首个事件必须从 0ms 开始")
+            elif event["at_ms"] <= previous_at_ms:
+                raise ValueError("回放事件 at_ms 必须严格递增")
+            previous_at_ms = event["at_ms"]
+
+            event_id, event_type, event_tone, expected_refs = expected_event
+            if event["id"] != event_id:
+                raise ValueError("回放事件顺序与发布验收不一致")
+            if event["id"] in seen_event_ids:
+                raise ValueError(f"回放事件 id 重复：{event['id']}")
+            seen_event_ids.add(event["id"])
+            if event["type"] not in _ALLOWED_EVENT_TYPES:
+                raise ValueError(f"回放事件 type 不受支持：{event['type']}")
+            if event["tone"] not in _ALLOWED_EVENT_TONES:
+                raise ValueError(f"回放事件 tone 不受支持：{event['tone']}")
+            if event["type"] != event_type or event["tone"] != event_tone:
+                raise ValueError("回放事件类型或风险语义与发布验收不一致")
+
+            source_refs = event["source_refs"]
+            if (
+                not isinstance(source_refs, list)
+                or not source_refs
+                or any(type(source_ref) is not str for source_ref in source_refs)
+                or len(source_refs) != len(set(source_refs))
+            ):
+                raise ValueError("回放事件 source_refs 必须是非空且不重复的字符串数组")
+            if any(source_ref not in PUBLIC_AGENT_SOURCES for source_ref in source_refs):
+                raise ValueError("回放事件 source_refs 只能引用人工核准的 PUBLIC_AGENT_SOURCES key")
+            if source_refs != list(expected_refs):
+                raise ValueError("回放事件 source_refs 与发布验收来源不一致")
+
+            status_card = _validate_exact_keys(
+                event["status_card"],
+                _STATUS_CARD_FIELDS,
+                "回放事件 status_card",
+            )
+            for field in _STATUS_CARD_FIELDS - {"allowed_actions"}:
+                if not _is_nonempty_string(status_card[field]):
+                    raise ValueError(f"status_card 字段必须是非空字符串：{field}")
+            allowed_actions = status_card["allowed_actions"]
+            if (
+                not isinstance(allowed_actions, list)
+                or not allowed_actions
+                or any(not _is_nonempty_string(action) for action in allowed_actions)
+            ):
+                raise ValueError("status_card allowed_actions 必须是非空字符串数组")
+
+        if previous_at_ms != scenario["duration_ms"]:
+            raise ValueError("回放场景最后事件的 at_ms 必须等于 duration_ms")
+        total_event_count += len(events)
+        total_duration_ms += scenario["duration_ms"]
+
+    handoff = scenarios[0]
+    if (
+        "429" not in handoff["events"][4]["message"]
+        or handoff["events"][-1]["status_card"]["finish"] != "needs_human"
+    ):
+        raise ValueError("Provider 429 必须保持 fail-closed / needs_human")
+    replan = scenarios[1]
+    if (
+        replan["events"][1]["status_card"]["reviewer"] != "needs_human"
+        or "Plan revision 2" not in replan["events"][4]["message"]
+    ):
+        raise ValueError("Reviewer 打回与 Plan revision 2 语义被改写")
+    finish = scenarios[2]
+    finish_text = " ".join(
+        [event["message"] + " " + event["detail"] for event in finish["events"]]
+    )
+    if (
+        not all(value in finish_text for value in ("361 passed", "7 passed", "180 passed"))
+        or finish["events"][-1]["status_card"]["finish"] != "ready_to_commit"
+    ):
+        raise ValueError("验证证据或 Core Finish 终态被改写")
+
+    proof = _validate_exact_keys(
+        agent_replay["proof"],
+        {"format", "event_count", "duration_ms", "sha256", "disclosure"},
+        "Agent 回放 proof",
+    )
+    if proof["format"] != "structured-event-replay-v1":
+        raise ValueError("Agent 回放 proof.format 不受支持")
+    if type(proof["event_count"]) is not int or proof["event_count"] != total_event_count:
+        raise ValueError("Agent 回放 proof.event_count 与场景事件数不一致")
+    if type(proof["duration_ms"]) is not int or proof["duration_ms"] != total_duration_ms:
+        raise ValueError("Agent 回放 proof.duration_ms 与场景时长不一致")
+    expected_sha256 = hashlib.sha256(_canonical_json_bytes(scenarios)).hexdigest()
+    if proof["sha256"] != expected_sha256:
+        raise ValueError("Agent 回放 proof.sha256 与 scenarios 规范 JSON 不一致")
+    disclosure = proof["disclosure"]
+    required_disclosure = (
+        "发布验收证据编排",
+        "低频状态回放",
+        "不是原始 Trace",
+        "不是浏览器实时录制",
+    )
+    if not _is_nonempty_string(disclosure) or not all(
+        phrase in disclosure for phrase in required_disclosure
+    ):
+        raise ValueError("Agent 回放 proof.disclosure 必须说明低频证据回放边界")
 
     cases = payload.get("cases")
     if not isinstance(cases, list) or len(cases) != 3:
-        raise ValueError("展示站 V1.1 必须恰好包含 3 个主案例")
+        raise ValueError("展示站 V2 必须恰好保留 3 个审查案例")
 
     expected_status = {
         "pycodestyle-1187-rejection": "request_changes",
@@ -392,7 +1360,7 @@ def validate_payload(payload: dict[str, Any]) -> None:
         if not isinstance(case["source_links"], list) or len(case["source_links"]) < 4:
             raise ValueError(f"{case_id} 必须链接可复核的证据文件")
 
-        source_paths: dict[str, Path] = {}
+        source_paths: dict[str, str] = {}
         for source in case["source_links"]:
             kind = source.get("kind")
             path = source.get("path")
@@ -400,26 +1368,27 @@ def validate_payload(payload: dict[str, Any]) -> None:
                 raise ValueError(f"{case_id} 的证据链接格式无效")
             if kind in source_paths:
                 raise ValueError(f"{case_id} 的证据类型重复：{kind}")
-            source_paths[kind] = _validate_source_path(path)
+            _validate_source_path(path)
+            source_paths[kind] = path
 
         diff_source = source_paths.get("diff")
         if diff_source is None:
             raise ValueError(f"{case_id} 缺少 Diff 证据")
         excerpt = case["diff"].get("excerpt")
-        if not isinstance(excerpt, str) or excerpt not in diff_source.read_text(
-            encoding="utf-8"
+        if not isinstance(excerpt, str) or excerpt not in _read_release_source(
+            diff_source
         ):
             raise ValueError(f"{case_id} 的 Diff 摘录与证据文件不一致")
 
         review_source = source_paths.get("review")
         if review_source is None:
             raise ValueError(f"{case_id} 缺少 Reviewer 证据")
-        review_payload = json.loads(review_source.read_text(encoding="utf-8"))
+        review_payload = json.loads(_read_release_source(review_source))
         if case["review"].get("verdict") != review_payload.get("verdict"):
             raise ValueError(f"{case_id} 的 Reviewer verdict 与证据文件不一致")
 
         for source_path, expected in _SOURCE_CHECKS[case_id]:
-            source_text = _validate_source_path(source_path).read_text(encoding="utf-8")
+            source_text = _read_release_source(source_path)
             if expected not in source_text:
                 raise ValueError(f"{case_id} 的来源证据缺失：{expected!r}")
 

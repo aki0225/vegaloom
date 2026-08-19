@@ -1,23 +1,26 @@
 # Vega Plan-first 与修改前确认协议
 
-> 状态：Phase 2 已完成
+> 状态：当前协议，适用于 `v0.2.0`
 >
-> 适用入口：Codex、Claude Code 等宿主会话，以及边界明确时的 `vega do`
+> 适用入口：Codex、Claude Code 等宿主会话、`vega agent`，以及边界明确时的 `vega do`
 
 ## 1. 目标
 
 当用户只描述 bug 现象或模糊需求时，宿主会话不能直接把猜测交给 Worker。默认顺序为：
 
 ```text
-只读调查 -> 固定 Plan -> 人工确认 -> assist 实现 -> Vega 判断链 -> Finish
+只读调查 -> 固定 Plan -> 人工确认
+  -> assist / do -> Vega 判断链 -> Finish
+  -> Supervisor Agent -> Checkpoint / Vega 判断链 -> Finish
 ```
 
-这是一项宿主使用协议，不是新的 Planner Agent、Runtime 路由、命令、状态或 artifact schema。
-Vega 不在 Runtime 中使用模型判断任务是否模糊。
+调查与 Plan 仍由宿主主会话负责，不增加 Planner Agent，也不在 `do / loop` Runtime 中使用
+模型判断任务是否模糊。`vega agent` 会持久化 Plan revision 和人工批准，但不会替主会话调查
+根因，也不会自行批准 Plan。
 
 ## 2. 什么时候可以直接执行
 
-只有以下条件同时成立，才可以省略重复调查并直接使用 `vega do` 或启动 assist：
+只有以下条件同时成立，才可以省略重复调查并直接使用 `vega do` 或启动普通 assist：
 
 1. 用户已经描述明确的目标行为或缺陷；
 2. 允许修改的文件或模块范围明确；
@@ -26,6 +29,9 @@ Vega 不在 Runtime 中使用模型判断任务是否模糊。
 5. 用户明确要求直接执行。
 
 缺少任一项时，先执行只读调查。不要用“任务看起来很小”代替这些条件。
+
+`vega agent` 无论任务大小都必须有结构化 Plan 和人工批准。任务已经明确时可以只做快速核实，
+但不能跳过 Plan revision 与批准记录。
 
 ## 3. 只读调查边界
 
@@ -101,7 +107,29 @@ Plan 完成后先交给用户。只有以下任一条件成立才进入修改：
 批准只覆盖 Plan 中写明的范围。调查后出现新的高风险、依赖、跨层修改或范围扩大时，先更新
 Plan 并再次确认。
 
-## 6. Codex 使用方式
+## 6. Supervisor Agent 使用方式
+
+需要暂停恢复、主会话控制或 Git-only 接手时，调查后生成结构化 Agent Plan：
+
+```powershell
+vega agent capabilities
+vega agent start --repo . --plan <plan.json> --text "<用户需求>"
+vega status --run <agent_run>
+```
+
+主会话先展示事实、假设、范围、验证和风险。只有用户明确批准后才执行：
+
+```powershell
+vega agent approve --run <agent_run> --actor human
+vega agent run --run <agent_run> --timeout 900
+```
+
+`steer`、新事实、范围、风险、验证或成功条件变化都会使旧批准失效。此时必须使用
+`vega agent plan --run <agent_run> --input <plan.json>` 写入新 revision，并再次等待批准。
+完整状态与 Handoff 流程见
+[`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md#supervisor-agent-v1)。
+
+## 7. Codex 使用方式
 
 仓库运行：
 
@@ -129,7 +157,7 @@ vega finish --run <loop_run_id>
 vega do feature --repo . --text "<用户需求>"
 ```
 
-## 7. Claude Code 使用方式
+## 8. Claude Code 使用方式
 
 Claude Code 不需要新的 Vega Runtime 或原生 Runner。普通 Claude Code 主会话按本协议：
 
@@ -145,17 +173,16 @@ Claude Code 可以作为外部 Worker，但同一会话不能同时充当独立 
 
 本阶段不增加 `vega adapters init claude`，也不实现 Claude Code 原生自动 Runner。
 
-## 8. `vega plan` 的边界
+## 9. `vega plan` 的边界
 
 `vega plan` 用于大目标的 scope、预算和 phase 规划。它不调查根因，也不自动批准实现，因此
 不能替代本协议的 `Observed Facts`、`Hypotheses` 和修改前人工确认。
 
-## 9. 停止线
-
-Phase 2 只固定宿主协议和生成的 Codex Skill：
+## 10. 当前边界
 
 - 不新增 Planner Agent；
-- 不新增 CLI、状态或 schema；
-- 不修改 Loop、Gate、Reviewer、Finish 或成功语义；
+- 普通 Plan-first 不新增 `do / loop` Runtime 路由；
+- Supervisor Agent 只持久化已经调查得到的 Plan，不负责猜测根因；
+- 不修改 Verification、Risk、Reviewer、Finish 或成功语义；
 - 不增加 Claude Code 原生 Runner；
 - 不把 Plan 当成自动审批。

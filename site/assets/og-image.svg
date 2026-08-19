@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#cfc3b2" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="9" dy="9" stdDeviation="0" flood-color="#171512" flood-opacity=".16"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="#eee5d6"/>
+  <rect width="1200" height="630" fill="url(#grid)" opacity=".72"/>
+
+  <g transform="translate(48 38)">
+    <rect width="48" height="48" fill="#e15d2f" stroke="#171512" stroke-width="2"/>
+    <rect x="5" y="5" width="48" height="48" fill="none" stroke="#171512" stroke-width="3"/>
+    <text x="24" y="34" fill="#fffaf0" font-family="Georgia, serif" font-size="25" text-anchor="middle">V</text>
+    <text x="72" y="21" fill="#171512" font-family="Georgia, 'Songti SC', serif" font-size="26" font-weight="700">Vega</text>
+    <text x="72" y="44" fill="#756b60" font-family="Consolas, monospace" font-size="12" letter-spacing="2">SUPERVISOR AGENT</text>
+    <rect x="955" y="2" width="94" height="34" rx="17" fill="#171512"/>
+    <text x="1002" y="24" fill="#fffaf0" font-family="Consolas, monospace" font-size="14" font-weight="700" text-anchor="middle">v0.2.0</text>
+  </g>
+
+  <g transform="translate(56 158)">
+    <text fill="#a93a19" font-family="Consolas, monospace" font-size="15" font-weight="700" letter-spacing="2">PLAN · CHECKPOINT · WORKSPACE · FINISH</text>
+    <text y="82" fill="#171512" font-family="Georgia, 'Songti SC', serif" font-size="48" font-weight="700">Codex / Claude Code 的</text>
+    <text y="162" fill="#e15d2f" font-family="Georgia, 'Songti SC', serif" font-size="64" font-weight="700">任务状态与验证层</text>
+    <text y="226" fill="#3f3932" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="21">保存 Plan、Checkpoint、Diff 和验证结果。</text>
+    <text y="266" fill="#3f3932" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="21">Worker 中断后先核对现场。</text>
+    <text y="304" fill="#3f3932" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="21">根据证据继续执行或交还人工。</text>
+  </g>
+
+  <g transform="translate(765 134)" filter="url(#shadow)">
+    <rect width="380" height="420" fill="#171715" stroke="#171512" stroke-width="2"/>
+    <rect x="14" y="14" width="352" height="392" fill="none" stroke="#4d4941"/>
+
+    <circle cx="38" cy="43" r="7" fill="#4e9660"/>
+    <text x="55" y="48" fill="#f6eedf" font-family="Consolas, monospace" font-size="13" font-weight="700">AGENT RUN / DECISION LEDGER</text>
+    <text x="28" y="86" fill="#948d82" font-family="Consolas, monospace" font-size="11">WORKER CLAIM</text>
+    <text x="350" y="87" fill="#e15d2f" font-family="Consolas, monospace" font-size="15" font-weight="700" text-anchor="end">completed</text>
+
+    <rect x="28" y="112" width="324" height="78" fill="#22211e" stroke="#4d4941"/>
+    <rect x="28" y="112" width="5" height="78" fill="#b33c31"/>
+    <text x="48" y="139" fill="#f6eedf" font-family="Consolas, monospace" font-size="12" font-weight="700">MACHINE OBSERVATION</text>
+    <text x="48" y="164" fill="#d7cfc2" font-family="'Microsoft YaHei', sans-serif" font-size="14">缺少同批次回归与后端证据</text>
+    <text x="330" y="164" fill="#e27368" font-family="Consolas, monospace" font-size="13" font-weight="700" text-anchor="end">human</text>
+
+    <rect x="28" y="208" width="324" height="78" fill="#22211e" stroke="#4d4941"/>
+    <rect x="28" y="208" width="5" height="78" fill="#387247"/>
+    <text x="48" y="235" fill="#f6eedf" font-family="Consolas, monospace" font-size="12" font-weight="700">MACHINE OBSERVATION</text>
+    <text x="48" y="260" fill="#d7cfc2" font-family="Consolas, monospace" font-size="14">361 + 7 + 180 tests passed</text>
+    <text x="330" y="260" fill="#76aa80" font-family="Consolas, monospace" font-size="13" font-weight="700" text-anchor="end">finalize</text>
+
+    <line x1="28" y1="316" x2="352" y2="316" stroke="#4d4941"/>
+    <text x="28" y="346" fill="#948d82" font-family="Consolas, monospace" font-size="11">CORE FINISH</text>
+    <text x="352" y="376" fill="#76aa80" font-family="Consolas, monospace" font-size="21" font-weight="700" text-anchor="end">ready_to_commit</text>
+  </g>
+</svg>

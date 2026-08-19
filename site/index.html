@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Vega 让 AI 代码修改经过真实 Diff、项目验证和独立评审；证据不足时停止并交还人工。"
+      content="Vega 是 Codex 和 Claude Code 的任务状态与验证层。它保存 Plan、Checkpoint、Diff 和验证结果；Worker 中断后先核对现场，再决定继续或交还人工。"
     >
-    <meta name="theme-color" content="#f3ecdf">
+    <meta name="theme-color" content="#f2e8d7">
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Vega — AI 写的代码，得看证据">
+    <meta property="og:title" content="Vega — Coding Agent 的任务状态与验证层">
     <meta
       property="og:description"
-      content="Worker 留下真实 Diff，项目验证实际运行，Reviewer 从新会话审查。"
+      content="保存 Plan、Checkpoint、Workspace 状态和验证结果；Worker 中断后先核对现场，再决定继续或交还人工。"
     >
     <meta
       property="og:image"
       content="https://aki0225.github.io/vegaloom/assets/og-image.png"
     >
-    <title>Vega — AI 写的代码，得看证据</title>
+    <title>Vega — Coding Agent 的任务状态与验证层</title>
     <script>
       (() => {
         const storageKey = "vega-showcase-theme";
@@ -46,23 +46,28 @@
     <header class="site-header">
       <a class="brand" href="#top" aria-label="返回 Vega 展示站顶部">
         <span class="brand-mark" aria-hidden="true">V</span>
-        <strong>Vega</strong>
+        <span>
+          <strong>Vega</strong>
+          <small>Supervisor Agent</small>
+        </span>
       </a>
 
       <nav class="header-links" aria-label="站点链接">
+        <span class="version-chip">v0.2.0</span>
+        <a href="#replay">发布验收</a>
+        <a href="#cases">Reviewer 案例</a>
         <button
           class="theme-toggle"
           type="button"
-          aria-label="切换到黑夜模式"
+          aria-label="切换到深色模式"
           aria-pressed="false"
           data-theme-toggle
         >
           <span class="theme-toggle__track" aria-hidden="true">
             <span class="theme-toggle__thumb"></span>
           </span>
-          <span data-theme-label>黑夜</span>
+          <span data-theme-label>深色</span>
         </button>
-        <a href="#cases">运行记录</a>
         <a
           href="https://github.com/aki0225/vegaloom"
           target="_blank"
@@ -74,243 +79,410 @@
     <main id="main-content">
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="kicker">One writes, one reviews.</p>
-          <p class="hero-brand">Vega</p>
-          <h1 id="hero-title">AI 写的代码，<br>得看证据。</h1>
+          <p class="eyebrow">Vega v0.2.0 · Supervisor Agent</p>
+          <h1 id="hero-title">
+            Codex / Claude Code 的<br>
+            <em>任务状态与验证层。</em>
+          </h1>
           <p class="hero-lead">
-            真实 Diff。项目验证。独立 Reviewer。证据不足就停。
+            Vega 保存批准的 Plan、Checkpoint、当前 Diff 和验证结果。Worker
+            中断后，它先核对进程与工作区，再选择继续、修改 Plan 或交给人。
           </p>
           <div class="hero-actions">
-            <a class="button button--primary" href="#cases">查看真实运行</a>
-            <a class="button button--secondary" href="#quick-start">开始使用</a>
+            <a class="button button--primary" href="#replay">查看发布验收</a>
+            <a class="button button--secondary" href="#quick-start">安装</a>
           </div>
         </div>
 
-        <figure class="hero-visual">
-          <img
-            src="assets/vega-flow.svg?v=20260804"
-            alt="Vega 关系图：Worker 留下 Diff、测试和规则证据，Reviewer 从新会话审查，最终由人决定是否提交"
-            width="760"
-            height="560"
-          >
-        </figure>
+        <aside class="hero-recorder" aria-label="Vega 运行记录摘要">
+          <div class="hero-recorder__top">
+            <span class="record-dot" aria-hidden="true"></span>
+            <strong>RELEASE ACCEPTANCE</strong>
+            <code>RUN 20260818</code>
+          </div>
+          <p>设置页并发缺陷，2026-08-18。</p>
+          <dl>
+            <div>
+              <dt>PLAN</dt>
+              <dd>revision 2</dd>
+            </div>
+            <div>
+              <dt>CHECKPOINT</dt>
+              <dd>checkpoint-006</dd>
+            </div>
+            <div>
+              <dt>FINISH</dt>
+              <dd>ready_to_commit</dd>
+            </div>
+          </dl>
+        </aside>
       </section>
 
-      <section class="section section--cases" id="cases" aria-labelledby="cases-title">
-        <header class="section-heading">
-          <h2 id="cases-title">真实运行</h2>
+      <section class="responsibility-strip" aria-label="宿主 Agent 与 Vega 的职责边界">
+        <p class="responsibility-strip__copy">
+          Codex / Claude Code 继续读代码、改文件和跑命令。Vega 管理
+          <code>Plan revision</code>、单 Writer、Checkpoint 和 Finish。
+        </p>
+      </section>
+
+      <section class="section player-section" id="replay" aria-labelledby="replay-title">
+        <header class="section-heading section-heading--split">
+          <div>
+            <p class="section-number">01 / RELEASE ACCEPTANCE</p>
+            <h2 id="replay-title">v0.2.0 发布验收回放</h2>
+          </div>
+          <p class="section-intro">
+            这是一次设置页并发缺陷修复。任务经历了 partial WIP、fresh clone、
+            Provider 429 和 Reviewer 打回。左侧是低频事件，右侧是同一时刻的状态卡。
+          </p>
         </header>
 
-        <div class="case-layout">
-          <div class="case-grid" role="tablist" aria-label="选择真实运行案例">
+        <div class="agent-player" data-agent-player>
+          <div class="player-tabs" role="tablist" aria-label="选择 Agent 运行场景" data-player-tabs>
             <button
-              class="case-card is-active"
-              id="tab-pycodestyle-1187-rejection"
+              class="player-tab is-active"
+              id="agent-player-tab-handoff-and-provider-failure"
               type="button"
               role="tab"
               aria-selected="true"
-              aria-controls="finish-panel"
-              data-case-id="pycodestyle-1187-rejection"
+              aria-controls="agent-player-panel"
+              data-scenario-id="handoff-and-provider-failure"
+              disabled
             >
-              <strong>pycodestyle #1187</strong>
-              <small><i class="status-mark status-mark--changes" aria-hidden="true"></i> request_changes</small>
+              <span>01</span>
+              <strong>中断后换 clone</strong>
+              <small>needs_human</small>
             </button>
             <button
-              class="case-card"
-              id="tab-pycodestyle-1187-success"
+              class="player-tab"
+              id="agent-player-tab-reviewer-rejection-and-replan"
               type="button"
               role="tab"
               aria-selected="false"
-              aria-controls="finish-panel"
+              aria-controls="agent-player-panel"
               tabindex="-1"
-              data-case-id="pycodestyle-1187-success"
+              data-scenario-id="reviewer-rejection-and-replan"
+              disabled
             >
-              <strong>修正候选</strong>
-              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+              <span>02</span>
+              <strong>Reviewer 要求补测试</strong>
+              <small>replanned</small>
             </button>
             <button
-              class="case-card"
-              id="tab-click-2939-success"
+              class="player-tab"
+              id="agent-player-tab-evidence-to-finish"
               type="button"
               role="tab"
               aria-selected="false"
-              aria-controls="finish-panel"
+              aria-controls="agent-player-panel"
               tabindex="-1"
-              data-case-id="click-2939-success"
+              data-scenario-id="evidence-to-finish"
+              disabled
             >
-              <strong>Click #2939</strong>
-              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+              <span>03</span>
+              <strong>重新跑完验证</strong>
+              <small>ready_to_commit</small>
             </button>
           </div>
 
           <article
-            class="finish-panel"
-            id="finish-panel"
+            class="player-shell"
+            id="agent-player-panel"
             role="tabpanel"
-            aria-labelledby="tab-pycodestyle-1187-rejection"
-            aria-live="polite"
-            data-status="request_changes"
+            aria-labelledby="agent-player-tab-handoff-and-provider-failure"
+            data-player-panel
           >
-            <div class="finish-panel__heading">
+            <header class="player-shell__header">
               <div>
-                <p class="case-kind" data-case-field="kind">Reviewer 阻断</p>
-                <h3 data-case-field="status">request_changes</h3>
+                <p class="section-number" data-player-field="index">01</p>
+                <p class="player-kicker" data-player-field="label">中断后换 clone</p>
+                <h3 data-player-field="title">partial WIP、Task Card 和 Provider 429</h3>
+                <p class="player-run-ref">
+                  公开 Run 引用
+                  <code data-player-field="run_ids">20260818-221144-agent-resume</code>
+                </p>
               </div>
-              <span class="decision-stamp" data-case-field="status_label">
-                测试全绿，但不能交付
-              </span>
-            </div>
+              <div class="player-shell__result">
+                <span>场景结果</span>
+                <strong data-player-field="result">needs_human</strong>
+              </div>
+            </header>
 
-            <p class="case-summary" data-case-field="summary">
-              初始补丁修复了反向内建类型比较，却删除了原有歧义场景豁免。
-              固定测试全部通过，隔离 Reviewer 仍识别出新的 E721 误报。
+            <p class="player-summary" data-player-field="summary">
+              Writer 修改了 2 个批准文件后停止。Vega 生成 Task Card，并在 fresh clone
+              恢复。第一个恢复 child 收到 429，状态停在 needs_human。
             </p>
 
-            <div class="evidence-board">
-              <section class="evidence-block evidence-block--diff" aria-labelledby="diff-title">
-                <header class="evidence-block__header">
+            <div class="player-stage">
+              <section class="event-recorder" aria-labelledby="event-recorder-title">
+                <header class="event-recorder__header">
                   <div>
-                    <span class="evidence-label" id="diff-title">Actual Diff</span>
-                    <code data-case-field="diff_file">pycodestyle.py</code>
+                    <p class="micro-label">LOW-FREQUENCY EVENT LOG</p>
+                    <h4 id="event-recorder-title">现场记录</h4>
                   </div>
-                  <strong data-case-field="diff_summary">
-                    1 个文件 · 删除 3 行保护逻辑
-                  </strong>
+                  <span class="virtual-clock">VIRTUAL TIMECODE</span>
                 </header>
-                <pre class="diff-view"><code data-diff-code><span class="diff-line diff-line--removed">-        inst = match.group(1)</span>
-<span class="diff-line diff-line--removed">-        if inst and inst.isidentifier() and inst not in SINGLETONS:</span>
-<span class="diff-line diff-line--removed">-            return  # Allow comparison for types which are not obvious</span></code></pre>
+
+                <div
+                  class="event-log"
+                  role="log"
+                  aria-live="polite"
+                  aria-relevant="additions text"
+                  aria-label="当前 Agent 场景事件记录"
+                  data-player-log
+                >
+                  <article class="event-log__entry tone-neutral">
+                    <div class="event-log__stamp">
+                      <code>00:00.000</code>
+                      <span>WORKER</span>
+                    </div>
+                    <div>
+                      <h5>Writer 修改了 2 个批准文件</h5>
+                      <p>这是 partial WIP。尚未执行验证，不能进入 Finish。</p>
+                    </div>
+                  </article>
+                </div>
               </section>
 
-              <div class="evidence-stack">
-                <section class="evidence-block evidence-block--verification" aria-labelledby="verification-title">
-                  <header class="evidence-block__header">
-                    <span class="evidence-label" id="verification-title">
-                      Deterministic Verification
-                    </span>
-                    <strong data-case-field="verification_headline">
-                      768 passed, 5 skipped
-                    </strong>
-                  </header>
-                  <ul class="evidence-list" data-verification-list>
-                    <li>初始定向 oracle 能识别反向内建类型比较。</li>
-                    <li>三阶段 Scope Gate 只检测到 pycodestyle.py。</li>
-                    <li>固定测试没有覆盖普通小写变量的歧义比较。</li>
-                  </ul>
-                </section>
+              <aside class="status-board" aria-live="polite" aria-atomic="true" data-player-status>
+                <header class="status-board__header">
+                  <div>
+                    <p class="micro-label">STATUS CARD / SNAPSHOT</p>
+                    <h4>当前可用状态</h4>
+                  </div>
+                  <span data-status-field="phase">acting</span>
+                </header>
 
-                <section class="evidence-block evidence-block--review" aria-labelledby="review-title">
-                  <header class="evidence-block__header">
-                    <span class="evidence-label" id="review-title">Independent Reviewer</span>
-                    <span class="review-verdict">
-                      <strong data-case-field="review_verdict">request_changes</strong>
-                      <small data-case-field="review_severity">major finding</small>
-                    </span>
-                  </header>
-                  <h4 data-case-field="review_title">
-                    反向匹配变成无条件报错，破坏原有合法歧义比较
-                  </h4>
-                  <dl class="review-finding">
-                    <div>
-                      <dt>Evidence</dt>
-                      <dd data-case-field="review_evidence">
-                        expected == type(obj) 与 value != type(other) 会误报 E721。
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Required change</dt>
-                      <dd data-case-field="review_recommendation">
-                        只对可解释的明显类型表达式报告 E721，同时保留普通小写变量的歧义比较。
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-              </div>
+                <dl class="status-grid">
+                  <div>
+                    <dt>WORK ITEM</dt>
+                    <dd data-status-field="work_item">单项任务</dd>
+                  </div>
+                  <div>
+                    <dt>WORKER</dt>
+                    <dd data-status-field="worker">active</dd>
+                  </div>
+                  <div>
+                    <dt>WORKSPACE</dt>
+                    <dd data-status-field="workspace">allowed_diff</dd>
+                  </div>
+                  <div>
+                    <dt>CHECKPOINT</dt>
+                    <dd data-status-field="checkpoint">not_created</dd>
+                  </div>
+                  <div>
+                    <dt>VERIFICATION</dt>
+                    <dd data-status-field="verification">not_run</dd>
+                  </div>
+                  <div>
+                    <dt>RISK</dt>
+                    <dd data-status-field="risk">not_run</dd>
+                  </div>
+                  <div>
+                    <dt>REVIEWER</dt>
+                    <dd data-status-field="reviewer">not_run</dd>
+                  </div>
+                  <div>
+                    <dt>ALLOWED ACTIONS</dt>
+                    <dd data-status-field="allowed_actions">stop · checkpoint</dd>
+                  </div>
+                  <div>
+                    <dt>NEXT STEP</dt>
+                    <dd data-status-field="next_step">按 child 与 operation 身份停止 Writer。</dd>
+                  </div>
+                  <div>
+                    <dt>FINISH</dt>
+                    <dd data-status-field="finish">not_ready</dd>
+                  </div>
+                </dl>
+              </aside>
             </div>
 
-            <dl class="gate-strip">
-              <div>
-                <dt>Scope Gate</dt>
-                <dd data-case-field="gate_scope">
-                  pre-verification、post-verification、pre-review 均通过；
-                  变更仅涉及 pycodestyle.py。
-                </dd>
+            <footer class="player-controls" aria-label="Agent 回放控制">
+              <div class="player-controls__buttons">
+                <button class="icon-button" type="button" data-player-rewind aria-label="回到场景开头" disabled>
+                  <span aria-hidden="true">↺</span>
+                  回到开头
+                </button>
+                <button class="play-button" type="button" data-player-play aria-pressed="false" disabled>
+                  <span aria-hidden="true">▶</span>
+                  <b data-player-play-label>播放回放</b>
+                </button>
               </div>
-              <div>
-                <dt>Risk Gate</dt>
-                <dd data-case-field="gate_risk">success · low · self-check</dd>
+              <div class="player-progress-group">
+                <div
+                  class="player-progress"
+                  role="progressbar"
+                  aria-label="当前场景回放进度"
+                  aria-valuemin="0"
+                  aria-valuemax="54000"
+                  aria-valuenow="0"
+                  aria-valuetext="00:00.000 / 00:54.000"
+                  data-player-progress
+                >
+                  <span data-player-progress-fill></span>
+                </div>
+                <p><code data-player-current>00:00.000</code> / <code data-player-total>00:54.000</code></p>
               </div>
-              <div>
-                <dt>Finish</dt>
-                <dd data-case-field="gate_finish">
-                  needs_human · 保留候选现场 · 未自动提交
-                </dd>
-              </div>
-            </dl>
-
-            <div class="evidence-footer">
-              <details class="case-details">
-                <summary>证据边界</summary>
-                <ul data-limitations-list>
-                  <li>公开包是脱敏摘要，不包含 Worker 或 Reviewer 的完整会话。</li>
-                  <li>该案例证明 Reviewer 阻止了已知语义回归，不构成通用缺陷发现率。</li>
-                </ul>
-              </details>
-              <nav class="source-links" aria-label="当前案例证据文件" data-source-links>
-                <a
-                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/diff.patch"
-                  target="_blank"
-                  rel="noreferrer"
-                >实际 Diff ↗</a>
-                <a
-                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/verification-summary.md"
-                  target="_blank"
-                  rel="noreferrer"
-                >验证摘要 ↗</a>
-                <a
-                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/review-verdict.json"
-                  target="_blank"
-                  rel="noreferrer"
-                >Reviewer 结论 ↗</a>
-                <a
-                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/gate-result.json"
-                  target="_blank"
-                  rel="noreferrer"
-                >Gate 结果 ↗</a>
-              </nav>
-            </div>
+              <p class="player-controls__note" data-player-notice>
+                4× 虚拟 timecode；只重放低频状态事件，不连接实时终端。
+              </p>
+            </footer>
           </article>
         </div>
 
+        <details class="replay-evidence" data-replay-evidence>
+          <summary>证据来源与边界</summary>
+          <div class="replay-evidence__body">
+            <dl class="evidence-meta">
+              <div>
+                <dt>TAG</dt>
+                <dd data-evidence-field="tag">v0.2.0</dd>
+              </div>
+              <div>
+                <dt>COMMIT</dt>
+                <dd><code data-evidence-field="commit">2fb1bd85</code></dd>
+              </div>
+              <div>
+                <dt>FINAL RUN</dt>
+                <dd><code data-evidence-field="final_run_id">20260818-231923-agent-resume</code></dd>
+              </div>
+              <div>
+                <dt>RELATED RUN</dt>
+                <dd><code data-evidence-field="related_run_ids">20260818-221144-agent-resume</code></dd>
+              </div>
+              <div>
+                <dt>EVENTS</dt>
+                <dd data-evidence-field="event_count">加载数据后显示</dd>
+              </div>
+              <div>
+                <dt>SCENARIOS JSON SHA-256</dt>
+                <dd><code data-evidence-field="sha256">加载数据后显示</code></dd>
+              </div>
+            </dl>
+            <nav class="source-links" aria-label="Agent 回放来源链接" data-player-source-links>
+              <a href="https://github.com/aki0225/vegaloom/blob/v0.2.0/docs/RELEASE-NOTES-0.2.0.md" target="_blank" rel="noreferrer">发布说明 ↗</a>
+              <a href="https://github.com/aki0225/vegaloom/blob/v0.2.0/eval/real-world-runs.md" target="_blank" rel="noreferrer">脱敏运行记录 ↗</a>
+            </nav>
+            <ul class="limitation-list" data-player-limitations>
+              <li>公开内容只保留决定性事件和脱敏证据索引。</li>
+              <li>它不证明无人值守运行、多 Work Item 自治或 Provider 永远稳定。</li>
+            </ul>
+            <p class="evidence-disclaimer">
+              这不是原始 Trace，也不是实时终端；不展示隐藏推理、完整聊天或命令参数。
+            </p>
+          </div>
+        </details>
+      </section>
+
+      <section class="section reviewer-evidence" id="cases" aria-labelledby="cases-title">
+        <header class="section-heading section-heading--split">
+          <div>
+            <p class="section-number">02 / REVIEWER CASE</p>
+            <h2 id="cases-title">pycodestyle #1187：768 passed，Reviewer 返回 request_changes</h2>
+          </div>
+          <p class="section-intro">
+            补丁删掉了一个歧义比较豁免。固定测试全部通过，但 Reviewer
+            复现了新的 E721 误报。
+          </p>
+        </header>
+
+        <article class="reviewer-primary" data-primary-case>
+          <div class="reviewer-primary__heading">
+            <div>
+              <p class="micro-label" data-primary-field="kind">REVIEWER BLOCK</p>
+              <h3 data-primary-field="title">pycodestyle #1187</h3>
+            </div>
+            <strong class="reviewer-primary__stamp" data-primary-field="status_label">测试全绿，但不能交付</strong>
+          </div>
+
+          <p class="reviewer-primary__summary" data-primary-field="summary">
+            初始补丁修复了反向内建类型比较，却删除了原有歧义场景豁免。固定测试全部通过，隔离 Reviewer 仍识别出新的 E721 误报。
+          </p>
+
+          <dl class="reviewer-facts">
+            <div>
+              <dt>验证结果</dt>
+              <dd data-primary-field="verification">768 passed, 5 skipped</dd>
+            </div>
+            <div>
+              <dt>Reviewer</dt>
+              <dd data-primary-field="review_verdict">request_changes · major finding</dd>
+            </div>
+            <div>
+              <dt>发现</dt>
+              <dd data-primary-field="review_title">反向匹配变成无条件报错，破坏原有合法歧义比较</dd>
+            </div>
+            <div>
+              <dt>Finish</dt>
+              <dd data-primary-field="finish">needs_human · 保留候选现场 · 未自动提交</dd>
+            </div>
+          </dl>
+
+          <nav class="source-links" aria-label="主 Reviewer 案例来源链接" data-primary-source-links>
+            <a href="https://github.com/aki0225/vegaloom/blob/v0.2.0/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/verification-summary.md" target="_blank" rel="noreferrer">验证摘要 ↗</a>
+            <a href="https://github.com/aki0225/vegaloom/blob/v0.2.0/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/review-verdict.json" target="_blank" rel="noreferrer">Reviewer 结论 ↗</a>
+          </nav>
+        </article>
+
+        <div class="more-evidence" aria-label="更多 Reviewer 证据入口">
+          <div>
+            <p class="micro-label">MORE RUNS</p>
+            <p>另外两个脱敏结果：</p>
+          </div>
+          <div class="more-evidence__actions" data-more-evidence-list>
+            <button type="button" data-fallback-case="pycodestyle-1187-success" disabled>查看修正后证据</button>
+            <button type="button" data-fallback-case="click-2939-success" disabled>查看 Click #2939 证据</button>
+          </div>
+        </div>
+
+        <article class="secondary-evidence" data-secondary-case-panel hidden aria-live="polite">
+          <p class="micro-label" data-secondary-field="kind"></p>
+          <h3 data-secondary-field="title"></h3>
+          <p data-secondary-field="summary"></p>
+          <nav class="source-links" aria-label="附加案例来源链接" data-secondary-source-links></nav>
+        </article>
+
         <noscript>
           <p class="noscript-note">
-            页面未启用 JavaScript，因此当前只显示 pycodestyle Reviewer 阻断案例。
-            三个案例的完整证据可从上方文件链接查看。
+            页面未启用 JavaScript，因此显示首个脱敏运行节点和主 Reviewer 案例；完整证据可通过页面链接查看。
           </p>
         </noscript>
       </section>
 
-      <aside class="boundary-strip" aria-label="Vega 产品边界">
-        <span>会话隔离 ≠ OS 沙箱</span>
-        <span>不自动 commit / push</span>
-        <span>验证失败不可被 <code>approve</code> 覆盖</span>
-      </aside>
-
-      <section class="section section--quickstart" id="quick-start" aria-labelledby="quickstart-title">
+      <section class="section quickstart-section" id="quick-start" aria-labelledby="quickstart-title">
         <div class="quickstart">
           <div class="quickstart-copy">
-            <h2 id="quickstart-title">试一次</h2>
+            <p class="section-number">03 / INSTALL</p>
+            <h2 id="quickstart-title">安装</h2>
+            <p>
+              安装 Agent extra，然后为目标仓库生成 Codex adapter。主会话里运行
+              <code>$vega-agent</code>。
+            </p>
+            <p class="quickstart-boundary">
+              Vega 不执行 commit、push、PR 或 release。验证失败时，Finish 不会返回
+              <code>ready_to_commit</code>。
+            </p>
+            <p class="quickstart-boundary">
+              当前自动 Worker 使用 Codex CLI；Claude Code 主会话通过
+              <code>assist</code> 流程接入。
+            </p>
           </div>
 
-          <div class="terminal" aria-label="Vega 快速开始命令">
+          <div class="terminal" aria-label="Vega Supervisor Agent 快速开始命令">
             <div class="terminal-bar">
               <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
               <b>PowerShell</b>
               <button type="button" data-copy-quickstart>复制命令</button>
             </div>
-            <pre><code data-quickstart-code>python -m pip install -e ".[dev]"
-vega config check --repo .
-vega loop bug --repo . --text "修复一个边界明确的缺陷" --mode assist</code></pre>
+            <pre><code data-quickstart-code>git clone https://github.com/aki0225/vegaloom.git
+cd vegaloom
+python -m pip install -e ".[agent]"
+vega adapters init codex --repo &lt;target-repo&gt;</code></pre>
+            <div class="terminal-prompt">
+              <span>Codex 主会话入口</span>
+              <code>$vega-agent</code>
+            </div>
             <p class="copy-status" role="status" aria-live="polite" data-copy-status></p>
           </div>
         </div>
@@ -320,11 +492,15 @@ vega loop bug --repo . --text "修复一个边界明确的缺陷" --mode assist<
     <footer class="site-footer">
       <a class="brand brand--footer" href="#top">
         <span class="brand-mark" aria-hidden="true">V</span>
-        <strong>Vega</strong>
+        <span>
+          <strong>Vega</strong>
+          <small>One writes, one reviews.</small>
+        </span>
       </a>
       <nav aria-label="页脚链接">
         <a href="https://github.com/aki0225/vegaloom">GitHub</a>
         <a href="https://github.com/aki0225/vegaloom/blob/main/README.md">使用文档</a>
+        <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.2.0">v0.2.0</a>
         <a href="https://github.com/aki0225/vegaloom/blob/main/LICENSE">MIT License</a>
       </nav>
     </footer>

@@ -1,10 +1,602 @@
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "generated_from": [
     "examples/evidence/real-world-pycodestyle-1187",
-    "examples/evidence/real-world-click-2939"
+    "examples/evidence/real-world-click-2939",
+    "docs/RELEASE-NOTES-0.2.0.md",
+    "docs/RELEASE-SUMMARY-0.2.0.md",
+    "eval/real-world-runs.md"
   ],
-  "evidence_through": "2026-08-04",
+  "evidence_through": "2026-08-19",
+  "agent_replay": {
+    "id": "echo-vault-concurrency-resume",
+    "kind": "v0.2.0 发布验收",
+    "title": "设置页并发竞态",
+    "final_run_id": "20260818-231923-agent-resume",
+    "related_run_ids": [
+      "20260818-221144-agent-resume"
+    ],
+    "terminal_status": "ready_to_commit",
+    "summary": "设置页并发缺陷的发布验收。多个 run 串联 partial WIP、Git Task Card、fresh clone、Provider 429、Reviewer 打回和 Plan revision 2。",
+    "release": {
+      "tag": "v0.2.0",
+      "commit": "2fb1bd856df55907a4d3ef1039ea62658b30b2b4"
+    },
+    "scenarios": [
+      {
+        "id": "handoff-and-provider-failure",
+        "index": 1,
+        "label": "中断后换 clone",
+        "title": "partial WIP、Task Card 和 Provider 429",
+        "summary": "Writer 修改了 2 个批准文件后停止。Vega 生成 Task Card，并在 fresh clone 恢复。第一个恢复 child 收到 429，状态停在 needs_human。",
+        "run_ids": [
+          "20260818-221144-agent-resume"
+        ],
+        "duration_ms": 54000,
+        "result": "needs_human",
+        "events": [
+          {
+            "id": "partial-wip",
+            "at_ms": 0,
+            "type": "worker",
+            "tone": "warning",
+            "message": "Writer 修改了 2 个批准文件",
+            "detail": "这是 partial WIP。尚未执行验证，不能进入 Finish。",
+            "source_refs": [
+              "release",
+              "run"
+            ],
+            "status_card": {
+              "phase": "acting",
+              "work_item": "单项任务",
+              "worker": "active",
+              "workspace": "allowed_diff",
+              "checkpoint": "not_created",
+              "verification": "not_run",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "stop",
+                "checkpoint"
+              ],
+              "next_step": "按 child 与 operation 身份停止 Writer。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "identity-bound-stop",
+            "at_ms": 9000,
+            "type": "checkpoint",
+            "tone": "warning",
+            "message": "停止 Writer 并核对工作区",
+            "detail": "进程已停止，Diff 原样保留。人工完成副作用裁决后生成交接记录。",
+            "source_refs": [
+              "release",
+              "run"
+            ],
+            "status_card": {
+              "phase": "stopped",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "reconciled",
+              "checkpoint": "created",
+              "verification": "not_run",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "handoff",
+                "inspect_workspace"
+              ],
+              "next_step": "生成可移植的 Git Task Card。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "git-task-card",
+            "at_ms": 18000,
+            "type": "workspace",
+            "tone": "neutral",
+            "message": "生成 Git Task Card",
+            "detail": "Task Card 记录 committed WIP、Plan、约束和下一步。本机 State、Trace 与聊天不进入 Git。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "handoff_ready",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "git_task_card_created",
+              "checkpoint": "handoff_created",
+              "verification": "historical",
+              "risk": "historical",
+              "reviewer": "historical",
+              "allowed_actions": [
+                "resume"
+              ],
+              "next_step": "在新的隔离 clone 中重建任务现场。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "fresh-clone-resume",
+            "at_ms": 29000,
+            "type": "workspace",
+            "tone": "neutral",
+            "message": "在 fresh clone 读取 WIP 和 Task Card",
+            "detail": "新 run 重建 Goal、Plan、Work Item 和比较基线。旧门禁标记为 historical。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "resumed",
+              "work_item": "单项任务",
+              "worker": "starting",
+              "workspace": "fresh_clone",
+              "checkpoint": "historical",
+              "verification": "not_run",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "start_worker"
+              ],
+              "next_step": "启动恢复后的第一条 child。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "provider-429",
+            "at_ms": 41000,
+            "type": "worker",
+            "tone": "danger",
+            "message": "恢复 child 收到 Provider 429",
+            "detail": "Runner 返回非零，且没有 Worker Claim。外部副作用状态为 unknown。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "needs_human",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "not_disclosed",
+              "checkpoint": "not_disclosed",
+              "verification": "not_run",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "inspect_side_effects",
+                "human_decision"
+              ],
+              "next_step": "人工裁决未知副作用并决定后续动作。",
+              "finish": "needs_human"
+            }
+          },
+          {
+            "id": "fail-closed-human",
+            "at_ms": 54000,
+            "type": "decision",
+            "tone": "warning",
+            "message": "Supervisor 返回 needs_human",
+            "detail": "当前 attempt 不会自动重试，也不会启动第二个 Writer。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "needs_human",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "not_disclosed",
+              "checkpoint": "not_disclosed",
+              "verification": "not_run",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "human_decision"
+              ],
+              "next_step": "保留现场，等待人工决定是否重新执行。",
+              "finish": "needs_human"
+            }
+          }
+        ]
+      },
+      {
+        "id": "reviewer-rejection-and-replan",
+        "index": 2,
+        "label": "Reviewer 要求补测试",
+        "title": "前端检查通过，但证据不够",
+        "summary": "4 项前端检查通过。Reviewer 发现同批次竞态没有覆盖，Plan 里也缺少项目要求的后端测试。Plan revision 2 增加这两项验证，允许修改文件不变。",
+        "run_ids": [
+          "20260818-231923-agent-resume"
+        ],
+        "duration_ms": 50000,
+        "result": "replanned",
+        "events": [
+          {
+            "id": "front-end-gates-passed",
+            "at_ms": 0,
+            "type": "verification",
+            "tone": "success",
+            "message": "4 项前端检查通过",
+            "detail": "这些检查没有覆盖同一 React 批次内的重复提交。",
+            "source_refs": [
+              "run"
+            ],
+            "status_card": {
+              "phase": "reviewing",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "allowed_diff",
+              "checkpoint": "not_disclosed",
+              "verification": "passed",
+              "risk": "not_disclosed",
+              "reviewer": "not_disclosed",
+              "allowed_actions": [
+                "review"
+              ],
+              "next_step": "由独立只读 Reviewer 检查 Diff 与测试证据。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "reviewer-finding",
+            "at_ms": 9000,
+            "type": "reviewer",
+            "tone": "danger",
+            "message": "Reviewer 要求补同批次回归和后端测试",
+            "detail": "当前证据无法说明同步 ref 锁是否必要，Plan 也没有运行项目要求的后端测试。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "needs_human",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "allowed_diff",
+              "checkpoint": "not_disclosed",
+              "verification": "passed",
+              "risk": "not_disclosed",
+              "reviewer": "needs_human",
+              "allowed_actions": [
+                "replan",
+                "human_decision"
+              ],
+              "next_step": "人工修订 Plan 后再启动新的 child。",
+              "finish": "needs_human"
+            }
+          },
+          {
+            "id": "claim-cannot-override-finding",
+            "at_ms": 19000,
+            "type": "decision",
+            "tone": "warning",
+            "message": "Supervisor 忽略 completed Claim",
+            "detail": "Reviewer 已记录 finding，因此当前状态保持 needs_human。",
+            "source_refs": [
+              "run"
+            ],
+            "status_card": {
+              "phase": "needs_human",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "allowed_diff",
+              "checkpoint": "not_disclosed",
+              "verification": "passed",
+              "risk": "not_disclosed",
+              "reviewer": "needs_human",
+              "allowed_actions": [
+                "replan"
+              ],
+              "next_step": "记录 finding 并请求人工调整验证合同。",
+              "finish": "needs_human"
+            }
+          },
+          {
+            "id": "human-replan",
+            "at_ms": 29000,
+            "type": "plan",
+            "tone": "warning",
+            "message": "Plan revision 2 增加两项验证",
+            "detail": "新增同批次竞态回归和后端测试命令。允许修改的 2 个产品文件不变。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "planning",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "allowed_diff",
+              "checkpoint": "not_disclosed",
+              "verification": "historical",
+              "risk": "historical",
+              "reviewer": "historical",
+              "allowed_actions": [
+                "approve_plan"
+              ],
+              "next_step": "审核 Plan revision 2。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "plan-revision-2-approved",
+            "at_ms": 39000,
+            "type": "plan",
+            "tone": "neutral",
+            "message": "Plan revision 2 已批准",
+            "detail": "仍然只有 1 个 Work Item 和 1 个 Writer。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "awaiting_execution",
+              "work_item": "单项任务",
+              "worker": "not_started",
+              "workspace": "approved_scope",
+              "checkpoint": "not_disclosed",
+              "verification": "not_run",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "start_worker"
+              ],
+              "next_step": "在 revision 2 下启动新的 child。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "resume-with-new-evidence",
+            "at_ms": 50000,
+            "type": "decision",
+            "tone": "neutral",
+            "message": "旧门禁结果标记为 historical",
+            "detail": "Verification、Risk 和 Reviewer 将在当前工作区重新运行。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "replanned",
+              "work_item": "单项任务",
+              "worker": "not_started",
+              "workspace": "approved_scope",
+              "checkpoint": "not_disclosed",
+              "verification": "not_run",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "start_worker"
+              ],
+              "next_step": "按 revision 2 开始新的完整执行。",
+              "finish": "not_run"
+            }
+          }
+        ]
+      },
+      {
+        "id": "evidence-to-finish",
+        "index": 3,
+        "label": "重新跑完验证",
+        "title": "后端 361、定向 7、前端 180",
+        "summary": "revision 2 的 child 只修改批准的测试文件。后端、设置页和完整前端测试通过后，Risk Gate、Reviewer 和 Core Finish 依次运行。",
+        "run_ids": [
+          "20260818-231923-agent-resume"
+        ],
+        "duration_ms": 65000,
+        "result": "ready_to_commit",
+        "events": [
+          {
+            "id": "second-child-started",
+            "at_ms": 0,
+            "type": "worker",
+            "tone": "neutral",
+            "message": "启动 revision 2 child",
+            "detail": "child 在同一个 React act 批次内补充重复提交和交叉提交回归。",
+            "source_refs": [
+              "run"
+            ],
+            "status_card": {
+              "phase": "acting",
+              "work_item": "单项任务",
+              "worker": "active",
+              "workspace": "approved_scope",
+              "checkpoint": "not_disclosed",
+              "verification": "running",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "wait_for_verification"
+              ],
+              "next_step": "完成 revision 2 的验证合同。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "backend-361-passed",
+            "at_ms": 11000,
+            "type": "verification",
+            "tone": "success",
+            "message": "后端完整测试：361 passed",
+            "detail": "这是目标仓库 AGENTS.md 要求的后端测试。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "verifying",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "allowed_diff",
+              "checkpoint": "not_disclosed",
+              "verification": "backend_passed",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "run_settings_tests"
+              ],
+              "next_step": "运行设置页定向测试。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "settings-7-passed",
+            "at_ms": 22000,
+            "type": "verification",
+            "tone": "success",
+            "message": "设置页定向测试：7 passed",
+            "detail": "7 个用例包含同批次重复提交和交叉提交。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "verifying",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "allowed_diff",
+              "checkpoint": "not_disclosed",
+              "verification": "settings_passed",
+              "risk": "not_run",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "run_frontend_suite"
+              ],
+              "next_step": "运行完整前端测试。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "frontend-180-passed",
+            "at_ms": 34000,
+            "type": "verification",
+            "tone": "success",
+            "message": "前端完整测试：180 passed",
+            "detail": "14 个测试文件通过。类型检查、隔离构建和 git diff --check 也通过。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "verifying",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "reconciled",
+              "checkpoint": "not_disclosed",
+              "verification": "passed",
+              "risk": "running",
+              "reviewer": "not_run",
+              "allowed_actions": [
+                "run_risk_gate"
+              ],
+              "next_step": "完成 Risk Gate 并交给 Reviewer。",
+              "finish": "not_run"
+            }
+          },
+          {
+            "id": "core-gates-and-reviewer",
+            "at_ms": 47000,
+            "type": "reviewer",
+            "tone": "success",
+            "message": "Risk Gate passed，Reviewer approve",
+            "detail": "Reviewer 复核新增回归后没有报告 finding。",
+            "source_refs": [
+              "run"
+            ],
+            "status_card": {
+              "phase": "finalizing",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "reconciled",
+              "checkpoint": "not_disclosed",
+              "verification": "passed",
+              "risk": "passed",
+              "reviewer": "approve",
+              "allowed_actions": [
+                "finalize"
+              ],
+              "next_step": "由 Core Finish 校验 Artifact 与证据新鲜度。",
+              "finish": "pending"
+            }
+          },
+          {
+            "id": "core-finish-ready-to-commit",
+            "at_ms": 65000,
+            "type": "finish",
+            "tone": "success",
+            "message": "Core Finish 返回 ready_to_commit",
+            "detail": "Verification、Risk、Reviewer、Artifact 完整性和证据新鲜度均通过。Git 提交仍由人工执行。",
+            "source_refs": [
+              "release",
+              "summary",
+              "run"
+            ],
+            "status_card": {
+              "phase": "completed",
+              "work_item": "单项任务",
+              "worker": "stopped",
+              "workspace": "reconciled",
+              "checkpoint": "checkpoint-006",
+              "verification": "passed",
+              "risk": "passed",
+              "reviewer": "approve",
+              "allowed_actions": [
+                "inspect_evidence",
+                "human_commit"
+              ],
+              "next_step": "人工检查 Diff 与发布验收证据后决定是否提交。",
+              "finish": "ready_to_commit"
+            }
+          }
+        ]
+      }
+    ],
+    "proof": {
+      "format": "structured-event-replay-v1",
+      "event_count": 18,
+      "duration_ms": 169000,
+      "sha256": "56ca4a1bb3e607c7802b50a467aa6d88cbc609d78012421e753ca901a8153333",
+      "disclosure": "这是发布验收证据编排的低频状态回放，不是原始 Trace，也不是浏览器实时录制。"
+    },
+    "source_links": [
+      {
+        "kind": "release",
+        "label": "v0.2.0 发布说明",
+        "path": "docs/RELEASE-NOTES-0.2.0.md"
+      },
+      {
+        "kind": "run",
+        "label": "发布验收记录",
+        "path": "eval/real-world-runs.md"
+      },
+      {
+        "kind": "summary",
+        "label": "发布摘要",
+        "path": "docs/RELEASE-SUMMARY-0.2.0.md"
+      }
+    ],
+    "limitations": [
+      "该运行只有 1 个 Work Item 和 1 个 Writer。",
+      "前序 Handoff 的公开记录未列出 Agent run ID；场景 1 的 Run 引用从 Provider 429 开始。",
+      "公开文件不包含完整 state、Trace、命令日志或模型会话。",
+      "页面 SHA-256 只覆盖三个 scenarios 的规范化 JSON，不是完整 cases.json 或源证据文件的哈希。",
+      "本案例没有覆盖多 Work Item、操作系统隔离、Provider 稳定性或无人值守运行。"
+    ]
+  },
   "cases": [
     {
       "id": "pycodestyle-1187-rejection",
@@ -140,7 +732,7 @@
     },
     {
       "id": "click-2939-success",
-      "kind": "标准闭环",
+      "kind": "完整验证通过",
       "title": "Click #2939",
       "subtitle": "真实 Diff、独立 oracle 与完整测试",
       "issue_url": "https://github.com/pallets/click/issues/2939",

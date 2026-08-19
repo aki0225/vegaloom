@@ -2,9 +2,37 @@
 
 > 日期：2026-08-04
 >
-> 状态：`deployment-approved`；本地展示实现与视觉验收已完成，准备通过 PR 和 Pages workflow 部署
+> 状态：`completed / deployed`；展示站已合并并发布到 GitHub Pages
 >
-> 当前权限：已获用户授权提交、合并并部署 GitHub Pages；仍须先通过 PR CI
+> 当前入口：<https://aki0225.github.io/vegaloom/>
+>
+> 阅读说明：本文保留实施前冻结的范围、分支和验收合同。正文中的“准备部署”“等待 CI”
+> 等表述属于当时的计划，不是当前待办；当前使用与版本状态以 `README.md`、
+> `docs/README.md` 和 `docs/ROADMAP.md` 为准。
+
+## 2026-08-19：Supervisor Agent 运行回放
+
+展示站现已随 `v0.2.0` 调整为 Supervisor Agent 叙事，原 V1 计划正文继续作为历史设计记录，
+不再代表当前页面结构。当前页面不再重复罗列控制能力，而是把同一次发布验收中的多个 Run
+拆成三段短回放：
+
+1. Writer 中断、现场对账、Git Task Card 接手与 Provider 429；
+2. 前端验证通过后，Reviewer 因行为覆盖和后端证据不足打回；
+3. 人工批准 Plan revision 2，完成后端 `361 passed`、设置页定向 `7 passed` 和前端完整
+   `180 passed`，随后进入 `ready_to_commit`。
+
+回放左侧按时间展示主会话可见的低频事件，右侧同步更新 Vega 状态卡；访客可以播放、暂停、
+重置或切换片段。页面只保留一条紧凑职责说明，并把 Reviewer 历史案例降为一个代表案例与
+两个次级证据入口，避免把 Supervisor Agent 重新讲成单纯的代码评审工具。
+
+`site/data/cases.json` 由 `scripts/build_showcase_data.py` 从人工核准的公开来源生成，schema
+升级为 `4`。每个场景列出可公开核对的关联 Run；前序 Handoff 未公开 Run ID，因此只从
+Provider 429 的恢复 Run 开始列出。每个回放事件必须绑定允许来源，生成器冻结事件顺序、
+状态语义、数量、时长和 scenarios 规范化 JSON 的 SHA-256。这个哈希不覆盖完整
+`cases.json` 或源证据文件。页面明确披露：这是从发布验收证据编排的结构化状态回放，不是
+原始 Trace、实时终端或完整模型会话；本机 state、Trace、命令日志、凭据和隐藏推理仍不进入
+展示站。公开证据链接和生成器读取来源均固定到 `v0.2.0`，不会用当前工作区文件替代发布
+证据。数据文件读取失败时保留页面内置摘要并停用回放控件，不再维护第二份事件数据。
 
 ## 一、目标
 

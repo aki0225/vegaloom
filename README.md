@@ -17,6 +17,7 @@
 **[核心设计](#核心设计)** ·
 **[核心能力](#核心能力)** ·
 **[安装](#安装)** ·
+**[入口怎么选](#入口怎么选)** ·
 **[快速开始](#快速开始)** ·
 **[Codex 接入](#codex-接入)** ·
 **[关键行为](#关键行为)** ·
@@ -63,6 +64,8 @@ Worker（编写）与 Reviewer（评审）使用彼此独立的新会话。Revie
 - 使用独立只读 reviewer 会话审查 diff、测试证据和项目规则，不传递 worker 完整对话。
 - 根据变更路径、diff 规模和预算输出风险等级与审查建议。
 - 在失败、中断或证据不足时保存 state、trace、报告和人工接管入口。
+- 可选的 Supervisor Agent 为长任务补充 Plan 批准、单 Writer、Checkpoint、主会话状态和
+  Git Task Card 恢复，不改变 Core 的成功语义。
 - 不自动 commit、push、release，也不自动接受长期 Memory。
 
 ## 安装
@@ -82,10 +85,42 @@ git clone https://github.com/aki0225/vegaloom.git
 cd vegaloom
 
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[dev]"
 .\.venv\Scripts\Activate.ps1
+python -m pip install -e .
 vega --version
 ```
+
+需要使用 Supervisor Agent 时安装可选依赖：
+
+```powershell
+python -m pip install -e ".[agent]"
+vega agent capabilities
+```
+
+参与 Vega 本身开发时使用 `python -m pip install -e ".[dev]"`；`dev` 已包含测试、静态检查和
+Agent 依赖。普通 `do / loop / finish` 用户不需要安装 `dev` extra。
+
+更新源码后应重新执行对应的 `pip install -e ...`。Git pull 会更新 Python 源码，但不会自动
+刷新已经安装的 console-script 入口；只看 `vega --version` 可能遗漏旧入口。若
+`vega agent` 提示命令不存在，先确认当前命令来源并重新安装：
+
+```powershell
+Get-Command vega
+python -m pip install -e ".[agent]"
+vega agent capabilities
+```
+
+## 入口怎么选
+
+| 场景 | 推荐入口 | 说明 |
+|---|---|---|
+| 根因、范围或验收还不明确 | Plan-first + `vega loop ... --mode assist` | 主会话先只读调查并让人工确认，再修改 |
+| 边界清晰的一次性小任务 | `vega do bug|feature` | 自动 Worker，仍经过验证、Risk、Reviewer 和 Finish |
+| 需要暂停、接手或 Git-only 换机恢复 | `$vega-agent` 或 `vega agent` | 单 Work Item、单 Writer、显式批准和 Checkpoint |
+| 只读检查现有仓库 | `vega run engineering-change` | 不启动可写 Worker |
+
+不确定时先走 Plan-first。Supervisor Agent 不是更强的默认模式，而是为长时间运行、人工控制和
+恢复增加一层状态管理。
 
 ## 快速开始
 
@@ -212,6 +247,10 @@ vega adapters init codex --repo .
 面向需要暂停恢复或持续控制的任务，由主会话提交单 Work Item Plan，人工批准后再驱动真实
 Codex Worker、Verification、Risk、独立 Reviewer 和可信 Finish。
 
+推荐先让主会话使用 `$vega-agent`，由 Skill 展示 Plan、状态和下一步。需要直接操作 CLI 或
+排查恢复流程时，参见
+[日常使用 Walkthrough 的 Supervisor Agent V1 小节](docs/USAGE-WALKTHROUGH.md#supervisor-agent-v1)。
+
 Supervisor Agent V1 保持 opt-in，当前只接受一个未完成 Work Item。通用
 `vega status --run <agent_run>` 与 `vega watch --run <agent_run> --follow` 可以直接查看父 Agent
 状态、Supervisor 低频事件和绑定 child 的安全进度。只有 Core Finish 为 `ready_to_commit`
@@ -245,13 +284,10 @@ Claude Code 主会话复用同一份
 | 想了解 | 文档 |
 |---|---|
 | 全部文档及状态 | [文档导航](docs/README.md) |
-| 当前 Supervisor Agent 实施计划 | [Supervisor Agent V1 计划](docs/VEGA-SUPERVISOR-AGENT-V1-PLAN.md) |
-| Supervisor Agent 当前状态与交接 | [Supervisor Agent V1 交接](docs/SUPERVISOR-AGENT-V1-HANDOFF.md) |
-| Gate 2C 首次运行记录 | [Supervisor Agent Gate 2C](docs/SUPERVISOR-AGENT-GATE-2C-PLAN.md) |
-| Gate 2C R2 修正协议 | [Supervisor Agent Gate 2C R2](docs/SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) |
+| 选择日常入口与完整操作 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
+| Supervisor Agent 的产品边界 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
+| Supervisor Agent 状态权威与恢复合同 | [SUPERVISOR-AGENT-STATE-AUTHORITY](docs/SUPERVISOR-AGENT-STATE-AUTHORITY.md) |
 | 调查、Plan 与修改前人工确认 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
-| 完整使用流程 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
-| 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
 | v0.2.0 发布摘要 | [RELEASE-SUMMARY-0.2.0](docs/RELEASE-SUMMARY-0.2.0.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |

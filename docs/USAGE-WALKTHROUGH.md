@@ -1,8 +1,147 @@
 # Vega 日常使用 Walkthrough
 
-这份文档用一次真实 dogfood 说明 Vega 的日常用法，以及它如何避免“让 AI 一路自动写到失控”。
+这份文档先说明当前版本应该选择哪条入口，再用一次真实 dogfood 解释 Vega 如何避免
+“让 AI 一路自动写到失控”。
 
-示例目标不是展示复杂功能，而是验证一条最小但真实的研发闭环：
+## 先选入口
+
+| 任务形态 | 推荐路径 |
+|---|---|
+| 只知道现象，不知道根因或修改范围 | 主会话只读调查 -> Plan 人工确认 -> `assist` |
+| 边界明确的一次性小任务 | `vega do` |
+| 需要暂停、恢复、接手或换机 | `$vega-agent` / `vega agent` |
+| 只读检查，不需要修改 | `vega run engineering-change` |
+
+普通 `do / loop` 和 Supervisor Agent 最终都会复用 Workspace、Scope、Verification、Risk、
+独立 Reviewer 与 Finish。区别在于 Agent 额外管理 Plan 批准、单 Writer、Checkpoint、
+主会话状态和 Git Task Card；它不会放宽成功条件。
+
+<a id="supervisor-agent-v1"></a>
+
+## Supervisor Agent V1：长任务、暂停与接手
+
+Supervisor Agent 是 `v0.2.0` 的 opt-in 能力。它适合一次修改可能跨多个会话、需要中途停下，
+或需要把 WIP 与关键约束提交到任务分支后在新 clone 中继续的场景。V1 当前只接受一个未完成
+Work Item，不自动连续派发多个任务。
+
+### 1. 安装并检查能力
+
+```powershell
+python -m pip install -e ".[agent]"
+vega agent capabilities
+vega adapters init codex --repo <target-repo>
+```
+
+`supervisor_runtime` 和 `langgraph` 都为 `true` 后，Codex 主会话可以优先使用
+`$vega-agent`。Skill 会执行只读调查、展示 Plan、等待批准，并根据状态卡选择下一条命令。
+下面的 CLI 流程主要用于人工操作和排障。
+
+### 2. 调查后写一个未批准 Plan
+
+Plan 文件应放在临时目录或目标仓库已忽略的目录，不要直接堆在仓库根目录。V1 只允许一个
+`pending` Work Item，例如：
+
+```json
+{
+  "schema_version": 1,
+  "task_id": "export-button-fix",
+  "goal_revision": 1,
+  "plan_revision": 1,
+  "user_goal": "修复导出按钮无响应",
+  "non_goals": ["不调整导出文件格式"],
+  "success_conditions": ["回归测试能够复现旧问题并验证修复"],
+  "observed_facts": ["失败路径位于现有导出事件处理模块"],
+  "hypotheses": ["事件状态可能在异步回调前被提前清理"],
+  "unresolved_decisions": [],
+  "work_items": [
+    {
+      "schema_version": 1,
+      "work_item_id": "W1",
+      "objective": "修复并验证导出事件状态",
+      "allowed_paths": ["src/export.py", "tests/test_export.py"],
+      "forbidden_paths": [".env"],
+      "verification": ["python -m pytest tests/test_export.py -q"],
+      "risk_notes": ["检查并发回调是否可能重复提交"],
+      "depends_on": [],
+      "status": "pending"
+    }
+  ],
+  "approved": false
+}
+```
+
+`observed_facts` 只能写已经由代码、命令或运行结果确认的事实；推测必须放在
+`hypotheses`。允许路径、验证命令或风险发生变化时，应写入新的 Plan revision 并重新批准。
+
+### 3. 创建、批准并执行
+
+```powershell
+vega agent start `
+  --repo <target-repo> `
+  --plan <plan.json> `
+  --text "修复导出按钮无响应"
+
+vega status --run <agent_run>
+vega agent approve --run <agent_run> --actor human
+vega agent run --run <agent_run> --timeout 900
+vega status --run <agent_run>
+```
+
+执行期间可以在另一个终端查看安全事件：
+
+```powershell
+vega watch --run <agent_run> --follow
+```
+
+状态处理规则：
+
+- `completed`：读取 changed files、Verification、Risk、Reviewer 和 Finish，再由人工决定提交；
+- `finalizing`：运行 `vega agent finalize --run <agent_run>`，只采用现有 Core Finish；
+- `awaiting_approval`：新证据使旧 Plan 失效，先更新 Plan，再次等待人工批准；
+- `needs_human`：停止自动执行，检查 active Writer、Checkpoint、Workspace 和外部副作用；
+- `stopped`：保留现场，除非人工明确要求，否则不继续。
+
+Worker 声称完成、Reviewer 返回 `approve` 或 LangGraph 到达 `END` 都不等于成功。只有 Core
+Finish 为 `ready_to_commit`，且父 Agent 为 `completed`，才进入人工提交前检查。
+
+### 4. 本机恢复与 Git-only 接手
+
+本机恢复先确认没有 active Writer，再运行：
+
+```powershell
+vega agent resume-local --run <agent_run>
+```
+
+需要换目录、换会话或换机器时，先让当前 Worker 停止并完成现场对账。只有状态卡显示现场可解释、
+没有 active Writer，才能生成 Handoff：
+
+```powershell
+vega agent checkpoint `
+  --run <agent_run> `
+  --handoff `
+  --reason "提交 WIP 与任务约束，稍后在新 clone 中继续"
+```
+
+Vega 会生成 `.vega/tasks/**/*.md` Task Card 和人工 Git 清单，但不会执行 `git add`、commit
+或 push。人工只提交本轮 WIP 与 Task Card；`runs/`、Trace、SQLite、凭据和聊天记录不得进入
+Git。
+
+在新的 clone 中切到同一任务分支、安装 Vega 后运行：
+
+```powershell
+vega agent resume --repo .
+vega status --run <new_agent_run>
+```
+
+新 run 会恢复 Goal、批准 Plan、当前 Work Item、WIP 比较基线和下一步。旧 Verification、
+Risk 与 Reviewer 只作为历史记录，必须在新 Workspace 重新执行，不能直接沿用为当前通过证据。
+
+如果旧 Worker 是否仍在运行、Workspace 是否有 partial Diff，或数据库、支付、部署等外部
+副作用是否发生无法确认，Vega 会保持 `needs_human`，不会自动重跑或启动第二 Writer。
+
+## 普通 Loop Dogfood
+
+下面的示例目标不是展示复杂功能，而是验证一条最小但真实的研发闭环：
 
 ```text
 需求 -> auto worker -> 自动验证 -> 隔离 reviewer -> request_changes

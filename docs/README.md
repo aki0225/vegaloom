@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-18
+> 更新时间：2026-08-19
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -12,25 +12,28 @@
 | 快速了解产品与真实运行 | [Vega 在线展示](https://aki0225.github.io/vegaloom/) | GitHub Pages |
 | 先了解怎么使用 | [`../README.md`](../README.md) | 当前入口 |
 | 查看日常完整流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | 当前使用说明 |
+| 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | v0.2.0 当前协议 |
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
-| 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
-| 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | V1 已实现并随 v0.2.0 发布 |
-| 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
-| 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
-| 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
-| 查看 Gate 3B 历史协议 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | SAG3B-01～08 原始结果保留 |
-| 查看 Supervisor Agent 当前交接 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | V1 当前交接 |
-| 查看 RCB-01 预注册合同 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md) | 历史冻结合同 |
-| 查看 RCB-01 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `insufficient-evidence` |
-| 查看 RCB-02 离线检索结果 | [`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md) | Phase 0 停止，未运行 Holdout |
-| 查看 RCB-03 预注册合同 | [`REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md`](REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md) | 历史冻结合同 |
-| 查看 RCB-03 实验结果 | [`../eval/reviewer-context-bootstrap.md`](../eval/reviewer-context-bootstrap.md) | `reject-before-holdout` |
+| 查看 Supervisor 状态与恢复合同 | [`SUPERVISOR-AGENT-STATE-AUTHORITY.md`](SUPERVISOR-AGENT-STATE-AUTHORITY.md) | v0.2.0 当前合同 |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
-| 查看 v0.1 范围 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前范围说明 |
+| 查看版本范围和非目标 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | v0.1 baseline + v0.2.0 可选能力 |
 | 查看工作区规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 当前规范 |
+| 查看 v0.2.0 发布内容 | [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md) | 已发布 |
 | 查看历史实验归档 Tag | [`EXPERIMENT-ARCHIVES.md`](EXPERIMENT-ARCHIVES.md) | 已结束实验，只读复核 |
+
+下面这些文档用于复盘实现过程，不是开始使用 Vega 的前置阅读：
+
+| 主题 | 文档 | 结果 |
+|---|---|---|
+| Supervisor Agent 总计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | V1 已随 v0.2.0 发布 |
+| GitHub Pages 展示设计 | [`GITHUB-PAGES-SHOWCASE-V1-PLAN.md`](GITHUB-PAGES-SHOWCASE-V1-PLAN.md) | 已更新为 v0.2.0 Agent 运行回放 |
+| 当前发布交接与历史时间线 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | 最新结论在文档顶部和末尾 |
+| Gate 2B | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
+| Gate 2C 首次运行与修正 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md)、[`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `invalid-harness` / `gate-exit-pass` |
+| Gate 3B 预注册系列 | [`SUPERVISOR-AGENT-GATE-3B-PLAN.md`](SUPERVISOR-AGENT-GATE-3B-PLAN.md) | SAG3B-01～08 原始结果保留 |
+| Reviewer 上下文实验 | [`REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md`](REVIEWER-CONTEXT-BOOTSTRAP-PREREGISTRATION.md)、[`REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md`](REVIEWER-CONTEXT-RETRIEVAL-OFFLINE-PLAN.md)、[`REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md`](REVIEWER-HYPOTHESIS-RECON-PREREGISTRATION.md) | 未接入默认 Reviewer |
+| 日常流程阶段计划 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
 
 ## 当前工作
 

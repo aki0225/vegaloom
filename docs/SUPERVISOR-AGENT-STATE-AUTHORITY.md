@@ -1,12 +1,15 @@
 # Supervisor Agent V1 状态权威与最小合同 ADR
 
-> 状态：`accepted / Gate 2A 已合并 / Gate 2B gate-exit-pass`
+> 状态：`accepted / v0.2.0 released / release-acceptance-pass`
 >
 > 日期：2026-08-13
 >
-> 更新：2026-08-14
+> 更新：2026-08-19
 >
 > Gate 0～2A 实施分支：`experiment/supervisor-agent-v1`（PR `#57` 合并后归档）
+>
+> 阅读说明：第 9 节按发生时间保留 Gate 实施证据，其中旧的“下一 Gate”状态不代表当前版本；
+> 当前发布结论以第 10 节为准。
 
 ## 1. 决定
 
@@ -124,7 +127,7 @@ Core Artifact 对账。不能以恢复 Graph checkpoint 代替恢复执行事实
 - 不同 Observation 至少产生三种不同合法 Decision；
 - 既有默认命令行为和成功语义没有变化；顶层 CLI 仅新增 opt-in `agent` 子命令。
 
-## 9. Gate 1 与 Gate 2A 实施证据
+## 9. Gate 1 与 Gate 2A 实施证据（历史时间线）
 
 Gate 1 已实现 Fake Worker 可见控制循环、Plan 批准、Task Brief、状态卡、LangGraph 条件路由和
 `next / repair / replan / human / finalize` 决策。Graph 只能进入 `finalizing`，不能写入
@@ -174,3 +177,23 @@ Gate 3A 已完成；Gate 3B 已获批准。固定控制器、未知副作用继�
 已通过 PR CI。SAG3B-03 已完成机器 A 和同机隔离 B 模拟，暴露 committed handoff
 comparison baseline 缺口；窄修复已通过 PR `#63` 合入 `main@435767a`。历史 Case 仍保持
 `gate-not-passed`，SAG3B-04 与另一台物理机器 B 尚未运行，Gate 3C 继续冻结。
+
+## 10. v0.2.0 当前状态
+
+Supervisor Agent V1 已作为 opt-in 能力随 `v0.2.0` 发布。当前实现保持本 ADR 的权威顺序和
+fail-closed 约束，并补齐：
+
+- 主会话状态卡与通用 `status / watch`；
+- 真实 Codex Worker、独立 Reviewer 和父 Agent `finalize`；
+- Handoff Checkpoint、Resume Capsule 与 Git Task Card；
+- Git-only fresh clone 恢复，并把旧 Verification、Risk 和 Reviewer 降为历史证据；
+- Provider 失败、Reviewer 打回、Plan revision 和重新执行后的可信 Finish。
+
+SAG3B-01～08 的预注册结果仍按原记录保留，不因后续修复或发布验收而改写。2026-08-18 的
+独立发布验收已完成 partial WIP 停止、Git Task Card、fresh clone 恢复、Provider 失败
+fail-closed、Reviewer 打回、Plan revision 2、完整 Core Gate 和人工 PR 合入，判定为
+`release-acceptance-pass`。另一台物理机器与长期使用价值改为发布后的增强证据，不再阻断
+`v0.2.0`。
+
+当前仍不支持多 Work Item 自动连续派发、多 Writer 并行、自动 Git、长期 Memory 自动写入、
+Provider 平台或第二套成功语义。
