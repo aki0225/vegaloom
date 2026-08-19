@@ -108,13 +108,14 @@ reviewer 合同。该提示词边界只能降低误跟随风险，不能证明�
 - 为大范围变更声明 scope profile。
 - 本地 decision ledger。
 
-### 实验能力
+### 可选与实验能力
 
 - Memory proposal / ledger。
 - Goal P0 长任务人工状态层，以及已冻结、默认关闭、一次只运行一个 checkpoint 的 P1 实验入口。
 - Codex skill adapter。
-- opt-in `vega agent` Supervisor 控制层：Plan 批准、单 Writer、Checkpoint、机器对账、本机恢复和
-  真实 Codex Adapter。它尚未成为默认入口，当前只承诺一个未完成 Work Item。
+- v0.2.0 发布候选中的 opt-in `vega agent` Supervisor 控制层：Plan 批准、单 Writer、
+  Checkpoint、机器对账、本机恢复、Git Task Card 和真实 Codex Adapter。它不是默认入口，
+  当前只承诺一个未完成 Work Item，也不增加第二套成功语义。
 
 Goal P1 不再作为新的长任务能力扩建入口。后续可恢复任务实验只在 Supervisor Agent 路线进行；
 Goal P1 保留兼容和历史证据，不与 Supervisor 维护两套同级的当前事实。

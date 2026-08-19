@@ -612,7 +612,7 @@ Windows Job 或 POSIX process group 时只等待；child 状态为 running 但�
 证据新鲜度和仓库身份重新校验通过时，才完成 checkpoint。该流程不会自动恢复模型会话、
 重试、回滚、commit、push、写长期 Memory 或进入下一 checkpoint。
 
-## Supervisor Agent（opt-in 实验）
+## Supervisor Agent（opt-in V1）
 
 Supervisor Agent 是当前 `main` 的可选控制层，不改变 `vega do/loop` 的默认行为。宿主主会话
 负责只读调查并提交结构化 Agent Plan；Vega Runtime 不内置 Planner 模型，负责 Plan 版本与批准、
@@ -637,10 +637,12 @@ Supervisor 选择 `finalize` 后，Adapter 只采用已绑定且完整性、新�
 Reviewer 均通过的 Core `finish-summary.json`，把父 Agent 发布为
 `completed / ready_to_commit`。如果 Core 已完成而父终态发布前中断，可以用
 `vega agent finalize --run <agent-run>` 幂等恢复；它不创造第二套成功语义。
-Gate 3A 已实现 Handoff Checkpoint、Resume Capsule、Git Task Card 与同机双隔离副本恢复；
-真实跨机器继续执行仍属于 Gate 3B。Gate 3B 的控制器必须从固定 commit 重建源码快照，不能
-使用目标 checkout 的 editable 安装；`pause/stop` 生成的新 Checkpoint 继承最近外部副作用
-状态，`unknown` 不能经二次停止降级为可安全 Handoff。
+Gate 3A 已实现 Handoff Checkpoint、Resume Capsule、Git Task Card 与同机双隔离副本恢复。
+v0.2.0 发布验收又在独立 fresh clone 中完成真实 Worker 恢复、Reviewer 打回、人工 Plan
+revision 和完整 Core Finish。历史 SAG3B Case 的原始结果继续保留；发布验收不要求另一台
+物理机器，但控制环境必须从固定 commit 重建，不能使用目标 checkout 的 editable 安装。
+`pause/stop` 生成的新 Checkpoint 继承最近外部副作用状态，`unknown` 不能经二次停止降级为
+可安全 Handoff。
 
 Task Card 位于 Git 跟踪的 `.vega/tasks/**/*.md`，只保存批准 Plan 和人工交接所需的 Resume
 Capsule。本机 Agent State、Checkpoint、Trace 和 LangGraph SQLite 图游标仍留在 `runs/`，不进入

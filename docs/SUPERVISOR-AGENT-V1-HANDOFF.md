@@ -1,16 +1,17 @@
 # Supervisor Agent V1 当前交接
 
-> 日期：2026-08-17
+> 日期：2026-08-18
 >
-> 当前实施分支：`codex/sag3b-08-stable-env`
+> 当前实施分支：`release/v0.2.0`
 >
-> 实施基线：`main@70282d1`
+> 实施基线：`main@c4590fa`
 >
-> 状态：`Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / Gate 3B SAG3B-08 machine-a-known-side-effect / gate-not-passed / Gate 3C 冻结`
+> 状态：`Supervisor Agent V1 implemented / v0.2.0 release-acceptance-pass / package-smoke-pass / release CI pending`
 
 ## 当前结论
 
-Gate 0、Gate 1 与 Gate 2A 已进入主线。独立审阅发现并修复了 Observation 发布、
+Supervisor Agent V1 的产品合同和 opt-in CLI 已进入主线。Gate 0、Gate 1 与 Gate 2A 的
+独立审阅发现并修复了 Observation 发布、
 Plan 发布顺序、Recovery 证据引用和中间 Work Item 门禁四类问题。修复后的代码 HEAD
 `4180e7e` 已通过 workflow `31718078414` 的 9 项 CI，最终文档 HEAD `8ca75f2` 已通过 workflow
 `31718680069` 的 9 项 CI。PR `#57` 已以 `6a5c927` 合并到 `main`，Gate 2A 没有遗留阻断项。
@@ -49,10 +50,17 @@ Worker 在冻结环境中超时，没有形成新的完整 Core Gate Artifact。
 `main@70282d1` 合入 Windows batch launcher 与 replan attempt epoch 修复。SAG3B-08 随后在
 稳定 Python 3.12 环境通过三轮预检并形成允许范围内 partial Diff，但 Worker 自检在系统
 `%TEMP%` 留下 pytest fixture 和临时 Git 仓库，人工副作用裁决为 `known`，因此没有发布
-Handoff 或启动 machine B。Gate 3B 保持 `gate-not-passed`，Gate 3C 继续冻结。
+Handoff 或启动 machine B。SAG3B-01～08 的历史系列保持 `gate-not-passed`，没有事后放宽
+或改写。
+
+2026-08-18 另行批准的 v0.2.0 发布验收已经完成真实前端并发任务的 partial WIP 停止、
+Git Task Card、独立 fresh clone 恢复、Provider 失败 fail-closed、Reviewer 打回、人工
+Plan revision 2、重新执行完整 Core Gate 和人工 PR 合入。最终 Agent run
+`20260818-231923-agent-resume` 为 `completed / ready_to_commit`。该结果作为 V1 发布依据，
+不覆盖 SAG3B-01～08，也不把另一台物理机器设为发布硬门槛。
 
 既有 `vega do / loop / goal`、Reviewer、Verification、Risk Gate、Finish 的命令行为与成功
-语义未改变；打包后的顶层 CLI 仍以 opt-in `vega agent` 暴露实验能力。
+语义未改变；打包后的顶层 CLI 以 opt-in `vega agent` 暴露 V1 能力。
 
 ## 2026-08-16 V1 产品合同补全
 
@@ -455,3 +463,56 @@ machine_b = not_started
 没有提交 Worker WIP，没有生成 Task Card，也没有启动第二次 attempt。按预注册停止线，
 后续不自动创建 SAG3B-09；若继续 Gate 3B，需要先重新决定是否用确定性临时目录隔离替代
 Prompt 约束，不能在本 Case 内事后放宽标准。
+
+## 2026-08-18 v0.2.0 发布验收与当前交接
+
+本轮没有在 SAG3B-08 内修改冻结标准，而是经人工批准建立单独的发布验收。目标任务、范围、
+验证和风险由 Git Task Card 固定，新的控制环境与目标环境均从远端重新 clone；未复制旧
+`runs/`、Trace、SQLite、虚拟环境、临时目录或聊天。
+
+第一条恢复 attempt 遇到 Provider 429。Vega 正确保留 `needs_human`、unknown 副作用和未运行
+Core Gate，同时暴露恢复 run 继承旧 `handoff_ready` 的状态缺口。修复提交
+`aa096c014fd00807aeb1a0c6cb088341a264b280` 将已消费的 Task Card 转换为新 run 的
+`handoff_status=none`，并补充回归；unknown 副作用仍需人工裁决。
+
+新的隔离验收 run `20260818-231923-agent-resume` 先完成一次正常 Worker 与完整前端门禁，
+但 Reviewer 因“测试没有覆盖同一 React 批次竞态”和“缺少目标仓库要求的后端测试”返回
+`needs_human`。人工批准 Plan revision 2 后，第二条 child
+`20260818-233820-287105-bug-loop` 补强同批次回归，随后得到：
+
+```text
+backend pytest: 361 passed
+targeted frontend: 7 passed
+full frontend: 180 passed
+TypeScript: passed
+isolated Vite build: passed
+git diff --check: passed
+Risk: passed
+Reviewer: approve
+Supervisor: completed / ready_to_commit
+```
+
+目标仓库由人工创建 PR `#1` 并 Squash Merge；Vega 没有自动执行 Git 写入或发布动作。详细
+追加式记录见 [`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
+
+本机发布候选检查已经完成：
+
+- compileall、repository hygiene、Ruff 与 `git diff --check` 通过；
+- 版本、Agent CLI、架构增长和仓库卫生定向回归 `69 passed`；
+- 正确 Python 3.12 环境中的 Agent 相关组合回归 `115 passed`，完整节点收集
+  `1297 tests collected`；
+- wheel 与 sdist 构建成功，Twine 检查通过；
+- base wheel、带 `agent` extra 的 wheel 和 sdist 均在源码树外完成安装；`vega --version`、
+  `vega list-loops`、`vega agent capabilities` 与依赖检查通过。
+
+本机完整 pytest 没有形成可信通过结果：一次全量运行被人工中断，Windows 上的 Core CLI
+分片又因单测内 Git 子进程达到 58 秒超时而失败。因此不能写成本地全量通过，正式完整结果
+必须由同一候选提交的 PR CI 提供。
+
+当前剩余步骤：
+
+1. 推送 `release/v0.2.0`，等待同一候选提交的全部 PR CI；
+2. CI 通过后 Squash Merge、创建 annotated Tag `v0.2.0` 和 GitHub Release；
+3. 从精确 Tag 再做一次干净安装 smoke。
+
+若 PR CI、package smoke 或精确 Tag smoke 任一失败，不创建或不宣布 Release。
