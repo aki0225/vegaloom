@@ -9,7 +9,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Candidate-v0.2.0-4fb8d8?style=for-the-badge" alt="v0.2.0 发布候选">
+  <img src="https://img.shields.io/badge/Baseline-v0.2.0-4fb8d8?style=for-the-badge" alt="v0.2.0">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -253,7 +253,7 @@ Claude Code 主会话复用同一份
 | 完整使用流程 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品定位、非目标与成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
-| v0.2.0 发布候选摘要 | [RELEASE-SUMMARY-0.2.0](docs/RELEASE-SUMMARY-0.2.0.md) |
+| v0.2.0 发布摘要 | [RELEASE-SUMMARY-0.2.0](docs/RELEASE-SUMMARY-0.2.0.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | 实验性长任务 Goal 与 checkpoint 边界 | [LONG-RUNNING-GOALS](docs/LONG-RUNNING-GOALS.md) |
@@ -269,11 +269,10 @@ Claude Code 主会话复用同一份
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal、adapters 和 `vega agent` 是可选能力，不扩大核心 loop 的成功条件。
-- 当前已发布稳定基线为 `v0.1.5`；`v0.2.0` 发布候选已完成真实验收和本机包验证，正在等待
-  PR CI。候选在保留既有 `do / loop / goal` 成功语义的同时增加 opt-in Supervisor Agent
-  V1：主会话调查和提交单 Work Item Plan，人工批准后由 Vega 约束一个真实 Worker、核对
-  Workspace、支持 Git-only 交接恢复，并复用现有 Verification、Risk、独立 Reviewer 与
-  Finish 完成交付判断。
+- 当前稳定基线为 `v0.2.0`。它在保留既有 `do / loop / goal` 成功语义的同时发布 opt-in
+  Supervisor Agent V1：主会话调查和提交单 Work Item Plan，人工批准后由 Vega 约束一个
+  真实 Worker、核对 Workspace、支持 Git-only 交接恢复，并复用现有 Verification、Risk、
+  独立 Reviewer 与 Finish 完成交付判断。
 
 ## 开发验证
 

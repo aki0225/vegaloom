@@ -1,6 +1,6 @@
 # Vega Supervisor Agent V1 实施计划
 
-> 状态：`implemented / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / SAG3B-01～08 历史结果保留 / v0.2.0 release-acceptance-pass`
+> 状态：`implemented / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / SAG3B-01～08 历史结果保留 / v0.2.0 released`
 >
 > 计划日期：2026-08-13
 >

@@ -1,9 +1,8 @@
 # Vega 后续演进路线
 
 > 更新时间：2026-08-19
-> 当前已发布稳定基线：`v0.1.5`
-> 当前发布候选：`v0.2.0`（真实验收与本机 package smoke 通过，PR CI 待完成）
-> 发布记录：以远端 annotated Tag 与 GitHub Release 为准
+> 当前稳定基线：`v0.2.0`
+> 发布记录：annotated Tag 与 GitHub Release 已发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
 > 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式 `--rerun-worker`
@@ -66,7 +65,7 @@ v0.1.5 发布（完成）
   -> Gate 3A Handoff 机械生产与本地往返（gate-exit-pass）
   -> Gate 3B 预注册系列（SAG3B-01～08 历史结果保留）
   -> v0.2.0 单 Work Item Git-only 发布验收（完成，release-acceptance-pass）
-  -> v0.2.0 Supervisor Agent V1 发布（候选门禁进行中）
+  -> v0.2.0 Supervisor Agent V1 发布（完成）
   -> 小规模日常价值观察（发布后进行，不新增 Runtime）
   -> V1 产品合同补全：父终态、主会话 Skill、父 run status/watch（已进入主线）
   -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义

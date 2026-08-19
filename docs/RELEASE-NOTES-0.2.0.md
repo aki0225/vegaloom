@@ -1,7 +1,7 @@
 # Vega v0.2.0 发布说明
 
-v0.2.0 发布候选包含第一个 opt-in Supervisor Agent。它不替代 Codex 的代码理解和修改能力，
-也不把 Vega 扩张成通用多 Agent 平台；新增的是一层可观察、可暂停、可恢复的软件工程控制面。
+v0.2.0 发布第一个 opt-in Supervisor Agent。它不替代 Codex 的代码理解和修改能力，也不把
+Vega 扩张成通用多 Agent 平台；新增的是一层可观察、可暂停、可恢复的软件工程控制面。
 
 ## Supervisor Agent V1
 
@@ -49,8 +49,8 @@ v0.2.0 发布候选包含第一个 opt-in Supervisor Agent。它不替代 Codex 
 6. 目标仓库最终验证为后端 `361 passed`、设置页 `7 passed`、前端完整 `180 passed`，
    TypeScript、隔离构建和 `git diff --check` 通过，随后经人工 PR 合入。
 
-这项验收不改写 SAG3B-01～08 的历史失败结果。它证明 v0.2.0 候选可以在独立 clone 中从
-Git Task Card 恢复真实 WIP，允许 Reviewer 推翻 Worker Claim，并在补足证据后重新形成可信
+这项验收不改写 SAG3B-01～08 的历史失败结果。它证明 v0.2.0 可以在独立 clone 中从 Git
+Task Card 恢复真实 WIP，允许 Reviewer 推翻 Worker Claim，并在补足证据后重新形成可信
 Finish。
 
 ## 不变边界

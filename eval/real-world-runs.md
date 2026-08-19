@@ -1068,3 +1068,32 @@ human-replan-pass / full-core-pass / target-pr-merged / release-acceptance-pass`
 这项结果证明单 Work Item 的真实 WIP 可以只经 Git Task Card 在独立 clone 中恢复，并允许
 Reviewer 推翻 Worker Claim、要求人工修订 Plan 后重新完成 Core Gate。它不证明多 Work Item
 自治、物理机安全隔离、通用 Provider 稳定性、Claude Code 原生 Writer 或无人值守长时间运行。
+
+## 2026-08-19 v0.2.0 发布门禁与精确 Tag 复核
+
+v0.2.0 发布候选 PR `#73` 的精确 HEAD `8a9950576c0e0e45013d00e95d789a3925ea204f`
+通过 workflow `32207704764` 的全部 9 项检查。Squash Merge 后，`main@2fb1bd856df55907a4d3ef1039ea62658b30b2b4`
+再次通过 workflow `32208196425` 的全部 9 项检查：
+
+- 静态检查与分片覆盖；
+- Python 3.11 兼容性；
+- Python 3.12 四个测试分片；
+- Windows 专项与 wheel smoke；
+- POSIX 临时目录专项；
+- 构建并安装 wheel。
+
+annotated Tag `v0.2.0` 不可移动，解除引用后指向
+`2fb1bd856df55907a4d3ef1039ea62658b30b2b4`。从该精确 Tag 重新构建的 wheel 和 sdist
+均通过 Twine 检查；源码树外的 base wheel、`agent` extra wheel 和 sdist 安装均通过
+版本、`vega list-loops`、`vega agent capabilities` 与依赖检查。此次精确 Tag 本机复核的
+制品摘要为：
+
+```text
+wheel sha256 = 2AB3C17F13DD985C78C4303D315B04868F627F65E84E04509B31CFDFBCDDC840
+sdist sha256 = 415DFCDBFB559ECA4DDB220942CC5B4EB106E50121B950806EC6792A714A9D1F
+```
+
+GitHub Release `Vega v0.2.0` 已公开发布。发布后删除实现分支
+`release/v0.2.0`；SAG3B-03 的未完成 WIP 仅由不可移动 Tag
+`archive/sag3b-03-wip-20260816` 保留，旧远端实验分支已删除。文档候选状态在本次发布
+完成后更新为已发布，不改变前述历史实验结果。

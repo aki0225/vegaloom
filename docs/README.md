@@ -15,7 +15,7 @@
 | 确认产品边界和成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | 当前权威契约 |
 | 查看调查与修改前确认协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | Phase 2 已完成 |
 | 查看日常流程完成状态 | [`DAILY-USAGE-COMPLETION-PLAN.md`](DAILY-USAGE-COMPLETION-PLAN.md) | Phase 4 已完成 |
-| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | V1 已实现，v0.2.0 发布候选验收通过 |
+| 查看 Supervisor Agent V1 实施计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | V1 已实现并随 v0.2.0 发布 |
 | 查看 Gate 2B 实施与验证记录 | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | 查看 Gate 2C 首次运行协议 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md) | `invalid-harness` |
 | 查看 Gate 2C R2 修正协议 | [`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `gate-exit-pass` |
@@ -34,9 +34,9 @@
 
 ## 当前工作
 
-### 当前发布候选：Supervisor Agent V1
+### 当前版本：Supervisor Agent V1
 
-`v0.2.0` 发布候选增加 opt-in Supervisor Agent V1。宿主主会话负责只读调查和提交结构化 Plan，
+`v0.2.0` 发布 opt-in Supervisor Agent V1。宿主主会话负责只读调查和提交结构化 Plan，
 Coding Agent 继续读代码和修改文件；Vega 负责 Plan revision 与人工批准、单 Writer、
 Workspace 对账、Checkpoint、Git Task Card、恢复、主会话状态展示，以及复用现有 Core 的
 最终可信完成判断。
@@ -99,8 +99,8 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 
 ### 已完成的当前阶段
 
-- `v0.2.0` 发布候选已完成真实任务验收和本机 package smoke，正在等待 PR CI、Tag 和
-  GitHub Release 门禁；远端 Tag 与 Release 创建前不记为已发布。
+- `v0.2.0` annotated Tag 与 GitHub Release 已发布；PR `#73` 和精确 Tag package smoke
+  均已通过，该版本发布 opt-in Supervisor Agent V1 和 Git-only 恢复能力。
 - `v0.1.5` annotated Tag 与 GitHub Release 已发布；该版本汇总日常使用协议、Finish 展示、
   Reviewer 可信度修复和显式 Worker 重跑的恢复边界。
 - `v0.1.4` annotated Tag 与 GitHub Release 已发布；精确 Tag smoke 已登记在
@@ -141,11 +141,11 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 | [`LEAN-CORE-PLAN.md`](LEAN-CORE-PLAN.md) | 轻量核心清单和增长约束决策 |
 | [`LONG-RUNNING-GOALS.md`](LONG-RUNNING-GOALS.md) | Goal P0 与单 checkpoint P1 实验边界 |
 
-## 发布文档
+## 发布历史
 
 | 版本 | 发布说明 | 发布摘要 |
 |---|---|---|
-| `v0.2.0` 候选 | [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md) | [`RELEASE-SUMMARY-0.2.0.md`](RELEASE-SUMMARY-0.2.0.md) |
+| `v0.2.0` | [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md) | [`RELEASE-SUMMARY-0.2.0.md`](RELEASE-SUMMARY-0.2.0.md) |
 | `v0.1.5` | [`RELEASE-NOTES-0.1.5.md`](RELEASE-NOTES-0.1.5.md) | [`RELEASE-SUMMARY-0.1.5.md`](RELEASE-SUMMARY-0.1.5.md) |
 | `v0.1.4` | [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md) | [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md) |
 | `v0.1.3` | [`RELEASE-NOTES-0.1.3.md`](RELEASE-NOTES-0.1.3.md) | [`RELEASE-SUMMARY-0.1.3.md`](RELEASE-SUMMARY-0.1.3.md) |

@@ -1,12 +1,10 @@
 # Supervisor Agent V1 当前交接
 
-> 日期：2026-08-18
+> 日期：2026-08-19
 >
-> 当前实施分支：`release/v0.2.0`
+> 发布基线：`main@2fb1bd8`
 >
-> 实施基线：`main@c4590fa`
->
-> 状态：`Supervisor Agent V1 implemented / v0.2.0 release-acceptance-pass / package-smoke-pass / release CI pending`
+> 状态：`Supervisor Agent V1 implemented / v0.2.0 released`
 
 ## 当前结论
 
@@ -509,10 +507,15 @@ Supervisor: completed / ready_to_commit
 分片又因单测内 Git 子进程达到 58 秒超时而失败。因此不能写成本地全量通过，正式完整结果
 必须由同一候选提交的 PR CI 提供。
 
-当前剩余步骤：
+发布结果：
 
-1. 推送 `release/v0.2.0`，等待同一候选提交的全部 PR CI；
-2. CI 通过后 Squash Merge、创建 annotated Tag `v0.2.0` 和 GitHub Release；
-3. 从精确 Tag 再做一次干净安装 smoke。
-
-若 PR CI、package smoke 或精确 Tag smoke 任一失败，不创建或不宣布 Release。
+1. PR `#73` 的候选提交和 `main@2fb1bd8` 均通过 9 项 GitHub Actions；
+2. annotated Tag `v0.2.0` 指向 `2fb1bd856df55907a4d3ef1039ea62658b30b2b4`；
+3. 精确 Tag 重新构建 wheel 与 sdist，Twine、base wheel、`agent` extra、sdist、版本、
+   包内 loop、LangGraph capability 与依赖检查全部通过；
+4. 精确 Tag wheel SHA-256 为
+   `2AB3C17F13DD985C78C4303D315B04868F627F65E84E04509B31CFDFBCDDC840`，sdist SHA-256 为
+   `415DFCDBFB559ECA4DDB220942CC5B4EB106E50121B950806EC6792A714A9D1F`；
+5. GitHub Release `Vega v0.2.0` 已发布；
+6. `release/v0.2.0` 已删除，SAG3B-03 WIP 已由不可移动归档 Tag
+   `archive/sag3b-03-wip-20260816` 保存，旧远端分支已删除。
