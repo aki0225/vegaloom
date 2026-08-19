@@ -22,12 +22,12 @@
   </g>
 
   <g transform="translate(56 158)">
-    <text fill="#a93a19" font-family="Consolas, monospace" font-size="15" font-weight="700" letter-spacing="2">PLAN · CHECKPOINT · SINGLE WRITER · CORE FINISH</text>
-    <text y="76" fill="#171512" font-family="Georgia, 'Songti SC', serif" font-size="58" font-weight="700">代码可以让 AI 写。</text>
-    <text y="154" fill="#e15d2f" font-family="Georgia, 'Songti SC', serif" font-size="69" font-weight="700">任务做到哪了，</text>
-    <text y="232" fill="#171512" font-family="Georgia, 'Songti SC', serif" font-size="69" font-weight="700">不能只靠聊天记录。</text>
-    <text y="290" fill="#3f3932" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="20">宿主 Agent 干活；Vega 对账现场，再决定继续、重排，还是交还人工。</text>
-    <text y="334" fill="#756b60" font-family="Consolas, monospace" font-size="15">One writes, one reviews. Vega keeps the work explainable.</text>
+    <text fill="#a93a19" font-family="Consolas, monospace" font-size="15" font-weight="700" letter-spacing="2">PLAN · CHECKPOINT · WORKSPACE · FINISH</text>
+    <text y="82" fill="#171512" font-family="Georgia, 'Songti SC', serif" font-size="48" font-weight="700">Codex / Claude Code 的</text>
+    <text y="162" fill="#e15d2f" font-family="Georgia, 'Songti SC', serif" font-size="64" font-weight="700">任务状态与验证层</text>
+    <text y="226" fill="#3f3932" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="21">保存 Plan、Checkpoint、Diff 和验证结果。</text>
+    <text y="266" fill="#3f3932" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="21">Worker 中断后先核对现场。</text>
+    <text y="304" fill="#3f3932" font-family="'Microsoft YaHei', 'PingFang SC', sans-serif" font-size="21">根据证据继续执行或交还人工。</text>
   </g>
 
   <g transform="translate(765 134)" filter="url(#shadow)">

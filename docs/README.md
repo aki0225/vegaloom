@@ -27,7 +27,7 @@
 | 主题 | 文档 | 结果 |
 |---|---|---|
 | Supervisor Agent 总计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | V1 已随 v0.2.0 发布 |
-| GitHub Pages 展示设计 | [`GITHUB-PAGES-SHOWCASE-V1-PLAN.md`](GITHUB-PAGES-SHOWCASE-V1-PLAN.md) | 已更新为 v0.2.0 Agent 展示 |
+| GitHub Pages 展示设计 | [`GITHUB-PAGES-SHOWCASE-V1-PLAN.md`](GITHUB-PAGES-SHOWCASE-V1-PLAN.md) | 已更新为 v0.2.0 Agent 运行回放 |
 | 当前发布交接与历史时间线 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | 最新结论在文档顶部和末尾 |
 | Gate 2B | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | Gate 2C 首次运行与修正 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md)、[`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `invalid-harness` / `gate-exit-pass` |
