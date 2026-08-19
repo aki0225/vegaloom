@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Vega 让 AI 代码修改经过真实 Diff、项目验证和独立评审；证据不足时停止并交还人工。"
+      content="Vega 是 AI 编码的 Supervisor Agent：固定计划、保存 Checkpoint、核对真实工作区，并用项目验证与独立 Reviewer 决定下一步。"
     >
-    <meta name="theme-color" content="#f3ecdf">
+    <meta name="theme-color" content="#eee5d6">
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Vega — AI 写的代码，得看证据">
+    <meta property="og:title" content="Vega — 任务做到哪了，不能只靠聊天记录">
     <meta
       property="og:description"
-      content="Worker 留下真实 Diff，项目验证实际运行，Reviewer 从新会话审查。"
+      content="Plan、单 Writer、Checkpoint、Git Task Card、机器证据与独立 Reviewer。"
     >
     <meta
       property="og:image"
       content="https://aki0225.github.io/vegaloom/assets/og-image.png"
     >
-    <title>Vega — AI 写的代码，得看证据</title>
+    <title>Vega — 任务做到哪了，不能只靠聊天记录</title>
     <script>
       (() => {
         const storageKey = "vega-showcase-theme";
@@ -46,10 +46,16 @@
     <header class="site-header">
       <a class="brand" href="#top" aria-label="返回 Vega 展示站顶部">
         <span class="brand-mark" aria-hidden="true">V</span>
-        <strong>Vega</strong>
+        <span>
+          <strong>Vega</strong>
+          <small>Supervisor Agent</small>
+        </span>
       </a>
 
       <nav class="header-links" aria-label="站点链接">
+        <span class="version-chip">v0.2.0</span>
+        <a href="#replay">决策重放</a>
+        <a href="#cases">证据档案</a>
         <button
           class="theme-toggle"
           type="button"
@@ -62,7 +68,6 @@
           </span>
           <span data-theme-label>黑夜</span>
         </button>
-        <a href="#cases">运行记录</a>
         <a
           href="https://github.com/aki0225/vegaloom"
           target="_blank"
@@ -74,31 +79,337 @@
     <main id="main-content">
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="kicker">One writes, one reviews.</p>
-          <p class="hero-brand">Vega</p>
-          <h1 id="hero-title">AI 写的代码，<br>得看证据。</h1>
+          <p class="kicker">Vega v0.2.0 · Supervisor Agent</p>
+          <h1 id="hero-title">
+            代码可以让 AI 写。<br>
+            <em>任务做到哪了，</em><br>
+            不能只靠聊天记录记着。
+          </h1>
           <p class="hero-lead">
-            真实 Diff。项目验证。独立 Reviewer。证据不足就停。
+            Vega 把批准过的计划、当前工作区和下一步写进可恢复状态。
+            Worker 中断、Provider 失败或 Reviewer 打回时，它先对账现场，
+            再决定继续、重排，还是交还人工。
           </p>
           <div class="hero-actions">
-            <a class="button button--primary" href="#cases">查看真实运行</a>
-            <a class="button button--secondary" href="#quick-start">开始使用</a>
+            <a class="button button--primary" href="#replay">看一次真实接力</a>
+            <a class="button button--secondary" href="#quick-start">安装并试用</a>
           </div>
+          <p class="hero-note">
+            One writes, one reviews.
+            <span>Vega 负责把现场留住。</span>
+          </p>
         </div>
 
-        <figure class="hero-visual">
-          <img
-            src="assets/vega-flow.svg?v=20260804"
-            alt="Vega 关系图：Worker 留下 Diff、测试和规则证据，Reviewer 从新会话审查，最终由人决定是否提交"
-            width="760"
-            height="560"
+        <aside class="run-ledger" aria-label="真实 Agent 运行状态卡">
+          <header class="run-ledger__header">
+            <div>
+              <span class="live-dot" aria-hidden="true"></span>
+              <strong>AGENT RUN</strong>
+            </div>
+            <code>20260818-231923</code>
+          </header>
+
+          <div class="ledger-title">
+            <span>Echo Vault / Settings</span>
+            <h2>设置页并发竞态</h2>
+          </div>
+
+          <dl class="ledger-grid">
+            <div>
+              <dt>PHASE</dt>
+              <dd>completed</dd>
+            </div>
+            <div>
+              <dt>PLAN</dt>
+              <dd>revision 2</dd>
+            </div>
+            <div>
+              <dt>CHECKPOINT</dt>
+              <dd>006</dd>
+            </div>
+            <div>
+              <dt>WRITER</dt>
+              <dd>stopped</dd>
+            </div>
+          </dl>
+
+          <div class="ledger-claim">
+            <span>WORKER CLAIM</span>
+            <p>completed</p>
+          </div>
+
+          <div class="ledger-route" aria-label="Claim、Observation 与 Decision">
+            <div>
+              <span>01</span>
+              <p><b>Observation</b> 缺少同批次回归与后端证据</p>
+              <strong class="route-badge route-badge--stop">human</strong>
+            </div>
+            <div>
+              <span>02</span>
+              <p><b>Observation</b> 361 + 7 + 180 tests passed</p>
+              <strong class="route-badge route-badge--go">finalize</strong>
+            </div>
+          </div>
+
+          <footer class="run-ledger__footer">
+            <span>CORE FINISH</span>
+            <strong>ready_to_commit</strong>
+          </footer>
+        </aside>
+      </section>
+
+      <section class="manifest" aria-label="Vega 职责边界">
+        <div class="manifest__lead">
+          <span>不是再套一层聊天</span>
+          <strong>宿主 Agent 干活，Vega 管下一步有没有依据。</strong>
+        </div>
+        <div class="manifest__roles">
+          <article>
+            <span>CODING AGENT</span>
+            <h2>调查、修改、运行命令</h2>
+            <p>Codex 或其他宿主继续负责理解代码和实现任务。</p>
+          </article>
+          <i aria-hidden="true">≠</i>
+          <article>
+            <span>VEGA SUPERVISOR</span>
+            <h2>批准、观察、恢复、裁决</h2>
+            <p>不把“继续跑”当默认答案，也不把模型自述当完成事实。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section section--replay" id="replay" aria-labelledby="replay-title">
+        <header class="section-heading section-heading--split">
+          <div>
+            <p class="section-number">01 / RUN REPLAY</p>
+            <h2 id="replay-title">一次真实接力，不是 happy path。</h2>
+          </div>
+          <div class="section-intro">
+            <p>
+              同一任务经历了 partial WIP、Git-only 接手、429、Reviewer 打回和人工 replan。
+              点击节点，看机器观察如何改变 Supervisor 的下一步。
+            </p>
+            <button class="replay-control" type="button" data-replay-play aria-pressed="false">
+              <span aria-hidden="true">▶</span>
+              <b data-replay-play-label>播放这条 Run</b>
+            </button>
+          </div>
+        </header>
+
+        <div class="replay-shell">
+          <div
+            class="replay-rail"
+            role="tablist"
+            aria-label="选择 Agent 运行节点"
+            aria-orientation="vertical"
           >
-        </figure>
+            <button
+              class="replay-step is-active"
+              id="replay-tab-plan-approved"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="replay-panel"
+              data-replay-id="plan-approved"
+            >
+              <span>01</span>
+              <strong>Plan 批准</strong>
+              <small>approved</small>
+            </button>
+            <button
+              class="replay-step"
+              id="replay-tab-partial-wip"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="replay-panel"
+              tabindex="-1"
+              data-replay-id="partial-wip"
+            >
+              <span>02</span>
+              <strong>保留 WIP</strong>
+              <small>checkpointed</small>
+            </button>
+            <button
+              class="replay-step"
+              id="replay-tab-git-handoff"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="replay-panel"
+              tabindex="-1"
+              data-replay-id="git-handoff"
+            >
+              <span>03</span>
+              <strong>Git 接手</strong>
+              <small>resumed</small>
+            </button>
+            <button
+              class="replay-step replay-step--danger"
+              id="replay-tab-provider-failure"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="replay-panel"
+              tabindex="-1"
+              data-replay-id="provider-failure"
+            >
+              <span>04</span>
+              <strong>Provider 429</strong>
+              <small>fail_closed</small>
+            </button>
+            <button
+              class="replay-step replay-step--danger"
+              id="replay-tab-reviewer-rejection"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="replay-panel"
+              tabindex="-1"
+              data-replay-id="reviewer-rejection"
+            >
+              <span>05</span>
+              <strong>Reviewer 打回</strong>
+              <small>request_changes</small>
+            </button>
+            <button
+              class="replay-step"
+              id="replay-tab-plan-revision"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="replay-panel"
+              tabindex="-1"
+              data-replay-id="plan-revision"
+            >
+              <span>06</span>
+              <strong>Plan revision 2</strong>
+              <small>replanned</small>
+            </button>
+            <button
+              class="replay-step replay-step--success"
+              id="replay-tab-trusted-finish"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="replay-panel"
+              tabindex="-1"
+              data-replay-id="trusted-finish"
+            >
+              <span>07</span>
+              <strong>可信 Finish</strong>
+              <small>ready_to_commit</small>
+            </button>
+          </div>
+
+          <article
+            class="replay-panel"
+            id="replay-panel"
+            role="tabpanel"
+            aria-labelledby="replay-tab-plan-approved"
+            aria-live="polite"
+            data-replay-status="approved"
+          >
+            <div class="replay-panel__meta">
+              <div>
+                <span data-replay-field="index">01</span>
+                <p data-replay-field="phase">awaiting_approval</p>
+              </div>
+              <strong data-replay-field="status">approved</strong>
+            </div>
+
+            <div class="replay-panel__copy">
+              <p class="case-kind" data-replay-field="label">Plan 批准</p>
+              <h3 data-replay-field="title">先把修改范围写清楚</h3>
+            </div>
+
+            <div class="observation-card">
+              <span>MACHINE OBSERVATION</span>
+              <p data-replay-field="observation">
+                目标是修复设置页用户名与密码修改可并发提交的竞态。
+                批准范围只有两个前端文件，后端、数据库、权限和依赖明确不动。
+              </p>
+            </div>
+
+            <div class="decision-card">
+              <span>SUPERVISOR DECISION</span>
+              <p data-replay-field="decision">
+                人工批准当前 Plan revision 后，Vega 才允许启动 Writer。
+              </p>
+            </div>
+
+            <footer class="replay-panel__footer">
+              <span>RUN <code data-replay-run>20260818-231923-agent-resume</code></span>
+              <nav data-replay-links aria-label="Agent 回放证据链接">
+                <a
+                  href="https://github.com/aki0225/vegaloom/blob/main/docs/RELEASE-NOTES-0.2.0.md"
+                  target="_blank"
+                  rel="noreferrer"
+                >发布说明 ↗</a>
+                <a
+                  href="https://github.com/aki0225/vegaloom/blob/main/eval/real-world-runs.md"
+                  target="_blank"
+                  rel="noreferrer"
+                >完整记录 ↗</a>
+              </nav>
+            </footer>
+          </article>
+        </div>
+
+        <p class="replay-caption">
+          这是已发布运行的证据回放，不是伪造的实时终端。页面只展示低频状态和决定性事实，
+          不展示模型隐藏推理或完整聊天。
+        </p>
+      </section>
+
+      <section class="section section--controls" aria-labelledby="controls-title">
+        <header class="section-heading">
+          <p class="section-number">02 / CONTROL SURFACE</p>
+          <h2 id="controls-title">麻雀虽小，关键控制一个不少。</h2>
+        </header>
+
+        <div class="control-grid">
+          <article class="control-card">
+            <span class="control-card__index">A</span>
+            <p class="control-card__tag">PLAN REVISION</p>
+            <h3>计划要批准，变化要重批</h3>
+            <p>范围、风险、验证或成功条件变化后，旧批准失效。主会话必须重新展示 Plan。</p>
+            <code>awaiting_approval → ready</code>
+          </article>
+          <article class="control-card">
+            <span class="control-card__index">B</span>
+            <p class="control-card__tag">SINGLE WRITER</p>
+            <h3>旧进程没对清，不开第二个 Writer</h3>
+            <p>child、operation 和进程身份绑定；Worker 丢失终态时先核对现场，不盲目重跑。</p>
+            <code>claim ≠ observation</code>
+          </article>
+          <article class="control-card">
+            <span class="control-card__index">C</span>
+            <p class="control-card__tag">GIT TASK CARD</p>
+            <h3>换会话或换 clone，计划和 WIP 一起走</h3>
+            <p>Task Card 只带目标、约束、Checkpoint 和下一步。本机 Trace、SQLite 与凭据不进 Git。</p>
+            <code>checkpoint --handoff</code>
+          </article>
+          <article class="control-card">
+            <span class="control-card__index">D</span>
+            <p class="control-card__tag">CORE FINISH</p>
+            <h3>“完成了”只是 Claim，不是终态</h3>
+            <p>项目验证、Risk、独立 Reviewer、完整性与新鲜度共同决定能否交给人工提交。</p>
+            <code>completed + ready_to_commit</code>
+          </article>
+        </div>
       </section>
 
       <section class="section section--cases" id="cases" aria-labelledby="cases-title">
-        <header class="section-heading">
-          <h2 id="cases-title">真实运行</h2>
+        <header class="section-heading section-heading--split">
+          <div>
+            <p class="section-number">03 / EVIDENCE FILES</p>
+            <h2 id="cases-title">Agent 最后为什么还要 Reviewer？</h2>
+          </div>
+          <p class="section-intro">
+            因为测试全绿也可能漏掉行为回归。下面保留三份历史脱敏证据，
+            用真实 Diff、验证与 Reviewer 结论说明 Vega 的最终判断链。
+          </p>
         </header>
 
         <div class="case-layout">
@@ -112,8 +423,9 @@
               aria-controls="finish-panel"
               data-case-id="pycodestyle-1187-rejection"
             >
+              <span>01</span>
               <strong>pycodestyle #1187</strong>
-              <small><i class="status-mark status-mark--changes" aria-hidden="true"></i> request_changes</small>
+              <small><i class="status-mark status-mark--changes" aria-hidden="true"></i> 测试全绿，仍被打回</small>
             </button>
             <button
               class="case-card"
@@ -125,8 +437,9 @@
               tabindex="-1"
               data-case-id="pycodestyle-1187-success"
             >
-              <strong>修正候选</strong>
-              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+              <span>02</span>
+              <strong>pycodestyle 修正候选</strong>
+              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> 证据补齐后通过</small>
             </button>
             <button
               class="case-card"
@@ -138,8 +451,9 @@
               tabindex="-1"
               data-case-id="click-2939-success"
             >
+              <span>03</span>
               <strong>Click #2939</strong>
-              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> ready_to_commit</small>
+              <small><i class="status-mark status-mark--ready" aria-hidden="true"></i> 标准可信完成</small>
             </button>
           </div>
 
@@ -170,7 +484,7 @@
               <section class="evidence-block evidence-block--diff" aria-labelledby="diff-title">
                 <header class="evidence-block__header">
                   <div>
-                    <span class="evidence-label" id="diff-title">Actual Diff</span>
+                    <span class="evidence-label" id="diff-title">ACTUAL DIFF</span>
                     <code data-case-field="diff_file">pycodestyle.py</code>
                   </div>
                   <strong data-case-field="diff_summary">
@@ -186,7 +500,7 @@
                 <section class="evidence-block evidence-block--verification" aria-labelledby="verification-title">
                   <header class="evidence-block__header">
                     <span class="evidence-label" id="verification-title">
-                      Deterministic Verification
+                      DETERMINISTIC VERIFICATION
                     </span>
                     <strong data-case-field="verification_headline">
                       768 passed, 5 skipped
@@ -201,7 +515,7 @@
 
                 <section class="evidence-block evidence-block--review" aria-labelledby="review-title">
                   <header class="evidence-block__header">
-                    <span class="evidence-label" id="review-title">Independent Reviewer</span>
+                    <span class="evidence-label" id="review-title">INDEPENDENT REVIEWER</span>
                     <span class="review-verdict">
                       <strong data-case-field="review_verdict">request_changes</strong>
                       <small data-case-field="review_severity">major finding</small>
@@ -230,18 +544,18 @@
 
             <dl class="gate-strip">
               <div>
-                <dt>Scope Gate</dt>
+                <dt>SCOPE GATE</dt>
                 <dd data-case-field="gate_scope">
                   pre-verification、post-verification、pre-review 均通过；
                   变更仅涉及 pycodestyle.py。
                 </dd>
               </div>
               <div>
-                <dt>Risk Gate</dt>
+                <dt>RISK GATE</dt>
                 <dd data-case-field="gate_risk">success · low · self-check</dd>
               </div>
               <div>
-                <dt>Finish</dt>
+                <dt>FINISH</dt>
                 <dd data-case-field="gate_finish">
                   needs_human · 保留候选现场 · 未自动提交
                 </dd>
@@ -272,11 +586,6 @@
                   target="_blank"
                   rel="noreferrer"
                 >Reviewer 结论 ↗</a>
-                <a
-                  href="https://github.com/aki0225/vegaloom/blob/main/examples/evidence/real-world-pycodestyle-1187/reviewer-rejection/gate-result.json"
-                  target="_blank"
-                  rel="noreferrer"
-                >Gate 结果 ↗</a>
               </nav>
             </div>
           </article>
@@ -284,33 +593,47 @@
 
         <noscript>
           <p class="noscript-note">
-            页面未启用 JavaScript，因此当前只显示 pycodestyle Reviewer 阻断案例。
-            三个案例的完整证据可从上方文件链接查看。
+            页面未启用 JavaScript，因此当前保留首个 Agent 节点和首个 Reviewer 案例。
+            完整证据可以通过页面中的 GitHub 链接查看。
           </p>
         </noscript>
       </section>
 
-      <aside class="boundary-strip" aria-label="Vega 产品边界">
-        <span>会话隔离 ≠ OS 沙箱</span>
-        <span>不自动 commit / push</span>
-        <span>验证失败不可被 <code>approve</code> 覆盖</span>
-      </aside>
-
       <section class="section section--quickstart" id="quick-start" aria-labelledby="quickstart-title">
         <div class="quickstart">
           <div class="quickstart-copy">
-            <h2 id="quickstart-title">试一次</h2>
+            <p class="section-number">04 / START</p>
+            <h2 id="quickstart-title">把 Vega 装进你的仓库。</h2>
+            <p>
+              初始化后，在新的 Codex 主会话中调用 <code>$vega-agent</code>。
+              主会话负责调查和展示 Plan，Vega 负责校验批准状态、受控执行、恢复和可信 Finish。
+            </p>
+            <ul class="boundary-list">
+              <li>不自动 commit、push、PR 或 release</li>
+              <li>验证失败不能被 Reviewer approve 覆盖</li>
+              <li>会话隔离与只读视图不等于 OS 沙箱</li>
+              <li>当前只支持一个未完成 Work Item 和一个 Writer</li>
+            </ul>
           </div>
 
-          <div class="terminal" aria-label="Vega 快速开始命令">
+          <div class="terminal" aria-label="Vega Supervisor Agent 快速开始命令">
             <div class="terminal-bar">
               <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
               <b>PowerShell</b>
               <button type="button" data-copy-quickstart>复制命令</button>
             </div>
-            <pre><code data-quickstart-code>python -m pip install -e ".[dev]"
-vega config check --repo .
-vega loop bug --repo . --text "修复一个边界明确的缺陷" --mode assist</code></pre>
+            <pre><code data-quickstart-code>git clone https://github.com/aki0225/vegaloom.git
+cd vegaloom
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[agent]"
+
+vega agent capabilities
+vega adapters init codex --repo &lt;target-repo&gt;</code></pre>
+            <div class="terminal-prompt">
+              <span>Codex 主会话</span>
+              <code>$vega-agent</code>
+            </div>
             <p class="copy-status" role="status" aria-live="polite" data-copy-status></p>
           </div>
         </div>
@@ -320,11 +643,15 @@ vega loop bug --repo . --text "修复一个边界明确的缺陷" --mode assist<
     <footer class="site-footer">
       <a class="brand brand--footer" href="#top">
         <span class="brand-mark" aria-hidden="true">V</span>
-        <strong>Vega</strong>
+        <span>
+          <strong>Vega</strong>
+          <small>One writes, one reviews.</small>
+        </span>
       </a>
       <nav aria-label="页脚链接">
         <a href="https://github.com/aki0225/vegaloom">GitHub</a>
         <a href="https://github.com/aki0225/vegaloom/blob/main/README.md">使用文档</a>
+        <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.2.0">v0.2.0</a>
         <a href="https://github.com/aki0225/vegaloom/blob/main/LICENSE">MIT License</a>
       </nav>
     </footer>

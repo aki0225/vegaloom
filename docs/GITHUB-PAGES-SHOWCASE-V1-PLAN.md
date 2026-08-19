@@ -10,6 +10,22 @@
 > 等表述属于当时的计划，不是当前待办；当前使用与版本状态以 `README.md`、
 > `docs/README.md` 和 `docs/ROADMAP.md` 为准。
 
+## 2026-08-19：Supervisor Agent 展示更新
+
+展示站现已随 `v0.2.0` 调整为 Supervisor Agent 叙事，原 V1 计划正文继续作为历史设计记录，
+不再代表当前页面结构。当前页面重点展示：
+
+- 宿主 Coding Agent 与 Vega Supervisor 的职责边界；
+- Plan 批准、单 Writer、Checkpoint、Git Task Card 与 Core Finish；
+- 一条来自发布验收的七节点决策回放，包含 partial WIP、Git-only 接手、Provider 429、
+  Reviewer 打回、Plan revision 2 和 `ready_to_commit`；
+- 三个历史 Reviewer 证据案例，继续区分确定性验证、Reviewer 意见和证据上限。
+
+页面回放不是伪造终端，也不读取本机 `runs/`。`site/data/cases.json` 由
+`scripts/build_showcase_data.py` 从人工核准的公开来源生成，schema 为 `3`。Agent 回放只允许
+链接 `v0.2.0` 发布说明、发布摘要和公开发布验收记录；完整 state、Trace、命令日志与模型会话
+仍保留在本机，不进入展示站。
+
 ## 一、目标
 
 为 Vega 建立一个适合公开介绍、简历引用和技术交流的静态展示站，让第一次接触项目的人能够：

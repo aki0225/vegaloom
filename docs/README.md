@@ -1,6 +1,6 @@
 # Vega 文档导航
 
-> 更新时间：2026-08-18
+> 更新时间：2026-08-19
 
 本文只负责说明每份文档现在是什么用途。产品行为以产品契约、源码和实际运行证据为准；
 历史交接中的“下一步”“不要合并”或旧分支状态，不代表当前主线。
@@ -27,6 +27,7 @@
 | 主题 | 文档 | 结果 |
 |---|---|---|
 | Supervisor Agent 总计划 | [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md) | V1 已随 v0.2.0 发布 |
+| GitHub Pages 展示设计 | [`GITHUB-PAGES-SHOWCASE-V1-PLAN.md`](GITHUB-PAGES-SHOWCASE-V1-PLAN.md) | 已更新为 v0.2.0 Agent 展示 |
 | 当前发布交接与历史时间线 | [`SUPERVISOR-AGENT-V1-HANDOFF.md`](SUPERVISOR-AGENT-V1-HANDOFF.md) | 最新结论在文档顶部和末尾 |
 | Gate 2B | [`SUPERVISOR-AGENT-GATE-2B-PLAN.md`](SUPERVISOR-AGENT-GATE-2B-PLAN.md) | `gate-exit-pass` |
 | Gate 2C 首次运行与修正 | [`SUPERVISOR-AGENT-GATE-2C-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-PLAN.md)、[`SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md`](SUPERVISOR-AGENT-GATE-2C-R2-PLAN.md) | `invalid-harness` / `gate-exit-pass` |

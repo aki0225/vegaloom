@@ -72,6 +72,7 @@ def test_generator_is_deterministic(tmp_path: Path) -> None:
 
 def test_three_cases_keep_their_real_evidence_outcomes() -> None:
     payload = load_cases()
+    assert payload["schema_version"] == 3
     cases = {case["id"]: case for case in payload["cases"]}
 
     assert set(cases) == {
@@ -88,6 +89,80 @@ def test_three_cases_keep_their_real_evidence_outcomes() -> None:
 
     assert cases["pycodestyle-1187-success"]["status"] == "ready_to_commit"
     assert cases["click-2939-success"]["status"] == "ready_to_commit"
+
+
+def test_agent_replay_keeps_release_acceptance_sequence() -> None:
+    payload = load_cases()
+    replay = payload["agent_replay"]
+
+    assert replay["run_id"] == "20260818-231923-agent-resume"
+    assert replay["terminal_status"] == "ready_to_commit"
+    assert [step["id"] for step in replay["steps"]] == [
+        "plan-approved",
+        "partial-wip",
+        "git-handoff",
+        "provider-failure",
+        "reviewer-rejection",
+        "plan-revision",
+        "trusted-finish",
+    ]
+    assert replay["steps"][3]["status"] == "fail_closed"
+    assert replay["steps"][4]["status"] == "request_changes"
+    assert replay["steps"][-1]["status"] == "ready_to_commit"
+    assert "361 passed" in replay["steps"][-1]["observation"]
+    assert "180 passed" in replay["steps"][-1]["observation"]
+
+    source_paths = {
+        source["path"]
+        for source in replay["source_links"]
+    }
+    assert "docs/RELEASE-NOTES-0.2.0.md" in source_paths
+    assert "docs/RELEASE-SUMMARY-0.2.0.md" in source_paths
+    assert "eval/real-world-runs.md" in source_paths
+    for relative_path in source_paths:
+        assert (REPO_ROOT / relative_path).is_file()
+
+
+def test_agent_replay_rejects_unapproved_public_source() -> None:
+    payload = build_payload()
+    payload["agent_replay"]["source_links"][1] = {
+        "kind": "run",
+        "label": "其他运行记录",
+        "path": "eval/cases.jsonl",
+    }
+
+    try:
+        validate_payload(payload)
+    except ValueError as exc:
+        assert "人工核准清单" in str(exc)
+    else:
+        raise AssertionError("Agent 回放不得链接未经核准的公开来源")
+
+
+def test_agent_replay_rejects_malformed_step() -> None:
+    payload = build_payload()
+    del payload["agent_replay"]["steps"][0]["decision"]
+
+    try:
+        validate_payload(payload)
+    except ValueError as exc:
+        assert "缺少字段" in str(exc)
+    else:
+        raise AssertionError("Agent 回放节点缺少决定字段时必须失败")
+
+
+def test_review_case_cannot_reuse_agent_document_allowlist() -> None:
+    payload = build_payload()
+    payload["cases"][0]["source_links"][0]["path"] = (
+        "docs/RELEASE-NOTES-0.2.0.md"
+    )
+
+    try:
+        validate_payload(payload)
+    except ValueError as exc:
+        assert "越过允许目录" in str(exc)
+    else:
+        raise AssertionError("Reviewer 案例只能引用专用脱敏证据目录")
 
 
 def test_every_case_links_real_evidence_and_diff_excerpt() -> None:
