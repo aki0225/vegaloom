@@ -1,5 +1,8 @@
 # Goal P1 Worker 重跑交接
 
+> 归档说明：显式 Worker 重跑已经进入主线。下方旧分支、PR CI 和“回家后继续”命令只用于
+> 复盘 2026-08-10 的合并前状态，不要在当前主线执行。
+>
 > 日期：2026-08-10
 > 分支：`codex/goal-p1-real-dogfood`
 > 主线基线：`origin/main@28c2ddb`

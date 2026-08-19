@@ -2,8 +2,8 @@
 
 ## 总览
 
-Vega v0.1 是一个本地文件系统优先的 AI Coding Harness。稳定产品通过两条顶层执行路径覆盖
-只读检查和日常编码闭环；当前 `main` 另有一个 opt-in Supervisor Agent 实验入口。
+Vega 是一个本地文件系统优先的 AI Coding Harness。当前稳定版本通过三条顶层执行路径覆盖
+只读检查、日常编码闭环和 opt-in Supervisor Agent 控制。
 
 ```text
 vega run engineering-change
@@ -46,14 +46,14 @@ vega agent
 `loops/engineering-change.loop.yaml` 优先，包内只读 baseline 回退；因此源码仓可显式覆盖，
 wheel 安装后也能在任意 workspace 使用该检查入口。
 
-两条路径共享本地 state、trace 和 fail-closed 原则，但入口、配置源、artifact 与 reviewer
+三条路径共享本地 state、trace 和 fail-closed 原则，但入口、配置源、artifact 与 reviewer
 语义不同。`BriefRuntime`、`ReviewPackRuntime` 和 `ReviewRuntime` 是阶段组件或可单独调用阶段，
 不是额外的长期 Agent。
 
 长任务 P0 已提供人工驱动状态层：`goal start/status/step/attach/checkpoint-done/pause/resume/stop/recover`。
-实验性 P1 另外提供 `goal run --max-checkpoints 1`，只调度一个普通 auto loop，并在 checkpoint
-证据边界停止。P1 现已冻结，不再承担后续长任务演进；新的 Plan 批准、单 Writer、Checkpoint
-和跨机器实验统一进入 opt-in Supervisor Agent 路线。详见 `docs/LONG-RUNNING-GOALS.md` 和
+P1 兼容入口另外提供 `goal run --max-checkpoints 1`，只调度一个普通 auto loop，并在 checkpoint
+证据边界停止。P1 不再承担后续长任务演进；新的 Plan 批准、单 Writer、Checkpoint
+和 Git-only 恢复统一进入 opt-in Supervisor Agent 路线。详见 `docs/LONG-RUNNING-GOALS.md` 和
 `docs/VEGA-SUPERVISOR-AGENT-V1-PLAN.md`。
 
 ## 核心流程
@@ -101,10 +101,11 @@ YAML 不允许配置：
 ## 产品能力分层
 
 核心主线是上下文编译、受控 worker、确定性验证、隔离 reviewer 和证据化恢复。`brief`、
-`reflect`、`gate`、`review-pack`、`review` 属于可单独观察的流水线阶段；Memory、Goal P0
-和 adapter 属于实验能力。完整契约见 `docs/PRODUCT-CONTRACT.md`。
+`reflect`、`gate`、`review-pack`、`review` 属于可单独观察的流水线阶段；Supervisor Agent
+与 Codex skills 是已发布的可选能力，Goal P0/P1 是兼容入口，Memory 仍是实验能力。完整契约
+见 `docs/PRODUCT-CONTRACT.md`。
 
-实验能力不得成为核心 run 的必需 artifact 或成功条件，也不作为 v0.1 baseline 冻结或
+可选和实验能力不得成为核心 run 的必需 artifact 或成功条件，也不作为 v0.1 baseline 冻结或
 发布准备的阻断条件。
 
 ## Project Knowledge Layer

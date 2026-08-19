@@ -23,5 +23,7 @@
 | [`LEAN-CORE-REVIEW-HANDOFF.md`](LEAN-CORE-REVIEW-HANDOFF.md) | 精简分支 findings 已关闭 |
 | [`MAINLINE-TRUST-HARDENING-HANDOFF.md`](MAINLINE-TRUST-HARDENING-HANDOFF.md) | 主线可信执行加固已进入主线 |
 | [`REQUIRED-RISK-REVIEW-HANDOFF.md`](REQUIRED-RISK-REVIEW-HANDOFF.md) | 必审风险能力已进入主线 |
+| [`GOAL-P1-WORKER-RERUN-REVIEW-HANDOFF.md`](GOAL-P1-WORKER-RERUN-REVIEW-HANDOFF.md) | Goal P1 显式 Worker 重跑已进入主线，旧分支命令不再适用 |
+| [`GITHUB-PAGES-SHOWCASE-V1-HANDOFF.md`](GITHUB-PAGES-SHOWCASE-V1-HANDOFF.md) | 展示站已合并并部署，旧 PR/部署步骤不再是当前任务 |
 
 归档文档中的旧状态、旧命令和旧分支只用于复盘。恢复当前工作时不要从这里选择“下一步”。

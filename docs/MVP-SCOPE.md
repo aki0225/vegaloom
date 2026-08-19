@@ -9,6 +9,7 @@
 ## 定位
 
 Vega 是一个本地优先的轻量 AI Coding Harness。`vega do/loop` 提供日常编码闭环，
+`vega agent` 为需要暂停、恢复和 Git-only 接手的任务提供 opt-in Supervisor 控制层，
 `vega run engineering-change` 保留为 YAML 驱动的只读检查 baseline。
 
 它要证明的是这些基础能力：
@@ -148,6 +149,25 @@ v0.1 baseline 的最小验收定义。
 - 完成后的 checkpoint 证据不可再修改
 - `goal complete` 和 `goal stop` 分别表达成功完成与终止
 
+## v0.2.0 可选 Supervisor Agent
+
+这些能力随 `v0.2.0` 发布，但不替换默认 `do / loop`：
+
+- CLI：`vega agent capabilities`
+- CLI：`vega agent start --repo <repo> --plan <plan.json> --text <text>`
+- CLI：`vega agent plan / approve / run / finalize`
+- CLI：`vega agent status / steer / pause / stop / recover / resume-local`
+- CLI：`vega agent checkpoint --handoff` 与 `vega agent resume --repo <repo>`
+- Codex adapter 生成 `.agents/skills/vega-agent/SKILL.md`
+- 单 Work Item、单 Writer、Plan revision 与人工批准
+- Worker Claim、Machine Observation、Supervisor Decision 分层
+- 粗粒度 Checkpoint、主会话状态卡和低频安全 Trace
+- Git Task Card 携带 WIP、批准 Plan、约束和下一步；本机 run、SQLite、凭据与聊天不进 Git
+- 最终 `ready_to_commit` 仍由现有 Verification、Risk、独立 Reviewer 与 Finish 裁决
+
+Supervisor Agent 当前不支持多 Work Item 自动连续派发、多 Worker 并行、自动 Git、长期
+Memory 自动写入或 Provider 平台。
+
 ## 实验能力
 
 以下能力保留用于验证设计取舍，但不属于 bug/feature 主流程成功条件：
@@ -156,14 +176,15 @@ v0.1 baseline 的最小验收定义。
 - reflect 显式 `--lesson` 时生成 `memory-proposals.jsonl`
 - memory proposal ID 与人工 accept/reject ledger
 - Goal P0 人工状态层
-- Codex skill adapter
 
 实验能力允许完全不使用，也不得要求每个 run 强制生成对应 artifact；其未冻结或后续变化
 不阻断 v0.1 baseline 发布准备。
 
-## Future goal loop 草案
+## Goal P1 当前边界
 
-P1 的 `goal run --max-checkpoints N`、自动 checkpoint 推进、自动调用普通 loop 等能力不属于当前 v0.1/v0.1.x 发布准备范围。
+Goal P1 的单 checkpoint `goal run`、child reconcile 和人工显式 `--rerun-worker` 已进入主线，
+但它只作为兼容与历史实验入口保留。它不会自动连续推进多个 checkpoint，也不会取代
+Supervisor Agent 的 Plan、Checkpoint 和 Git Task Card 路线。
 
 ## 显式非目标
 
@@ -173,7 +194,7 @@ v0.1 不包括：
 - 数据库服务
 - SQLite memory store
 - 向量检索
-- LangGraph
+- 用 LangGraph 替换 baseline 或 Core Runtime
 - Letta
 - 多 Agent 编排
 - 后台 daemon
@@ -202,13 +223,14 @@ v0.1 不包括：
 ```text
 v0.1 baseline: YAML 驱动的只读 engineering-change Inspection Loop
 v0.1.x daily mainline: brief/profile/reflect/gate/review/loop/finish/decision/recover Coding Harness
-experimental extensions: Goal、Memory、adapters
-future P1: 有限自动 checkpoint 推进
-future optional: SQLite + FTS5 memory ledger、replay UI
+v0.2.0 optional: Supervisor Agent、Codex skills、Git Task Card 恢复
+compatibility: Goal P0/P1 单 checkpoint 与显式 Worker 重跑
+experimental: Memory proposal / ledger
 ```
 
 当前产品范围以 `docs/PRODUCT-CONTRACT.md` 为准：核心是上下文编译、受控执行、确定性验证、
-隔离审查和证据化恢复；Memory、Goal P0 与 adapter 保持实验状态。
+隔离审查和证据化恢复；Supervisor Agent 与 Codex skills 是已发布的可选能力，Memory 保持
+实验状态，Goal P0/P1 只保留兼容和历史证据。
 
 当前稳定版本为 `v0.2.0`。它保留既有核心成功语义，并发布 opt-in Supervisor Agent V1：
 单 Work Item、人工批准、单 Writer、可恢复 Checkpoint、Git Task Card、机器 Observation

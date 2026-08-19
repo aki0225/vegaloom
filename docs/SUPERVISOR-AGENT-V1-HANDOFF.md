@@ -5,6 +5,10 @@
 > 发布基线：`main@2fb1bd8`
 >
 > 状态：`Supervisor Agent V1 implemented / v0.2.0 released`
+>
+> 阅读说明：本文按日期保留实施与验证时间线。中间章节中的“等待 PR CI”“下一 Case”
+> “尚未决定发布时间”等内容是当时交接快照，已经被末尾的
+> “2026-08-18 v0.2.0 发布验收与当前交接”替代。
 
 ## 当前结论
 
@@ -75,7 +79,8 @@ Plan revision 2、重新执行完整 Core Gate 和人工 PR 合入。最终 Agen
    `progress.jsonl`，不新增第二套进度账本。
 
 父 `completed` 不拥有新的成功语义，只镜像已经通过完整性、新鲜度、Verification、Risk 和
-Reviewer 检查的 Core `ready_to_commit`。当前状态为“本地验证通过 / PR CI pending”。
+Reviewer 检查的 Core `ready_to_commit`。本段记录的是 2026-08-16 当时的
+“本地验证通过 / PR CI pending”状态；后续 PR CI、发布验收与 v0.2.0 发布结果见文档末尾。
 本轮没有增加多 Work Item 连续派发、Planner、Memory、Claude Adapter、Provider SDK 或自动
 Git，也没有改变 Gate 3B 未通过和 Gate 3C 冻结的结论。
 

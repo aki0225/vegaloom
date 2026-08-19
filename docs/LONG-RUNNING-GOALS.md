@@ -1,12 +1,12 @@
 # 长任务 Goal Loop 设计
 
-> 状态：P0 人工状态层已实现；P1 单 checkpoint 自动推进与显式 child reconcile 已通过
-> PR `#54` 进入主线。主线仍只包含单 checkpoint 控制；显式 `--rerun-worker` 继续位于
-> 实验分支。r6 已真实通过同一 child 的显式重跑路径，后续代码审阅发现七项启动前证据与
-> 崩溃恢复缺口；当前分支已完成 Worker baseline V2、有界 ignored 后代清单、index flag
-> 防护、来源证据校验、重跑事务和最终启动边界复查。该能力在 PR CI 与独立审查完成前不提升
-> 为默认能力。多 checkpoint 自动
-> 串联、真实模型连续运行数小时/跨天的稳定性和收益仍未证明。
+> 状态：P0 人工状态层、P1 单 checkpoint、child reconcile 和人工显式
+> `--rerun-worker` 均已进入主线。Goal P1 作为兼容与历史实验入口保留；新的可恢复长任务能力
+> 统一由 `vega agent` 演进，不再同时扩建两套同级控制层。多 checkpoint 自动串联、真实模型
+> 连续运行数小时或跨天的稳定性和收益仍未证明。
+>
+> 阅读说明：本文后半部分按时间保留 r3～r6、审阅修复和 PR CI 前后的原始判断。带日期章节
+> 中的“当前分支”“等待 PR CI”等表述是当时证据，不代表 `v0.2.0` 当前状态。
 
 ## 1. 背景
 
@@ -490,9 +490,9 @@ r6 的真实成功只证明当时命中的 clean-workspace 路径。随后代码
   baseline 缺失、篡改或 trace 被删除时 fail-closed。
 - 达到 `max_iterations` 后，状态输出不再建议显式重跑，只保留人工完成现场后的普通 continue。
 
-本轮只修复 r6 后审阅发现的恢复边界，没有运行新的真实模型 dogfood，也没有改变 r6 的历史
-裁决。显式 Worker 重跑仍是实验分支能力；主线、默认 `vega do`、普通 loop 和 Reviewer
-语义均不改变。
+该轮只修复 r6 后审阅发现的恢复边界，没有运行新的真实模型 dogfood，也没有改变 r6 的历史
+裁决。在该次提交时，显式 Worker 重跑仍是实验分支能力；后续已通过 PR CI 和独立审查进入
+主线，但默认 `vega do`、普通 loop 和 Reviewer 语义仍未改变。
 
 ### 2026-08-10：七项阻断修复完成，等待 PR CI
 

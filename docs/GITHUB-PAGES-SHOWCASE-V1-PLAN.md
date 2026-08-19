@@ -2,9 +2,13 @@
 
 > 日期：2026-08-04
 >
-> 状态：`deployment-approved`；本地展示实现与视觉验收已完成，准备通过 PR 和 Pages workflow 部署
+> 状态：`completed / deployed`；展示站已合并并发布到 GitHub Pages
 >
-> 当前权限：已获用户授权提交、合并并部署 GitHub Pages；仍须先通过 PR CI
+> 当前入口：<https://aki0225.github.io/vegaloom/>
+>
+> 阅读说明：本文保留实施前冻结的范围、分支和验收合同。正文中的“准备部署”“等待 CI”
+> 等表述属于当时的计划，不是当前待办；当前使用与版本状态以 `README.md`、
+> `docs/README.md` 和 `docs/ROADMAP.md` 为准。
 
 ## 一、目标
 

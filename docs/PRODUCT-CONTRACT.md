@@ -26,7 +26,7 @@ Vega 的核心价值不是“拥有更多 Agent 功能”，而是回答四个�
 
 ## 日常入口
 
-日常使用只要求理解以下入口：
+边界清晰的一次性任务只要求理解以下入口：
 
 ```text
 vega do bug|feature
@@ -35,6 +35,20 @@ vega finish
 vega stop
 vega recover
 ```
+
+需要暂停、接手、跨会话继续或 Git-only 换机恢复时，显式选择 Supervisor Agent：
+
+```text
+vega agent capabilities
+vega agent start / approve / run
+vega agent status / pause / stop / recover
+vega agent checkpoint --handoff
+vega agent resume / finalize
+```
+
+`vega agent` 不是默认入口，也不是第二套编码模型。宿主主会话负责只读调查和提交 Plan，
+Vega 固定批准 revision、单 Writer、Checkpoint、机器对账与恢复，并把最终成功交回既有
+Verification、Risk、独立 Reviewer 和 Finish。
 
 `brief`、`reflect`、`gate`、`review-pack`、`review` 和 `loop continue`
 是可单独调用的流水线阶段，主要用于排障、人工接管和解释运行过程，不要求用户每天手工编排。
@@ -108,20 +122,26 @@ reviewer 合同。该提示词边界只能降低误跟随风险，不能证明�
 - 为大范围变更声明 scope profile。
 - 本地 decision ledger。
 
-### 可选与实验能力
+### 可选已发布能力
+
+- Codex skill adapter：生成 `$vega-loop`、`$vega-review` 和 `$vega-agent`，不安装 hook，
+  不修改 Codex 全局配置。
+- v0.2.0 发布的 opt-in `vega agent` Supervisor 控制层：Plan 批准、单 Writer、Checkpoint、
+  机器对账、本机恢复、Git Task Card 和真实 Codex Adapter。它当前只承诺一个未完成
+  Work Item，也不增加第二套成功语义。
+
+### 实验与兼容能力
 
 - Memory proposal / ledger。
-- Goal P0 长任务人工状态层，以及已冻结、默认关闭、一次只运行一个 checkpoint 的 P1 实验入口。
-- Codex skill adapter。
-- v0.2.0 发布的 opt-in `vega agent` Supervisor 控制层：Plan 批准、单 Writer、Checkpoint、
-  机器对账、本机恢复、Git Task Card 和真实 Codex Adapter。它不是默认入口，当前只承诺一个
-  未完成 Work Item，也不增加第二套成功语义。
+- Goal P0 长任务人工状态层，以及默认关闭、一次只运行一个 checkpoint 的 P1 兼容入口。
+- Goal P1 的显式 Worker 重跑已经进入主线，但只用于人工确认的无成果中断恢复，不自动重试，
+  不自动串联多个 checkpoint。
 
 Goal P1 不再作为新的长任务能力扩建入口。后续可恢复任务实验只在 Supervisor Agent 路线进行；
 Goal P1 保留兼容和历史证据，不与 Supervisor 维护两套同级的当前事实。
 
-实验能力不得反向扩大核心成功条件。未使用 Memory、Goal 或 adapter 时，bug/feature
-主流程仍必须可以完整运行。
+可选与实验能力不得反向扩大核心成功条件。未使用 Memory、Goal、adapter 或 Supervisor Agent
+时，bug/feature 主流程仍必须可以完整运行。
 
 ## 项目知识分层
 

@@ -66,9 +66,9 @@ v0.1.5 发布（完成）
   -> Gate 3B 预注册系列（SAG3B-01～08 历史结果保留）
   -> v0.2.0 单 Work Item Git-only 发布验收（完成，release-acceptance-pass）
   -> v0.2.0 Supervisor Agent V1 发布（完成）
-  -> 小规模日常价值观察（发布后进行，不新增 Runtime）
   -> V1 产品合同补全：父终态、主会话 Skill、父 run status/watch（已进入主线）
-  -> Gate 3 前保持 opt-in 实验入口，不改变既有默认命令行为与成功语义
+  -> 保持 opt-in，不改变既有默认命令行为与成功语义
+  -> 小规模日常价值观察（发布后进行，不新增 Runtime）
 ```
 
 Phase 3 已完成：

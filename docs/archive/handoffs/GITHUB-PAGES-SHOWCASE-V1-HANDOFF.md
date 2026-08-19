@@ -1,5 +1,8 @@
 # Vega GitHub Pages 展示站 V1 交接
 
+> 归档说明：展示站已经合并并部署。下方分支、CI 和“后续步骤”只记录 2026-08-04 当时现场，
+> 不要作为当前操作指引。
+>
 > 日期：2026-08-04
 >
 > 分支：`feat/github-pages-showcase-v1`
@@ -9,7 +12,7 @@
 ## 一、本轮完成内容
 
 本轮在已确认的
-[`GITHUB-PAGES-SHOWCASE-V1-PLAN.md`](GITHUB-PAGES-SHOWCASE-V1-PLAN.md)
+[`GITHUB-PAGES-SHOWCASE-V1-PLAN.md`](../../GITHUB-PAGES-SHOWCASE-V1-PLAN.md)
 范围内实现了第一版静态展示站：
 
 - `site/index.html`
