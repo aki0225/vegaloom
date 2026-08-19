@@ -9,6 +9,8 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
+import yaml
+
 from scripts.build_showcase_data import (
     _read_release_source,
     build_payload,
@@ -22,6 +24,7 @@ INDEX_PATH = REPO_ROOT / "site/index.html"
 APP_PATH = REPO_ROOT / "site/app.js"
 STYLE_PATH = REPO_ROOT / "site/styles.css"
 OG_IMAGE_PATH = REPO_ROOT / "site/assets/og-image.png"
+CI_PATH = REPO_ROOT / ".github/workflows/ci.yml"
 SUBPROCESS_ENV = {
     **os.environ,
     "PYTHONIOENCODING": "utf-8",
@@ -99,6 +102,25 @@ def test_generator_is_deterministic(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert output_path.read_text(encoding="utf-8") == DATA_PATH.read_text(encoding="utf-8")
+
+
+def test_ci_fetches_release_tag_before_jobs_execute_showcase_tests() -> None:
+    workflow = yaml.safe_load(CI_PATH.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+
+    py311_steps = jobs["tests-py311"]["steps"]
+    py311_fetch = next(
+        step for step in py311_steps if step.get("name") == "获取展示站发布证据 Tag"
+    )
+    assert py311_fetch["if"] == "github.event_name != 'pull_request'"
+    assert "refs/tags/v0.2.0:refs/tags/v0.2.0" in py311_fetch["run"]
+
+    py312_steps = jobs["tests-py312"]["steps"]
+    py312_fetch = next(
+        step for step in py312_steps if step.get("name") == "获取展示站发布证据 Tag"
+    )
+    assert py312_fetch["if"] == "matrix.name == 'config-assurance-pilot'"
+    assert "refs/tags/v0.2.0:refs/tags/v0.2.0" in py312_fetch["run"]
 
 
 def test_three_cases_keep_their_real_evidence_outcomes() -> None:
