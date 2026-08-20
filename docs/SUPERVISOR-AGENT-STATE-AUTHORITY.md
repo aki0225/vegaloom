@@ -1,5 +1,8 @@
 # Supervisor Agent V1 状态权威与最小合同 ADR
 
+> 文档性质：第 1～8 节是当前状态权威合同；第 9 节起包含历史 Gate 实施证据。历史进度文字
+> 不作为当前执行入口，当前版本和下一步以 [`ROADMAP.md`](ROADMAP.md) 为准。
+>
 > 状态：`accepted / v0.2.0 released / release-acceptance-pass`
 >
 > 日期：2026-08-13
@@ -73,14 +76,15 @@ next / repair / replan / human / finalize
   `needs_human / blocked`；
 - Graph `END` 不能写入 `ready_to_commit`。
 
-## 4. Task Card 与跨机器恢复
+## 4. Task Card 与 Git-only fresh-clone / 换目录恢复
 
 Task Card 位于 Git 跟踪的 `.vega/tasks/YYYY-MM/YYYY-MM-DD-task-slug.md`，正文包含目标、事实与
 假设、批准 Plan、进度、失败尝试、风险、验证、Resume Capsule 和下一步。
 
 WIP 可以和 Task Card 一起提交到任务分支。Task Card 只能记录 `handoff_ready` 或
-`handoff_blocked`，不能把未完成提交写成验证通过。新机器必须重新拉取远端、发现 Task Card、
-校验分支与内容摘要、创建新本机 run，并把旧验证与 Reviewer 降为历史证据。
+`handoff_blocked`，不能把未完成提交写成验证通过。新的 clone / 工作目录必须重新拉取远端、
+发现 Task Card、校验分支与内容摘要、创建新本机 run，并把旧验证与 Reviewer 降为历史证据。
+当前公开验收证明的是 Git-only fresh-clone 接手，不外推为另一台物理机器已经完成验收。
 
 Vega 生成、校验和展示待提交清单，但不自动 commit 或 push。
 
@@ -164,7 +168,8 @@ Gate 2A 已补充：
 - partial diff、未知外部副作用、Trace 损坏和状态损坏进入人工处理；
 - SQLite Graph checkpoint 丢失不影响从 Agent State、Checkpoint 和真实 Workspace 对账；
 - `pause / resume-local / stop` 保留 Goal、Plan、Diff、Artifact 和最近 Checkpoint 的外部
-  副作用状态，不执行自动回滚。
+  副作用状态，不执行自动回滚；`resume-local` 只恢复 `needs_human` 的 safe Checkpoint，
+  `stopped` 需要 Handoff 或新的 Agent run。
 - `adjudicate-side-effects` 复用 Recovery Request，要求 actor、reason 和 run-local
   evidence refs；它只追加裁决 Artifact 与 Checkpoint，不自动判断副作用或重放 Worker。
 
@@ -178,7 +183,7 @@ Gate 3A 已完成；Gate 3B 已获批准。固定控制器、未知副作用继�
 comparison baseline 缺口；窄修复已通过 PR `#63` 合入 `main@435767a`。历史 Case 仍保持
 `gate-not-passed`，SAG3B-04 与另一台物理机器 B 尚未运行，Gate 3C 继续冻结。
 
-## 10. v0.2.0 当前状态
+## 10. v0.2.x 当前合同
 
 Supervisor Agent V1 已作为 opt-in 能力随 `v0.2.0` 发布。当前实现保持本 ADR 的权威顺序和
 fail-closed 约束，并补齐：

@@ -414,7 +414,8 @@ class SupervisorAgentRecovery:
             plan,
             checkpoint=checkpoint,
             next_step=(
-                "任务已停止；代码、Goal、Plan 和现场均保留，不执行自动回滚或删除"
+                "任务已停止；代码、Goal、Plan 和现场均保留。当前 run 不能使用 "
+                "resume-local；如需继续，请人工创建 Handoff 或新的 Agent run"
                 if phase == "stopped"
                 else "停止前 Workspace 控制信息不完整；任务仍等待人工处理"
                 if stopped

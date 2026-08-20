@@ -1,5 +1,8 @@
 # Vega Supervisor Agent V1 实施计划
 
+> 文档类型：历史实施记录。本文用于复核 V1 的设计取舍、Gate 和发布依据，不是当前执行计划；
+> 当前版本、维护项和下一步以 [`ROADMAP.md`](ROADMAP.md) 为准。
+>
 > 状态：`implemented / Gate 2B gate-exit-pass / Gate 2C gate-exit-pass / Gate 3A gate-exit-pass / SAG3B-01～08 历史结果保留 / v0.2.0 released`
 >
 > 计划日期：2026-08-13
@@ -15,14 +18,14 @@
 > 同机双隔离副本往返、PR CI 和合并前审阅，状态为 `gate-exit-pass`。Gate 3B 的
 > SAG3B-01～03 分别暴露 handoff 机会、控制源码身份和 committed baseline 缺口；
 > SAG3B-04～06 又依次暴露 ignored Workspace、Writer MCP 和 Reviewer MCP 边界问题。
-> SAG3B-07 已完成 Git-only 双 fresh clone 恢复，但 machine B 在 Python 3.14.3 /
+> SAG3B-07 已完成 Git-only 双 fresh clone / 换目录恢复，但 machine B 在 Python 3.14.3 /
 > pytest 9.0.2 环境中超过冻结 Worker 预算。相关安全修复已进入主线，Windows
 > `codex.CMD` 启动与人工 replan attempt epoch 又通过 PR `#68` 合入 `main@70282d1`。
 > SAG3B-08 在稳定 Python 3.12 环境通过 machine A 预检并形成允许范围内 partial Diff，但
 > Worker 在系统 `%TEMP%` 遗留 pytest fixture 和临时 Git 仓库，人工副作用裁决为 `known`，
 > 未发布 Handoff 或启动 machine B。该预注册系列保持历史 `gate-not-passed`，没有事后
 > 改写或自动追加 SAG3B-09。2026-08-18 经人工另行批准，使用真实 Echo Vault 并发缺陷完成
-> v0.2.0 发布验收：Git-only fresh clone 恢复、Provider 失败 fail-closed、Reviewer 打回、
+> v0.2.0 发布验收：Git-only fresh clone / 换目录恢复、Provider 失败 fail-closed、Reviewer 打回、
 > Plan revision 2、完整 Core Gate 与人工 PR 均已走通，判定为
 > `release-acceptance-pass`。该结果作为 V1 发布依据，不覆盖 SAG3B-01～08。
 

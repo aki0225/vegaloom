@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Vega 是 Codex 和 Claude Code 的任务状态与验证层。它保存 Plan、Checkpoint、Diff 和验证结果；Worker 中断后先核对现场，再决定继续或交还人工。"
+      content="Vega 是 AI Coding Agent + Workflow Harness。它以独立写审会话、确定性验证和可恢复状态管理约束真实代码任务。"
     >
     <meta name="theme-color" content="#f2e8d7">
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Vega — Coding Agent 的任务状态与验证层">
+    <meta property="og:title" content="Vega — AI Coding Agent + Workflow Harness">
     <meta
       property="og:description"
-      content="保存 Plan、Checkpoint、Workspace 状态和验证结果；Worker 中断后先核对现场，再决定继续或交还人工。"
+      content="One writes, one reviews. 保存 Plan、Checkpoint、Workspace 状态和验证结果，证据不足时 fail-closed。"
     >
     <meta
       property="og:image"
       content="https://aki0225.github.io/vegaloom/assets/og-image.png"
     >
-    <title>Vega — Coding Agent 的任务状态与验证层</title>
+    <title>Vega — AI Coding Agent + Workflow Harness</title>
     <script>
       (() => {
         const storageKey = "vega-showcase-theme";
@@ -48,12 +48,12 @@
         <span class="brand-mark" aria-hidden="true">V</span>
         <span>
           <strong>Vega</strong>
-          <small>Supervisor Agent</small>
+          <small>Agent + Harness</small>
         </span>
       </a>
 
       <nav class="header-links" aria-label="站点链接">
-        <span class="version-chip">v0.2.0</span>
+        <span class="version-chip">证据 v0.2.0</span>
         <a href="#replay">发布验收</a>
         <a href="#cases">Reviewer 案例</a>
         <button
@@ -79,14 +79,15 @@
     <main id="main-content">
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow">Vega v0.2.0 · Supervisor Agent</p>
+          <p class="eyebrow">AI CODING AGENT + WORKFLOW HARNESS</p>
           <h1 id="hero-title">
-            Codex / Claude Code 的<br>
-            <em>任务状态与验证层。</em>
+            一个写，一个审。<br>
+            <em>证据决定能否交付。</em>
           </h1>
           <p class="hero-lead">
-            Vega 保存批准的 Plan、Checkpoint、当前 Diff 和验证结果。Worker
-            中断后，它先核对进程与工作区，再选择继续、修改 Plan 或交给人。
+            Vega 用 Supervisor Agent 管理 Plan、Checkpoint 和恢复，用 Core Harness
+            核对当前 Diff、验证、风险与独立评审。Worker 中断后先核对现场，再决定继续、
+            修改 Plan 或交给人。
           </p>
           <div class="hero-actions">
             <a class="button button--primary" href="#replay">查看发布验收</a>
@@ -456,7 +457,7 @@
             <p class="section-number">03 / INSTALL</p>
             <h2 id="quickstart-title">安装</h2>
             <p>
-              安装 Agent extra，然后为目标仓库生成 Codex adapter。主会话里运行
+              安装 Agent extra，为目标仓库生成 Codex adapter，再进入目标仓库。主会话里运行
               <code>$vega-agent</code>。
             </p>
             <p class="quickstart-boundary">
@@ -478,7 +479,10 @@
             <pre><code data-quickstart-code>git clone https://github.com/aki0225/vegaloom.git
 cd vegaloom
 python -m pip install -e ".[agent]"
-vega adapters init codex --repo &lt;target-repo&gt;</code></pre>
+$targetRepo = "&lt;target-repo&gt;"
+vega adapters init codex --repo $targetRepo
+Set-Location $targetRepo
+vega agent capabilities</code></pre>
             <div class="terminal-prompt">
               <span>Codex 主会话入口</span>
               <code>$vega-agent</code>

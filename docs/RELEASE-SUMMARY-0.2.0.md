@@ -5,8 +5,9 @@
 > 状态：已发布
 
 这份摘要用于 GitHub Release 文案。详细变更见
-[`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md)，发布步骤见
-[`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)。
+[`RELEASE-NOTES-0.2.0.md`](https://github.com/aki0225/vegaloom/blob/v0.2.0/docs/RELEASE-NOTES-0.2.0.md)，
+发布步骤见
+[`RELEASE-CHECKLIST.md`](https://github.com/aki0225/vegaloom/blob/v0.2.0/docs/RELEASE-CHECKLIST.md)。
 
 ## 一句话
 

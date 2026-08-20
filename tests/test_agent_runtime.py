@@ -406,9 +406,8 @@ def test_agent_parent_watch_includes_bound_child_safe_progress(
     assert f"child={child_run}" in watch.output
 
 
-def test_fake_worker_two_items_route_next_then_finalize(
+def test_start_rejects_multi_work_item_plan_before_creating_run(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     workspace = tmp_path / "workspace"
@@ -433,86 +432,11 @@ def test_fake_worker_two_items_route_next_then_finalize(
             ),
         ],
     )
-    monkeypatch.chdir(workspace)
-    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
-    approved = runtime.approve(run.run_dir.name)
-    first = _started_worker(
-        workspace,
-        approved.run_dir.name,
-        child_run="attempt-01",
-        operation_id="operation-01",
-    )
-    (repo / "one.txt").write_text("one\n", encoding="utf-8")
-    first_result = runtime.observe_fake_worker(
-        first.run_dir.name,
-        AgentObservation(
-            observation_id="obs-one",
-            work_item_id="W1",
-            child_run="attempt-01",
-            operation_id="operation-01",
-            machine_summary="第一项文件已落盘",
-            workspace_fingerprint="0" * 64,
-            work_item_completed=True,
-            verification="passed",
-            risk="passed",
-            review="passed",
-        ),
-    )
 
-    assert first_result.state.phase == "ready"
-    assert first_result.state.current_work_item == "W2"
-    assert first_result.plan.work_items[0].status == "completed"
+    with pytest.raises(ValueError, match="只接受一个未完成 Work Item"):
+        runtime.start(repo, goal=plan.user_goal, plan=plan)
 
-    second = _started_worker(
-        workspace,
-        first_result.run_dir.name,
-        child_run="attempt-02",
-        operation_id="operation-02",
-    )
-    (repo / "two.txt").write_text("two\n", encoding="utf-8")
-    final = runtime.observe_fake_worker(
-        second.run_dir.name,
-        AgentObservation(
-            observation_id="obs-two",
-            work_item_id="W2",
-            child_run="attempt-02",
-            operation_id="operation-02",
-            machine_summary="第二项和全部门禁已完成",
-            workspace_fingerprint="0" * 64,
-            work_item_completed=True,
-            all_work_items_completed=True,
-            verification="passed",
-            risk="passed",
-            review="passed",
-        ),
-    )
-
-    assert final.state.phase == "finalizing"
-    assert final.state.terminal_status is None
-    assert final.plan.work_items[1].status == "completed"
-    assert "采用同一证据发布 Supervisor completed" in runtime.status(
-        final.run_dir.name
-    )
-    events = [item["event"] for item in read_agent_trace(final.run_dir / "trace.jsonl")]
-    routed_events = [
-        event
-        for event in events
-        if event in {
-            "agent_started",
-            "plan_approved",
-            "worker_dispatch_committed",
-            "supervisor_next",
-            "supervisor_finalize",
-        }
-    ]
-    assert routed_events == [
-        "agent_started",
-        "plan_approved",
-        "worker_dispatch_committed",
-        "supervisor_next",
-        "worker_dispatch_committed",
-        "supervisor_finalize",
-    ]
+    assert not (workspace / "runs").exists()
 
 
 def test_machine_observation_can_advance_but_external_claim_cannot(
@@ -870,20 +794,14 @@ def test_observe_artifact_failure_keeps_plan_and_state_unpublished(
     plan = AgentPlan(
         task_id="task-observe-failure",
         user_goal="验证 Observation 发布顺序",
-        success_conditions=["两个 Work Item 完成"],
+        success_conditions=["当前 Work Item 可安全修复"],
         work_items=[
             AgentWorkItem(
                 work_item_id="W1",
-                objective="完成第一项",
+                objective="完成当前修改",
                 allowed_paths=["one.txt"],
                 verification=["检查第一项"],
-            ),
-            AgentWorkItem(
-                work_item_id="W2",
-                objective="完成第二项",
-                allowed_paths=["two.txt"],
-                verification=["检查第二项"],
-            ),
+            )
         ],
     )
     run = runtime.start(repo, goal=plan.user_goal, plan=plan)
@@ -909,12 +827,12 @@ def test_observe_artifact_failure_keeps_plan_and_state_unpublished(
         work_item_id="W1",
         child_run="attempt-observe-failure",
         operation_id="operation-observe-failure",
-        machine_summary="第一项已完成",
+        machine_summary="当前项可在批准范围内修复",
         workspace_fingerprint="0" * 64,
-        work_item_completed=True,
-        verification="passed",
+        verification="failed",
         risk="passed",
         review="passed",
+        repairable_in_scope=True,
     )
 
     with pytest.raises(OSError, match=f"simulated {label} failure"):
@@ -1119,6 +1037,96 @@ def test_default_start_requires_investigation_plan_before_approval(
     assert planned.plan.plan_revision == 2
     assert approved.state.phase == "ready"
     assert approved.plan.approval_is_current()
+
+
+def test_update_plan_rejects_empty_allowed_paths_before_revising_run(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="先调查后冻结执行范围")
+    plan_path = run.run_dir / "agent-plan.json"
+    state_path = run.run_dir / "agent-state.json"
+    original_plan = plan_path.read_bytes()
+    original_state = state_path.read_bytes()
+    draft = AgentPlan(
+        task_id=run.plan.task_id,
+        user_goal=run.plan.user_goal,
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="未声明允许路径的草案",
+                verification=["运行定向测试"],
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="至少一个允许路径"):
+        runtime.update_plan(run.run_dir.name, draft)
+
+    assert plan_path.read_bytes() == original_plan
+    assert state_path.read_bytes() == original_state
+
+
+def test_approve_rejects_legacy_plan_without_allowed_paths_before_checkpoint(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="验证历史 Plan 的范围门禁")
+    legacy_plan = AgentPlan(
+        task_id=run.plan.task_id,
+        user_goal=run.plan.user_goal,
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="历史未冻结路径的 Work Item",
+                verification=["运行定向测试"],
+            )
+        ],
+    )
+    runtime._save_plan(run.run_dir, legacy_plan)
+    state_path = run.run_dir / "agent-state.json"
+    original_state = state_path.read_bytes()
+
+    with pytest.raises(ValueError, match="至少一个允许路径"):
+        runtime.approve(run.run_dir.name)
+
+    assert state_path.read_bytes() == original_state
+    assert not (run.run_dir / "checkpoints").exists()
+
+
+def test_start_and_resume_fail_before_creating_run_when_agent_dependencies_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+
+    def missing_dependencies() -> None:
+        raise ValueError(
+            '当前环境缺少 Supervisor Agent 运行依赖；请执行：'
+            'python -m pip install "vegaloom[agent]"'
+        )
+
+    monkeypatch.setattr(
+        agent_runtime_module,
+        "require_agent_runtime_dependencies",
+        missing_dependencies,
+    )
+
+    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
+        runtime.start(repo, goal="不应创建运行")
+    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
+        runtime.resume_task_card(repo)
+
+    assert not (workspace / "runs").exists()
 
 
 def test_langgraph_route_and_interrupt_are_visible() -> None:

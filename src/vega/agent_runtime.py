@@ -11,10 +11,12 @@ from .agent_contract import (
     AgentWorkItem,
     ObservationAuthority,
     approve_plan,
+    validate_v1_execution_binding,
+    validate_v1_execution_plan,
 )
 from .agent_finalization import finalize_agent_state
 from .agent_persistence import append_agent_trace, save_agent_state
-from .agent_graph import langgraph_available, record_supervisor_route
+from .agent_graph import require_agent_runtime_dependencies, record_supervisor_route
 from .agent_mutation import agent_mutation
 from .agent_run import AgentRun
 from .agent_routing import decide_next_action, transition_state
@@ -59,8 +61,7 @@ class SupervisorAgentRuntime:
         plan: AgentPlan | None = None,
     ) -> AgentRun:
         repo_root = require_git_root(repo)
-        if not langgraph_available():
-            raise ValueError("当前环境缺少 LangGraph；请先安装项目的 agent 可选依赖")
+        require_agent_runtime_dependencies()
         revision = resolve_git_revision(repo_root)
         if revision is None:
             raise ValueError("目标目录不是 Git 仓库")
@@ -75,6 +76,9 @@ class SupervisorAgentRuntime:
                 )
             ],
         )
+        current_work_item = base_plan.work_items[0].work_item_id
+        if plan:
+            current_work_item = validate_v1_execution_plan(base_plan).work_item_id
         if base_plan.approved:
             raise ValueError("新 Agent run 不能接受预先批准的 Plan")
         if base_plan.user_goal != goal.strip():
@@ -91,7 +95,7 @@ class SupervisorAgentRuntime:
             phase="awaiting_approval",
             goal_revision=base_plan.goal_revision,
             plan_revision=base_plan.plan_revision,
-            current_work_item=base_plan.work_items[0].work_item_id,
+            current_work_item=current_work_item,
             workspace_fingerprint=snapshot.fingerprint,
             allowed_actions=["replan", "human"],
         )
@@ -114,9 +118,9 @@ class SupervisorAgentRuntime:
             raise ValueError("当前状态不允许批准 Plan")
         if plan.unresolved_decisions:
             raise ValueError("Plan 仍有未解决决策，不能批准")
+        validate_v1_execution_binding(plan, state.current_work_item)
         approved = approve_plan(plan, actor=actor)
-        # assist child 会在冻结 Worker baseline 时建立该受控目录。批准前先准备，
-        # 让 safe Checkpoint 包含真实执行前置现场，避免首个 child 被误判为用户漂移。
+        # 批准前准备 assist 受控目录，让 safe Checkpoint 能解释首个 child 的真实前置现场。
         prepare_verification_temp_root(bound_repo(run_dir))
         snapshot = capture_bound_workspace(run_dir)
         ready_state = update_state(
@@ -176,7 +180,7 @@ class SupervisorAgentRuntime:
             }
         )
         revised = AgentPlan.model_validate(revised.model_dump(mode="json"))
-        first_item = revised.work_items[0]
+        executable_item = validate_v1_execution_plan(revised)
         snapshot = capture_bound_workspace(run_dir)
         guarded_state = update_state(
             state,
@@ -192,7 +196,7 @@ class SupervisorAgentRuntime:
             guarded_state,
             goal_revision=revised.goal_revision,
             plan_revision=revised.plan_revision,
-            current_work_item=first_item.work_item_id,
+            current_work_item=executable_item.work_item_id,
         )
         checkpoint = write_checkpoint(
             run_dir,
@@ -481,8 +485,8 @@ class SupervisorAgentRuntime:
     def state_path(self, run: str) -> Path:
         run_dir, _, _, _ = self._load_run(run)
         return run_dir / "agent-state.json"
-
     def resume_task_card(self, repo: Path, task_path: Path | None = None) -> AgentRun:
+        require_agent_runtime_dependencies()
         return resume_agent_task_card(self.workspace, repo, task_path)
 
     @agent_mutation("agent.handoff")

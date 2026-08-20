@@ -222,7 +222,7 @@ def agent_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     if phase == "stopped":
         return [
             f"读取 `{run_dir / 'status-card.md'}` 和最新 Checkpoint，确认保留的 Workspace。",
-            f"如现场仍安全且要继续：`vega agent resume-local --run {run_dir.name}`。",
+            "当前本机 run 已停止，不能使用 resume-local；如需继续，请人工创建 Handoff 或新的 Agent run。",
         ]
     return [f"读取 `{run_dir / 'agent-state.json'}`，人工确认 Agent 状态。"]
 

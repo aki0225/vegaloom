@@ -217,16 +217,145 @@ def test_external_observation_cannot_promote_claim_to_progress() -> None:
     assert "只作为 Claim" in decision.reason
 
 
+@pytest.mark.parametrize(
+    ("work_items", "message"),
+    [
+        (
+            [
+                AgentWorkItem(
+                    work_item_id="W1",
+                    objective="第一项",
+                    allowed_paths=["src/one.py"],
+                ),
+                AgentWorkItem(
+                    work_item_id="W2",
+                    objective="第二项",
+                    allowed_paths=["src/two.py"],
+                ),
+            ],
+            "只接受一个未完成 Work Item",
+        ),
+        (
+            [AgentWorkItem(work_item_id="W1", objective="未冻结范围")],
+            "至少一个允许路径",
+        ),
+    ],
+)
+def test_approval_rejects_unexecutable_v1_plan(
+    work_items: list[AgentWorkItem],
+    message: str,
+) -> None:
+    plan = AgentPlan(
+        task_id="task-v1-plan",
+        user_goal="验证 V1 执行计划约束",
+        work_items=work_items,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        approve_plan(plan, actor="user")
+
+
+@pytest.mark.parametrize(
+    "allowed_path",
+    [
+        "**",
+        "**/*",
+        "*/**",
+        "**/**",
+        "***/**",
+        "****/**",
+        "**/***/**",
+        "*?*/**",
+    ],
+)
+def test_approval_rejects_repository_wide_allowed_path(
+    allowed_path: str,
+) -> None:
+    plan = AgentPlan(
+        task_id="task-v1-unrestricted-scope",
+        user_goal="验证 V1 不接受全仓范围",
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="修改整个仓库",
+                allowed_paths=[allowed_path],
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="覆盖整个仓库"):
+        approve_plan(plan, actor="user")
+
+
+@pytest.mark.parametrize("allowed_path", ["?/**", "**/?", "**/?/**"])
+def test_approval_allows_single_character_path_pattern(
+    allowed_path: str,
+) -> None:
+    plan = AgentPlan(
+        task_id="task-v1-single-character-scope",
+        user_goal="允许明确的一字符路径范围",
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="修改一字符目录或文件",
+                allowed_paths=[allowed_path],
+            )
+        ],
+    )
+
+    assert approve_plan(plan, actor="user").approval_is_current()
+
+
+def test_approval_preserves_history_with_one_unfinished_work_item() -> None:
+    plan = AgentPlan(
+        task_id="task-v1-history",
+        user_goal="继续历史计划中的最后一项",
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W0",
+                objective="已经完成的历史项",
+                status="completed",
+            ),
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="当前唯一可执行项",
+                allowed_paths=["src/current.py"],
+            ),
+        ],
+    )
+
+    approved = approve_plan(plan, actor="user")
+
+    assert approved.approval_is_current()
+    assert approved.work_items[0].status == "completed"
+
+
 def test_finalize_claim_cannot_skip_pending_work_item() -> None:
     plan = AgentPlan(
         task_id="task-two-items",
         user_goal="完成两项工作",
         work_items=[
-            AgentWorkItem(work_item_id="W1", objective="第一项"),
-            AgentWorkItem(work_item_id="W2", objective="第二项"),
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="第一项",
+                allowed_paths=["src/one.py"],
+            ),
+            AgentWorkItem(
+                work_item_id="W2",
+                objective="第二项",
+                allowed_paths=["src/two.py"],
+            ),
         ],
     )
-    plan = approve_plan(plan, actor="user")
+    plan = AgentPlan.model_validate(
+        {
+            **plan.model_dump(mode="json"),
+            "approved": True,
+            "approved_at": "2026-08-13T00:00:00+00:00",
+            "approved_by": "legacy-user",
+            "approved_digest": plan.expected_approval_digest(),
+        }
+    )
     observation = AgentObservation(
         observation_id="obs-skip",
         work_item_id="W1",

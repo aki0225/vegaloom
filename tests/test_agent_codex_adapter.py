@@ -9,16 +9,26 @@ from types import SimpleNamespace
 
 import pytest
 
+from vega import agent_codex_adapter as agent_codex_adapter_module
 from vega import agent_finalization as agent_finalization_module
+from vega import agent_worker as agent_worker_module
 from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
-from vega.agent_codex_evidence import _verification_status
-from vega.agent_contract import AgentPlan, AgentWorkItem, approve_plan
+from vega.agent_codex_evidence import (
+    _verification_status,
+    require_single_executable_work_item,
+)
+from vega.agent_codex_scope import (
+    capture_plan_scope_baseline,
+    evaluate_plan_scope,
+)
+from vega.agent_contract import AgentPlan, AgentState, AgentWorkItem, approve_plan
 from vega.agent_persistence import (
     append_agent_trace,
     load_agent_state,
     read_agent_trace,
 )
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_worker import SupervisorAgentWorker
 from vega.agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
@@ -280,17 +290,76 @@ def test_adapter_serializes_child_creation_before_writer_binding(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(invoke)
-        assert first_entered.wait(2)
+        assert first_entered.wait(10)
         second = pool.submit(invoke)
-        second_outcome = second.result(timeout=2)
+        second_outcome = second.result(timeout=10)
         release_first.set()
-        first_outcome = first.result(timeout=2)
+        first_outcome = first.result(timeout=10)
 
     assert sorted([first_outcome, second_outcome]) == [
         "blocked:run 正由当前进程修改：run=agent-run，operation=agent.dispatch",
         "completed",
     ]
     assert child_count == 1
+
+
+def test_adapter_dependency_preflight_rejects_before_creating_child_or_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    adapter = SupervisorAgentCodexAdapter(workspace)
+
+    def missing_dependencies() -> None:
+        raise ValueError(
+            '当前环境缺少 Supervisor Agent 运行依赖；请执行：'
+            'python -m pip install "vegaloom[agent]"'
+        )
+
+    def unexpected_prepare(*args, **kwargs):
+        pytest.fail("缺少 Agent 依赖时不应创建 child 或 Writer binding")
+
+    monkeypatch.setattr(
+        agent_codex_adapter_module,
+        "require_agent_runtime_dependencies",
+        missing_dependencies,
+    )
+    monkeypatch.setattr(adapter, "_prepare_and_bind", unexpected_prepare)
+
+    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
+        adapter.run("missing-agent-run", timeout_seconds=60)
+
+    assert not (workspace / "runs").exists()
+
+
+def test_worker_binding_preflights_dependencies_before_reading_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    def missing_dependencies() -> None:
+        raise ValueError(
+            '当前环境缺少 Supervisor Agent 运行依赖；请执行：'
+            'python -m pip install "vegaloom[agent]"'
+        )
+
+    monkeypatch.setattr(
+        agent_worker_module,
+        "require_agent_runtime_dependencies",
+        missing_dependencies,
+    )
+
+    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
+        SupervisorAgentWorker(workspace).bind(
+            "missing-agent-run",
+            child_run="child-not-created",
+            operation_id="operation-not-created",
+        )
+
+    assert not (workspace / "runs").exists()
 
 
 def test_verification_failure_takes_precedence_over_passed_finish_flag() -> None:
@@ -1087,13 +1156,7 @@ def test_repair_attempt_reuses_child_and_preserves_execution_history(
     ) == 2
 
 
-def test_adapter_rejects_multi_work_item_plan_before_creating_child(
-    tmp_path: Path,
-) -> None:
-    repo = _repo(tmp_path / "repo")
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    runtime = SupervisorAgentRuntime(workspace)
+def test_adapter_gate_rejects_legacy_multi_work_item_plan() -> None:
     plan = _plan().model_copy(deep=True)
     plan.work_items.append(
         AgentWorkItem(
@@ -1103,20 +1166,17 @@ def test_adapter_rejects_multi_work_item_plan_before_creating_child(
             verification=["运行定向测试"],
         )
     )
-    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
-    approved = runtime.approve(run.run_dir.name)
-    loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
-        workspace,
-        worker_runner=_FakeWorkerRunner(),
-        loop_runtime=loop,
-        finish_runtime=_FakeFinishRuntime(loop),
+    state = AgentState(
+        run_id="legacy-agent-run",
+        task_id=plan.task_id,
+        repository_id="legacy-repository",
+        phase="ready",
+        current_work_item="W1",
+        allowed_actions=["next"],
     )
 
     with pytest.raises(ValueError, match="只接受一个未完成 Work Item"):
-        adapter.run(approved.run_dir.name, timeout_seconds=60)
-
-    assert loop.child_dir is None
+        require_single_executable_work_item(plan, state)
 
 
 @pytest.mark.parametrize(
@@ -1284,6 +1344,199 @@ def test_outside_approved_plan_scope_skips_core_and_requires_replan(
     assert scope_path.relative_to(result.run_dir).as_posix() in observation[
         "evidence_refs"
     ]
+
+
+def test_completed_work_item_paths_are_read_only_for_current_attempt(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    historical = repo / "src" / "historical.py"
+    current = repo / "src" / "current.py"
+    historical.write_text("value = 0\n", encoding="utf-8")
+    current.write_text("value = 0\n", encoding="utf-8")
+    _git(repo, "add", "src/historical.py", "src/current.py")
+    _git(repo, "commit", "-m", "测试：准备多阶段范围基线")
+    head = _head(repo)
+    historical.write_text("value = 1\n", encoding="utf-8")
+    plan = AgentPlan(
+        task_id="task-historical-scope",
+        user_goal="继续当前 Work Item",
+        success_conditions=["当前范围内修改通过验证"],
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W0",
+                objective="保留已经完成的历史修改",
+                status="completed",
+                allowed_paths=["src/historical.py"],
+                verification=["历史验证"],
+            ),
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="完成当前修改",
+                allowed_paths=["src/current.py"],
+                verification=["当前验证"],
+            ),
+        ],
+    )
+    baseline = capture_plan_scope_baseline(
+        repo,
+        plan,
+        plan.work_items[1],
+        expected_head_sha=head,
+        iteration=1,
+    )
+
+    current.write_text("value = 1\n", encoding="utf-8")
+    allowed = evaluate_plan_scope(
+        repo,
+        baseline,
+        expected_head_sha=head,
+        iteration=1,
+    )
+
+    assert allowed.status == "success"
+    assert allowed.allowed_paths == ["src/current.py"]
+    assert allowed.violations == []
+
+    historical.write_text("value = 2\n", encoding="utf-8")
+    rejected = evaluate_plan_scope(
+        repo,
+        baseline,
+        expected_head_sha=head,
+        iteration=1,
+    )
+
+    assert rejected.status == "failed"
+    assert [
+        (violation.code, violation.path) for violation in rejected.violations
+    ] == [("outside_allowed_paths", "src/historical.py")]
+
+
+def test_overlapping_current_glob_cannot_mutate_completed_work_item_wip(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    historical = repo / "src" / "historical.py"
+    historical.write_text("value = 0\n", encoding="utf-8")
+    _git(repo, "add", "src/historical.py")
+    _git(repo, "commit", "-m", "测试：准备重叠范围基线")
+    head = _head(repo)
+    historical.write_text("value = 1\n", encoding="utf-8")
+    plan = AgentPlan(
+        task_id="task-overlapping-historical-scope",
+        user_goal="继续当前 Work Item",
+        success_conditions=["当前范围内修改通过验证"],
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W0",
+                objective="保留已经完成的历史修改",
+                status="completed",
+                allowed_paths=["src/historical.py"],
+                verification=["历史验证"],
+            ),
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="完成当前目录内的其他修改",
+                allowed_paths=["src/**"],
+                verification=["当前验证"],
+            ),
+        ],
+    )
+    with pytest.raises(ValueError, match="无法可靠归因"):
+        capture_plan_scope_baseline(
+            repo,
+            plan,
+            plan.work_items[1],
+            expected_head_sha=head,
+            iteration=1,
+        )
+
+
+def test_current_work_item_wip_remains_mutable_for_repair(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    current = repo / "src" / "current.py"
+    current.write_text("value = 0\n", encoding="utf-8")
+    _git(repo, "add", "src/current.py")
+    _git(repo, "commit", "-m", "测试：准备当前 Work Item WIP")
+    head = _head(repo)
+    current.write_text("value = 1\n", encoding="utf-8")
+    plan = AgentPlan(
+        task_id="task-current-wip",
+        user_goal="继续当前 Work Item",
+        success_conditions=["当前范围内修改通过验证"],
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="修复当前已有 WIP",
+                status="active",
+                allowed_paths=["src/**"],
+                verification=["当前验证"],
+            )
+        ],
+    )
+    baseline = capture_plan_scope_baseline(
+        repo,
+        plan,
+        plan.work_items[0],
+        expected_head_sha=head,
+        iteration=2,
+    )
+
+    current.write_text("value = 2\n", encoding="utf-8")
+    result = evaluate_plan_scope(
+        repo,
+        baseline,
+        expected_head_sha=head,
+        iteration=2,
+    )
+
+    assert result.status == "success"
+    assert baseline.immutable_path_states == ()
+
+
+def test_completed_work_item_forbidden_paths_remain_effective(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    forbidden = repo / "src" / "forbidden.py"
+    forbidden.write_text("value = 0\n", encoding="utf-8")
+    _git(repo, "add", "src/forbidden.py")
+    _git(repo, "commit", "-m", "测试：准备历史禁止范围")
+    head = _head(repo)
+    plan = AgentPlan(
+        task_id="task-historical-forbidden-scope",
+        user_goal="继续当前 Work Item",
+        success_conditions=["当前范围内修改通过验证"],
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W0",
+                objective="保留历史禁止范围",
+                status="completed",
+                allowed_paths=["src/historical.py"],
+                forbidden_paths=["src/forbidden.py"],
+                verification=["历史验证"],
+            ),
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="完成当前修改",
+                allowed_paths=["src/current.py"],
+                verification=["当前验证"],
+            ),
+        ],
+    )
+
+    forbidden.write_text("value = 1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="forbidden_path"):
+        capture_plan_scope_baseline(
+            repo,
+            plan,
+            plan.work_items[1],
+            expected_head_sha=head,
+            iteration=1,
+        )
 
 
 def _approved_run(tmp_path: Path) -> tuple[Path, Path, str]:

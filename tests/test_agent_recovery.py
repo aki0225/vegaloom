@@ -619,7 +619,10 @@ def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> No
     assert stopped.state.phase == "stopped"
     assert (repo / "README.md").read_text(encoding="utf-8") == "fixture\n"
     assert (stopped.run_dir / "agent-plan.json").read_bytes() == plan_before
-    assert "任务已停止" in runtime.status(stopped.run_dir.name)
+    status = runtime.status(stopped.run_dir.name)
+    assert "任务已停止" in status
+    assert "不能使用 resume-local" in status
+    assert "resume-local --run" not in status
 
 
 def test_stop_inherits_unknown_side_effect_and_remains_blocked(

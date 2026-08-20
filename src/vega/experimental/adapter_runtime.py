@@ -248,7 +248,8 @@ description: "当用户明确要求使用 Vega Supervisor Agent 完成长任务�
      `vega agent run`；第二次仍未完成就停止并交还人工。
    - `awaiting_approval`：新证据要求 replan；重新只读调查、提交 revision，并再次等待批准。
    - `needs_human`：停止自动执行，展示阻断、Checkpoint、未知副作用和人工选项。
-   - `stopped`：保留现场，除非用户明确要求，否则不要恢复。
+   - `stopped`：当前本机 run 已终止；保留现场，但不要运行 `resume-local`。需要继续时由
+     用户选择 Handoff 或新的 Agent run。
 
 ## 人工控制与恢复
 
@@ -256,9 +257,9 @@ description: "当用户明确要求使用 Vega Supervisor Agent 完成长任务�
 - 新约束：`vega agent steer --run <agent_run> --instruction "<约束>"`。
 - 暂停：`vega agent pause --run <agent_run> --reason "<原因>"`。
 - 停止：`vega agent stop --run <agent_run> --reason "<原因>"`。
-- 本机恢复：先确认无 active Writer，再运行
+- 本机恢复：仅在 `needs_human`、无 active Writer 且最新 Checkpoint 为 safe 时运行
   `vega agent resume-local --run <agent_run>`。
-- 跨机器准备：仅在用户明确要求时运行
+- Git-only fresh-clone / 换目录接手：仅在用户明确要求时运行
   `vega agent checkpoint --run <agent_run> --handoff --reason "<原因>"`；
   Vega 只生成材料，不执行 Git 操作。
 

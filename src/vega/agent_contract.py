@@ -203,6 +203,59 @@ class AgentPlan(StrictAgentModel):
         )
 
 
+def validate_v1_execution_plan(plan: AgentPlan) -> AgentWorkItem:
+    """校验当前 V1 在人工批准和真实执行前必须冻结的最小范围。"""
+
+    unrestricted = [
+        path
+        for item in plan.work_items
+        for path in item.allowed_paths
+        if _scope_pattern_covers_repository(path)
+    ]
+    if unrestricted:
+        raise ValueError(
+            "Supervisor Agent V1 不接受覆盖整个仓库的允许路径："
+            f"{sorted(dict.fromkeys(unrestricted))}"
+        )
+    executable = [
+        item
+        for item in plan.work_items
+        if item.status not in {"completed", "superseded"}
+    ]
+    if len(executable) != 1:
+        raise ValueError("Supervisor Agent V1 当前只接受一个未完成 Work Item")
+    work_item = executable[0]
+    if not work_item.allowed_paths:
+        raise ValueError("Supervisor Agent V1 Work Item 必须声明至少一个允许路径")
+    return work_item
+
+
+def _scope_pattern_covers_repository(pattern: str) -> bool:
+    segments = pattern.split("/")
+    fixed_width = [segment for segment in segments if segment != "**"]
+    if "**" not in segments or len(fixed_width) > 1:
+        return False
+    return not fixed_width or _segment_matches_every_nonempty_name(fixed_width[0])
+
+
+def _segment_matches_every_nonempty_name(pattern: str) -> bool:
+    return "*" in pattern and all(character in {"*", "?"} for character in pattern) and (
+        pattern.count("?") <= 1
+    )
+
+
+def validate_v1_execution_binding(
+    plan: AgentPlan,
+    current_work_item: str | None,
+) -> AgentWorkItem:
+    """确认 V1 唯一可执行项与持久化 State 指向同一对象。"""
+
+    work_item = validate_v1_execution_plan(plan)
+    if work_item.work_item_id != current_work_item:
+        raise ValueError("当前可执行 Work Item 与 Agent State 不一致")
+    return work_item
+
+
 class AgentObservation(StrictAgentModel):
     observation_id: ArtifactIdText
     work_item_id: NonEmptyText | None = None
@@ -382,6 +435,7 @@ class AgentState(StrictAgentModel):
 def approve_plan(plan: AgentPlan, *, actor: str, approved_at: str | None = None) -> AgentPlan:
     if not actor.strip():
         raise ValueError("批准人不能为空")
+    validate_v1_execution_plan(plan)
     payload = plan.model_dump(mode="json")
     payload.update(
         {

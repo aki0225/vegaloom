@@ -7,7 +7,7 @@ import typer
 
 from .agent_codex_adapter import SupervisorAgentCodexAdapter
 from .agent_contract import AgentObservation, AgentPlan
-from .agent_graph import langgraph_available
+from .agent_graph import langgraph_available, require_agent_runtime_dependencies
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_recovery_request import AgentRecoveryRequest
 from .agent_runtime import SupervisorAgentRuntime
@@ -88,6 +88,7 @@ def agent_dispatch(
     """绑定唯一 Writer，并保守进入 operation 可能已开始的边界。"""
 
     try:
+        require_agent_runtime_dependencies()
         result = _worker().bind(
             run,
             child_run=child_run,
@@ -113,8 +114,9 @@ def agent_run(
 ) -> None:
     """执行当前已批准 Work Item，并复用现有 Core 完成验证与独立评审。"""
 
-    ensure_runner_ready("codex-exec", "worker")
     try:
+        require_agent_runtime_dependencies()
+        ensure_runner_ready("codex-exec", "worker")
         result = _adapter().run(run, timeout_seconds=timeout_seconds)
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -327,6 +329,7 @@ def agent_resume(
 
     repo = require_repo_directory(repo)
     try:
+        require_agent_runtime_dependencies()
         result = _runtime().resume_task_card(repo, task)
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc

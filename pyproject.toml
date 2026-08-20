@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vegaloom"
-version = "0.2.0"
-description = "A local-first coding workflow harness with independent write and review sessions."
+version = "0.2.1"
+description = "带监督执行、确定性验证和独立评审的 AI 编码 Harness"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

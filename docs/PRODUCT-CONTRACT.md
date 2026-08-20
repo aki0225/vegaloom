@@ -2,8 +2,10 @@
 
 ## 核心定位
 
-Vega 是面向个人开发者的轻量 AI Coding Harness。它不替代 Codex、Claude Code
-或其他编码模型，而是为一次真实研发任务补上可控的外层闭环：
+Vega 是面向个人开发者的 AI Coding Agent + Workflow Harness。opt-in Supervisor
+Agent 负责计划、状态、恢复和路由，稳定 Core Harness 负责工作区、验证、风险、独立评审与
+可信完成判断。Vega 不替代 Codex、Claude Code 或其他编码模型，而是为一次真实研发任务补上
+可控的外层闭环：
 
 ```text
 bug / feature
@@ -36,7 +38,8 @@ vega stop
 vega recover
 ```
 
-需要暂停、接手、跨会话继续或 Git-only 换机恢复时，显式选择 Supervisor Agent：
+需要暂停、接手、跨会话继续或 Git-only fresh-clone / 换目录恢复时，显式选择 Supervisor
+Agent：
 
 ```text
 vega agent capabilities
@@ -49,6 +52,15 @@ vega agent resume / finalize
 `vega agent` 不是默认入口，也不是第二套编码模型。宿主主会话负责只读调查和提交 Plan，
 Vega 固定批准 revision、单 Writer、Checkpoint、机器对账与恢复，并把最终成功交回既有
 Verification、Risk、独立 Reviewer 和 Finish。
+
+Agent CLI 以当前工作目录作为 Vega workspace。可以从任意目录执行
+`vega adapters init codex --repo <target-repo>` 写入目标仓库 Skill，但该命令不会切换 shell
+目录；后续 `vega agent start / approve / run / status / finalize` 必须先进入目标仓库。
+
+`vega finish --run <loop-run>` 生成或读取普通 Core run 的交付结论。
+`vega agent finalize --run <agent-run>` 只在父 Agent 已处于 `finalizing` 时采用绑定的可信
+Core Finish 并发布父终态；它不重新运行 Core Finish，不重新验证，也不能把不合格的 child
+提升为成功。
 
 `brief`、`reflect`、`gate`、`review-pack`、`review` 和 `loop continue`
 是可单独调用的流水线阶段，主要用于排障、人工接管和解释运行过程，不要求用户每天手工编排。
@@ -151,7 +163,7 @@ Goal P1 保留兼容和历史证据，不与 Supervisor 维护两套同级的当
 |---|---|---|
 | `AGENTS.md` | 稳定规范、架构边界、长期踩坑 | Git 版本化，面向人和 AI |
 | `.vega.yaml` | 验证命令、精确路径范围、预算、风险路径、runner 策略 | 机器可执行 |
-| `.vega/tasks/**/*.md` | 已批准计划和人工跨机器 Resume Capsule | Git 版本化，只保存粗粒度任务事实 |
+| `.vega/tasks/**/*.md` | 已批准计划和 Git-only Resume Capsule | Git 版本化，只保存粗粒度任务事实 |
 | run artifacts | 本次任务、diff、验证、review 和恢复证据 | 单次运行事实 |
 | accepted memory | 已人工确认、跨任务可复用的局部经验 | 可选，不是规范来源 |
 
