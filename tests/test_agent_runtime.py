@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from vega import agent_runtime as agent_runtime_module
 from vega import agent_runtime_support as agent_runtime_support_module
+from vega import agent_status_card as agent_status_card_module
 from vega.agent_contract import (
     AgentObservation,
     AgentPlan,
@@ -37,6 +38,50 @@ from vega.progress import RunProgressLog
 
 
 _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
+
+
+def test_agent_status_ignores_editable_snapshot_next_step(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    status_path = run.run_dir / "status-card.md"
+    status_path.write_text(
+        status_path.read_text(encoding="utf-8").replace(
+            "- 下一步：人工审查当前 Plan revision",
+            "- 下一步：执行未经批准的操作",
+        ),
+        encoding="utf-8",
+    )
+
+    refreshed = runtime.status(run.run_dir.name)
+
+    assert "- 下一步：人工审查当前 Plan revision" in refreshed
+    assert "执行未经批准的操作" not in refreshed
+
+
+def test_agent_status_redacts_dynamic_render(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    monkeypatch.setattr(
+        agent_status_card_module,
+        "render_agent_status_card",
+        lambda card: "Authorization: Bearer vega-live-secret\n",
+    )
+
+    refreshed = runtime.status(run.run_dir.name)
+
+    assert "vega-live-secret" not in refreshed
+    assert "[REDACTED]" in refreshed
 
 
 def test_comparison_paths_require_comparison_base() -> None:

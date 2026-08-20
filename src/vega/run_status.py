@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent_run_status import (
-    agent_artifact_names,
+    agent_artifact_names, agent_live_stage_payload,
     agent_next_steps,
     load_agent_status_state,
 )
@@ -56,7 +56,6 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     if kind != "agent":
         state = _classify_init(workspace, run_dir, state)
     decisions = DecisionStore(run_dir).list()
-    execution = _latest_execution_payload(run_dir, state.get("status"))
     return {
         "run_id": run_dir.name,
         "run_dir": str(run_dir.resolve()),
@@ -71,12 +70,13 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         "last_child_status": state.get("last_child_status"),
         "decision_count": len(decisions),
         "latest_decisions": [entry.model_dump() for entry in decisions[-3:]],
-        "execution": execution,
+        "execution": _latest_execution_payload(run_dir, state.get("status")),
         "agent_phase": state.get("agent_phase"),
         "current_work_item": state.get("current_work_item"),
         "latest_checkpoint_id": state.get("latest_checkpoint_id"),
         "allowed_actions": state.get("allowed_actions"),
         "terminal_status": state.get("terminal_status"),
+        **agent_live_stage_payload(state),
         "next_steps": next_steps_for_run(workspace, run_dir, state, kind),
         "key_artifacts": key_artifacts_for_run(run_dir, state, kind),
     }

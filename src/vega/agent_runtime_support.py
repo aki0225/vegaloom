@@ -19,7 +19,6 @@ from .agent_contract import (
     AgentObservation,
     AgentPlan,
     AgentState,
-    AgentStatusCard,
     canonical_digest,
 )
 from .agent_graph import require_agent_runtime_dependencies
@@ -38,14 +37,13 @@ from .agent_resume_validation import (
     validate_resume_workspace,
 )
 from .agent_run import AgentRun
-from .agent_run_status import trusted_worker_label
 from .agent_runtime_logic import update_state
+from .agent_status_card import write_status_card as _write_status_card
 from .agent_task_card import (
     AgentTaskCard,
     discover_handoff_task_cards,
     parse_task_card,
 )
-from .agent_visibility import render_agent_status_card
 from .comparison_binding import require_comparison_binding_from_mapping
 from .redaction import write_redacted_json, write_redacted_text
 from .repository_identity import repository_scope
@@ -404,67 +402,14 @@ def write_status_card(
     checkpoint: AgentCheckpoint | None = None,
     next_step: str | None = None,
 ) -> None:
-    if checkpoint is None and state.latest_checkpoint_id:
-        checkpoint = load_agent_checkpoint(
-            run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
-        )
-    current_index = next(
-        (
-            index
-            for index, item in enumerate(plan.work_items, start=1)
-            if item.work_item_id == state.current_work_item
-        ),
-        0,
-    )
-    worker_label = trusted_worker_label(
+    _write_status_card(
         run_dir,
         state,
+        plan,
         observation=observation,
-        checkpoint_status=checkpoint.status if checkpoint else None,
+        checkpoint=checkpoint,
+        next_step=next_step,
     )
-    card = AgentStatusCard(
-        run_id=state.run_id,
-        task_id=state.task_id,
-        phase=state.phase,
-        task_goal=plan.user_goal,
-        work_item_label=(
-            f"{state.current_work_item} / {len(plan.work_items)}"
-            if state.current_work_item
-            else "尚未选择"
-        ),
-        worker_label=worker_label,
-        changed_files=(
-            observation.changed_files
-            if observation is not None
-            else checkpoint.changed_files
-            if checkpoint is not None
-            else []
-        ),
-        unknown_file_count=observation.unknown_file_count if observation else 0,
-        latest_checkpoint=state.latest_checkpoint_id,
-        checkpoint_status=checkpoint.status if checkpoint else None,
-        verification=observation.verification if observation else "not_run",
-        risk=observation.risk if observation else "not_run",
-        review=observation.review if observation else "not_run",
-        terminal_status=state.terminal_status,
-        allowed_actions=list(state.allowed_actions),
-        next_step=next_step or default_next_step(state.phase, current_index),
-    )
-    write_redacted_text(run_dir / "status-card.md", render_agent_status_card(card))
-
-
-def default_next_step(phase: str, current_index: int) -> str:
-    if phase == "awaiting_approval":
-        return "人工审查当前 Plan revision"
-    if phase == "ready":
-        return f"准备执行第 {max(1, current_index)} 个 Work Item"
-    if phase == "needs_human":
-        return "查看最近 Observation 与 Checkpoint 后选择人工动作"
-    if phase == "finalizing":
-        return "调用现有 Vega Finish，Agent Graph 不能自行宣称成功"
-    if phase == "completed":
-        return "读取 Core Finish 结论并完成人工提交前检查；Vega 不自动执行 Git 操作"
-    return "查看结构化状态与允许动作"
 
 
 def state_from_task_card(
