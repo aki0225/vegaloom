@@ -17,9 +17,9 @@
 | 查看 Supervisor 状态与恢复合同 | [`SUPERVISOR-AGENT-STATE-AUTHORITY.md`](SUPERVISOR-AGENT-STATE-AUTHORITY.md) | v0.2.x 当前合同，后半含历史实施证据 |
 | 查看长期路线和历史决策 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
 | 查看 Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前架构说明 |
-| 查看版本范围和非目标 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | v0.1 baseline + v0.2.0 可选能力 |
+| 查看版本范围和非目标 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | v0.1 baseline + v0.2.x 可选能力 |
 | 查看工作区规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 当前规范 |
-| 查看 v0.2.1 发布候选内容 | [`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md) | 发布候选，尚未发布 |
+| 查看 v0.2.1 发布内容 | [`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md) | 当前稳定版本 |
 | 查看 v0.2.0 发布内容 | [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md) | 已发布 |
 | 查看历史实验归档 Tag | [`EXPERIMENT-ARCHIVES.md`](EXPERIMENT-ARCHIVES.md) | 已结束实验，只读复核 |
 
@@ -38,13 +38,11 @@
 
 ## 当前工作
 
-### 当前发布候选：v0.2.1
+### 当前稳定版本：v0.2.1
 
-当前稳定版本仍是 `v0.2.0`。`v0.2.1` 是维护发布候选，不增加新的 Agent 角色、Runtime 或
-成功路径。它收紧 Plan 范围、
+`v0.2.1` 是维护版本，不增加新的 Agent 角色、Runtime 或成功路径。它收紧 Plan 范围、
 可选依赖预检、Task Card 路径卫生与停止状态提示，并同步入口、工作目录、Finish 分层、
-Git-only fresh-clone 证据边界和安全支持版本文案。远端 Tag 与 GitHub Release 创建前，不将
-该候选记为已发布版本。
+Git-only fresh-clone 证据边界和安全支持版本文案。
 
 ### Supervisor Agent V1
 
@@ -70,7 +68,7 @@ fresh clone 恢复、Provider 429 fail-closed、Reviewer 打回、人工 Plan re
 
 ### 真实日常使用观察
 
-`v0.2.0` 发布后进入真实日常使用观察；`v0.2.1` 候选只做维护修正。CRWP-V1、Plan-first、
+`v0.2.0` 发布后进入真实日常使用观察；`v0.2.1` 只做维护修正。CRWP-V1、Plan-first、
 Finish 第一屏、Reviewer 覆盖、
 Goal P1 显式 Worker 重跑和 Supervisor Agent V1 都已有实现或真实证据；Codex assist、
 Claude Code assist、`vega do`、Reviewer 打回、Provider 失败和 Git-only 恢复场景均有记录。
@@ -134,8 +132,8 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
   运行前控制登记，不替代 Handoff。
 - [`../eval/real-world-runs.md`](../eval/real-world-runs.md)：
   真实运行证据，只允许追加。
-- [`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md)：v0.2.1 候选详细变更。
-- [`RELEASE-SUMMARY-0.2.1.md`](RELEASE-SUMMARY-0.2.1.md)：v0.2.1 候选 Release 文案。
+- [`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md)：v0.2.1 详细变更。
+- [`RELEASE-SUMMARY-0.2.1.md`](RELEASE-SUMMARY-0.2.1.md)：v0.2.1 GitHub Release 文案。
 - [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md)：v0.2.0 详细变更。
 - [`RELEASE-SUMMARY-0.2.0.md`](RELEASE-SUMMARY-0.2.0.md)：v0.2.0 GitHub Release 文案。
 - [`RELEASE-NOTES-0.1.5.md`](RELEASE-NOTES-0.1.5.md)：v0.1.5 详细变更。
@@ -156,15 +154,11 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 | [`LEAN-CORE-PLAN.md`](LEAN-CORE-PLAN.md) | 轻量核心清单和增长约束决策 |
 | [`LONG-RUNNING-GOALS.md`](LONG-RUNNING-GOALS.md) | Goal P0 与单 checkpoint P1 实验边界 |
 
-## 发布历史
-
-`v0.2.1` 当前仍是发布候选，候选说明见
-[`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md) 与
-[`RELEASE-SUMMARY-0.2.1.md`](RELEASE-SUMMARY-0.2.1.md)；创建远端 Tag 和 GitHub Release
-后才能移入下表。
+## 版本文档
 
 | 版本 | 发布说明 | 发布摘要 |
 |---|---|---|
+| `v0.2.1` | [`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md) | [`RELEASE-SUMMARY-0.2.1.md`](RELEASE-SUMMARY-0.2.1.md) |
 | `v0.2.0` | [`RELEASE-NOTES-0.2.0.md`](RELEASE-NOTES-0.2.0.md) | [`RELEASE-SUMMARY-0.2.0.md`](RELEASE-SUMMARY-0.2.0.md) |
 | `v0.1.5` | [`RELEASE-NOTES-0.1.5.md`](RELEASE-NOTES-0.1.5.md) | [`RELEASE-SUMMARY-0.1.5.md`](RELEASE-SUMMARY-0.1.5.md) |
 | `v0.1.4` | [`RELEASE-NOTES-0.1.4.md`](RELEASE-NOTES-0.1.4.md) | [`RELEASE-SUMMARY-0.1.4.md`](RELEASE-SUMMARY-0.1.4.md) |
@@ -172,7 +166,7 @@ PR `#49` 已保证 Reviewer 的 `reviewed_files` 覆盖完整变更文件，但�
 | `v0.1.2` | [`RELEASE-NOTES-0.1.2.md`](RELEASE-NOTES-0.1.2.md) | [`RELEASE-SUMMARY-0.1.2.md`](RELEASE-SUMMARY-0.1.2.md) |
 | `v0.1.1` | [`RELEASE-NOTES-0.1.1.md`](RELEASE-NOTES-0.1.1.md) | 无单独摘要 |
 
-远端 Tag 与 GitHub Release 是发布状态的权威来源；上表只提供仓库内发布文档导航。
+远端 Tag 与 GitHub Release 是发布动作的权威来源；上表只提供各版本的仓库内文档导航。
 
 ## 历史交接
 

@@ -232,8 +232,7 @@ experimental: Memory proposal / ledger
 隔离审查和证据化恢复；Supervisor Agent 与 Codex skills 是已发布的可选能力，Memory 保持
 实验状态，Goal P0/P1 只保留兼容和历史证据。
 
-当前稳定版本为 `v0.2.0`，`v0.2.1` 仍是维护发布候选。v0.2.x 保留既有核心成功语义，并维护
-opt-in Supervisor Agent V1：
+当前稳定版本为 `v0.2.1`。v0.2.x 保留既有核心成功语义，并维护 opt-in Supervisor Agent V1：
 单 Work Item、人工批准、单 Writer、可恢复 Checkpoint、Git Task Card、机器 Observation
 以及现有 Verification、Risk、独立 Reviewer 和 Finish。多 Work Item 自动推进、长期
 Memory、Provider 平台和自动 Git 仍不在当前范围。

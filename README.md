@@ -11,7 +11,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Stable-v0.2.0-4fb8d8?style=for-the-badge" alt="当前稳定版本 v0.2.0">
+  <img src="https://img.shields.io/badge/Stable-v0.2.1-4fb8d8?style=for-the-badge" alt="当前稳定版本 v0.2.1">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -305,7 +305,7 @@ Claude Code 主会话复用同一份
 | Supervisor Agent 状态权威与恢复合同 | [SUPERVISOR-AGENT-STATE-AUTHORITY](docs/SUPERVISOR-AGENT-STATE-AUTHORITY.md) |
 | 调查、Plan 与修改前人工确认 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
-| v0.2.1 发布候选说明 | [RELEASE-NOTES-0.2.1](docs/RELEASE-NOTES-0.2.1.md) |
+| v0.2.1 发布说明 | [RELEASE-NOTES-0.2.1](docs/RELEASE-NOTES-0.2.1.md) |
 | v0.2.0 发布摘要 | [RELEASE-SUMMARY-0.2.0](docs/RELEASE-SUMMARY-0.2.0.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
@@ -322,8 +322,8 @@ Claude Code 主会话复用同一份
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal、adapters 和 `vega agent` 是可选能力，不扩大核心 loop 的成功条件。
-- 当前稳定基线为 `v0.2.0`，`v0.2.1` 仍是发布候选。v0.2.0 在保留既有
-  `do / loop / goal` 成功语义的同时发布 opt-in
+- 当前稳定基线为 `v0.2.1`。v0.2.0 在保留既有 `do / loop / goal` 成功语义的同时发布
+  opt-in
   Supervisor Agent V1：主会话调查和提交单 Work Item Plan，人工批准后由 Vega 约束一个
   真实 Worker、核对 Workspace、支持 Git-only fresh-clone / 换目录接手，并复用现有
   Verification、Risk、独立 Reviewer 与 Finish 完成交付判断。该证据不外推为另一台物理机器

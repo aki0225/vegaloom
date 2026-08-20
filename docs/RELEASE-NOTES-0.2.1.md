@@ -1,9 +1,9 @@
-# Vega v0.2.1 发布候选说明
+# Vega v0.2.1 发布说明
 
-> 状态：发布候选，尚未发布
+> 版本：v0.2.1
 
-v0.2.1 是维护发布候选，不增加新的 Agent 角色、Runtime 或成功路径。它收紧 Supervisor
-Agent V1 的批准前约束与依赖探测，并把安装、恢复、Finish 和安全边界说明对齐到实际实现。
+v0.2.1 是维护版本，不增加新的 Agent 角色、Runtime 或成功路径。它收紧 Supervisor Agent V1
+的批准前约束与依赖探测，并把安装、恢复、Finish 和安全边界说明对齐到实际实现。
 
 ## Agent 合同加固
 
@@ -36,7 +36,7 @@ Agent V1 的批准前约束与依赖探测，并把安装、恢复、Finish 和�
 
 - distribution、Python 包版本和 package smoke 更新为 `0.2.1`。
 - `SECURITY.md` 的当前支持线更新为 `0.2.x`。
-- GitHub Pages 保留 `v0.2.0` 发布验收的固定来源与哈希；本维护候选不改写既有证据。
+- GitHub Pages 保留 `v0.2.0` 发布验收的固定来源与哈希；本维护版本不改写既有证据。
 
 ## 不变边界
 
@@ -44,4 +44,3 @@ Agent V1 的批准前约束与依赖探测，并把安装、恢复、Finish 和�
 - 不增加自动 commit、push、release、部署、回滚、长期 Memory 或多 Writer 并行。
 - Verification、Risk、独立 Reviewer 和 Core Finish 仍共同决定能否进入
   `ready_to_commit`。
-- 创建远端 Tag 与 GitHub Release 前，本文件只描述候选内容，不代表 v0.2.1 已发布。

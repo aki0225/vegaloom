@@ -1,10 +1,8 @@
-# Vega v0.2.1 发布候选摘要
+# Vega v0.2.1 发布摘要
 
 > 版本：v0.2.1
->
-> 状态：发布候选，尚未发布
 
-这份摘要用于候选 GitHub Release 文案。详细变更见
+这份摘要用于 GitHub Release 正文。详细变更见
 [`RELEASE-NOTES-0.2.1.md`](https://github.com/aki0225/vegaloom/blob/v0.2.1/docs/RELEASE-NOTES-0.2.1.md)，
 发布步骤见
 [`RELEASE-CHECKLIST.md`](https://github.com/aki0225/vegaloom/blob/v0.2.1/docs/RELEASE-CHECKLIST.md)。
@@ -31,4 +29,3 @@ Vega v0.2.1 收紧 Supervisor Agent V1 的单 Work Item、允许路径和可选�
 
 - 本版本不增加新 Runtime、Agent 角色、多 Writer、自动 Git 或第二套成功语义。
 - 会话隔离不等同于操作系统级安全沙箱。
-- 远端 Tag 与 GitHub Release 创建前，v0.2.1 仍是发布候选。
