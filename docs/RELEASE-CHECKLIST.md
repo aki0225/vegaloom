@@ -1,6 +1,6 @@
 # Vega 发布前检查清单
 
-这份清单用于正式打标签、公开演示或在新机器上复核 Vega 是否可用。它不新增产品能力，
+这份清单用于正式打标签、公开演示或在 fresh clone 中复核 Vega 是否可用。它不新增产品能力，
 只把安装、验证、证据和边界检查整理成可重复步骤。
 
 ## 一、适用范围
@@ -137,6 +137,10 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 - 验证失败、证据不足或 reviewer 打回时进入人工处理状态。
 - Vega 不自动 commit、push、release 或写长期 memory。
 
+`vega finish --run <loop_run>` 面向普通 Core run；`vega agent finalize --run <agent_run>` 只在
+父 Agent 已处于 `finalizing` 时采用已绑定的可信 Core Finish。后者不重新运行验证或 Reviewer，
+不能替代前者生成 Core 交付证据。
+
 ### Codex JSONL 与显式 Worker 重跑验收
 
 涉及 Codex 实时进度和终态解析的发布候选，还必须在最终候选提交上使用 fresh 小型目标仓库
@@ -171,6 +175,9 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 
 包含 `vega agent` 产品变更的发布候选还必须完成一个真实单 Work Item 案例。通过条件：
 
+- 可以从任意目录运行 `vega adapters init codex --repo <target-repo>`，但随后必须进入
+  `<target-repo>` 再执行 Agent CLI；初始化命令不会改变 shell 工作目录。
+
 - Plan、Non-goals、成功条件、允许路径、验证命令和风险说明由人工显式批准。
 - Writer 只有一个绑定的 child/operation；Provider 失败、进程消失或 unknown 副作用不会
   自动重试。
@@ -201,7 +208,7 @@ vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode 
 
 可以说：
 
-- Vega 是本地优先的 AI 编码工作流 harness。
+- Vega 是 AI 编码 Supervisor Agent 与验证 Harness。
 - Vega 提供 opt-in、单 Work Item 的 Supervisor Agent 控制层。
 - worker 与 reviewer 使用独立会话边界，reviewer 在只读视图中结合证据审查。
 - 结构化验证、workspace snapshot、risk gate 和 finish evidence 共同决定是否可交付。

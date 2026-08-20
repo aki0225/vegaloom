@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -20,7 +19,33 @@ class SupervisorGraphState(TypedDict, total=False):
 
 
 def langgraph_available() -> bool:
-    return importlib.util.find_spec("langgraph") is not None
+    try:
+        _load_agent_runtime_dependencies()
+    except ImportError:
+        return False
+    return True
+
+
+def require_agent_runtime_dependencies() -> None:
+    """在会创建或恢复真实 Agent 运行前确认完整可选依赖。"""
+
+    try:
+        _load_agent_runtime_dependencies()
+    except ImportError as exc:
+        raise ValueError(
+            "当前环境缺少 Supervisor Agent 运行依赖；"
+            '请执行：python -m pip install "vegaloom[agent]"'
+        ) from exc
+
+
+def _load_agent_runtime_dependencies() -> None:
+    """只探测真实运行会使用的 LangGraph 图和 SQLite checkpoint 组件。"""
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.types import interrupt
+
+    _ = (SqliteSaver, END, START, StateGraph, interrupt)
 
 
 def build_supervisor_graph(*, checkpointer: Any | None = None) -> Any:

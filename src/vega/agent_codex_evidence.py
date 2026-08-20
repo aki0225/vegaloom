@@ -22,7 +22,9 @@ from .agent_contract import (
     AgentState,
     AgentWorkItem,
     canonical_digest,
+    validate_v1_execution_binding,
 )
+from .agent_codex_scope import PlanScopeBaseline
 from .agent_persistence import load_agent_checkpoint
 from .agent_run import AgentRun
 from .agent_runtime_support import capture_bound_workspace
@@ -33,11 +35,9 @@ from .execution_control import (
     inspect_execution_for_recovery,
 )
 from .models import LoopAutomationState
-from .project_config import ScopeConfig
 from .redaction import write_redacted_json_once
 from .run_utils import resolve_run_dir
 from .runner import Runner, RunnerResult
-from .scope_gate import ScopeGateResult, evaluate_scope_gate
 from .workspace_check import ReviewWorkspaceSnapshot
 
 
@@ -73,6 +73,7 @@ class PreparedCodexAttempt:
     task_brief: str
     runner: Runner
     verification_commands: tuple[str, ...]
+    plan_scope_baseline: PlanScopeBaseline
     comparison_base_sha: str | None = None
     comparison_paths: tuple[str, ...] = ()
 
@@ -101,20 +102,7 @@ def require_single_executable_work_item(
     plan: AgentPlan,
     state: AgentState,
 ) -> AgentWorkItem:
-    executable = [
-        item
-        for item in plan.work_items
-        if item.status not in {"completed", "superseded"}
-    ]
-    if (
-        len(executable) != 1
-        or executable[0].work_item_id != state.current_work_item
-    ):
-        raise ValueError(
-            "Gate 2B 真实 Adapter 当前只接受一个未完成 Work Item；"
-            "多 Work Item 的累计 Diff 归因尚未取得可信证据"
-        )
-    work_item = executable[0]
+    work_item = validate_v1_execution_binding(plan, state.current_work_item)
     commands = [command.strip() for command in work_item.verification]
     if not commands:
         raise ValueError("真实 Adapter Work Item 必须冻结至少一个验证命令")
@@ -123,74 +111,6 @@ def require_single_executable_work_item(
     if len(set(commands)) != len(commands):
         raise ValueError("真实 Adapter Work Item 的验证命令不能重复")
     return work_item
-
-
-def evaluate_plan_scope(
-    repo: Path,
-    plan: AgentPlan,
-    *,
-    expected_head_sha: str,
-    iteration: int,
-    comparison_base_sha: str | None = None,
-    comparison_paths: tuple[str, ...] = (),
-) -> ScopeGateResult:
-    """把已批准 Plan 的全部路径约束作为 Adapter 额外机器门禁。"""
-
-    allowed_paths = list(
-        dict.fromkeys(
-            path
-            for item in plan.work_items
-            if item.status != "superseded"
-            for path in item.allowed_paths
-        )
-    )
-    forbidden_paths = list(
-        dict.fromkeys(
-            path
-            for item in plan.work_items
-            if item.status != "superseded"
-            for path in item.forbidden_paths
-        )
-    )
-    return evaluate_scope_gate(
-        repo,
-        ScopeConfig(
-            allowed_paths=allowed_paths,
-            forbidden_paths=forbidden_paths,
-        ),
-        iteration=iteration,
-        phase="pre_verification",
-        expected_head_sha=expected_head_sha,
-        comparison_base_sha=comparison_base_sha,
-        comparison_paths=comparison_paths,
-    )
-
-
-def write_plan_scope_evidence(
-    run_dir: Path,
-    operation_id: str,
-    result: ScopeGateResult,
-    *,
-    stage: Literal["post-worker", "post-core"],
-) -> str:
-    relative = (
-        f"plan-scope/{stage}-"
-        f"{canonical_digest({'operation_id': operation_id, 'stage': stage})}.json"
-    )
-    write_redacted_json_once(run_dir / relative, result.model_dump(mode="json"))
-    return relative
-
-
-def plan_scope_failure(result: ScopeGateResult) -> str:
-    if result.violations:
-        changed = "、".join(
-            f"{violation.path}（{violation.code}）"
-            for violation in result.violations[:5]
-        )
-        suffix = " 等" if len(result.violations) > 5 else ""
-        return f"批准 Plan 范围门禁未通过：{changed}{suffix}"
-    detail = result.diagnostic or result.failure_code or "无法确认变更范围"
-    return f"批准 Plan 范围门禁未通过：{detail}"
 
 
 def require_repair_child(

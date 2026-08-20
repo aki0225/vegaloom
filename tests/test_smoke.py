@@ -3338,6 +3338,8 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert "vega agent run --run <agent_run> --timeout 900" in agent_skill_text
     assert "vega watch --run <agent_run> --follow" in agent_skill_text
     assert "vega agent finalize --run <agent_run>" in agent_skill_text
+    assert "stopped`：当前本机 run 已终止" in agent_skill_text
+    assert "不要运行 `resume-local`" in agent_skill_text
     assert "不执行 Git 操作" in agent_skill_text
     assert "只有可信 Core Finish 为 `ready_to_commit`" in agent_skill_text
 

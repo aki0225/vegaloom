@@ -20,6 +20,7 @@ from vega.agent_persistence import (
     read_agent_trace,
     save_agent_checkpoint,
 )
+from vega.agent_handoff_safety import assert_portable_task_card_payload
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_recovery_request import AgentRecoveryRequest
 from vega.agent_runtime import SupervisorAgentRuntime
@@ -138,6 +139,32 @@ def test_handoff_round_trip_between_isolated_clones(tmp_path: Path) -> None:
     assert "Verification：尚未运行" in status_card
     assert "Risk：尚未运行" in status_card
     assert "Reviewer：尚未运行" in status_card
+
+
+def test_direct_task_card_resume_preflights_dependencies_before_creating_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    def missing_dependencies() -> None:
+        raise ValueError(
+            '当前环境缺少 Supervisor Agent 运行依赖；请执行：'
+            'python -m pip install "vegaloom[agent]"'
+        )
+
+    monkeypatch.setattr(
+        agent_runtime_support_module,
+        "require_agent_runtime_dependencies",
+        missing_dependencies,
+    )
+
+    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
+        agent_runtime_support_module.resume_agent_task_card(workspace, repo)
+
+    assert not (workspace / "runs").exists()
 
 
 def test_resumed_run_can_adjudicate_new_unknown_side_effects(
@@ -485,6 +512,80 @@ def test_handoff_rejects_local_absolute_path_in_task_card(tmp_path: Path) -> Non
         )
 
     assert not list((repo / ".vega" / "tasks").rglob("*.md"))
+
+
+@pytest.mark.parametrize(
+    "local_path",
+    [
+        "/home/alice/private.txt",  # repo-path-policy: allow-test-fixture
+        "/Users/alice/private.txt",  # repo-path-policy: allow-test-fixture
+        "/private/var/folders/vega/private.txt",
+        "/tmp/vega-private.txt",
+        "/var/folders/vega/private.txt",
+        "/var/tmp/vega-private.txt",
+    ],
+)
+def test_handoff_rejects_posix_local_path_in_task_card(
+    tmp_path: Path,
+    local_path: str,
+) -> None:
+    plan = _plan(observed_facts=[f"本机调查文件位于 {local_path}"])
+    repo, workspace, run_id = _stopped_run(tmp_path, plan=plan)
+
+    with pytest.raises(TaskCardError, match="本机绝对路径"):
+        SupervisorAgentRuntime(workspace).handoff(
+            run_id,
+            reason="验证公开 Task Card 不携带 POSIX 本机路径",
+        )
+
+    assert not list((repo / ".vega" / "tasks").rglob("*.md"))
+
+
+@pytest.mark.parametrize(
+    "portable_text",
+    [
+        "https://example.com/redirect?next=/tmp/reference",
+        "https://example.com/var/folders/reference",
+        "<worktree-path>/tmp/reference",
+        "<worktree-path>/var/folders/reference",
+        "tmp/reference",
+    ],
+)
+def test_task_card_path_check_preserves_urls_placeholders_and_relative_paths(
+    portable_text: str,
+) -> None:
+    assert_portable_task_card_payload({"reference": portable_text})
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/redirect?next=file:///home/alice/private.txt",  # repo-path-policy: allow-test-fixture
+        "https://example.com/redirect?next=C:/Users/Alice/private.txt",  # repo-path-policy: allow-test-fixture
+        "https://example.com/redirect?next=%2Fhome%2Falice%2Fprivate.txt",
+        "https://example.com/redirect#file%3A%2F%2F%2Ftmp%2Fprivate.txt",
+    ],
+)
+def test_task_card_path_check_rejects_local_path_inside_url(url: str) -> None:
+    with pytest.raises(TaskCardError, match="本机绝对路径"):
+        assert_portable_task_card_payload({"reference": url})
+
+
+@pytest.mark.parametrize(
+    "local_uri",
+    [
+        "file:///home/alice/private.txt",  # repo-path-policy: allow-test-fixture
+        "file:///C:/Users/Example/private.txt",  # repo-path-policy: allow-test-fixture
+        "file:///var/folders/vega/private.txt",
+        "file:///var/tmp/vega-private.txt",
+        "file://localhost/home/alice/private.txt",
+        "file://localhost/tmp/vega-private.txt",
+        "file://server/var/folders/vega/private.txt",
+    ],
+)
+def test_task_card_path_check_rejects_local_file_uri(local_uri: str) -> None:
+    with pytest.raises(TaskCardError, match="本机绝对路径"):
+        assert_portable_task_card_payload({"reference": local_uri})
 
 
 def test_handoff_redacts_fake_key_from_all_artifacts(tmp_path: Path) -> None:

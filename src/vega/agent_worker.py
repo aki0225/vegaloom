@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .agent_contract import AgentState, canonical_digest
+from .agent_contract import AgentState, canonical_digest, validate_v1_execution_binding
+from .agent_graph import require_agent_runtime_dependencies
 from .agent_mutation import agent_mutation
 from .agent_persistence import append_agent_trace, read_agent_trace, save_agent_state
 from .agent_run import AgentRun
@@ -22,8 +23,22 @@ class SupervisorAgentWorker:
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace.resolve()
 
-    @agent_mutation("agent.dispatch")
     def bind(
+        self,
+        run: str,
+        *,
+        child_run: str,
+        operation_id: str,
+    ) -> AgentRun:
+        require_agent_runtime_dependencies()
+        return self._bind_with_lock(
+            run,
+            child_run=child_run,
+            operation_id=operation_id,
+        )
+
+    @agent_mutation("agent.dispatch")
+    def _bind_with_lock(
         self,
         run: str,
         *,
@@ -45,7 +60,9 @@ class SupervisorAgentWorker:
     ) -> AgentRun:
         """在调用方已经持有当前 Agent run mutation lock 时提交 Writer binding。"""
 
+        require_agent_runtime_dependencies()
         run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
+        validate_v1_execution_binding(plan, state.current_work_item)
         if state.phase != "ready" or not {"next", "repair"}.intersection(
             state.allowed_actions
         ):

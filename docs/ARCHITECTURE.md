@@ -2,8 +2,8 @@
 
 ## 总览
 
-Vega 是一个本地文件系统优先的 AI Coding Harness。当前稳定版本通过三条顶层执行路径覆盖
-只读检查、日常编码闭环和 opt-in Supervisor Agent 控制。
+Vega 是 AI 编码 Supervisor Agent 与验证 Harness。当前稳定版本通过三条顶层执行路径覆盖
+只读检查、日常编码流程和 opt-in Supervisor Agent 控制。
 
 ```text
 vega run engineering-change

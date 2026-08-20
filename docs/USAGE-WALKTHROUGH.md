@@ -9,7 +9,7 @@
 |---|---|
 | 只知道现象，不知道根因或修改范围 | 主会话只读调查 -> Plan 人工确认 -> `assist` |
 | 边界明确的一次性小任务 | `vega do` |
-| 需要暂停、恢复、接手或换机 | `$vega-agent` / `vega agent` |
+| 需要暂停、恢复、接手或换目录 | `$vega-agent` / `vega agent` |
 | 只读检查，不需要修改 | `vega run engineering-change` |
 
 普通 `do / loop` 和 Supervisor Agent 最终都会复用 Workspace、Scope、Verification、Risk、
@@ -20,21 +20,27 @@
 
 ## Supervisor Agent V1：长任务、暂停与接手
 
-Supervisor Agent 是 `v0.2.0` 的 opt-in 能力。它适合一次修改可能跨多个会话、需要中途停下，
-或需要把 WIP 与关键约束提交到任务分支后在新 clone 中继续的场景。V1 当前只接受一个未完成
-Work Item，不自动连续派发多个任务。
+Supervisor Agent 是 `v0.2.0` 发布的 opt-in 能力；`v0.2.1` 维护版本不改变它的成功语义。
+它适合一次修改可能跨多个会话、需要中途停下，或需要把 WIP 与关键约束提交到任务分支后在
+fresh clone / 新目录中继续的场景。V1 当前只接受一个未完成 Work Item，不自动连续派发多个
+任务。
 
 ### 1. 安装并检查能力
 
 ```powershell
 python -m pip install -e ".[agent]"
+$targetRepo = "<target-repo>"
+vega adapters init codex --repo $targetRepo
+Set-Location $targetRepo
 vega agent capabilities
-vega adapters init codex --repo <target-repo>
 ```
 
 `supervisor_runtime` 和 `langgraph` 都为 `true` 后，Codex 主会话可以优先使用
 `$vega-agent`。Skill 会执行只读调查、展示 Plan、等待批准，并根据状态卡选择下一条命令。
 下面的 CLI 流程主要用于人工操作和排障。
+
+`adapters init` 只把 Skill 写入目标仓库，不会切换当前 shell。Agent CLI 使用当前工作目录
+定位 Vega workspace 和 `runs/`，因此初始化后必须先进入目标仓库，再执行本节后续命令。
 
 ### 2. 调查后写一个未批准 Plan
 
@@ -99,21 +105,26 @@ vega watch --run <agent_run> --follow
 - `finalizing`：运行 `vega agent finalize --run <agent_run>`，只采用现有 Core Finish；
 - `awaiting_approval`：新证据使旧 Plan 失效，先更新 Plan，再次等待人工批准；
 - `needs_human`：停止自动执行，检查 active Writer、Checkpoint、Workspace 和外部副作用；
-- `stopped`：保留现场，除非人工明确要求，否则不继续。
+- `stopped`：当前本机 run 已终止；保留现场，但不能使用 `resume-local`。需要继续时由人工生成
+  Handoff 或创建新的 Agent run。
 
 Worker 声称完成、Reviewer 返回 `approve` 或 LangGraph 到达 `END` 都不等于成功。只有 Core
 Finish 为 `ready_to_commit`，且父 Agent 为 `completed`，才进入人工提交前检查。
 
-### 4. 本机恢复与 Git-only 接手
+`vega finish --run <loop_run>` 面向普通 Core run，生成或读取 Core 的交付结论。
+`vega agent finalize --run <agent_run>` 只在父 Agent 已进入 `finalizing` 后采用已经绑定的
+可信 Core Finish，主要用于父终态发布前中断后的幂等恢复；它不会重新执行验证或 Reviewer。
 
-本机恢复先确认没有 active Writer，再运行：
+### 4. 本机恢复与 Git-only fresh-clone / 换目录接手
+
+`resume-local` 只适用于 `needs_human` 且没有 active Writer 的 safe Checkpoint：
 
 ```powershell
 vega agent resume-local --run <agent_run>
 ```
 
-需要换目录、换会话或换机器时，先让当前 Worker 停止并完成现场对账。只有状态卡显示现场可解释、
-没有 active Writer，才能生成 Handoff：
+需要换目录、换会话或在 fresh clone 中接手时，先让当前 Worker 停止并完成现场对账。只有
+状态卡显示现场可解释、没有 active Writer，才能生成 Handoff：
 
 ```powershell
 vega agent checkpoint `
@@ -610,9 +621,10 @@ vega gate --repo . --run <reflect_run> --scope refactor
 - 长期 memory 必须人工 accept。
 - 不允许一次任务自动污染长期项目记忆。
 
-## 9. 阶段整理后的观察项
+## 9. v0.1.x 阶段整理后的历史观察项
 
-现在已有的 harness 能管住基本风险：输入、配置预检、执行、验证、工作区污染、变更预算、
+本节记录 v0.1.x 阶段结束时的观察和停止线，不代表 v0.2.x 当前版本状态。当时已有的 harness
+能管住基本风险：输入、配置预检、执行、验证、工作区污染、变更预算、
 prompt 预算、隔离审查和状态追溯。Memory、Goal P0 与 adapter 保持实验性质，不作为主流程
 成功条件。可以用项目内脚本做确定性 dogfood eval：
 
@@ -640,12 +652,13 @@ Goal P0 case 会验证：
 - 目标仓库 `git status` 不被 goal step 改动。
 - `vega status` / `latest --kind goal` 能识别 goal run。
 
-以下方向只记录为观察项，不在 v0.1.x 继续实现：
+以下方向当时只记录为观察项，不在 v0.1.x 继续实现：
 
 - architecture gate：新增框架、跨层调用、目录结构变化必须人工确认。
 - delete reason gate：删除文件时必须说明业务理由和回滚方式。
 - generated code provenance：大段生成代码必须标记来源和验证方式。
 - test impact gate：变更命中核心模块时要求更强测试证据。
 
-只有真实 dogfood 多次暴露同一类问题时，才考虑把它们沉淀进 `.vega.yaml`。当前停止线是：
-冻结新功能，只修影响核心证据链和安全边界的缺陷。
+只有真实 dogfood 多次暴露同一类问题时，才考虑把它们沉淀进 `.vega.yaml`。v0.1.x 当时的
+停止线是：冻结新功能，只修影响核心证据链和安全边界的缺陷。当前路线与维护版本状态以
+[`ROADMAP.md`](ROADMAP.md) 为准。

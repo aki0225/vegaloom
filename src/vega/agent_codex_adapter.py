@@ -13,19 +13,22 @@ from .agent_codex_evidence import (
     WorkerClaim,
     build_repair_prompt,
     decision_label,
-    evaluate_plan_scope,
     evaluate_worker_claim,
     load_child_state,
     load_finish_summary,
     observation_from_child,
     operation_ref,
-    plan_scope_failure,
     require_child_quiescent,
     require_repair_child,
     require_single_executable_work_item,
     require_terminal_worker_execution,
     require_waiting_child,
     write_child_summary,
+)
+from .agent_codex_scope import (
+    capture_plan_scope_baseline,
+    evaluate_plan_scope,
+    plan_scope_failure,
     write_plan_scope_evidence,
 )
 from .agent_codex_preparation import (
@@ -36,6 +39,7 @@ from .agent_codex_preparation import (
     validate_prepared_workspace,
 )
 from .agent_contract import AgentObservation
+from .agent_graph import require_agent_runtime_dependencies
 from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import (
@@ -84,6 +88,7 @@ class SupervisorAgentCodexAdapter:
         self.worker = SupervisorAgentWorker(self.workspace)
 
     def run(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
+        require_agent_runtime_dependencies()
         prepared, child_dir, prompt, operation_id, bound = self._prepare_and_bind(
             run,
             timeout_seconds,
@@ -138,16 +143,15 @@ class SupervisorAgentCodexAdapter:
         comparison_base_sha, comparison_paths = comparison_binding_from_metadata(
             metadata
         )
-        initial_plan_scope = evaluate_plan_scope(
+        plan_scope_baseline = capture_plan_scope_baseline(
             repo,
             plan,
+            work_item,
             expected_head_sha=before.head_sha,
             iteration=attempt_number,
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
         )
-        if initial_plan_scope.status == "failed":
-            raise ValueError(plan_scope_failure(initial_plan_scope))
         task_brief = _read_task_brief(run_dir)
         config = load_project_config(repo)
         self._ensure_isolated_reviewer(config)
@@ -166,6 +170,7 @@ class SupervisorAgentCodexAdapter:
             task_brief=task_brief,
             runner=runner,
             verification_commands=tuple(work_item.verification),
+            plan_scope_baseline=plan_scope_baseline,
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
         )
@@ -268,7 +273,7 @@ class SupervisorAgentCodexAdapter:
         result = executed.result
         plan_scope = evaluate_plan_scope(
             repo,
-            plan,
+            prepared.plan_scope_baseline,
             expected_head_sha=before.head_sha,
             iteration=attempt_number,
             comparison_base_sha=prepared.comparison_base_sha,
@@ -366,7 +371,7 @@ class SupervisorAgentCodexAdapter:
 
         final_plan_scope = evaluate_plan_scope(
             repo,
-            plan,
+            prepared.plan_scope_baseline,
             expected_head_sha=before.head_sha,
             iteration=attempt_number,
             comparison_base_sha=prepared.comparison_base_sha,

@@ -32,12 +32,14 @@ Vega 扩张成通用多 Agent 平台；新增的是一层可观察、可暂停�
   `$vega-review` 仓库级 Skill。
 - `$vega-agent` 约定主会话只读调查、单 Work Item Plan、人工批准、受控执行、一次有界修复、
   交接恢复和最终证据展示。
-- 真实 Codex Writer 与 Reviewer 均关闭继承 MCP、网络和额外可写根；Reviewer 保持独立只读
-  会话，不继承 Worker 完整对话或中间推理。
+- 真实 Codex Writer 使用单 Writer 配置，禁用继承 MCP、出站网络、Codex 多代理和额外可写根。
+  Reviewer 保持独立只读会话，禁用继承 MCP、个人 memories、plugins、hooks 与 legacy
+  notify，不继承 Worker 完整对话或中间推理。本版本不宣称 Vega 为 Reviewer 注入了与 Writer
+  相同的网络配置；Reviewer 的网络边界仍由所选 Codex 只读 sandbox 与运行环境共同决定。
 
 ## 真实发布验收
 
-发布候选使用一个真实前端并发缺陷完成 Git-only 接力：
+发布验收使用一个真实前端并发缺陷完成 Git-only fresh-clone / 换目录接力：
 
 1. Worker 在允许范围内形成 WIP，经身份绑定 stop、现场对账和人工副作用裁决后生成 Task Card；
 2. 新的隔离 clone 仅从 Git 恢复，没有复制旧 `runs/`、Trace、SQLite、虚拟环境或聊天；

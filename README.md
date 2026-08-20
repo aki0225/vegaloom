@@ -4,12 +4,14 @@
 
 # Vega
 
-<h3>本地优先的 AI 编码与验证编排框架</h3>
+<h3>AI 编码 Supervisor Agent 与验证 Harness</h3>
+
+<p><strong>One writes, one reviews.</strong></p>
 
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Baseline-v0.2.0-4fb8d8?style=for-the-badge" alt="v0.2.0">
+  <img src="https://img.shields.io/badge/Stable-v0.2.1-4fb8d8?style=for-the-badge" alt="当前稳定版本 v0.2.1">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -26,8 +28,9 @@
 
 </div>
 
-Vega 不追求堆叠复杂的 Multi-Agent 架构。它专注于将代码修改、确定性验证与独立评审分流，
-让 AI 编码的每一步都有明确的输入边界、验证证据和退出条件。
+Vega 同时提供 opt-in 的软件工程 Supervisor Agent 和稳定的 Coding Harness。它不追求堆叠
+复杂的 Multi-Agent 架构，而是把代码修改、确定性验证与独立评审分流，让 AI 编码的每一步
+都有明确的输入边界、验证证据和退出条件。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，worker 与 reviewer 使用独立会话，失败 fail-closed 交还人工">
@@ -116,7 +119,7 @@ vega agent capabilities
 |---|---|---|
 | 根因、范围或验收还不明确 | Plan-first + `vega loop ... --mode assist` | 主会话先只读调查并让人工确认，再修改 |
 | 边界清晰的一次性小任务 | `vega do bug|feature` | 自动 Worker，仍经过验证、Risk、Reviewer 和 Finish |
-| 需要暂停、接手或 Git-only 换机恢复 | `$vega-agent` 或 `vega agent` | 单 Work Item、单 Writer、显式批准和 Checkpoint |
+| 需要暂停、接手或 Git-only fresh-clone 恢复 | `$vega-agent` 或 `vega agent` | 单 Work Item、单 Writer、显式批准和 Checkpoint |
 | 只读检查现有仓库 | `vega run engineering-change` | 不启动可写 Worker |
 
 不确定时先走 Plan-first。Supervisor Agent 不是更强的默认模式，而是为长时间运行、人工控制和
@@ -203,6 +206,12 @@ vega finish --run <run_id>
 vega finish --run <run_id> --json
 ```
 
+`vega finish --run <loop_run>` 面向普通 `do / loop` 的 Core run，读取当前 Core Artifact 并生成
+交付结论。`vega agent finalize --run <agent_run>` 只在父 Agent 已处于 `finalizing` 时使用，
+采用已经绑定且可信的 Core Finish 发布父终态；它不重新运行 Core Finish，也不绕过验证、
+Risk 或 Reviewer。正常的 `vega agent run` 会自动完成这一步，显式 `agent finalize` 主要用于
+父终态发布前中断后的幂等恢复。
+
 `finish-summary.json.first_screen.actual_changes.changed_files` 保留本轮可信 Git 证据中的完整
 变更文件清单；`review.coverage`、`priority_files` 和 `other_changed_files` 分别展示 Reviewer
 声明的文件覆盖、带 finding/风险位置的重点文件，以及其余实际变更。Reviewer 的重点排序只用于
@@ -228,11 +237,18 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 
 ## Codex 接入
 
-需要让 Codex 主会话按 Skill 调用 Vega 时，在目标仓库显式初始化：
+需要让 Codex 主会话按 Skill 调用 Vega 时，先为目标仓库初始化，再切换到该目标仓库：
 
 ```powershell
-vega adapters init codex --repo .
+$targetRepo = "<target-repo>"
+vega adapters init codex --repo $targetRepo
+Set-Location $targetRepo
+vega agent capabilities
 ```
+
+`adapters init` 只决定仓库级 Skill 的写入位置，不会改变当前 shell 的工作目录。后续
+`vega agent start / approve / run / status / finalize` 必须在目标仓库目录中执行，因为 Agent
+run、状态和恢复入口以当前工作目录作为 Vega workspace。
 
 命令会生成仓库级 Skill：
 
@@ -264,7 +280,7 @@ Skill 不安装 hook、不修改 Codex 全局配置，初始化时也不会启�
 ## Claude Code 接入
 
 Claude Code 主会话复用同一份
-[Plan-first 与修改前确认协议](docs/PLAN-FIRST-PROTOCOL.md#7-claude-code-使用方式)，并在批准后
+[Plan-first 与修改前确认协议](docs/PLAN-FIRST-PROTOCOL.md#8-claude-code-使用方式)，并在批准后
 使用 `assist` 进入 Vega 判断链。Claude Code 可以实现 `worker-prompt.md`，但同一会话不能
 替代独立 Reviewer。本阶段不增加 Claude Code 原生 adapter 或自动 Runner。
 
@@ -289,6 +305,7 @@ Claude Code 主会话复用同一份
 | Supervisor Agent 状态权威与恢复合同 | [SUPERVISOR-AGENT-STATE-AUTHORITY](docs/SUPERVISOR-AGENT-STATE-AUTHORITY.md) |
 | 调查、Plan 与修改前人工确认 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 当前演进路线与下一步 | [ROADMAP](docs/ROADMAP.md) |
+| v0.2.1 发布说明 | [RELEASE-NOTES-0.2.1](docs/RELEASE-NOTES-0.2.1.md) |
 | v0.2.0 发布摘要 | [RELEASE-SUMMARY-0.2.0](docs/RELEASE-SUMMARY-0.2.0.md) |
 | 安装、验收与发布前检查 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | Runtime、配置、证据链与风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
@@ -305,10 +322,12 @@ Claude Code 主会话复用同一份
 - Vega 的本地策略、证据链和 reviewer 隔离不等同于操作系统级安全沙箱。
 - `loop` 默认使用 `assist`；只有显式选择 `auto` 或 `do` 才启动外部 worker。
 - Goal、Memory proposal、adapters 和 `vega agent` 是可选能力，不扩大核心 loop 的成功条件。
-- 当前稳定基线为 `v0.2.0`。它在保留既有 `do / loop / goal` 成功语义的同时发布 opt-in
+- 当前稳定基线为 `v0.2.1`。v0.2.0 在保留既有 `do / loop / goal` 成功语义的同时发布
+  opt-in
   Supervisor Agent V1：主会话调查和提交单 Work Item Plan，人工批准后由 Vega 约束一个
-  真实 Worker、核对 Workspace、支持 Git-only 交接恢复，并复用现有 Verification、Risk、
-  独立 Reviewer 与 Finish 完成交付判断。
+  真实 Worker、核对 Workspace、支持 Git-only fresh-clone / 换目录接手，并复用现有
+  Verification、Risk、独立 Reviewer 与 Finish 完成交付判断。该证据不外推为另一台物理机器
+  已完成验收。
 
 ## 开发验证
 

@@ -8,7 +8,7 @@
 
 ## 定位
 
-Vega 是一个本地优先的轻量 AI Coding Harness。`vega do/loop` 提供日常编码闭环，
+Vega 是一个轻量 AI Coding Agent + Workflow Harness。`vega do/loop` 提供日常编码流程，
 `vega agent` 为需要暂停、恢复和 Git-only 接手的任务提供 opt-in Supervisor 控制层，
 `vega run engineering-change` 保留为 YAML 驱动的只读检查 baseline。
 
@@ -149,7 +149,7 @@ v0.1 baseline 的最小验收定义。
 - 完成后的 checkpoint 证据不可再修改
 - `goal complete` 和 `goal stop` 分别表达成功完成与终止
 
-## v0.2.0 可选 Supervisor Agent
+## v0.2.x 可选 Supervisor Agent
 
 这些能力随 `v0.2.0` 发布，但不替换默认 `do / loop`：
 
@@ -223,7 +223,7 @@ v0.1 不包括：
 ```text
 v0.1 baseline: YAML 驱动的只读 engineering-change Inspection Loop
 v0.1.x daily mainline: brief/profile/reflect/gate/review/loop/finish/decision/recover Coding Harness
-v0.2.0 optional: Supervisor Agent、Codex skills、Git Task Card 恢复
+v0.2.x optional: Supervisor Agent、Codex skills、Git Task Card 恢复
 compatibility: Goal P0/P1 单 checkpoint 与显式 Worker 重跑
 experimental: Memory proposal / ledger
 ```
@@ -232,7 +232,7 @@ experimental: Memory proposal / ledger
 隔离审查和证据化恢复；Supervisor Agent 与 Codex skills 是已发布的可选能力，Memory 保持
 实验状态，Goal P0/P1 只保留兼容和历史证据。
 
-当前稳定版本为 `v0.2.0`。它保留既有核心成功语义，并发布 opt-in Supervisor Agent V1：
+当前稳定版本为 `v0.2.1`。v0.2.x 保留既有核心成功语义，并维护 opt-in Supervisor Agent V1：
 单 Work Item、人工批准、单 Writer、可恢复 Checkpoint、Git Task Card、机器 Observation
 以及现有 Verification、Risk、独立 Reviewer 和 Finish。多 Work Item 自动推进、长期
 Memory、Provider 平台和自动 Git 仍不在当前范围。

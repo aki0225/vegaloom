@@ -1,6 +1,6 @@
 # Vega Plan-first 与修改前确认协议
 
-> 状态：当前协议，适用于 `v0.2.0`
+> 状态：当前协议，适用于 `v0.2.x`
 >
 > 适用入口：Codex、Claude Code 等宿主会话、`vega agent`，以及边界明确时的 `vega do`
 

@@ -5,6 +5,7 @@ import re
 import stat
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import unquote, urlsplit
 
 from .agent_contract import AgentCheckpoint, AgentState
 from .git_read import run_git_capture
@@ -13,6 +14,23 @@ from .git_read import run_git_capture
 _WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?i)(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/][^\\/\s]+)"
     r"[^\r\n\t\"'`<>]*"
+)
+_POSIX_LOCAL_PATH_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_>])/"
+    r"(?:home|Users|tmp|private/var|var/folders|var/tmp)"
+    r"(?![A-Za-z0-9_.-])"
+    r"(?:/[^\r\n\t\"'`<>]*)?"
+)
+_HTTP_URL_PATTERN = re.compile(r"(?i)\bhttps?://[^\s\"'`<>]+")
+_PLACEHOLDER_PATH_PATTERN = re.compile(
+    r"<[A-Za-z0-9_-]+>(?:[\\/][^\s\"'`<>]+)*"
+)
+_LOCAL_FILE_URI_PATTERN = re.compile(r"(?i)(?<![A-Za-z0-9+.-])file:")
+_URL_COMPONENT_LOCAL_PATH_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_>])/"
+    r"(?:home|Users|private/var|var/folders|var/tmp)"
+    r"(?![A-Za-z0-9_.-])"
+    r"(?:/[^\r\n\t\"'`<>]*)?"
 )
 
 
@@ -27,7 +45,21 @@ class _HandoffCard(Protocol):
 
 def assert_portable_task_card_payload(value: object) -> None:
     if isinstance(value, str):
-        if _WINDOWS_ABSOLUTE_PATH_PATTERN.search(value):
+        candidate = _PLACEHOLDER_PATH_PATTERN.sub("", value)
+        if (
+            _LOCAL_FILE_URI_PATTERN.search(candidate)
+            or _WINDOWS_ABSOLUTE_PATH_PATTERN.search(candidate)
+            or any(
+                _url_contains_local_reference(match.group())
+                for match in _HTTP_URL_PATTERN.finditer(candidate)
+            )
+        ):
+            raise TaskCardError("Task Card 不能包含本机绝对路径")
+        candidate = _HTTP_URL_PATTERN.sub("", candidate)
+        if (
+            _WINDOWS_ABSOLUTE_PATH_PATTERN.search(candidate)
+            or _POSIX_LOCAL_PATH_PATTERN.search(candidate)
+        ):
             raise TaskCardError("Task Card 不能包含本机绝对路径")
         return
     if isinstance(value, dict):
@@ -38,6 +70,30 @@ def assert_portable_task_card_payload(value: object) -> None:
     if isinstance(value, (list, tuple, set)):
         for item in value:
             assert_portable_task_card_payload(item)
+
+
+def _url_contains_local_reference(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return True
+    for component in (parts.query, parts.fragment):
+        candidate = component
+        for _ in range(8):
+            if (
+                _LOCAL_FILE_URI_PATTERN.search(candidate)
+                or _WINDOWS_ABSOLUTE_PATH_PATTERN.search(candidate)
+                or _URL_COMPONENT_LOCAL_PATH_PATTERN.search(candidate)
+            ):
+                return True
+            decoded = unquote(candidate)
+            if decoded == candidate:
+                break
+            candidate = decoded
+        else:
+            # 深层重复编码无法可靠解释，公开 Task Card 选择 fail-closed。
+            return True
+    return False
 
 
 def collect_handoff_issues(

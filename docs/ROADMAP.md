@@ -1,8 +1,8 @@
 # Vega 后续演进路线
 
-> 更新时间：2026-08-19
-> 当前稳定基线：`v0.2.0`
-> 发布记录：annotated Tag 与 GitHub Release 已发布
+> 更新时间：2026-08-20
+> 当前稳定基线：`v0.2.1`
+> 发布记录：`v0.2.0` 已使用 annotated Tag 和 GitHub Release 发布
 > 当前顺序：Phase 4 真实使用验收已完成；RCB-01 判定为 `insufficient-evidence`；RCB-02 在
 > Phase 0 停止；RCB-03 判定为 `reject-before-holdout`。Reviewer 上下文实验不再继续扩建，
 > 默认 Runtime 与 Reviewer 保持不变。Goal P1 单 checkpoint 控制与显式 `--rerun-worker`
@@ -39,7 +39,9 @@
 产品行为以 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 为准，详细 Assurance 合同以
 [`ASSURANCE-CONTRACT-CANDIDATE.md`](ASSURANCE-CONTRACT-CANDIDATE.md) 为准，历史验证证据
 以 [`../eval/assurance-validation.md`](../eval/assurance-validation.md) 为准。本文不复制这些
-文档的完整内容。当前执行计划见
+文档的完整内容。当前维护版本见
+[`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md) 与
+[`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)；V1 的历史实施计划见
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)，文档状态见
 [`README.md`](README.md)。
 
@@ -913,6 +915,13 @@ full-core-pass / release-acceptance-pass`。详细证据追加在
 v0.2.0 发布后不继续增加多 Work Item、Memory、Provider 平台或新 Runtime。下一阶段只做
 真实日常使用观察：记录恢复耗时、重复调查、人工步骤、误判和是否愿意再次使用；出现重复、
 可复现的产品缺口时才做最小修正。
+
+### 2026-08-20：v0.2.1 维护发布
+
+`v0.2.1` 不增加新 Runtime、Agent 角色或成功路径。本轮只收紧 V1 批准前的单 Work Item 与
+非空允许路径校验，完善 Agent 可选依赖探测，并对齐目标仓库工作目录、Core Finish 与父 Agent
+finalize、Git-only fresh-clone 证据边界、Reviewer 隔离声明和安全支持版本。本版本的发布门禁
+仍要求同一提交通过完整 CI、wheel/sdist smoke 与发布复核；远端发布动作以仓库实际状态为准。
 
 ## 七、更新规则
 

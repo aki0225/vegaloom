@@ -22,6 +22,7 @@ from .agent_contract import (
     AgentStatusCard,
     canonical_digest,
 )
+from .agent_graph import require_agent_runtime_dependencies
 from .agent_handoff_safety import TaskCardError
 from .agent_persistence import (
     AgentArtifactError,
@@ -186,6 +187,7 @@ def resume_agent_task_card(
     repo: Path,
     task_path: Path | None = None,
 ) -> AgentRun:
+    require_agent_runtime_dependencies()
     repo_root = require_git_root(repo)
     resolved_task, relative_task = resolve_resume_task(repo_root, task_path)
     card, task_card_content = load_task_card_with_content(resolved_task)
@@ -493,8 +495,6 @@ def state_from_task_card(
         current_work_item=card.current_work_item,
         workspace_fingerprint=snapshot.fingerprint,
         allowed_actions=allowed_actions,
-        # Task Card 里的 Handoff 已在创建本机 run 时被消费。新 run 必须从
-        # “尚未发布交接”开始，否则后续 429/断网等失败会被误判成旧 run
-        # 已发布 Handoff，进而阻断人工副作用裁决和本机恢复。
+        # 新 run 不继承旧 Handoff 发布态，避免后续失败被误判为已经完成交接。
         handoff_status="none",
     )
