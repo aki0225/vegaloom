@@ -14,6 +14,7 @@ from .agent_codex_evidence import (
     build_repair_prompt,
     decision_label,
     evaluate_worker_claim,
+    hash_evidence_refs,
     load_child_state,
     load_finish_summary,
     observation_from_child,
@@ -471,6 +472,7 @@ class SupervisorAgentCodexAdapter:
             finish_summary=finish_summary,
         )
         snapshot = capture_bound_workspace(bound.run_dir)
+        evidence_refs = [operation_ref(operation_id), *(extra_evidence_refs or []), summary_ref]
         observation = AgentObservation(
             observation_id=f"observation-{uuid4().hex[:12]}",
             work_item_id=bound.state.current_work_item,
@@ -480,11 +482,8 @@ class SupervisorAgentCodexAdapter:
             machine_summary=reason,
             workspace_fingerprint=snapshot.fingerprint,
             changed_files=list(snapshot.changed_files),
-            evidence_refs=[
-                operation_ref(operation_id),
-                *(extra_evidence_refs or []),
-                summary_ref,
-            ],
+            evidence_refs=evidence_refs,
+            evidence_sha256=hash_evidence_refs(bound.run_dir, evidence_refs),
             authority="machine_reconcile",
             operation_started=True,
             workspace_explained=True,

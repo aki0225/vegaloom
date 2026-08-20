@@ -21,6 +21,12 @@ _GATE_LABELS = {
     "blocked": "阻断",
     "stale": "已过期",
 }
+_SUPERVISOR_EVIDENCE_LABELS = {
+    "passed": "通过",
+    "failed": "未通过",
+    "stale": "已过期",
+    "unverified": "未验证",
+}
 _CHECKPOINT_LABELS = {
     "safe": "现场可解释",
     "uncertain": "现场不确定",
@@ -63,6 +69,11 @@ def render_agent_status_card(card: AgentStatusCard) -> str:
         f"- 任务：{card.task_goal}",
         f"- Work Item：{card.work_item_label}",
         f"- Worker：{card.worker_label}",
+        *(
+            [f"- Core 子流程：`{card.live_child_stage}`"]
+            if card.live_child_stage is not None
+            else []
+        ),
         f"- Workspace：{changed_files}；未知文件 {card.unknown_file_count} 个",
         f"- 最近 Checkpoint：{checkpoint}",
         f"- Verification：{_GATE_LABELS[card.verification]}",
@@ -73,4 +84,25 @@ def render_agent_status_card(card: AgentStatusCard) -> str:
     if card.terminal_status is not None:
         lines.append(f"- Finish：`{card.terminal_status}`")
     lines.append(f"- 下一步：{card.next_step}")
+    if card.plan_risk_notes:
+        lines.extend(
+            [
+                "",
+                "## 计划风险提示",
+                "- 以下内容来自当前 Work Item 的批准 Plan，仅供人工关注，不改变 Risk Gate 结果。",
+                *[f"- {note}" for note in card.plan_risk_notes],
+            ]
+        )
+    if card.supervisor_evidence:
+        lines.extend(
+            [
+                "",
+                "## Supervisor 证据",
+                *[
+                    f"- {item.label}：{_SUPERVISOR_EVIDENCE_LABELS[item.status]}；"
+                    f"{item.detail}"
+                    for item in card.supervisor_evidence
+                ],
+            ]
+        )
     return "\n".join(lines).rstrip() + "\n"

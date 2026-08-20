@@ -272,6 +272,10 @@ Supervisor Agent V1 保持 opt-in，当前只接受一个未完成 Work Item。�
 状态、Supervisor 低频事件和绑定 child 的安全进度。只有 Core Finish 为 `ready_to_commit`
 且父 Agent phase 为 `completed` 时，才建议人工检查并提交。
 
+`vega agent status --run <agent_run>` 会重新读取当前 child 阶段，并核对 Supervisor Worker、
+批准范围和 Core Finish 的证据文件。`status-card.md` 只是生成时快照，不能替代实时状态命令。
+Plan 中的风险备注会单独列出，不会被当成 Risk Gate 的实际运行结果。
+
 Skill 不安装 hook、不修改 Codex 全局配置，初始化时也不会启动 Worker；执行阶段仍需要当前
 会话按 Skill 调用 CLI，并遵守人工批准和 fail-closed 门禁。
 初始化默认不覆盖已有文件；`--force` 只覆盖新的 `.agents/skills` 目标，不删除或改写历史

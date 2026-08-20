@@ -207,8 +207,10 @@ jobs:
               tests/test_agent_codex_adapter.py
               tests/test_agent_contract.py
               tests/test_agent_handoff.py
+              tests/test_agent_live_child_status.py
               tests/test_agent_recovery.py
               tests/test_agent_runtime.py
+              tests/test_agent_status_card_evidence.py
               tests/test_agent_task_card.py
           - name: execution-artifacts
             test_timeout: 58

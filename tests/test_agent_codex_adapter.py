@@ -696,8 +696,87 @@ def test_agent_success_path_preserves_completed_worker_in_status_card(
     assert "阶段：已完成" in status_card
     assert f"Worker：{loop.child_dir.name}" in status_card
     assert "Worker：未启动" not in status_card
+    assert "## Supervisor 证据" in status_card
+    assert "- Worker 执行：通过；" in status_card
+    assert "- 计划范围（Worker 后）：通过；" in status_card
+    assert "- 计划范围（Core 后）：通过；" in status_card
+    assert "- 核心完成：通过；" in status_card
     assert "Finish：`ready_to_commit`" in status_card
+    assert set(payload["evidence_sha256"]) == set(payload["evidence_refs"])
     assert payload["changed_files"] == ["src/example.py"]
+
+
+def test_agent_status_revalidates_supervisor_evidence_after_scope_tamper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(workspace)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+    result = adapter.run(run_id, timeout_seconds=60)
+    observation = json.loads(
+        next((result.run_dir / "observations").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    scope_ref = next(
+        ref
+        for ref in observation["evidence_refs"]
+        if ref.startswith("plan-scope/post-core-")
+    )
+    scope_path = result.run_dir / scope_ref
+    persisted = (result.run_dir / "status-card.md").read_text(encoding="utf-8")
+    scope_path.write_text(
+        scope_path.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+
+    refreshed = SupervisorAgentRuntime(workspace).status(result.run_dir.name)
+
+    assert "- 计划范围（Core 后）：通过；" in persisted
+    assert "- 计划范围（Core 后）：已过期；" in refreshed
+    assert "- 计划范围（Core 后）：通过；" not in refreshed
+
+
+@pytest.mark.parametrize(
+    ("tamper", "message"),
+    [
+        ("missing", "最新 Observation 不存在或无法读取"),
+        ("wrong_id", "最新 Observation 与 Checkpoint 不一致"),
+    ],
+)
+def test_agent_status_rejects_missing_or_misbound_observation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+    message: str,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(workspace)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+    result = adapter.run(run_id, timeout_seconds=60)
+    observation_path = next((result.run_dir / "observations").glob("*.json"))
+    if tamper == "missing":
+        observation_path.unlink()
+    else:
+        payload = json.loads(observation_path.read_text(encoding="utf-8"))
+        payload["observation_id"] = "observation-misbound"
+        observation_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        SupervisorAgentRuntime(workspace).status(result.run_dir.name)
 
 
 def test_agent_finalize_recovers_after_terminal_publish_interruption(
@@ -918,6 +997,7 @@ def test_worker_timeout_preserves_partial_diff_and_skips_core(
     assert observation["external_side_effects"] == "unknown"
     assert observation["verification"] == "not_run"
     assert observation["review"] == "not_run"
+    assert set(observation["evidence_sha256"]) == set(observation["evidence_refs"])
 
 
 def test_missing_codex_preflight_failure_releases_writer_binding(

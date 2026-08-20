@@ -335,6 +335,7 @@ def observation_from_child(
         workspace_fingerprint=snapshot.fingerprint,
         changed_files=list(snapshot.changed_files),
         evidence_refs=evidence_refs,
+        evidence_sha256=hash_evidence_refs(agent_run_dir, evidence_refs),
         authority="machine_reconcile",
         operation_started=True,
         workspace_explained=True,
@@ -366,3 +367,17 @@ def decision_label(result: AgentRun, observation: AgentObservation) -> str:
 
 def _sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def hash_evidence_refs(
+    run_dir: Path,
+    evidence_refs: list[str],
+) -> dict[str, str]:
+    root = run_dir.resolve(strict=True)
+    result: dict[str, str] = {}
+    for ref in evidence_refs:
+        path = (root / ref).resolve(strict=True)
+        if not path.is_relative_to(root) or not path.is_file():
+            raise ValueError("Observation 证据引用越过 Agent run 或不是普通文件")
+        result[ref] = _sha256_file(path)
+    return result

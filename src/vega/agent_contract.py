@@ -48,6 +48,7 @@ WorkItemStatus = Literal[
 CheckpointStatus = Literal["safe", "uncertain", "blocked"]
 GateStatus = Literal["not_run", "passed", "failed", "blocked", "stale"]
 TerminalStatus = Literal["ready_to_commit", "request_changes", "needs_human"]
+SupervisorEvidenceStatus = Literal["passed", "failed", "stale", "unverified"]
 
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 RelativePathText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -266,6 +267,7 @@ class AgentObservation(StrictAgentModel):
     workspace_fingerprint: Sha256Text
     changed_files: list[RelativePathText] = Field(default_factory=list)
     evidence_refs: list[RelativePathText] = Field(default_factory=list)
+    evidence_sha256: dict[str, Sha256Text] = Field(default_factory=dict)
     authority: ObservationAuthority = "external_claim"
     work_item_completed: bool = False
     worker_alive: bool = False
@@ -286,6 +288,20 @@ class AgentObservation(StrictAgentModel):
     def validate_paths(cls, values: list[str]) -> list[str]:
         return _normalize_relative_paths(values)
 
+    @field_validator("evidence_sha256")
+    @classmethod
+    def validate_evidence_sha256(
+        cls,
+        values: dict[str, str],
+    ) -> dict[str, str]:
+        normalized = {
+            _normalize_repo_relative_path(path): digest
+            for path, digest in values.items()
+        }
+        if len(normalized) != len(values):
+            raise ValueError("evidence_sha256 路径不能重复")
+        return normalized
+
     @model_validator(mode="after")
     def validate_observation(self) -> AgentObservation:
         if (self.child_run is None) != (self.operation_id is None):
@@ -304,6 +320,11 @@ class AgentObservation(StrictAgentModel):
             self.work_item_completed or self.all_work_items_completed
         ):
             raise ValueError("operation 尚未开始时不能声明 Work Item 已完成")
+        unknown_digests = set(self.evidence_sha256) - set(self.evidence_refs)
+        if unknown_digests:
+            raise ValueError(
+                f"evidence_sha256 引用了未声明证据：{sorted(unknown_digests)}"
+            )
         return self
 
 
@@ -323,6 +344,14 @@ class AgentDecision(StrictAgentModel):
         if self.selected_action not in self.allowed_actions:
             raise ValueError("selected_action 必须属于 allowed_actions")
         return self
+
+
+class SupervisorEvidenceItem(StrictAgentModel):
+    """状态卡中可追溯的 Supervisor 证据摘要。"""
+
+    label: NonEmptyText
+    status: SupervisorEvidenceStatus
+    detail: NonEmptyText
 
 
 class AgentCheckpoint(StrictAgentModel):
@@ -375,6 +404,7 @@ class AgentStatusCard(StrictAgentModel):
     task_goal: NonEmptyText
     work_item_label: NonEmptyText
     worker_label: NonEmptyText
+    live_child_stage: NonEmptyText | None = None
     changed_files: list[RelativePathText] = Field(default_factory=list)
     unknown_file_count: int = Field(default=0, ge=0)
     latest_checkpoint: NonEmptyText | None = None
@@ -385,6 +415,9 @@ class AgentStatusCard(StrictAgentModel):
     terminal_status: TerminalStatus | None = None
     allowed_actions: list[AgentAction] = Field(default_factory=list)
     next_step: NonEmptyText
+    # 这些字段都是展示层可选信息，旧的调用方不需要补充即可继续构造状态卡。
+    plan_risk_notes: list[NonEmptyText] = Field(default_factory=list)
+    supervisor_evidence: list[SupervisorEvidenceItem] = Field(default_factory=list)
 
     @field_validator("changed_files")
     @classmethod

@@ -20,6 +20,7 @@ from .agent_graph import require_agent_runtime_dependencies, record_supervisor_r
 from .agent_mutation import agent_mutation
 from .agent_run import AgentRun
 from .agent_routing import decide_next_action, transition_state
+from .agent_status_card import read_status_card
 from .agent_runtime_logic import (
     apply_work_item_progress,
     invalidate_plan_for_steer,
@@ -477,10 +478,7 @@ class SupervisorAgentRuntime:
 
     def status(self, run: str) -> str:
         run_dir, state, plan, _ = self._load_run(run)
-        status_path = run_dir / "status-card.md"
-        if not status_path.exists():
-            write_status_card(run_dir, state, plan)
-        return status_path.read_text(encoding="utf-8")
+        return read_status_card(run_dir, state, plan)
 
     def state_path(self, run: str) -> Path:
         run_dir, _, _, _ = self._load_run(run)
