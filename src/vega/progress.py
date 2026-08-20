@@ -162,6 +162,7 @@ _SAFE_RUN_STEPS = frozenset(
         "workspace_baseline",
         "workspace_baseline_dirty",
         "workspace_baseline_unavailable",
+        "workspace_changed_before_worker",
         "workspace_changed_during_review",
         "workspace_check",
         "workspace_check_failed",

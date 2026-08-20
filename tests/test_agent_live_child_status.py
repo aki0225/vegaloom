@@ -19,6 +19,7 @@ from vega.run_status import render_run_status, run_status_payload
     ("phase", "current_step"),
     [
         ("acting", "verify"),
+        ("acting", "workspace_changed_before_worker"),
         ("observing", "review"),
         ("needs_human", "review"),
     ],
