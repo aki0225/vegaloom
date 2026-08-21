@@ -176,8 +176,16 @@ def _precondition_route(
             (["human"], "human", "Workspace 变化尚未完成机器对账"),
         ),
         (
-            observation.external_side_effects == "unknown",
-            (["human"], "human", "外部副作用未知，禁止自动重试"),
+            observation.external_side_effects != "none",
+            (
+                ["human"],
+                "human",
+                (
+                    "外部副作用未知，禁止自动重试"
+                    if observation.external_side_effects == "unknown"
+                    else "已声明存在外部副作用，必须由人工确认后续动作"
+                ),
+            ),
         ),
         (
             observation.plan_contradicted,

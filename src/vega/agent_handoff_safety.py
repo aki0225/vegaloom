@@ -135,7 +135,14 @@ def collect_handoff_issues(
             "Git index 存在无法解释的 skip-worktree 或 assume-unchanged 路径",
         ),
         (not snapshot.git_control_complete, "Git control manifest 不完整"),
-        (checkpoint.external_side_effects == "unknown", "存在未知外部副作用"),
+        (
+            checkpoint.external_side_effects != "none",
+            (
+                "存在未知外部副作用"
+                if checkpoint.external_side_effects == "unknown"
+                else "存在已知外部副作用，必须由人工处理"
+            ),
+        ),
     )
     return [message for failed, message in checks if failed]
 

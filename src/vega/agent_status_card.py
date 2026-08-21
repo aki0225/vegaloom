@@ -12,10 +12,12 @@ from .agent_contract import (
     AgentStatusCard,
 )
 from .agent_persistence import load_agent_checkpoint
+from .agent_repository_binding import capture_bound_workspace
 from .agent_run_status import read_live_child_stage, trusted_worker_label
 from .agent_status_evidence import build_supervisor_evidence
 from .agent_visibility import render_agent_status_card
 from .redaction import redact_text, write_redacted_text
+from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
 _SNAPSHOT_NOTICE = (
@@ -58,12 +60,16 @@ def read_status_card(
 
     checkpoint = _load_status_checkpoint(run_dir, state)
     observation = _load_status_observation(run_dir, state, checkpoint)
+    live_workspace, workspace_issue = _capture_live_workspace(run_dir)
     card = _build_status_card(
         run_dir,
         state,
         plan,
         observation=observation,
         checkpoint=checkpoint,
+        live_workspace=live_workspace,
+        workspace_checked=True,
+        workspace_issue=workspace_issue,
         next_step=(
             checkpoint.reason
             if checkpoint is not None and state.phase in {"ready", "needs_human"}
@@ -81,6 +87,9 @@ def _build_status_card(
     observation: AgentObservation | None,
     checkpoint: AgentCheckpoint | None,
     next_step: str | None,
+    live_workspace: ReviewWorkspaceSnapshot | None = None,
+    workspace_checked: bool = False,
+    workspace_issue: str | None = None,
 ) -> AgentStatusCard:
     current_index = next(
         (
@@ -104,10 +113,69 @@ def _build_status_card(
         observation=observation,
         checkpoint_status=checkpoint.status if checkpoint else None,
     )
+    supervisor_evidence = build_supervisor_evidence(
+        run_dir,
+        state,
+        observation,
+        plan,
+    )
+    expected_workspace_fingerprint = (
+        state.workspace_fingerprint
+        if state.handoff_status != "none"
+        else observation.workspace_fingerprint
+        if observation is not None
+        else checkpoint.workspace_fingerprint
+        if checkpoint is not None
+        else state.workspace_fingerprint
+    )
+    workspace_current = (
+        None
+        if not workspace_checked
+        else bool(
+            live_workspace is not None
+            and expected_workspace_fingerprint is not None
+            and live_workspace.fingerprint == expected_workspace_fingerprint
+        )
+    )
+    evidence_health = _evidence_health(
+        supervisor_evidence,
+        observation,
+        workspace_current=workspace_current,
+    )
+    commit_recommended = bool(
+        state.phase == "completed"
+        and state.terminal_status == "ready_to_commit"
+        and checkpoint is not None
+        and checkpoint.status == "safe"
+        and checkpoint.external_side_effects == "none"
+        and observation is not None
+        and observation.verification == "passed"
+        and observation.risk == "passed"
+        and observation.review == "passed"
+        and observation.external_side_effects == "none"
+        and workspace_current is not False
+        and evidence_health == "passed"
+    )
+    terminal_evidence_invalid = (
+        state.phase == "completed"
+        and state.terminal_status == "ready_to_commit"
+        and not commit_recommended
+    )
+    effective_phase = "needs_human" if terminal_evidence_invalid else state.phase
+    effective_next_step = (
+        _terminal_integrity_next_step(workspace_current, workspace_issue)
+        if terminal_evidence_invalid
+        else next_step or default_next_step(state.phase, current_index)
+    )
+    integrity_warning = _integrity_warning(
+        terminal_evidence_invalid=terminal_evidence_invalid,
+        workspace_current=workspace_current,
+        workspace_issue=workspace_issue,
+    )
     return AgentStatusCard(
         run_id=state.run_id,
         task_id=state.task_id,
-        phase=state.phase,
+        phase=effective_phase,
         task_goal=plan.user_goal,
         work_item_label=(
             f"{state.current_work_item} / {len(plan.work_items)}"
@@ -117,29 +185,131 @@ def _build_status_card(
         worker_label=worker_label,
         live_child_stage=read_live_child_stage(run_dir, state),
         changed_files=(
-            observation.changed_files
+            list(live_workspace.changed_files)
+            if workspace_checked and live_workspace is not None
+            else observation.changed_files
             if observation is not None
             else checkpoint.changed_files
             if checkpoint is not None
             else []
         ),
-        unknown_file_count=observation.unknown_file_count if observation else 0,
+        unknown_file_count=(
+            len(live_workspace.untracked_files)
+            if workspace_checked and live_workspace is not None
+            else observation.unknown_file_count
+            if observation
+            else 0
+        ),
         latest_checkpoint=state.latest_checkpoint_id,
         checkpoint_status=checkpoint.status if checkpoint else None,
         verification=observation.verification if observation else "not_run",
         risk=observation.risk if observation else "not_run",
         review=observation.review if observation else "not_run",
-        terminal_status=state.terminal_status,
-        allowed_actions=list(state.allowed_actions),
-        next_step=next_step or default_next_step(state.phase, current_index),
+        terminal_status=(
+            None if terminal_evidence_invalid else state.terminal_status
+        ),
+        allowed_actions=(
+            ["human"] if terminal_evidence_invalid else list(state.allowed_actions)
+        ),
+        next_step=effective_next_step,
+        evidence_health=evidence_health,
+        workspace_current=workspace_current,
+        commit_recommended=commit_recommended,
+        integrity_warning=integrity_warning,
         plan_risk_notes=list(current_item.risk_notes) if current_item else [],
-        supervisor_evidence=build_supervisor_evidence(
-            run_dir,
-            state,
-            observation,
-            plan,
+        supervisor_evidence=supervisor_evidence,
+    )
+
+
+def build_agent_status_payload(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+) -> dict[str, object]:
+    """生成文本与 JSON 共用的经验证状态投影。"""
+
+    checkpoint = _load_status_checkpoint(run_dir, state)
+    observation = _load_status_observation(run_dir, state, checkpoint)
+    live_workspace, workspace_issue = _capture_live_workspace(run_dir)
+    card = _build_status_card(
+        run_dir,
+        state,
+        plan,
+        observation=observation,
+        checkpoint=checkpoint,
+        live_workspace=live_workspace,
+        workspace_checked=True,
+        workspace_issue=workspace_issue,
+        next_step=(
+            checkpoint.reason
+            if checkpoint is not None and state.phase in {"ready", "needs_human"}
+            else None
         ),
     )
+    payload = card.model_dump(mode="json")
+    payload.update(
+        {
+            "recorded_phase": state.phase,
+            "recorded_terminal_status": state.terminal_status,
+            "effective_phase": card.phase,
+            "effective_terminal_status": card.terminal_status,
+        }
+    )
+    return payload
+
+
+def _evidence_health(
+    evidence: list,
+    observation: AgentObservation | None,
+    *,
+    workspace_current: bool | None,
+) -> str:
+    if workspace_current is False:
+        return "stale"
+    if observation is None:
+        return "not_applicable"
+    statuses = [item.status for item in evidence]
+    if statuses and all(status == "passed" for status in statuses):
+        return "passed"
+    for status in ("failed", "stale", "unverified"):
+        if status in statuses:
+            return status
+    return "unverified"
+
+
+def _capture_live_workspace(
+    run_dir: Path,
+) -> tuple[ReviewWorkspaceSnapshot | None, str | None]:
+    try:
+        return capture_bound_workspace(run_dir), None
+    except (OSError, RuntimeError, ValueError):
+        return None, "当前 Workspace 无法重新采集或绑定无法验证"
+
+
+def _terminal_integrity_next_step(
+    workspace_current: bool | None,
+    workspace_issue: str | None,
+) -> str:
+    if workspace_issue is not None:
+        return "当前 Workspace 无法重新采集；不要提交，先检查仓库绑定和 Git 状态"
+    if workspace_current is False:
+        return "当前 Workspace 已偏离最终证据；不要提交，先重新对账并执行验证"
+    return "持久化终态的当前证据无法重新验证；不要提交，先检查损坏或过期的 Artifact"
+
+
+def _integrity_warning(
+    *,
+    terminal_evidence_invalid: bool,
+    workspace_current: bool | None,
+    workspace_issue: str | None,
+) -> str | None:
+    if workspace_issue is not None:
+        return workspace_issue
+    if workspace_current is False:
+        return "当前 Workspace 与最近 Observation 或 Checkpoint 不一致。"
+    if terminal_evidence_invalid:
+        return "持久化 State 记录过 ready_to_commit，但当前证据已失败、过期或无法验证。"
+    return None
 
 
 def _load_status_checkpoint(

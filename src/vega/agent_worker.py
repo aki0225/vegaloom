@@ -6,9 +6,14 @@ from .agent_contract import AgentState, canonical_digest, validate_v1_execution_
 from .agent_graph import require_agent_runtime_dependencies
 from .agent_mutation import agent_mutation
 from .agent_persistence import append_agent_trace, read_agent_trace, save_agent_state
+from .agent_repository_guard import (
+    acquire_writer_claim,
+    release_writer_claim,
+)
 from .agent_run import AgentRun
 from .agent_runtime_logic import update_state
 from .agent_runtime_support import (
+    bound_repo,
     capture_bound_workspace,
     load_agent_bundle,
     validate_dispatch_artifacts,
@@ -78,41 +83,60 @@ class SupervisorAgentWorker:
         snapshot = capture_bound_workspace(run_dir)
         if snapshot.fingerprint != state.workspace_fingerprint:
             raise ValueError("Worker 启动前 Workspace 已漂移，必须先重新对账")
-        operation_ref = _reserve_operation_identity(
-            run_dir,
-            state,
+        repo = bound_repo(run_dir)
+        acquire_writer_claim(
+            repo,
+            run_dir=run_dir,
+            task_id=state.task_id,
             child_run=child_run,
             operation_id=operation_id,
         )
-        state = update_state(
-            state,
-            phase="acting",
-            state_version=state.state_version + 1,
-            active_child_run=child_run,
-            active_operation_id=operation_id,
-            # dispatch 返回后宿主随时可能启动真实进程。这里保守跨过不可自动
-            # 重试边界，避免进程已启动但第二次确认尚未落盘时释放旧 Writer。
-            operation_started=True,
-            allowed_actions=["human"],
-        )
-        save_agent_state(run_dir / "agent-state.json", state)
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="worker_dispatch_committed",
-            state=state,
-            observation_summary=(
-                "已绑定单一 Writer，并保守视为 operation 可能已开始；"
-                "Worker Claim 尚不是完成证据"
-            ),
-            artifact_refs=["task-brief.md", operation_ref],
-        )
-        write_status_card(
-            run_dir,
-            state,
-            plan,
-            next_step="等待 Worker 终态；失去终态时先检查进程并对账 Workspace",
-        )
-        return AgentRun(run_dir=run_dir, state=state, plan=plan)
+        state_committed = False
+        try:
+            operation_ref = _reserve_operation_identity(
+                run_dir,
+                state,
+                child_run=child_run,
+                operation_id=operation_id,
+            )
+            state = update_state(
+                state,
+                phase="acting",
+                state_version=state.state_version + 1,
+                active_child_run=child_run,
+                active_operation_id=operation_id,
+                # dispatch 返回后宿主随时可能启动真实进程。这里保守跨过不可自动
+                # 重试边界，避免进程已启动但第二次确认尚未落盘时释放旧 Writer。
+                operation_started=True,
+                allowed_actions=["human"],
+            )
+            save_agent_state(run_dir / "agent-state.json", state)
+            state_committed = True
+            append_agent_trace(
+                run_dir / "trace.jsonl",
+                event="worker_dispatch_committed",
+                state=state,
+                observation_summary=(
+                    "已绑定仓库级单一 Writer，并保守视为 operation 可能已开始；"
+                    "Worker Claim 尚不是完成证据"
+                ),
+                artifact_refs=["task-brief.md", operation_ref],
+            )
+            write_status_card(
+                run_dir,
+                state,
+                plan,
+                next_step="等待 Worker 终态；失去终态时先检查进程并对账 Workspace",
+            )
+            return AgentRun(run_dir=run_dir, state=state, plan=plan)
+        except Exception:
+            if not state_committed:
+                release_writer_claim(
+                    repo,
+                    run_id=state.run_id,
+                    operation_id=operation_id,
+                )
+            raise
 
 
 def _reserve_operation_identity(

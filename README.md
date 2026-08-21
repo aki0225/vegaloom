@@ -269,12 +269,19 @@ Codex Worker、Verification、Risk、独立 Reviewer 和可信 Finish。
 
 Supervisor Agent V1 保持 opt-in，当前只接受一个未完成 Work Item。通用
 `vega status --run <agent_run>` 与 `vega watch --run <agent_run> --follow` 可以直接查看父 Agent
-状态、Supervisor 低频事件和绑定 child 的安全进度。只有 Core Finish 为 `ready_to_commit`
-且父 Agent phase 为 `completed` 时，才建议人工检查并提交。
+状态、Supervisor 低频事件和绑定 child 的安全进度。只有 Core Finish 为 `ready_to_commit`、
+父 Agent phase 为 `completed`，并且实时状态重新校验得到 `evidence_health=passed` 与
+`workspace_current=true`、`commit_recommended=true` 时，才建议人工检查并提交。完成后如果
+HEAD、Diff、未跟踪文件或 Git 控制状态发生变化，实时状态会撤销提交建议。
 
 `vega agent status --run <agent_run>` 会重新读取当前 child 阶段，并核对 Supervisor Worker、
 批准范围和 Core Finish 的证据文件。`status-card.md` 只是生成时快照，不能替代实时状态命令。
-Plan 中的风险备注会单独列出，不会被当成 Risk Gate 的实际运行结果。
+`vega agent status --run <agent_run> --json` 与文本输出使用同一份实时证据投影。Plan 中的风险
+备注会单独列出，不会被当成 Risk Gate 的实际运行结果。
+
+每个 Work Item 还必须声明仓库外副作用为 `none`、`known` 或 `unknown`。数据库写入、支付、
+部署与外部 API 等动作不会因为命令返回成功就自动视为无副作用；`known` 或 `unknown` 会停在
+人工处理，避免在 Worker 异常后自动重放。
 
 Skill 不安装 hook、不修改 Codex 全局配置，初始化时也不会启动 Worker；执行阶段仍需要当前
 会话按 Skill 调用 CLI，并遵守人工批准和 fail-closed 门禁。

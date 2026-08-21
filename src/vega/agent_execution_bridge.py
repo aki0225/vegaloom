@@ -22,7 +22,7 @@ def resolve_bound_execution_run_dir(
     workspace: Path,
     agent_run_dir: Path,
     state: AgentState,
-    metadata: dict[str, str],
+    metadata: dict[str, object],
 ) -> Path:
     """优先使用真实 assist child；旧 Fake Worker 仍回退到 Agent run。"""
 
@@ -38,11 +38,14 @@ def resolve_bound_execution_run_dir(
         )
     except (OSError, ValueError) as exc:
         raise ValueError("active child 存在，但无法验证其 assist loop 身份") from exc
+    repo_path = metadata.get("repo_path")
+    if not isinstance(repo_path, str):
+        raise ValueError("Agent run 缺少可验证的 repo binding")
     if (
         child_state.run_id != state.active_child_run
         or child_state.automation_mode != "assist"
         or Path(child_state.repo_path).resolve()
-        != Path(metadata["repo_path"]).resolve()
+        != Path(repo_path).resolve()
     ):
         raise ValueError("active child 与 Agent run 的仓库或运行身份不一致")
     return child_dir
@@ -106,7 +109,7 @@ def stop_active_child(
     run_dir: Path,
     state: AgentState,
     plan: AgentPlan,
-    metadata: dict[str, str],
+    metadata: dict[str, object],
     *,
     reason: str,
 ) -> AgentRun:

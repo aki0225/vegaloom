@@ -16,9 +16,11 @@ from .agent_context import (
 )
 from .agent_contract import (
     AgentCheckpoint,
+    AgentDecision,
     AgentObservation,
     AgentPlan,
     AgentState,
+    ObservationAuthority,
     canonical_digest,
 )
 from .agent_graph import require_agent_runtime_dependencies
@@ -36,6 +38,20 @@ from .agent_resume_validation import (
     require_resume_repository_identity,
     validate_resume_workspace,
 )
+from .agent_repository_binding import (
+    bound_repo as _bound_repo,
+    capture_bound_workspace as _capture_bound_workspace,
+    load_run_metadata as _load_run_metadata,
+    require_git_root,
+    validate_run_repository_binding,
+    write_run_metadata,
+)
+from .agent_repository_guard import (
+    acquire_task_card_resume_claim,
+    prepare_terminal_writer_claim_release,
+    release_task_card_resume_claim,
+    release_terminal_writer_claim,
+)
 from .agent_run import AgentRun
 from .agent_runtime_logic import update_state
 from .agent_status_card import write_status_card as _write_status_card
@@ -43,28 +59,13 @@ from .agent_task_card import (
     AgentTaskCard,
     discover_handoff_task_cards,
     parse_task_card,
+    task_card_content_digest,
 )
-from .comparison_binding import require_comparison_binding_from_mapping
 from .redaction import write_redacted_json, write_redacted_text
 from .repository_identity import repository_scope
 from .run_utils import create_run_dir, resolve_run_dir
-from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
-from .workspace_inventory import prepare_verification_temp_root, workspace_ignored_path_exclusions
-
-
-def require_git_root(repo: Path) -> Path:
-    root = repo.resolve(strict=True)
-    process = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=root,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    if process.returncode != 0 or Path(process.stdout.strip()).resolve() != root:
-        raise ValueError("目标目录必须是 Git 仓库根目录")
-    return root
+from .workspace_inventory import prepare_verification_temp_root
+from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
 def resolve_resume_task(repo: Path, task_path: Path | None) -> tuple[Path, str]:
@@ -101,25 +102,13 @@ def load_task_card_with_content(path: Path) -> tuple[AgentTaskCard, str]:
 
 
 def capture_bound_workspace(run_dir: Path) -> ReviewWorkspaceSnapshot:
-    metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
-    repo = Path(metadata["repo_path"]).resolve(strict=True)
-    exclusions = workspace_ignored_path_exclusions(run_dir.parent.parent, repo)
-    comparison_base, comparison_paths = require_comparison_binding_from_mapping(
-        metadata,
-        base_key="comparison_base_revision",
-    )
-    return capture_review_workspace(
-        repo,
-        ignored_path_exclusions=exclusions,
-        comparison_base_sha=comparison_base,
-        comparison_paths=comparison_paths,
-    )
+    return _capture_bound_workspace(run_dir)
 
 
 def load_agent_bundle(
     workspace: Path,
     run: str,
-) -> tuple[Path, AgentState, AgentPlan, dict[str, str]]:
+) -> tuple[Path, AgentState, AgentPlan, dict[str, object]]:
     """读取 Agent 的三个权威本机 Artifact，并统一执行身份校验。"""
 
     run_dir = resolve_run_dir(workspace, run)
@@ -128,7 +117,7 @@ def load_agent_bundle(
         plan = AgentPlan.model_validate_json(
             (run_dir / "agent-plan.json").read_text(encoding="utf-8")
         )
-        metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
+        metadata = _load_run_metadata(run_dir)
     except (OSError, ValidationError, json.JSONDecodeError, AgentArtifactError) as exc:
         raise ValueError(f"Agent run 无法恢复：{run_dir.name}") from exc
     if state.run_id != run_dir.name or plan.task_id != state.task_id:
@@ -141,8 +130,7 @@ def load_agent_bundle(
             or not plan.approval_is_current()
         ):
             raise ValueError("Agent State 与当前批准 Plan 不一致")
-    if not isinstance(metadata, dict) or not isinstance(metadata.get("repo_path"), str):
-        raise ValueError("Agent run 缺少 repo binding")
+    validate_run_repository_binding(run_dir, state, metadata)
     return run_dir, state, plan, metadata
 
 
@@ -151,33 +139,7 @@ def save_agent_plan(run_dir: Path, plan: AgentPlan) -> None:
 
 
 def bound_repo(run_dir: Path) -> Path:
-    metadata = json.loads((run_dir / "agent-run.json").read_text(encoding="utf-8"))
-    return Path(metadata["repo_path"]).resolve(strict=True)
-
-
-def write_run_metadata(
-    run_dir: Path,
-    repo: Path,
-    base_revision: str,
-    *,
-    task_card: str | None = None,
-    comparison_base_revision: str | None = None,
-    comparison_paths: list[str] | None = None,
-) -> None:
-    payload = {
-        "schema_version": 1,
-        "run_id": run_dir.name,
-        "repo_path": str(repo),
-        "base_revision": base_revision,
-        "task_card": task_card,
-    }
-    if comparison_base_revision is not None:
-        payload["comparison_base_revision"] = comparison_base_revision
-        payload["comparison_paths"] = list(comparison_paths or [])
-    write_redacted_json(
-        run_dir / "agent-run.json",
-        payload,
-    )
+    return _bound_repo(run_dir)
 
 
 def resume_agent_task_card(
@@ -189,6 +151,7 @@ def resume_agent_task_card(
     repo_root = require_git_root(repo)
     resolved_task, relative_task = resolve_resume_task(repo_root, task_path)
     card, task_card_content = load_task_card_with_content(resolved_task)
+    task_card_sha256 = task_card_content_digest(task_card_content)
     # 新机器不会携带空的运行目录；先重建 Vega 自己的固定根路径，再冻结新现场。
     prepare_verification_temp_root(repo_root)
     snapshot = validate_resume_workspace(
@@ -206,57 +169,97 @@ def resume_agent_task_card(
         workspace,
         f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent-resume",
     )
-    state = state_from_task_card(run_id, repo_root, card, snapshot)
-    write_run_metadata(
-        run_dir,
+    acquire_task_card_resume_claim(
         repo_root,
-        snapshot.head_sha,
+        task_card_sha256=task_card_sha256,
+        run_dir=run_dir,
         task_card=relative_task,
-        comparison_base_revision=card.handoff_base_revision,
-        comparison_paths=list(card.resume_capsule.changed_files),
     )
-    save_agent_plan(run_dir, card.plan)
-    checkpoint = write_checkpoint(
-        run_dir,
-        state,
-        snapshot,
-        reason="已从 Git 跟踪的 Resume Capsule 建立新本机 run",
-        status="safe" if card.handoff_status == "handoff_ready" else "blocked",
-        pending_actions=list(state.allowed_actions),
-        evidence_refs=[relative_task],
-    )
-    state = update_state(
-        state,
-        latest_checkpoint_id=checkpoint.checkpoint_id,
-        state_version=state.state_version + 1,
-    )
-    capsule = card.resume_capsule
-    write_task_brief(
-        run_dir,
-        card.plan,
-        state,
-        checkpoint,
-        confirmed_facts=capsule.confirmed_facts if capsule else [],
-        failed_attempts=capsule.failed_attempts if capsule else [],
-    )
-    append_agent_trace(
-        run_dir / "trace.jsonl",
-        event="task_card_resumed",
-        state=state,
-        observation_summary="旧门禁已作为历史证据，当前现场已重新对账",
-        artifact_refs=[relative_task, "task-brief.md"],
-    )
-    write_status_card(
-        run_dir,
-        state,
-        card.plan,
-        checkpoint=checkpoint,
-        next_step=(
-            capsule.next_step if capsule is not None else "人工确认当前 Work Item 后继续"
-        ),
-    )
-    save_agent_state(run_dir / "agent-state.json", state)
-    return AgentRun(run_dir=run_dir, state=state, plan=card.plan)
+    published = False
+    try:
+        state = state_from_task_card(run_id, repo_root, card, snapshot)
+        capsule = card.resume_capsule
+        changed_files = list(capsule.changed_files) if capsule else []
+        comparison_base = (
+            (
+                capsule.comparison_base_revision
+                or card.handoff_base_revision
+            )
+            if capsule is not None and changed_files
+            else snapshot.head_sha
+        )
+        write_run_metadata(
+            run_dir,
+            repo_root,
+            snapshot.head_sha,
+            task_card=relative_task,
+            task_card_sha256=task_card_sha256,
+            comparison_base_revision=comparison_base,
+            comparison_paths=changed_files,
+        )
+        save_agent_plan(run_dir, card.plan)
+        checkpoint = write_checkpoint(
+            run_dir,
+            state,
+            snapshot,
+            reason="已从 Git 跟踪的 Resume Capsule 建立新本机 run",
+            status="safe" if card.handoff_status == "handoff_ready" else "blocked",
+            pending_actions=list(state.allowed_actions),
+            evidence_refs=[relative_task],
+            external_side_effects=(
+                capsule.external_side_effects if capsule else "unknown"
+            ),
+        )
+        state = update_state(
+            state,
+            latest_checkpoint_id=checkpoint.checkpoint_id,
+            state_version=state.state_version + 1,
+        )
+        confirmed_facts = list(
+            dict.fromkeys(
+                [
+                    *card.plan.observed_facts,
+                    *(capsule.confirmed_facts if capsule else []),
+                ]
+            )
+        )
+        write_task_brief(
+            run_dir,
+            card.plan,
+            state,
+            checkpoint,
+            confirmed_facts=confirmed_facts,
+            failed_attempts=capsule.failed_attempts if capsule else [],
+            artifact_refs=[relative_task],
+        )
+        append_agent_trace(
+            run_dir / "trace.jsonl",
+            event="task_card_resumed",
+            state=state,
+            observation_summary="旧门禁已作为历史证据，当前现场已重新对账",
+            artifact_refs=[relative_task, "task-brief.md"],
+        )
+        write_status_card(
+            run_dir,
+            state,
+            card.plan,
+            checkpoint=checkpoint,
+            next_step=(
+                capsule.next_step
+                if capsule is not None
+                else "人工确认当前 Work Item 后继续"
+            ),
+        )
+        save_agent_state(run_dir / "agent-state.json", state)
+        published = True
+        return AgentRun(run_dir=run_dir, state=state, plan=card.plan)
+    finally:
+        if not published:
+            release_task_card_resume_claim(
+                repo_root,
+                task_card_sha256=task_card_sha256,
+                run_id=run_id,
+            )
 
 
 def write_checkpoint(
@@ -314,6 +317,7 @@ def write_task_brief(
     *,
     confirmed_facts: list[str] | None = None,
     failed_attempts: list[str] | None = None,
+    artifact_refs: list[str] | None = None,
 ) -> TaskBrief:
     if not state.current_work_item:
         raise ValueError("当前 run 没有可编译的 Work Item")
@@ -323,6 +327,7 @@ def write_task_brief(
         checkpoint=checkpoint,
         confirmed_facts=confirmed_facts or (),
         failed_attempts=failed_attempts or (),
+        artifact_refs=artifact_refs or (),
         max_bytes=DEFAULT_TASK_BRIEF_MAX_BYTES,
     )
     write_redacted_text(run_dir / "task-brief.md", brief.content)
@@ -409,6 +414,51 @@ def write_status_card(
         observation=observation,
         checkpoint=checkpoint,
         next_step=next_step,
+    )
+
+
+def publish_observation_transition(
+    run_dir: Path,
+    previous_state: AgentState,
+    state: AgentState,
+    plan: AgentPlan,
+    observation: AgentObservation,
+    decision: AgentDecision,
+    checkpoint: AgentCheckpoint,
+    authority: ObservationAuthority,
+    *,
+    next_step: str,
+) -> None:
+    """按 claim、Plan、State、Trace、状态卡的安全顺序发布对账结果。"""
+
+    repo = bound_repo(run_dir)
+    prepare_terminal_writer_claim_release(
+        repo, previous_state, state, observation, authority
+    )
+    save_agent_plan(run_dir, plan)
+    save_agent_state(run_dir / "agent-state.json", state)
+    append_agent_trace(
+        run_dir / "trace.jsonl",
+        event=f"supervisor_{decision.selected_action}",
+        state=state,
+        observation_summary=observation.machine_summary,
+        route_reason=decision.reason,
+        artifact_refs=[
+            f"observations/{observation.observation_id}.json",
+            f"decisions/{decision.decision_id}.json",
+            f"checkpoints/{checkpoint.checkpoint_id}.json",
+        ],
+    )
+    write_status_card(
+        run_dir,
+        state,
+        plan,
+        observation=observation,
+        checkpoint=checkpoint,
+        next_step=next_step,
+    )
+    release_terminal_writer_claim(
+        repo, previous_state, state, observation, authority
     )
 
 

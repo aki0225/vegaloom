@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from .agent_contract import (
     AgentObservation,
@@ -67,7 +68,14 @@ def reconcile_observation(
     observation: AgentObservation,
     authority: ObservationAuthority,
     snapshot: ReviewWorkspaceSnapshot,
+    *,
+    declared_external_side_effects: Literal["none", "known", "unknown"],
 ) -> AgentObservation:
+    observed_external_side_effects = (
+        _external_claim_side_effects(observation, state)
+        if authority == "external_claim"
+        else observation.external_side_effects
+    )
     common = {
         "authority": authority,
         "work_item_id": state.current_work_item,
@@ -76,6 +84,11 @@ def reconcile_observation(
         "workspace_fingerprint": snapshot.fingerprint,
         "changed_files": list(snapshot.changed_files),
         "unknown_file_count": len(snapshot.untracked_files),
+        # Adapter 只能把副作用声明变得更保守，不能降低人工批准 Plan 的约束。
+        "external_side_effects": _conservative_external_side_effects(
+            declared_external_side_effects,
+            observed_external_side_effects,
+        ),
     }
     if authority != "external_claim":
         return observation.model_copy(
@@ -105,10 +118,6 @@ def reconcile_observation(
             "verification": "not_run",
             "risk": "not_run",
             "review": "not_run",
-            "external_side_effects": _external_claim_side_effects(
-                observation,
-                state,
-            ),
         }
     )
 
@@ -120,6 +129,17 @@ def _external_claim_side_effects(
     if observation.external_side_effects != "none":
         return observation.external_side_effects
     return "unknown" if state.operation_started else "none"
+
+
+def _conservative_external_side_effects(
+    declared: Literal["none", "known", "unknown"],
+    observed: Literal["none", "known", "unknown"],
+) -> Literal["none", "known", "unknown"]:
+    if "unknown" in {declared, observed}:
+        return "unknown"
+    if "known" in {declared, observed}:
+        return "known"
+    return "none"
 
 
 def apply_work_item_progress(

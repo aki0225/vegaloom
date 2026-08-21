@@ -10,7 +10,7 @@ from .agent_run_status import (
     agent_next_steps,
     load_agent_status_state,
 )
-from .decision import DecisionStore
+from . import agent_status_projection as asp
 from .execution_control import (
     ACTIVE_EXECUTION_STATUSES,
     ExecutionRecord,
@@ -55,7 +55,9 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     kind = _infer_kind(run_dir, state)
     if kind != "agent":
         state = _classify_init(workspace, run_dir, state)
-    decisions = DecisionStore(run_dir).list()
+    else:
+        asp.apply_agent_projection(workspace, run, run_dir, state)
+    decisions = asp.combined_decisions(run_dir, include_agent=kind == "agent")
     return {
         "run_id": run_dir.name,
         "run_dir": str(run_dir.resolve()),
@@ -69,13 +71,14 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         "last_child_run": state.get("last_child_run"),
         "last_child_status": state.get("last_child_status"),
         "decision_count": len(decisions),
-        "latest_decisions": [entry.model_dump() for entry in decisions[-3:]],
+        "latest_decisions": decisions[-3:],
         "execution": _latest_execution_payload(run_dir, state.get("status")),
         "agent_phase": state.get("agent_phase"),
         "current_work_item": state.get("current_work_item"),
         "latest_checkpoint_id": state.get("latest_checkpoint_id"),
         "allowed_actions": state.get("allowed_actions"),
         "terminal_status": state.get("terminal_status"),
+        **asp.payload_fields(state),
         **agent_live_stage_payload(state),
         "next_steps": next_steps_for_run(workspace, run_dir, state, kind),
         "key_artifacts": key_artifacts_for_run(run_dir, state, kind),
@@ -386,11 +389,7 @@ def _read_state_for_selection(run_dir: Path) -> dict[str, Any]:
         return _read_state(run_dir)
     except ValueError:
         # latest 先选 run，再由 run_status_payload 对被选中的状态给出明确诊断。
-        return (
-            {"_run_kind": "agent", "automation_mode": None}
-            if (run_dir / "agent-state.json").exists()
-            else {}
-        )
+        return asp.fallback_agent_selection_state(run_dir) if (run_dir / "agent-state.json").exists() else {}
 
 
 def _safe_run_dirs(runs_dir: Path) -> list[Path]:

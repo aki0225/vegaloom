@@ -67,6 +67,8 @@ next / repair / replan / human / finalize
 - Plan 未批准、批准过期或 Workspace binding 冲突时不能 `next/repair/finalize`；
 - 旧 Writer 或 owned process 仍存活时不能启动第二 Writer；
 - Verification 失败、Risk 阻断、Artifact 不完整或 stale 时不能 `finalize`；
+- Work Item 必须显式声明 `external_side_effects`；缺省 `unknown`，`known / unknown` 都不能
+  因 Worker 或验证命令返回成功而自动降级为 `none`；
 - 未知外部副作用不能自动重试；
 - 人工 `pause/stop` 必须继承最近 Checkpoint 的外部副作用状态，不能把 `unknown` 降级为
   `none` 或新的 `safe` Handoff；
@@ -75,6 +77,16 @@ next / repair / replan / human / finalize
 - 只有人工把副作用明确为 `none` 才能进入 `stopped / safe`；明确为 `known` 时仍保持
   `needs_human / blocked`；
 - Graph `END` 不能写入 `ready_to_commit`。
+- 仓库级 Writer claim 位于 Git common dir，用于协调同一物理 Git 仓库及其 worktree；
+  它不声称跨独立 clone 或跨机器提供分布式锁。
+- Worker 终态发布前先把 claim 标记为 `releasing`，再清除父 State 的 active binding。
+  如果最后删除 claim 失败，后续 dispatch 只能在原 run 已证明没有 active Writer 时清理该
+  `releasing` claim；`active` claim 或无法验证的 owner 永远不能自动删除。
+- 文本状态和 `--json` 必须使用同一份实时证据投影。持久化 State 曾记录
+  `completed / ready_to_commit`，但当前证据失败、过期或无法验证时，展示层必须降级为
+  `needs_human`，并明确 `commit_recommended=false`。
+- 实时投影还必须重新采集当前 Workspace。当前指纹与最终 Observation/Checkpoint 不一致时，
+  `workspace_current=false`、`evidence_health=stale`，不得继续建议提交。
 
 ## 4. Task Card 与 Git-only fresh-clone / 换目录恢复
 
@@ -88,6 +100,11 @@ WIP 可以和 Task Card 一起提交到任务分支。Task Card 只能记录 `ha
 
 Vega 生成、校验和展示待提交清单，但不自动 commit 或 push。
 
+连续交接必须让新 Task Card 引用上一张 Task Card，并沿用最初的 WIP 比较基线；已经被后继
+Task Card 接替的旧卡不再作为自动恢复候选。同一物理 Git 仓库内还会按 Task Card 内容摘要
+登记一次性恢复 claim，避免重复建立两个本机 run。独立 clone 之间没有共享锁，因此跨机器
+仍以任务分支上唯一、线性的 Task Card 历史和人工操作纪律为准。
+
 ## 5. Task Brief
 
 Task Brief 无下限，默认软上限为 `32 KiB` UTF-8 字节。按以下优先级生成：
@@ -98,6 +115,9 @@ Task Brief 无下限，默认软上限为 `32 KiB` UTF-8 字节。按以下优�
 
 必需内容超过上限时进入人工处理或拆分 Work Item，不静默截断。宿主 Codex/Claude Code 的压缩
 可以继续帮助原会话，但不能替代 Task Brief 或任务状态。
+
+事实、失败尝试等必需列表必须完整写入 Task Brief；长日志和代码只能通过 Artifact 引用缩减，
+不能用“其余若干项”替代尚未写入的约束。
 
 ## 6. Checkpoint 与 Trace
 

@@ -20,6 +20,7 @@ from .cli_support import (
     require_repo_directory,
 )
 from .redaction import redact_text
+from .run_status import run_status_payload
 
 
 agent_app = typer.Typer(help="运行轻量 Supervisor Agent 控制层。")
@@ -297,7 +298,13 @@ def agent_status(
 
     try:
         if json_output:
-            typer.echo(_runtime().state_path(run).read_text(encoding="utf-8"))
+            typer.echo(
+                json.dumps(
+                    run_status_payload(Path.cwd(), run),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
         else:
             typer.echo(_runtime().status(run))
     except (FileNotFoundError, OSError, ValueError) as exc:

@@ -141,6 +141,188 @@ def test_handoff_round_trip_between_isolated_clones(tmp_path: Path) -> None:
     assert "Reviewer：尚未运行" in status_card
 
 
+def test_clean_handoff_resumes_without_treating_task_card_as_wip(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    _git(repo, "checkout", "-b", "feature/clean-handoff")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    plan = AgentPlan(
+        task_id="task-clean-handoff",
+        user_goal="验证没有 WIP 的跨机器交接",
+        success_conditions=["新 run 可以从干净现场恢复"],
+        work_items=[
+            AgentWorkItem(
+                work_item_id="W1",
+                objective="继续只读调查",
+                allowed_paths=["README.md"],
+                verification=["git diff --check"],
+                external_side_effects="none",
+            )
+        ],
+    )
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    approved = runtime.approve(run.run_dir.name)
+    stopped = SupervisorAgentRecovery(workspace).stop(
+        approved.run_dir.name,
+        reason="准备换机继续只读调查",
+    )
+    handoff = runtime.handoff(
+        stopped.run_dir.name,
+        reason="提交只有 Task Card 的交接",
+    )
+    card = load_task_card(handoff.task_card_path)
+    assert card.resume_capsule is not None
+    assert card.resume_capsule.changed_files == []
+    _git(repo, "add", handoff.task_card_path.relative_to(repo).as_posix())
+    _git(repo, "commit", "-m", "测试：提交干净 Handoff")
+    next_workspace = tmp_path / "next-workspace"
+    next_workspace.mkdir()
+
+    restored = SupervisorAgentRuntime(next_workspace).resume_task_card(repo)
+
+    checkpoint = load_agent_checkpoint(
+        restored.run_dir
+        / "checkpoints"
+        / f"{restored.state.latest_checkpoint_id}.json"
+    )
+    metadata = json.loads(
+        (restored.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    assert restored.state.phase == "ready"
+    assert checkpoint.changed_files == []
+    assert metadata["comparison_base_revision"] == _head(repo)
+    assert metadata["comparison_paths"] == []
+
+
+def test_same_task_card_cannot_resume_twice_in_one_git_repository(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    handoff = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证同一卡只能恢复一次",
+    )
+    _git(
+        repo,
+        "add",
+        "src/example.py",
+        handoff.task_card_path.relative_to(repo).as_posix(),
+    )
+    _git(repo, "commit", "-m", "测试：提交单次恢复 Task Card")
+    first_workspace = tmp_path / "first-workspace"
+    second_workspace = tmp_path / "second-workspace"
+    first_workspace.mkdir()
+    second_workspace.mkdir()
+    first = SupervisorAgentRuntime(first_workspace).resume_task_card(repo)
+
+    with pytest.raises(ValueError, match="已经.*恢复 run|已在本机"):
+        SupervisorAgentRuntime(second_workspace).resume_task_card(repo)
+
+    assert first.state.phase == "ready"
+    assert not list(
+        (second_workspace / "runs").glob("*-agent-resume*/agent-state.json")
+    )
+
+
+def test_task_card_supports_two_handoff_hops(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _stopped_run(tmp_path)
+    first_handoff = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="第一次换机交接",
+    )
+    first_relative = first_handoff.task_card_path.relative_to(repo).as_posix()
+    _git(repo, "add", "src/example.py", first_relative)
+    _git(repo, "commit", "-m", "测试：提交第一次 Handoff")
+    second_workspace = tmp_path / "second-workspace"
+    second_workspace.mkdir()
+    restored = SupervisorAgentRuntime(second_workspace).resume_task_card(repo)
+    stopped = SupervisorAgentRecovery(second_workspace).stop(
+        restored.run_dir.name,
+        reason="准备第二次换机",
+    )
+    second_handoff = SupervisorAgentRuntime(second_workspace).handoff(
+        stopped.run_dir.name,
+        reason="第二次换机交接",
+    )
+    second_card = load_task_card(second_handoff.task_card_path)
+    second_relative = second_handoff.task_card_path.relative_to(repo).as_posix()
+
+    assert second_card.handoff_sequence == 2
+    assert second_card.previous_task_card == first_relative
+    second_metadata = json.loads(
+        (second_handoff.run.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    assert (
+        second_metadata["comparison_base_revision"]
+        == second_card.resume_capsule.comparison_base_revision
+    )
+    assert second_metadata["comparison_paths"] == ["src/example.py"]
+    assert "Workspace 与证据一致：`是`" in SupervisorAgentRuntime(
+        second_workspace
+    ).status(second_handoff.run.run_dir.name)
+    _git(repo, "add", second_relative)
+    _git(repo, "commit", "-m", "测试：提交第二次 Handoff")
+    third_workspace = tmp_path / "third-workspace"
+    third_workspace.mkdir()
+
+    resumed_again = SupervisorAgentRuntime(third_workspace).resume_task_card(repo)
+
+    assert resumed_again.state.phase == "ready"
+    metadata = json.loads(
+        (resumed_again.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    assert metadata["task_card"] == second_relative
+    assert metadata["comparison_paths"] == ["src/example.py"]
+    stopped_again = SupervisorAgentRecovery(third_workspace).stop(
+        resumed_again.run_dir.name,
+        reason="准备第三次换机",
+    )
+
+    third_handoff = SupervisorAgentRuntime(third_workspace).handoff(
+        stopped_again.run_dir.name,
+        reason="第三次换机交接",
+    )
+    third_card = load_task_card(third_handoff.task_card_path)
+
+    assert third_card.handoff_sequence == 3
+    assert third_card.previous_task_card == second_relative
+
+
+def test_handoff_and_task_brief_preserve_all_confirmed_facts(
+    tmp_path: Path,
+) -> None:
+    facts = [f"事实 {index:02d}" for index in range(1, 14)]
+    plan = _plan(observed_facts=facts)
+    repo, workspace, run_id = _stopped_run(tmp_path, plan=plan)
+    handoff = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证长任务事实不会静默丢失",
+    )
+    card = load_task_card(handoff.task_card_path)
+    assert card.resume_capsule is not None
+    assert "事实 13" in card.resume_capsule.confirmed_facts
+    _git(
+        repo,
+        "add",
+        "src/example.py",
+        handoff.task_card_path.relative_to(repo).as_posix(),
+    )
+    _git(repo, "commit", "-m", "测试：提交完整上下文 Handoff")
+    next_workspace = tmp_path / "next-workspace-facts"
+    next_workspace.mkdir()
+
+    restored = SupervisorAgentRuntime(next_workspace).resume_task_card(repo)
+    task_brief = (restored.run_dir / "task-brief.md").read_text(encoding="utf-8")
+
+    assert "事实 13" in task_brief
+    assert "其余" not in task_brief
+
+
 def test_direct_task_card_resume_preflights_dependencies_before_creating_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -867,6 +1049,7 @@ def _plan(*, observed_facts: list[str] | None = None) -> AgentPlan:
                 objective="完成最小修改",
                 allowed_paths=["src/example.py"],
                 verification=["python -c \"from pathlib import Path; assert Path('src/example.py').exists()\""],
+                external_side_effects="none",
             )
         ],
     )
@@ -894,3 +1077,15 @@ def _git(repo: Path, *args: str) -> None:
         encoding="utf-8",
     )
     assert process.returncode == 0, process.stderr
+
+
+def _head(repo: Path) -> str:
+    process = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    return process.stdout.strip()

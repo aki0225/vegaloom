@@ -35,6 +35,7 @@ from .agent_runtime_support import (
     bound_repo,
     capture_bound_workspace,
     load_agent_bundle,
+    publish_observation_transition,
     require_git_root,
     resume_agent_task_card,
     save_agent_plan,
@@ -48,7 +49,6 @@ from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
 from .workspace_check import capture_review_workspace
 from .workspace_inventory import prepare_verification_temp_root
-
 
 class SupervisorAgentRuntime:
     def __init__(self, workspace: Path) -> None:
@@ -277,10 +277,12 @@ class SupervisorAgentRuntime:
         authority: ObservationAuthority,
     ) -> AgentRun:
         run_dir, state, plan, _ = self._load_run(run)
+        work_item = validate_v1_execution_binding(plan, state.current_work_item)
         validate_observation_binding(state, observation, authority)
         # 真实现场只能在当前 State 与已提交 dispatch Trace 同时证明执行身份后发布；
         # 否则后续 Observation、Decision 与 Checkpoint 会把篡改现场固化为权威状态。
         validate_machine_trace_binding(run_dir, state, observation, authority)
+        previous_state = state
         attempt = state.active_child_run
         actual = capture_bound_workspace(run_dir)
         reconciled = reconcile_observation(
@@ -288,6 +290,7 @@ class SupervisorAgentRuntime:
             observation,
             authority,
             actual,
+            declared_external_side_effects=work_item.external_side_effects,
         )
         observation_path = (
             run_dir / "observations" / f"{reconciled.observation_id}.json"
@@ -380,26 +383,15 @@ class SupervisorAgentRuntime:
             )
         # Plan 进度只有在 Checkpoint 与下一轮 Task Brief 均成功后才发布。
         # State 仍是最后的调度安全闩；此前任一步失败都会保留旧 active Writer。
-        self._save_plan(run_dir, plan)
-        save_agent_state(run_dir / "agent-state.json", state)
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event=f"supervisor_{decision.selected_action}",
-            state=state,
-            observation_summary=reconciled.machine_summary,
-            route_reason=decision.reason,
-            artifact_refs=[
-                f"observations/{reconciled.observation_id}.json",
-                f"decisions/{decision.decision_id}.json",
-                f"checkpoints/{checkpoint.checkpoint_id}.json",
-            ],
-        )
-        write_status_card(
+        publish_observation_transition(
             run_dir,
+            previous_state,
             state,
             plan,
-            observation=reconciled,
-            checkpoint=checkpoint,
+            reconciled,
+            decision,
+            checkpoint,
+            authority,
             next_step=(
                 "Core Finish 已满足可信终态；采用同一证据发布 Supervisor completed"
                 if decision.selected_action == "finalize"
@@ -491,7 +483,7 @@ class SupervisorAgentRuntime:
     def handoff(self, run: str, *, reason: str) -> HandoffResult:
         return create_handoff(self.workspace, run, reason=reason)
 
-    def _load_run(self, run: str) -> tuple[Path, AgentState, AgentPlan, dict[str, str]]:
+    def _load_run(self, run: str) -> tuple[Path, AgentState, AgentPlan, dict[str, object]]:
         return load_agent_bundle(self.workspace, run)
 
     def _save_plan(self, run_dir: Path, plan: AgentPlan) -> None:

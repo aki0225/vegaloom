@@ -67,6 +67,7 @@ Plan 文件应放在临时目录或目标仓库已忽略的目录，不要直接
       "allowed_paths": ["src/export.py", "tests/test_export.py"],
       "forbidden_paths": [".env"],
       "verification": ["python -m pytest tests/test_export.py -q"],
+      "external_side_effects": "none",
       "risk_notes": ["检查并发回调是否可能重复提交"],
       "depends_on": [],
       "status": "pending"
@@ -78,6 +79,15 @@ Plan 文件应放在临时目录或目标仓库已忽略的目录，不要直接
 
 `observed_facts` 只能写已经由代码、命令或运行结果确认的事实；推测必须放在
 `hypotheses`。允许路径、验证命令或风险发生变化时，应写入新的 Plan revision 并重新批准。
+
+`external_side_effects` 必须按当前 Work Item 明确填写：
+
+- `none`：计划内命令只影响当前 Git Workspace；
+- `known`：会写数据库、调用支付/部署/外部 API，或存在其他已知仓库外影响；
+- `unknown`：暂时无法证明。该值也是缺省值。
+
+`known` 和 `unknown` 都不会被一次成功退出码自动改成 `none`，Supervisor 会停止并要求人工
+确认，避免把可重复执行的本地修改和不可安全重放的外部操作混为一谈。
 
 ### 3. 创建、批准并执行
 
@@ -101,7 +111,9 @@ vega watch --run <agent_run> --follow
 
 状态处理规则：
 
-- `completed`：读取 changed files、Verification、Risk、Reviewer 和 Finish，再由人工决定提交；
+- `completed`：仍需确认实时状态中的 `evidence_health=passed` 和
+  `workspace_current=true`、`commit_recommended=true`，再读取 changed files、Verification、
+  Risk、Reviewer 与 Finish；
 - `finalizing`：运行 `vega agent finalize --run <agent_run>`，只采用现有 Core Finish；
 - `awaiting_approval`：新证据使旧 Plan 失效，先更新 Plan，再次等待人工批准；
 - `needs_human`：停止自动执行，检查 active Writer、Checkpoint、Workspace 和外部副作用；
@@ -109,7 +121,19 @@ vega watch --run <agent_run> --follow
   Handoff 或创建新的 Agent run。
 
 Worker 声称完成、Reviewer 返回 `approve` 或 LangGraph 到达 `END` 都不等于成功。只有 Core
-Finish 为 `ready_to_commit`，且父 Agent 为 `completed`，才进入人工提交前检查。
+Finish 为 `ready_to_commit`、父 Agent 记录为 `completed`，并且当前 Artifact 重新校验后
+`commit_recommended=true`，才进入人工提交前检查。若终态之后的证据被删除、篡改或过期，
+或者当前 HEAD、Diff、未跟踪文件和 Git 控制状态发生变化，实时状态会降级为 `needs_human`，
+不会重复旧的成功结论。
+
+需要给脚本读取状态时使用：
+
+```powershell
+vega agent status --run <agent_run> --json
+```
+
+文本和 JSON 共用同一份实时证据投影；`agent-state.json` 与 `status-card.md` 都不能单独作为
+当前可提交结论。
 
 `vega finish --run <loop_run>` 面向普通 Core run，生成或读取 Core 的交付结论。
 `vega agent finalize --run <agent_run>` 只在父 Agent 已进入 `finalizing` 后采用已经绑定的
@@ -146,6 +170,8 @@ vega status --run <new_agent_run>
 
 新 run 会恢复 Goal、批准 Plan、当前 Work Item、WIP 比较基线和下一步。旧 Verification、
 Risk 与 Reviewer 只作为历史记录，必须在新 Workspace 重新执行，不能直接沿用为当前通过证据。
+连续交接会由新 Task Card 引用上一张 Task Card，并保留最初的 WIP 比较基线；同一物理 Git
+仓库内，一张 Task Card 只允许建立一个恢复 run，避免重复接手同一现场。
 
 如果旧 Worker 是否仍在运行、Workspace 是否有 partial Diff，或数据库、支付、部署等外部
 副作用是否发生无法确认，Vega 会保持 `needs_human`，不会自动重跑或启动第二 Writer。

@@ -14,6 +14,7 @@ from .agent_contract import (
     AgentState,
     utc_now,
 )
+from .comparison_binding import require_comparison_binding_from_mapping
 from .agent_handoff_safety import (
     collect_handoff_issues,
     prepare_task_card_root,
@@ -47,6 +48,7 @@ from .agent_task_card import (
     ResumeCapsule,
     TaskCardError,
     compute_handoff_workspace_digest,
+    discover_local_handoff_task_cards,
     load_task_card,
     render_task_card,
     save_task_card,
@@ -99,7 +101,14 @@ def create_handoff(
     work_item = _current_work_item(plan, state)
     repo = bound_repo(run_dir)
     branch = current_branch(repo)
-    _ensure_no_existing_handoff(repo, state.task_id, branch)
+    source_task_card = metadata.get("task_card")
+    previous_task_card = source_task_card if isinstance(source_task_card, str) else None
+    _ensure_no_existing_handoff(
+        repo,
+        state.task_id,
+        branch,
+        allowed_existing=previous_task_card,
+    )
     card_path = _task_card_path(repo, state.task_id)
     snapshot = capture_bound_workspace(run_dir)
     latest = load_agent_checkpoint(
@@ -150,6 +159,13 @@ def create_handoff(
         source_revision=snapshot.head_sha,
         recorded_at=observation_time,
     )
+    comparison_base_revision, comparison_paths = require_comparison_binding_from_mapping(
+        metadata,
+        base_key="comparison_base_revision",
+    )
+    comparison_base_revision = comparison_base_revision or _metadata_revision(
+        metadata, snapshot.head_sha
+    )
     capsule = ResumeCapsule(
         current_work_item=state.current_work_item,
         stopped_at=f"{reason.strip()}；当前阶段：{state.phase}",
@@ -189,6 +205,7 @@ def create_handoff(
             ]
         ),
         changed_files=list(snapshot.changed_files),
+        comparison_base_revision=comparison_base_revision,
         workspace_digest=workspace_digest,
         gate_evidence=gate_evidence,
         external_side_effects=latest.external_side_effects,
@@ -216,6 +233,7 @@ def create_handoff(
         status=_task_card_status(state, handoff_status),
         branch=branch,
         base_revision=_metadata_revision(metadata, snapshot.head_sha),
+        previous_task_card=previous_task_card,
         plan=plan,
         current_work_item=state.current_work_item,
         handoff_sequence=_next_handoff_sequence(repo, state.task_id, branch),
@@ -268,6 +286,9 @@ def create_handoff(
             repo,
             _metadata_revision(metadata, snapshot.head_sha),
             task_card=relative_card,
+            task_card_sha256=card_digest,
+            comparison_base_revision=comparison_base_revision,
+            comparison_paths=list(comparison_paths),
         )
         write_redacted_json(
             manifest_path,
@@ -303,6 +324,12 @@ def create_handoff(
         require_plain_task_card_tree(repo, card_path.parent)
         save_task_card(card_path, card)
         card_published = True
+        post_handoff_snapshot = capture_bound_workspace(run_dir)
+        published_state = update_state(
+            published_state,
+            state_version=published_state.state_version + 1,
+            workspace_fingerprint=post_handoff_snapshot.fingerprint,
+        )
         save_agent_state(state_path, published_state)
         write_status_card(
             run_dir,
@@ -407,7 +434,7 @@ def _task_card_status(state: AgentState, handoff_status: str) -> str:
     return state.phase
 
 
-def _metadata_revision(metadata: dict[str, str], fallback: str) -> str:
+def _metadata_revision(metadata: dict[str, object], fallback: str) -> str:
     revision = metadata.get("base_revision")
     return revision if isinstance(revision, str) and revision else fallback
 
@@ -425,23 +452,22 @@ def _task_card_path(repo: Path, task_id: str) -> Path:
     return candidate
 
 
-def _ensure_no_existing_handoff(repo: Path, task_id: str, branch: str) -> None:
+def _ensure_no_existing_handoff(
+    repo: Path,
+    task_id: str,
+    branch: str,
+    *,
+    allowed_existing: str | None = None,
+) -> None:
     task_root = repo / ".vega" / "tasks"
     if not os.path.lexists(task_root):
         return
     require_plain_task_card_tree(repo, task_root)
-    for path in task_root.rglob("*.md"):
-        if path.is_symlink():
-            raise TaskCardError("Task Card 目录中不能包含链接文件")
-        try:
-            card = load_task_card(path)
-        except (OSError, ValueError, TaskCardError):
-            continue
+    for path in discover_local_handoff_task_cards(repo, branch=branch):
+        card = load_task_card(path)
         if (
             card.task_id == task_id
-            and card.branch == branch
-            and card.status not in {"completed", "stopped"}
-            and card.handoff_status != "none"
+            and path.relative_to(repo).as_posix() != allowed_existing
         ):
             raise TaskCardError(
                 "当前任务和分支已存在未终止 Handoff Task Card；"
@@ -464,10 +490,10 @@ def _next_handoff_sequence(repo: Path, task_id: str, branch: str) -> int:
     return highest + 1
 
 
-def _compact(values: list[str], *, limit: int = 12) -> list[str]:
+def _compact(values: list[str]) -> list[str]:
     unique: list[str] = []
     for value in values:
         text = value.strip()
         if text and text not in unique:
             unique.append(text)
-    return unique[:limit]
+    return unique

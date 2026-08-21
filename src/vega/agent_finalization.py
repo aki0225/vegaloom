@@ -284,6 +284,7 @@ def _validate_observation_and_decision(
         or observation.verification != "passed"
         or observation.risk != "passed"
         or observation.review != "passed"
+        or observation.external_side_effects != "none"
     ):
         raise ValueError("finalize Observation 不满足 Agent 完成条件")
     if (

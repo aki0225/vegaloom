@@ -40,6 +40,7 @@ from vega.finish_runtime import FinishRuntime
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.project_config import ProjectConfig
+from vega.run_status import run_status_payload
 from vega.runner import CodexExecRunner, RunnerResult
 from vega.workspace_inventory import prepare_verification_temp_root
 
@@ -549,12 +550,13 @@ def test_resumed_committed_handoff_runs_core_with_capsule_diff(
             user_goal="验证已提交 WIP 的跨机器恢复。",
             success_conditions=["定向测试通过并完成隔离审查"],
             work_items=[
-                AgentWorkItem(
-                    work_item_id="W1",
-                    objective="重新验证已提交 WIP",
-                    allowed_paths=list(changed_files),
-                    verification=["python -m pytest tests/test_example.py -q"],
-                )
+                    AgentWorkItem(
+                        work_item_id="W1",
+                        objective="重新验证已提交 WIP",
+                        allowed_paths=list(changed_files),
+                        verification=["python -m pytest tests/test_example.py -q"],
+                        external_side_effects="none",
+                    )
             ],
         ),
         actor="user",
@@ -706,6 +708,43 @@ def test_agent_success_path_preserves_completed_worker_in_status_card(
     assert payload["changed_files"] == ["src/example.py"]
 
 
+@pytest.mark.parametrize("side_effects", ["known", "unknown"])
+def test_successful_core_cannot_override_declared_external_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    side_effects: str,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    plan = _plan()
+    plan.work_items[0].external_side_effects = side_effects
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    approved = runtime.approve(run.run_dir.name)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(workspace)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    result = adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+    observation = json.loads(
+        next((result.run_dir / "observations").glob("*.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result.state.phase == "needs_human"
+    assert result.state.terminal_status is None
+    assert observation["external_side_effects"] == side_effects
+    assert observation["verification"] == "passed"
+    assert observation["review"] == "passed"
+
+
 def test_agent_status_revalidates_supervisor_evidence_after_scope_tamper(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -738,10 +777,58 @@ def test_agent_status_revalidates_supervisor_evidence_after_scope_tamper(
     )
 
     refreshed = SupervisorAgentRuntime(workspace).status(result.run_dir.name)
+    payload = run_status_payload(workspace, result.run_dir.name)
 
     assert "- 计划范围（Core 后）：通过；" in persisted
     assert "- 计划范围（Core 后）：已过期；" in refreshed
     assert "- 计划范围（Core 后）：通过；" not in refreshed
+    assert "证据告警" in refreshed
+    assert "阶段：等待人工" in refreshed
+    assert "Finish：`ready_to_commit`" not in refreshed
+    assert payload["status"] == "needs_human"
+    assert payload["current_step"] == "evidence_invalid"
+    assert payload["recorded_agent_phase"] == "completed"
+    assert payload["recorded_terminal_status"] == "ready_to_commit"
+    assert payload["terminal_status"] is None
+    assert payload["commit_recommended"] is False
+    assert payload["evidence_health"] == "stale"
+
+
+def test_agent_status_downgrades_completed_run_after_workspace_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(workspace)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+    result = adapter.run(run_id, timeout_seconds=60)
+
+    before = run_status_payload(workspace, result.run_dir.name)
+    (repo / "src" / "example.py").write_text(
+        "value = 2\n",
+        encoding="utf-8",
+    )
+    refreshed = SupervisorAgentRuntime(workspace).status(result.run_dir.name)
+    after = run_status_payload(workspace, result.run_dir.name)
+
+    assert before["workspace_current"] is True
+    assert before["commit_recommended"] is True
+    assert before["verification"] == "passed"
+    assert before["risk"] == "passed"
+    assert before["review"] == "passed"
+    assert after["status"] == "needs_human"
+    assert after["workspace_current"] is False
+    assert after["evidence_health"] == "stale"
+    assert after["commit_recommended"] is False
+    assert after["changed_files"] == ["src/example.py"]
+    assert "Workspace 与证据一致：`否`" in refreshed
+    assert "当前 Workspace 已偏离最终证据" in refreshed
 
 
 @pytest.mark.parametrize(
@@ -1641,6 +1728,7 @@ def _plan(*, task_id: str = "task-adapter") -> AgentPlan:
                 objective="完成最小修复",
                 allowed_paths=["src/example.py"],
                 verification=["运行定向测试"],
+                external_side_effects="none",
             )
         ],
     )

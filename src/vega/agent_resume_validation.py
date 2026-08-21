@@ -8,6 +8,7 @@ from .agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
     compute_handoff_workspace_digest,
+    load_task_card,
     task_card_content_digest,
 )
 from .tracked_workspace import collect_comparison_changed_paths
@@ -87,10 +88,15 @@ def _capture_resume_snapshot(
     *,
     handoff_head_sha: str,
 ) -> ReviewWorkspaceSnapshot:
+    comparison_base = (
+        (capsule.comparison_base_revision or card.handoff_base_revision)
+        if capsule.changed_files
+        else handoff_head_sha
+    )
     try:
         snapshot = capture_review_workspace(
             repo,
-            comparison_base_sha=card.handoff_base_revision,
+            comparison_base_sha=comparison_base,
             comparison_paths=tuple(capsule.changed_files),
         )
     except RuntimeError as exc:
@@ -215,14 +221,22 @@ def _validate_committed_paths(
     handoff_head_sha: str,
 ) -> None:
     assert card.resume_capsule is not None
+    comparison_base = (
+        card.resume_capsule.comparison_base_revision
+        or card.handoff_base_revision
+    )
+    assert comparison_base is not None
     committed_paths = set(
         collect_comparison_changed_paths(
             repo,
-            card.handoff_base_revision,
+            comparison_base,
             comparison_head_sha=handoff_head_sha,
         )
     )
-    expected_paths = {*card.resume_capsule.changed_files, relative_task}
+    expected_paths = {
+        *card.resume_capsule.changed_files,
+        *_task_card_chain_paths(repo, card, relative_task),
+    }
     if committed_paths == expected_paths:
         return
     details = []
@@ -236,3 +250,31 @@ def _validate_committed_paths(
         "Handoff 提交必须只包含 Resume Capsule 文件与当前 Task Card；"
         + "；".join(details)
     )
+
+
+def _task_card_chain_paths(
+    repo: Path,
+    card: AgentTaskCard,
+    relative_task: str,
+) -> set[str]:
+    paths = {relative_task}
+    seen = {relative_task}
+    current = card
+    while current.previous_task_card is not None:
+        previous = current.previous_task_card
+        if previous in seen:
+            raise ValueError("Task Card 交接链存在循环引用")
+        seen.add(previous)
+        try:
+            previous_card = load_task_card(repo / previous)
+        except (OSError, ValueError) as exc:
+            raise ValueError("Task Card 交接链中的旧卡无法验证") from exc
+        if (
+            previous_card.task_id != card.task_id
+            or previous_card.branch != card.branch
+            or previous_card.handoff_sequence >= current.handoff_sequence
+        ):
+            raise ValueError("Task Card 交接链身份或 sequence 不一致")
+        paths.add(previous)
+        current = previous_card
+    return paths
