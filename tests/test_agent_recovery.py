@@ -601,7 +601,8 @@ def test_corrupt_state_and_unknown_schema_write_diagnostic_without_overwrite(
         )
         assert report["status"] == "blocked"
         assert report["state_preserved"] is True
-        assert report["workspace"]["captured"] is True
+        assert report["workspace"]["captured"] is False
+        assert "无法共同验证" in report["workspace"]["issue"]
 
 
 def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> None:

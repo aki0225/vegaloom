@@ -8,6 +8,7 @@ from .agent_run import AgentRun
 from .agent_persistence import (
     append_agent_trace,
     load_agent_checkpoint,
+    load_agent_state,
     read_agent_trace,
     save_agent_state,
 )
@@ -15,7 +16,11 @@ from .agent_recovery_request import AgentRecoveryRequest
 from .redaction import write_redacted_json
 from .agent_run_status import latest_dispatch_binding
 from .agent_runtime_logic import update_state
-from .agent_runtime_support import write_checkpoint, write_status_card
+from .agent_runtime_support import (
+    validate_run_repository_binding,
+    write_checkpoint,
+    write_status_card,
+)
 from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
 
 
@@ -206,21 +211,23 @@ def write_load_failure_report(
         "changed_files": [],
     }
     try:
+        state = load_agent_state(run_dir / "agent-state.json")
         metadata = json.loads(
             (run_dir / "agent-run.json").read_text(encoding="utf-8")
         )
-        if not isinstance(metadata, dict) or not isinstance(
-            metadata.get("repo_path"), str
-        ):
-            raise ValueError("agent-run.json 缺少 repo binding")
-        snapshot = capture_review_workspace(Path(metadata["repo_path"]))
+        if not isinstance(metadata, dict):
+            raise ValueError("agent-run.json 必须是 JSON object")
+        repo = validate_run_repository_binding(run_dir, state, metadata)
+        snapshot = capture_review_workspace(repo)
         workspace_status = {
             "captured": True,
             "fingerprint": snapshot.fingerprint,
             "changed_files": list(snapshot.changed_files),
         }
     except (OSError, ValueError, json.JSONDecodeError):
-        workspace_status["issue"] = "无法从 agent-run.json 重新采集 Workspace"
+        workspace_status["issue"] = (
+            "Agent State 与 repo binding 无法共同验证，未重新采集 Workspace"
+        )
     write_redacted_json(
         run_dir / "agent-recovery-report.json",
         {

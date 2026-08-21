@@ -13,6 +13,7 @@ from vega.agent_task_card import (
     ResumeCapsule,
     TaskCardError,
     discover_handoff_task_cards,
+    discover_local_handoff_task_cards,
     parse_task_card,
     render_task_card,
     save_task_card,
@@ -31,6 +32,13 @@ def test_task_card_round_trip_preserves_resume_capsule() -> None:
     assert restored == card
     assert restored.resume_capsule is not None
     assert restored.resume_capsule.gate_evidence == []
+    rendered = render_task_card(card)
+    assert "## 目标与非目标" in rendered
+    assert "## 最近交接" in rendered
+    assert "## Goal and Non-goals" not in rendered
+    assert "W1 [进行中]：" in rendered
+    assert "状态：可交接" in rendered
+    assert "外部副作用：无" in rendered
 
 
 def test_handoff_ready_requires_stopped_writer_and_explained_workspace() -> None:
@@ -68,6 +76,40 @@ def test_discovery_only_returns_current_branch_handoff(tmp_path: Path) -> None:
     _git(tmp_path, "commit", "-m", "测试：加入交接卡片")
 
     matches = discover_handoff_task_cards(tmp_path)
+
+    assert [path.name for path in matches] == ["current.md"]
+
+
+def test_local_discovery_rejects_malformed_task_card(tmp_path: Path) -> None:
+    task_root = tmp_path / ".vega" / "tasks" / "2026-08"
+    task_root.mkdir(parents=True)
+    (task_root / "broken.md").write_text("不是有效 Task Card\n", encoding="utf-8")
+
+    with pytest.raises(TaskCardError, match="本地 Task Card 无法验证"):
+        discover_local_handoff_task_cards(
+            tmp_path,
+            branch="feature/current",
+        )
+
+
+def test_other_branch_successor_cannot_hide_current_branch_card(
+    tmp_path: Path,
+) -> None:
+    task_root = tmp_path / ".vega" / "tasks" / "2026-08"
+    first_path = task_root / "current.md"
+    save_task_card(first_path, _handoff_card(branch="feature/current"))
+    successor = _handoff_card(branch="feature/other").model_copy(
+        update={
+            "handoff_sequence": 2,
+            "previous_task_card": first_path.relative_to(tmp_path).as_posix(),
+        }
+    )
+    save_task_card(task_root / "other.md", successor)
+
+    matches = discover_local_handoff_task_cards(
+        tmp_path,
+        branch="feature/current",
+    )
 
     assert [path.name for path in matches] == ["current.md"]
 

@@ -283,6 +283,18 @@ def agent_status_lines(payload: dict[str, Any]) -> list[str]:
         f"- Checkpoint：`{payload.get('latest_checkpoint_id') or '尚无'}`",
         f"- 允许动作：`{', '.join(payload.get('allowed_actions') or []) or '无'}`",
     ]
+    if payload.get("integrity_warning"):
+        lines.insert(0, f"- 证据告警：{payload['integrity_warning']}")
+    if payload.get("evidence_health"):
+        lines.append(f"- 证据健康：`{payload['evidence_health']}`")
+    if payload.get("workspace_current") is not None:
+        lines.append(
+            f"- Workspace 与证据一致：`{'是' if payload['workspace_current'] else '否'}`"
+        )
+    if payload.get("commit_recommended") is not None:
+        lines.append(
+            f"- 建议提交：`{'是' if payload['commit_recommended'] else '否'}`"
+        )
     if payload.get("active_child_run"):
         lines.append(f"- active child：`{payload['active_child_run']}`")
     if payload.get("live_child_stage"):

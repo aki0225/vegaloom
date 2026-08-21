@@ -4,11 +4,13 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from typer.testing import CliRunner
 
 from vega import agent_runtime as agent_runtime_module
+from vega import agent_repository_guard as agent_repository_guard_module
 from vega import agent_runtime_support as agent_runtime_support_module
 from vega import agent_status_card as agent_status_card_module
 from vega.agent_contract import (
@@ -34,7 +36,9 @@ from vega.agent_task_card import (
 )
 from vega.cli_entrypoint import app
 from vega.comparison_binding import require_comparison_binding_from_mapping
+from vega.models import LoopAutomationState
 from vega.progress import RunProgressLog
+from vega.run_status import latest_run_dir, run_status_payload
 
 
 _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
@@ -91,6 +95,211 @@ def test_comparison_paths_require_comparison_base() -> None:
         )
 
 
+def test_agent_run_rejects_repo_binding_redirect(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    other_repo = _repo(tmp_path / "other-repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    metadata_path = run.run_dir / "agent-run.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["repo_path"] = str(other_repo)
+    metadata["base_revision"] = _head(other_repo)
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    with pytest.raises(ValueError, match="指向不同仓库"):
+        runtime.approve(run.run_dir.name)
+
+    assert not (run.run_dir / "checkpoints").exists()
+
+
+def test_repository_writer_claim_blocks_second_agent_run(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    first = runtime.start(
+        repo,
+        goal="修复第一个问题",
+        plan=_single_item_plan(
+            task_id="task-first-writer",
+            user_goal="修复第一个问题",
+        ),
+    )
+    second = runtime.start(
+        repo,
+        goal="修复第二个问题",
+        plan=_single_item_plan(
+            task_id="task-second-writer",
+            user_goal="修复第二个问题",
+        ),
+    )
+    first = runtime.approve(first.run_dir.name)
+    second = runtime.approve(second.run_dir.name)
+    SupervisorAgentWorker(workspace).bind(
+        first.run_dir.name,
+        child_run="attempt-first",
+        operation_id="operation-first",
+    )
+
+    with pytest.raises(ValueError, match="已由另一个 Agent Writer 占用"):
+        SupervisorAgentWorker(workspace).bind(
+            second.run_dir.name,
+            child_run="attempt-second",
+            operation_id="operation-second",
+        )
+
+    second_state = load_agent_state(second.run_dir / "agent-state.json")
+    assert second_state.phase == "ready"
+    assert second_state.active_child_run is None
+
+
+def test_plan_external_side_effects_cannot_be_downgraded_by_observation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    plan = _single_item_plan(
+        user_goal="验证副作用约束",
+        external_side_effects="unknown",
+    )
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    run = runtime.approve(run.run_dir.name)
+    run = _started_worker(
+        workspace,
+        run.run_dir.name,
+        child_run="attempt-side-effects",
+        operation_id="operation-side-effects",
+    )
+
+    result = runtime.observe_fake_worker(
+        run.run_dir.name,
+        AgentObservation(
+            observation_id="obs-side-effects",
+            work_item_id="W1",
+            child_run="attempt-side-effects",
+            operation_id="operation-side-effects",
+            machine_summary="Adapter 错误地把未知副作用报告为 none",
+            workspace_fingerprint="0" * 64,
+            operation_started=True,
+            external_side_effects="none",
+            verification="failed",
+            repairable_in_scope=True,
+        ),
+    )
+    observation = json.loads(
+        (result.run_dir / "observations" / "obs-side-effects.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert result.plan.work_items[0].external_side_effects == "unknown"
+    assert observation["external_side_effects"] == "unknown"
+    assert result.state.phase == "needs_human"
+    assert result.state.allowed_actions == ["human"]
+
+
+def test_releasing_writer_claim_is_reconciled_after_unlink_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    first = runtime.start(
+        repo,
+        goal="验证 Writer claim 释放恢复",
+        plan=_single_item_plan(
+            task_id="task-release-first",
+            user_goal="验证 Writer claim 释放恢复",
+        ),
+    )
+    first = runtime.approve(first.run_dir.name)
+    first = _started_worker(
+        workspace,
+        first.run_dir.name,
+        child_run="attempt-release-first",
+        operation_id="operation-release-first",
+    )
+    original_unlink = agent_repository_guard_module._unlink_regular_file
+
+    def fail_writer_claim_unlink(
+        path: Path,
+        label: str,
+        *,
+        expected_identity: tuple[int, int] | None = None,
+    ) -> None:
+        del path, expected_identity
+        if label == "Writer claim":
+            raise agent_repository_guard_module.AgentRepositoryGuardError(
+                "simulated Writer claim release failure"
+            )
+        raise AssertionError(f"unexpected unlink label: {label}")
+
+    monkeypatch.setattr(
+        agent_repository_guard_module,
+        "_unlink_regular_file",
+        fail_writer_claim_unlink,
+    )
+    with pytest.raises(ValueError, match="simulated Writer claim release failure"):
+        runtime.observe_fake_worker(
+            first.run_dir.name,
+            AgentObservation(
+                observation_id="obs-release-first",
+                work_item_id="W1",
+                child_run="attempt-release-first",
+                operation_id="operation-release-first",
+                machine_summary="Worker 已终止，等待人工处理",
+                workspace_fingerprint="0" * 64,
+                operation_started=True,
+                verification="failed",
+            ),
+        )
+    monkeypatch.setattr(
+        agent_repository_guard_module,
+        "_unlink_regular_file",
+        original_unlink,
+    )
+
+    first_state = load_agent_state(first.run_dir / "agent-state.json")
+    assert first_state.active_child_run is None
+    assert first_state.active_operation_id is None
+
+    second = runtime.start(
+        repo,
+        goal="启动后续任务",
+        plan=_single_item_plan(
+            task_id="task-release-second",
+            user_goal="启动后续任务",
+        ),
+    )
+    second = runtime.approve(second.run_dir.name)
+    rebound = _started_worker(
+        workspace,
+        second.run_dir.name,
+        child_run="attempt-release-second",
+        operation_id="operation-release-second",
+    )
+
+    assert rebound.state.phase == "acting"
+    assert rebound.state.active_operation_id == "operation-release-second"
+
+
 def test_generic_status_latest_and_watch_recognize_agent_parent_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -107,6 +316,10 @@ def test_generic_status_latest_and_watch_recognize_agent_parent_run(
         app,
         ["status", "--run", run.run_dir.name, "--json"],
     )
+    agent_status = CliRunner().invoke(
+        app,
+        ["agent", "status", "--run", run.run_dir.name, "--json"],
+    )
     latest = CliRunner().invoke(app, ["latest", "--kind", "agent", "--json"])
     watch = CliRunner().invoke(
         app,
@@ -114,9 +327,11 @@ def test_generic_status_latest_and_watch_recognize_agent_parent_run(
     )
 
     assert status.exit_code == 0, status.output
+    assert agent_status.exit_code == 0, agent_status.output
     assert latest.exit_code == 0, latest.output
     assert watch.exit_code == 0, watch.output
     status_payload = json.loads(status.output)
+    agent_status_payload = json.loads(agent_status.output)
     latest_payload = json.loads(latest.output)
     assert status_payload["kind"] == "agent"
     assert status_payload["status"] == "paused"
@@ -124,6 +339,7 @@ def test_generic_status_latest_and_watch_recognize_agent_parent_run(
     assert status_payload["agent_phase"] == "awaiting_approval"
     assert status_payload["active_child_run"] is None
     assert status_payload["last_child_run"] is None
+    assert agent_status_payload == status_payload
     assert latest_payload["run_id"] == run.run_dir.name
     assert f"run={run.run_dir.name} status=paused step=awaiting_approval" in (
         watch.output
@@ -198,10 +414,52 @@ def test_generic_status_retains_latest_child_after_binding_is_cleared(
     latest_payload = json.loads(latest.output)
     assert status_payload["active_child_run"] is None
     assert status_payload["last_child_run"] == child_run
+    assert status_payload["decision_count"] == 1
+    assert status_payload["latest_decisions"][0]["selected_action"] == "finalize"
     assert latest_payload["active_child_run"] is None
     assert latest_payload["last_child_run"] == child_run
     assert loaded["brief_run"] == child_run
     assert f"child={child_run}" in watch.output
+
+
+def test_latest_keeps_agent_parent_when_trace_is_corrupt(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    approved = runtime.approve(run.run_dir.name)
+    child_run = "20260820-120000-corrupt-trace-child"
+    bound = SupervisorAgentWorker(workspace).bind(
+        approved.run_dir.name,
+        child_run=child_run,
+        operation_id="operation-corrupt-trace",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir()
+    LoopAutomationState(
+        run_id=child_run,
+        task_mode="bug",
+        automation_mode="assist",
+        repo_path=str(repo),
+        input_source="测试",
+        status="running",
+        current_step="worker",
+    ).save(child_dir / "state.json")
+    (bound.run_dir / "trace.jsonl").write_text(
+        '{"event":"broken"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    latest = latest_run_dir(workspace)
+
+    assert latest is not None
+    assert latest.name == bound.run_dir.name
+    with pytest.raises(ValueError, match="trace.jsonl"):
+        run_status_payload(workspace, bound.run_dir.name)
 
 
 def test_agent_status_rejects_active_operation_trace_mismatch(
@@ -846,6 +1104,7 @@ def test_observe_artifact_failure_keeps_plan_and_state_unpublished(
                 objective="完成当前修改",
                 allowed_paths=["one.txt"],
                 verification=["检查第一项"],
+                external_side_effects="none",
             )
         ],
     )
@@ -1354,6 +1613,7 @@ def _single_item_plan(
     *,
     task_id: str = "task-single",
     user_goal: str = "修复问题",
+    external_side_effects: Literal["none", "known", "unknown"] = "none",
 ) -> AgentPlan:
     return AgentPlan(
         task_id=task_id,
@@ -1365,6 +1625,7 @@ def _single_item_plan(
                 objective="完成最小修复",
                 allowed_paths=["src/example.py"],
                 verification=["运行定向测试"],
+                external_side_effects=external_side_effects,
             )
         ],
     )

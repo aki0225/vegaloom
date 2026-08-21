@@ -73,6 +73,7 @@ class PreparedCodexAttempt:
     task_brief: str
     runner: Runner
     verification_commands: tuple[str, ...]
+    external_side_effects: Literal["none", "known", "unknown"]
     plan_scope_baseline: PlanScopeBaseline
     comparison_base_sha: str | None = None
     comparison_paths: tuple[str, ...] = ()
@@ -300,6 +301,7 @@ def observation_from_child(
     finish_summary: dict[str, object],
     *,
     evidence_refs: list[str],
+    external_side_effects: Literal["none", "known", "unknown"],
 ) -> AgentObservation:
     latest = child_state.iterations[-1] if child_state.iterations else None
     finish_status = finish_summary.get("finish_status")
@@ -339,7 +341,7 @@ def observation_from_child(
         authority="machine_reconcile",
         operation_started=True,
         workspace_explained=True,
-        external_side_effects="none",
+        external_side_effects=external_side_effects,
         repairable_in_scope=repairable,
         verification=verification,
         risk=risk,

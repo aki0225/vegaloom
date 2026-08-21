@@ -74,9 +74,15 @@ def compile_task_brief(
         ("禁止范围", work_item.forbidden_paths or ["未声明"]),
         ("成功条件", plan.success_conditions or ["未声明"]),
         ("验证要求", work_item.verification or ["未声明"]),
-        ("风险提示", work_item.risk_notes or ["无"]),
-        ("已确认事实", _compact_lines(confirmed_facts or plan.observed_facts)),
-        ("失败尝试", _compact_lines(failed_attempts)),
+        (
+            "风险提示",
+            [
+                f"外部副作用声明：{work_item.external_side_effects}",
+                *(work_item.risk_notes or ["无"]),
+            ],
+        ),
+        ("已确认事实", _complete_lines(confirmed_facts or plan.observed_facts)),
+        ("失败尝试", _complete_lines(failed_attempts)),
         ("门禁状态", _render_gate_summary(gate_summary)),
         ("当前现场", _render_checkpoint(checkpoint)),
         ("证据引用", list(normalized_refs) or ["无"]),
@@ -137,14 +143,13 @@ def _normalize_artifact_ref(value: str) -> str:
     return path.as_posix()
 
 
-def _compact_lines(values: Sequence[str], *, max_items: int = 12) -> list[str]:
-    normalized = [value.strip() for value in values if value.strip()]
+def _complete_lines(values: Sequence[str]) -> list[str]:
+    normalized = list(
+        dict.fromkeys(value.strip() for value in values if value.strip())
+    )
     if not normalized:
         return ["无"]
-    if len(normalized) <= max_items:
-        return normalized
-    omitted = len(normalized) - max_items
-    return [*normalized[:max_items], f"其余 {omitted} 项请按 Artifact 引用读取"]
+    return normalized
 
 
 def _render_gate_summary(gate_summary: Mapping[str, str] | None) -> list[str]:
@@ -159,6 +164,7 @@ def _render_checkpoint(checkpoint: AgentCheckpoint | None) -> list[str]:
     return [
         f"Checkpoint: {checkpoint.checkpoint_id}",
         f"现场状态: {checkpoint.status}",
+        f"外部副作用: {checkpoint.external_side_effects}",
         f"Workspace fingerprint: {checkpoint.workspace_fingerprint}",
         f"changed files: {json.dumps(checkpoint.changed_files, ensure_ascii=False)}",
     ]

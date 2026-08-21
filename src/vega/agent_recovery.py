@@ -15,6 +15,10 @@ from .agent_persistence import (
     append_agent_trace,
     save_agent_state,
 )
+from .agent_repository_guard import (
+    mark_writer_claim_releasing,
+    release_writer_claim,
+)
 from .agent_recovery_request import AgentRecoveryRequest
 from .agent_recovery_support import (
     agent_trace_issue,
@@ -30,6 +34,7 @@ from .agent_recovery_support import (
 from .agent_run import AgentRun
 from .agent_runtime_logic import update_state
 from .agent_runtime_support import (
+    bound_repo,
     capture_bound_workspace,
     load_agent_bundle,
     write_checkpoint,
@@ -218,6 +223,13 @@ class SupervisorAgentRecovery:
             latest_checkpoint_id=checkpoint.checkpoint_id,
             state_version=next_state.state_version + 1,
         )
+        assert state.active_operation_id is not None
+        repo = bound_repo(run_dir)
+        mark_writer_claim_releasing(
+            repo,
+            run_id=state.run_id,
+            operation_id=state.active_operation_id,
+        )
         save_agent_state(run_dir / "agent-state.json", next_state)
         append_agent_trace(
             run_dir / "trace.jsonl",
@@ -237,6 +249,11 @@ class SupervisorAgentRecovery:
             observation=observation,
             checkpoint=checkpoint,
             next_step=next_step,
+        )
+        release_writer_claim(
+            repo,
+            run_id=state.run_id,
+            operation_id=state.active_operation_id,
         )
         return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
 

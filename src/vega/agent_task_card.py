@@ -63,6 +63,7 @@ class ResumeCapsule(StrictAgentModel):
     risk_notes: list[NonEmptyText] = Field(default_factory=list)
     human_checks: list[NonEmptyText] = Field(default_factory=list)
     changed_files: list[RelativePathText] = Field(default_factory=list)
+    comparison_base_revision: NonEmptyText | None = None
     workspace_digest: Sha256Text
     gate_evidence: list[HistoricalGateEvidence] = Field(default_factory=list)
     external_side_effects: Literal["none", "known", "unknown"] = "none"
@@ -76,6 +77,13 @@ class ResumeCapsule(StrictAgentModel):
     @classmethod
     def validate_paths(cls, values: list[str]) -> list[str]:
         return _normalize_relative_paths(values)
+
+    @field_validator("comparison_base_revision")
+    @classmethod
+    def validate_comparison_revision(cls, value: str | None) -> str | None:
+        if value is not None and not _REVISION_PATTERN.fullmatch(value):
+            raise ValueError("Resume Capsule comparison revision 必须是完整 Git OID")
+        return value
 
     @model_validator(mode="after")
     def validate_actions(self) -> ResumeCapsule:
@@ -99,6 +107,7 @@ class AgentTaskCard(StrictAgentModel):
     ] = "planning"
     branch: NonEmptyText
     base_revision: NonEmptyText
+    previous_task_card: RelativePathText | None = None
     plan: AgentPlan
     current_work_item: NonEmptyText | None = None
     handoff_sequence: int = Field(default=0, ge=0)
@@ -133,6 +142,16 @@ class AgentTaskCard(StrictAgentModel):
         if value is not None and not _REVISION_PATTERN.fullmatch(value):
             raise ValueError("Git revision 必须是 40 或 64 位小写十六进制摘要")
         return value
+
+    @field_validator("previous_task_card")
+    @classmethod
+    def validate_previous_task_card(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = _normalize_relative_paths([value])[0]
+        if not normalized.startswith(".vega/tasks/") or not normalized.endswith(".md"):
+            raise ValueError("previous_task_card 必须指向 .vega/tasks 下的 Markdown")
+        return normalized
 
     @model_validator(mode="after")
     def validate_bindings(self) -> AgentTaskCard:
@@ -183,12 +202,14 @@ def _validate_active_handoff(card: AgentTaskCard) -> None:
     if card.handoff_status == "handoff_ready" and (
         not card.resume_capsule.writer_stopped
         or not card.resume_capsule.workspace_explained
-        or card.resume_capsule.external_side_effects == "unknown"
+        or card.resume_capsule.external_side_effects != "none"
     ):
-        raise ValueError("handoff_ready 必须证明 Writer 已停止、现场可解释且副作用已知")
+        raise ValueError("handoff_ready 必须证明 Writer 已停止、现场可解释且无外部副作用")
 
 
 def render_task_card(card: AgentTaskCard) -> str:
+    from .agent_task_card_render import render_task_card_body
+
     safe_payload = redact_value(card.model_dump(mode="json"))
     assert_portable_task_card_payload(safe_payload)
     safe_card = AgentTaskCard.model_validate(safe_payload)
@@ -201,6 +222,7 @@ def render_task_card(card: AgentTaskCard) -> str:
         "status": safe_card.status,
         "branch": safe_card.branch,
         "base_revision": safe_card.base_revision,
+        "previous_task_card": safe_card.previous_task_card,
         "goal_revision": safe_card.plan.goal_revision,
         "plan_revision": safe_card.plan.plan_revision,
         "approved_plan_digest": safe_card.plan.approved_digest,
@@ -218,17 +240,7 @@ def render_task_card(card: AgentTaskCard) -> str:
         sort_keys=False,
         default_flow_style=False,
     ).rstrip()
-    sections = [
-        ("Goal and Non-goals", _goal_lines(safe_card)),
-        ("Success Conditions", safe_card.plan.success_conditions),
-        ("Observed Facts and Hypotheses", _fact_lines(safe_card)),
-        ("Approved Plan", _plan_lines(safe_card)),
-        ("Progress and Failed Attempts", _progress_lines(safe_card)),
-        ("Risks and Verification", _risk_lines(safe_card)),
-        ("Last Handoff", _handoff_lines(safe_card)),
-        ("Next Step", _next_step_lines(safe_card)),
-    ]
-    body = _render_sections(sections)
+    body = render_task_card_body(safe_card)
     machine_state = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return (
         f"---\n{yaml_text}\n---\n\n"
@@ -254,6 +266,7 @@ def parse_task_card(content: str) -> AgentTaskCard:
         "status": card.status,
         "branch": card.branch,
         "base_revision": card.base_revision,
+        "previous_task_card": card.previous_task_card,
         "goal_revision": card.plan.goal_revision,
         "plan_revision": card.plan.plan_revision,
         "approved_plan_digest": card.plan.approved_digest,
@@ -316,20 +329,77 @@ def discover_handoff_task_cards(repo: Path, *, branch: str | None = None) -> lis
     )
     if process.returncode != 0:
         raise TaskCardError("无法读取 Git 跟踪的 Task Card")
-    matches: list[Path] = []
+    tracked_cards: dict[str, tuple[Path, AgentTaskCard]] = {}
     for raw_path in process.stdout.split(b"\0"):
         if not raw_path:
             continue
         relative = raw_path.decode("utf-8", errors="strict")
         path = repo_root / PurePosixPath(relative)
         card = load_task_card(path)
+        tracked_cards[relative] = (path, card)
+    return _active_handoff_paths(tracked_cards, current_branch)
+
+
+def discover_local_handoff_task_cards(
+    repo: Path,
+    *,
+    branch: str,
+) -> list[Path]:
+    """发现本地 Task Card 链的最新可恢复节点，包括尚未提交的新卡。"""
+
+    repo_root = repo.resolve()
+    task_root = repo_root / ".vega" / "tasks"
+    if not task_root.exists():
+        return []
+    cards: dict[str, tuple[Path, AgentTaskCard]] = {}
+    for path in sorted(task_root.rglob("*.md")):
+        if path.is_symlink():
+            raise TaskCardError("Task Card 目录中不能包含链接文件")
+        try:
+            card = load_task_card(path)
+        except (OSError, ValueError, TaskCardError) as exc:
+            raise TaskCardError(
+                f"本地 Task Card 无法验证：{path.relative_to(repo_root).as_posix()}"
+            ) from exc
+        cards[path.relative_to(repo_root).as_posix()] = (path, card)
+    return _active_handoff_paths(cards, branch)
+
+
+def _active_handoff_paths(
+    cards: dict[str, tuple[Path, AgentTaskCard]],
+    branch: str,
+) -> list[Path]:
+    branch_cards = {
+        relative: (path, card)
+        for relative, (path, card) in cards.items()
+        if card.branch == branch
+    }
+    superseded: set[str] = set()
+    for _, successor in branch_cards.values():
+        previous = successor.previous_task_card
+        if previous is None:
+            continue
+        predecessor_entry = branch_cards.get(previous)
+        if predecessor_entry is None:
+            raise TaskCardError(
+                "Task Card 交接链引用的上一张卡不存在或不属于当前分支"
+            )
+        _, predecessor = predecessor_entry
         if (
-            card.branch == current_branch
+            predecessor.task_id != successor.task_id
+            or predecessor.handoff_sequence >= successor.handoff_sequence
+        ):
+            raise TaskCardError("Task Card 交接链的任务身份或 sequence 不一致")
+        superseded.add(previous)
+    return sorted(
+        path
+        for relative, (path, card) in branch_cards.items()
+        if (
+            relative not in superseded
             and card.status not in _TERMINAL_TASK_STATUSES
             and card.handoff_status != "none"
-        ):
-            matches.append(path)
-    return sorted(matches)
+        )
+    )
 
 
 def task_card_content_digest(content: str) -> str:
@@ -424,77 +494,3 @@ def _normalize_relative_paths(values: list[str]) -> list[str]:
     if len(set(normalized)) != len(normalized):
         raise ValueError("仓库相对路径不能重复")
     return normalized
-
-
-def _render_sections(sections: list[tuple[str, list[str]]]) -> str:
-    output: list[str] = []
-    for title, values in sections:
-        output.extend([f"## {title}", ""])
-        output.extend(f"- {value}" for value in (values or ["无"]))
-        output.append("")
-    return "\n".join(output).rstrip()
-
-
-def _goal_lines(card: AgentTaskCard) -> list[str]:
-    return [
-        f"Goal: {card.plan.user_goal}",
-        *(f"Non-goal: {value}" for value in card.plan.non_goals),
-    ]
-
-
-def _fact_lines(card: AgentTaskCard) -> list[str]:
-    return [
-        *(f"Fact: {value}" for value in card.plan.observed_facts),
-        *(f"Hypothesis: {value}" for value in card.plan.hypotheses),
-    ]
-
-
-def _plan_lines(card: AgentTaskCard) -> list[str]:
-    approval = (
-        f"已批准，digest={card.plan.approved_digest}"
-        if card.plan.approval_is_current()
-        else "尚未批准"
-    )
-    return [
-        f"Plan revision: {card.plan.plan_revision}，{approval}",
-        *(
-            f"{item.work_item_id} [{item.status}]: {item.objective}"
-            for item in card.plan.work_items
-        ),
-    ]
-
-
-def _progress_lines(card: AgentTaskCard) -> list[str]:
-    return [
-        *(f"Progress: {value}" for value in card.progress_notes),
-        *(f"Failed attempt: {value}" for value in card.failed_attempts),
-    ]
-
-
-def _risk_lines(card: AgentTaskCard) -> list[str]:
-    return [
-        *(f"Risk: {value}" for value in card.risk_notes),
-        *(f"Verification: {value}" for value in card.verification_notes),
-    ]
-
-
-def _handoff_lines(card: AgentTaskCard) -> list[str]:
-    if card.resume_capsule is None:
-        return ["尚无跨机器交接"]
-    capsule = card.resume_capsule
-    return [
-        f"Status: {card.handoff_status}",
-        f"Stopped at: {capsule.stopped_at}",
-        f"Workspace digest: {capsule.workspace_digest}",
-        f"Changed files: {', '.join(capsule.changed_files) or '无'}",
-        f"External side effects: {capsule.external_side_effects}",
-    ]
-
-
-def _next_step_lines(card: AgentTaskCard) -> list[str]:
-    if card.resume_capsule is None:
-        return ["等待 Plan 批准或继续当前 Work Item"]
-    lines = [card.resume_capsule.next_step]
-    if card.resume_capsule.recommended_command:
-        lines.append(f"建议命令：`{card.resume_capsule.recommended_command}`")
-    return lines

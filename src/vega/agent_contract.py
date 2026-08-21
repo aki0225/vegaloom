@@ -126,6 +126,8 @@ class AgentWorkItem(StrictAgentModel):
     allowed_paths: list[RelativePathText] = Field(default_factory=list)
     forbidden_paths: list[RelativePathText] = Field(default_factory=list)
     verification: list[NonEmptyText] = Field(default_factory=list)
+    # 这是批准计划对任务与验证命令的显式声明；Vega 不会仅凭命令退出码猜测外部副作用。
+    external_side_effects: Literal["none", "known", "unknown"] = "unknown"
     risk_notes: list[NonEmptyText] = Field(default_factory=list)
     depends_on: list[NonEmptyText] = Field(default_factory=list)
     status: WorkItemStatus = "pending"
@@ -415,6 +417,16 @@ class AgentStatusCard(StrictAgentModel):
     terminal_status: TerminalStatus | None = None
     allowed_actions: list[AgentAction] = Field(default_factory=list)
     next_step: NonEmptyText
+    evidence_health: Literal[
+        "not_applicable",
+        "passed",
+        "failed",
+        "stale",
+        "unverified",
+    ] = "not_applicable"
+    workspace_current: bool | None = None
+    commit_recommended: bool = False
+    integrity_warning: NonEmptyText | None = None
     # 这些字段都是展示层可选信息，旧的调用方不需要补充即可继续构造状态卡。
     plan_risk_notes: list[NonEmptyText] = Field(default_factory=list)
     supervisor_evidence: list[SupervisorEvidenceItem] = Field(default_factory=list)

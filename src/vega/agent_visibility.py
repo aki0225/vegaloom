@@ -64,6 +64,14 @@ def render_agent_status_card(card: AgentStatusCard) -> str:
     lines = [
         "# Vega Agent",
         "",
+        *(
+            [
+                f"> **证据告警**：{card.integrity_warning}",
+                "",
+            ]
+            if card.integrity_warning is not None
+            else []
+        ),
         f"- 运行：`{card.run_id}`",
         f"- 阶段：{_PHASE_LABELS[card.phase]}",
         f"- 任务：{card.task_goal}",
@@ -79,6 +87,16 @@ def render_agent_status_card(card: AgentStatusCard) -> str:
         f"- Verification：{_GATE_LABELS[card.verification]}",
         f"- Risk：{_GATE_LABELS[card.risk]}",
         f"- Reviewer：{_GATE_LABELS[card.review]}",
+        f"- 证据健康：`{card.evidence_health}`",
+        *(
+            [
+                "- Workspace 与证据一致："
+                f"`{'是' if card.workspace_current else '否'}`"
+            ]
+            if card.workspace_current is not None
+            else []
+        ),
+        f"- 建议提交：`{'是' if card.commit_recommended else '否'}`",
         f"- 允许动作：{allowed}",
     ]
     if card.terminal_status is not None:

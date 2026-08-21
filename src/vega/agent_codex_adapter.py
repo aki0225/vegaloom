@@ -171,6 +171,7 @@ class SupervisorAgentCodexAdapter:
             task_brief=task_brief,
             runner=runner,
             verification_commands=tuple(work_item.verification),
+            external_side_effects=work_item.external_side_effects,
             plan_scope_baseline=plan_scope_baseline,
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
@@ -294,9 +295,7 @@ class SupervisorAgentCodexAdapter:
                 worker_record,
                 result,
                 reason=plan_scope_failure(plan_scope),
-                external_side_effects=(
-                    "none" if result.status == "success" else "unknown"
-                ),
+                external_side_effects=prepared.external_side_effects if result.status == "success" else "unknown",
                 plan_contradicted=True,
                 extra_evidence_refs=[plan_scope_ref],
             )
@@ -316,7 +315,7 @@ class SupervisorAgentCodexAdapter:
                     "repair Worker 未产生新的 Workspace 变化；"
                     "不能把上一 attempt 的 Diff 重新记为本次修复证据"
                 ),
-                external_side_effects="none",
+                external_side_effects=prepared.external_side_effects,
                 extra_evidence_refs=[plan_scope_ref],
             )
 
@@ -365,7 +364,7 @@ class SupervisorAgentCodexAdapter:
                 worker_record,
                 result,
                 reason=f"现有 Vega Core 未形成可采用终态：{exc}",
-                external_side_effects="unknown",
+                external_side_effects=prepared.external_side_effects,
                 claim=claim,
                 extra_evidence_refs=[plan_scope_ref],
             )
@@ -395,7 +394,7 @@ class SupervisorAgentCodexAdapter:
                     "现有 Core 执行后，"
                     f"{plan_scope_failure(final_plan_scope)}"
                 ),
-                external_side_effects="none",
+                external_side_effects=prepared.external_side_effects,
                 claim=claim,
                 plan_contradicted=True,
                 extra_evidence_refs=[
@@ -432,6 +431,7 @@ class SupervisorAgentCodexAdapter:
                 final_plan_scope_ref,
                 summary_ref,
             ],
+            external_side_effects=prepared.external_side_effects,
         )
         self._event("Workspace 与现有 Core Artifact 已完成对账")
         routed = self.runtime.observe_machine(run_dir.name, observation)
