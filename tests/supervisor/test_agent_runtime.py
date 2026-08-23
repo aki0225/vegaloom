@@ -21,8 +21,10 @@ from vega.agent_contract import (
 from vega.agent_graph import compile_gate1_graph
 from vega.agent_persistence import (
     append_agent_trace,
+    load_agent_checkpoint,
     load_agent_state,
     read_agent_trace,
+    save_agent_checkpoint,
     save_agent_state,
 )
 from vega.agent_run_status import load_agent_status_state
@@ -349,11 +351,21 @@ def test_generic_status_latest_and_watch_recognize_agent_parent_run(
     assert "agent / 已启动" in watch.output
 
 
-@pytest.mark.parametrize("damage", ["missing", "mismatched"])
-def test_agent_status_degrades_invalid_observation_to_needs_human(
+@pytest.mark.parametrize(
+    ("damage", "expected_health", "warning_term"),
+    [
+        ("missing_observation", "unverified", "Observation"),
+        ("mismatched_observation", "unverified", "Observation"),
+        ("missing_checkpoint", "unverified", "Checkpoint"),
+        ("workspace_drift", "stale", "Workspace"),
+    ],
+)
+def test_agent_status_degrades_invalid_evidence_or_workspace_to_needs_human(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     damage: str,
+    expected_health: str,
+    warning_term: str,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     workspace = tmp_path / "workspace"
@@ -381,15 +393,25 @@ def test_agent_status_degrades_invalid_observation_to_needs_human(
         ),
     )
     observation_path = observed.run_dir / "observations" / "obs-status-damage.json"
-    if damage == "missing":
+    if damage == "missing_observation":
         observation_path.unlink()
-    else:
+    elif damage == "mismatched_observation":
         payload = json.loads(observation_path.read_text(encoding="utf-8"))
         payload["work_item_id"] = "W-other"
         observation_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+    elif damage == "missing_checkpoint":
+        assert observed.state.latest_checkpoint_id is not None
+        checkpoint_path = (
+            observed.run_dir
+            / "checkpoints"
+            / f"{observed.state.latest_checkpoint_id}.json"
+        )
+        checkpoint_path.unlink()
+    else:
+        (repo / "README.md").write_text("workspace drift\n", encoding="utf-8")
 
     status = CliRunner().invoke(
         app,
@@ -407,9 +429,44 @@ def test_agent_status_degrades_invalid_observation_to_needs_human(
     assert payload["agent_phase"] == "needs_human"
     assert payload["status"] == "needs_human"
     assert payload["allowed_actions"] == ["human"]
-    assert payload["evidence_health"] == "unverified"
-    assert "Observation" in payload["integrity_warning"]
-    assert "Observation" in text_status.output
+    assert payload["evidence_health"] == expected_health
+    assert warning_term in payload["integrity_warning"]
+    assert warning_term in text_status.output
+
+
+def test_write_checkpoint_rejects_mismatched_previous_identity(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    approved = runtime.approve(run.run_dir.name)
+    assert approved.state.latest_checkpoint_id is not None
+    checkpoint_path = (
+        approved.run_dir
+        / "checkpoints"
+        / f"{approved.state.latest_checkpoint_id}.json"
+    )
+    previous = load_agent_checkpoint(checkpoint_path)
+    save_agent_checkpoint(
+        checkpoint_path,
+        previous.model_copy(update={"run_id": "different-run"}),
+    )
+    checkpoint_files = sorted((approved.run_dir / "checkpoints").glob("*.json"))
+
+    with pytest.raises(ValueError, match="前序 Checkpoint"):
+        agent_runtime_support_module.write_checkpoint(
+            approved.run_dir,
+            approved.state,
+            agent_runtime_support_module.capture_bound_workspace(approved.run_dir),
+            reason="不应继承错绑历史",
+            status="safe",
+            pending_actions=["next", "human"],
+        )
+
+    assert sorted((approved.run_dir / "checkpoints").glob("*.json")) == checkpoint_files
 
 
 def test_generic_status_retains_latest_child_after_binding_is_cleared(
@@ -1602,10 +1659,12 @@ def test_resume_tracked_task_card_rebuilds_local_run(
         handoff_base_revision=_head(repo),
         handoff_workspace_digest=digest,
         last_handoff_checkpoint="checkpoint-009",
+        failed_attempts=["attempt-top-level"],
         resume_capsule=ResumeCapsule(
             current_work_item="W1",
             stopped_at="写入实现后",
             confirmed_facts=["实现文件已创建"],
+            failed_attempts=["attempt-capsule", "attempt-top-level"],
             changed_files=["src/example.py"],
             workspace_digest=digest,
             writer_stopped=True,
@@ -1666,6 +1725,13 @@ def test_resume_tracked_task_card_rebuilds_local_run(
         )
     )
     assert checkpoint["data"]["changed_files"] == ["src/example.py"]
+    assert checkpoint["data"]["failed_attempts"] == [
+        "attempt-top-level",
+        "attempt-capsule",
+    ]
+    task_brief = (restored.run_dir / "task-brief.md").read_text(encoding="utf-8")
+    assert "attempt-top-level" in task_brief
+    assert "attempt-capsule" in task_brief
     assert "先重新验证当前实现" in (
         restored.run_dir / "status-card.md"
     ).read_text(encoding="utf-8")

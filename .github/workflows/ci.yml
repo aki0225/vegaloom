@@ -20,6 +20,8 @@ jobs:
     name: 静态检查
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      run_experimental: ${{ steps.experimental_scope.outputs.run_experimental }}
     steps:
       - name: 检出源码
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -95,6 +97,48 @@ jobs:
             git show --check --format= HEAD
           fi
 
+      - name: 核对测试职责目录
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          allowed_groups = {"core", "experimental", "security", "supervisor"}
+          frozen_root_test = Path("tests/test_crwp_v1_control.py")
+          invalid = []
+          for path in Path("tests").rglob("test_*.py"):
+              relative = path.relative_to("tests")
+              if len(relative.parts) == 1:
+                  if path != frozen_root_test:
+                      invalid.append(path.as_posix())
+              elif relative.parts[0] not in allowed_groups:
+                  invalid.append(path.as_posix())
+          if invalid:
+              raise SystemExit(f"测试文件未归入职责目录：{sorted(invalid)}")
+          if not frozen_root_test.is_file():
+              raise SystemExit("冻结控制测试路径缺失")
+          print("测试文件均位于已登记职责目录")
+          PY
+
+      - name: 判定是否需要运行实验测试
+        id: experimental_scope
+        shell: bash
+        run: |
+          run_experimental=true
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            run_experimental=false
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                .github/workflows/*|pyproject.toml|tests/conftest.py|src/vega/experimental/*|tests/experimental/*|tests/test_crwp_v1_control.py|eval/*|examples/evidence/*|site/*|scripts/build_showcase_data.py|scripts/dogfood_eval.py|scripts/pilot/*|scripts/rcb01_*|scripts/run_assurance_*)
+                  run_experimental=true
+                  break
+                  ;;
+              esac
+            done < <(git diff --name-only -z --diff-filter=ACMRT "$base_sha..HEAD")
+          fi
+          echo "run_experimental=$run_experimental" >> "$GITHUB_OUTPUT"
+
   tests-py311:
     name: Python 3.11 兼容性
     needs: static
@@ -143,7 +187,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           python -m compileall -q src scripts
-          python -m pytest --collect-only -q tests/core tests/supervisor tests/security
+          python -m pytest --collect-only -q
 
       - name: 主线与发布运行全量测试
         if: github.event_name != 'pull_request'
@@ -218,7 +262,9 @@ jobs:
 
   tests-experimental:
     name: Python 3.12 实验与历史重放
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.static.outputs.run_experimental == 'true'
     needs: static
     runs-on: ubuntu-24.04
     timeout-minutes: 15

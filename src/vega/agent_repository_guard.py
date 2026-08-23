@@ -49,9 +49,9 @@ def acquire_writer_claim(
             except FileExistsError:
                 pass
         owner = _read_claim(path, "Writer")
-        if owner.get("status", "active") == "active" and all(
+        if owner.get("status", "active") in {"active", "releasing"} and all(
             owner.get(key) == payload[key]
-            for key in ("run_id", "task_id", "child_run", "operation_id")
+            for key in ("repository_root", "run_dir", "run_id", "task_id", "child_run", "operation_id")
         ):
             return
         raise AgentRepositoryGuardError(
@@ -468,11 +468,11 @@ def _remove_released_writer_claim(path: Path) -> bool:
     run_dir = Path(raw_run_dir)
     if not run_dir.is_absolute() or run_dir.name != run_id:
         return False
-    try:
-        owner_repo = Path(payload["repository_root"]).resolve(strict=True)  # type: ignore[arg-type]
-    except (KeyError, TypeError, OSError):
+    raw_repository_root = payload.get("repository_root")
+    if not isinstance(raw_repository_root, str) or not Path(raw_repository_root).is_absolute():
         return False
-    if not owner_repo.is_dir() or _writer_claim_path(owner_repo) != path:
+    owner_repo = Path(raw_repository_root).resolve(strict=False)
+    if owner_repo.exists() and (not owner_repo.is_dir() or _writer_claim_path(owner_repo) != path):
         return False
     try:
         state = load_agent_state(run_dir / "agent-state.json")

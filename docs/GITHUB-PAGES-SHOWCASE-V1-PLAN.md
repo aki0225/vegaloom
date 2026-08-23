@@ -1,7 +1,7 @@
 # Vega GitHub Pages 展示站 V1 计划
 
 > 文档类型：历史设计记录。本文保留 V1 冻结范围与验收过程，不是当前页面维护计划；当前页面
-> 与数据合同以 `site/`、`scripts/build_showcase_data.py` 和 `tests/test_showcase_data.py`
+> 与数据合同以 `site/`、`scripts/build_showcase_data.py` 和 `tests/experimental/test_showcase_data.py`
 > 为准。
 >
 > 日期：2026-08-04

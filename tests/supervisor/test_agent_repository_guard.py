@@ -56,7 +56,37 @@ def test_writer_claim_race_does_not_remove_actual_owner(
     assert json.loads(claim_path.read_text(encoding="utf-8")) == owner
 
 
-def test_linked_worktree_can_replace_released_claim_from_original_owner(
+def test_writer_claim_reuse_requires_same_run_directory(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    first_run = tmp_path / "workspace-a" / "runs" / "same-run"
+    copied_run = tmp_path / "workspace-b" / "runs" / "same-run"
+    first_run.mkdir(parents=True)
+    copied_run.mkdir(parents=True)
+    claim = {
+        "task_id": "same-task",
+        "child_run": "same-child",
+        "operation_id": "same-operation",
+    }
+    acquire_writer_claim(repo, run_dir=first_run, **claim)
+    mark_writer_claim_releasing(
+        repo,
+        run_id="same-run",
+        operation_id="same-operation",
+    )
+    acquire_writer_claim(repo, run_dir=first_run, **claim)
+
+    with pytest.raises(AgentRepositoryGuardError, match="same-run"):
+        acquire_writer_claim(repo, run_dir=copied_run, **claim)
+
+    claim_path = agent_repository_guard._prepare_control_dir(repo) / "writer-claim.json"
+    payload = json.loads(claim_path.read_text(encoding="utf-8"))
+    assert payload["run_dir"] == str(first_run.resolve(strict=True))
+    assert payload["status"] == "releasing"
+
+
+def test_repository_can_replace_released_claim_after_owner_worktree_removed(
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
@@ -85,7 +115,7 @@ def test_linked_worktree_can_replace_released_claim_from_original_owner(
     owner_run = tmp_path / "workspace" / "runs" / "owner-run"
     owner_run.mkdir(parents=True)
     acquire_writer_claim(
-        repo,
+        worktree,
         run_dir=owner_run,
         task_id="task-owner",
         child_run="child-owner",
@@ -96,21 +126,27 @@ def test_linked_worktree_can_replace_released_claim_from_original_owner(
         AgentState(
             run_id="owner-run",
             task_id="task-owner",
-            repository_id=repository_scope(repo),
+            repository_id=repository_scope(worktree),
             phase="ready",
             current_work_item="W1",
         ),
     )
     mark_writer_claim_releasing(
-        repo,
+        worktree,
         run_id="owner-run",
         operation_id="operation-owner",
+    )
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", str(worktree)],
+        cwd=repo,
+        check=True,
+        capture_output=True,
     )
     replacement_run = tmp_path / "workspace" / "runs" / "replacement-run"
     replacement_run.mkdir()
 
     acquire_writer_claim(
-        worktree,
+        repo,
         run_dir=replacement_run,
         task_id="task-replacement",
         child_run="child-replacement",
