@@ -832,17 +832,16 @@ def test_agent_status_downgrades_completed_run_after_workspace_drift(
 
 
 @pytest.mark.parametrize(
-    ("tamper", "message"),
+    "tamper",
     [
-        ("missing", "最新 Observation 不存在或无法读取"),
-        ("wrong_id", "最新 Observation 与 Checkpoint 不一致"),
+        "missing",
+        "wrong_id",
     ],
 )
-def test_agent_status_rejects_missing_or_misbound_observation(
+def test_agent_status_degrades_terminal_run_with_invalid_observation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     tamper: str,
-    message: str,
 ) -> None:
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
@@ -862,8 +861,16 @@ def test_agent_status_rejects_missing_or_misbound_observation(
         payload["observation_id"] = "observation-misbound"
         observation_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ValueError, match=message):
-        SupervisorAgentRuntime(workspace).status(result.run_dir.name)
+    status = SupervisorAgentRuntime(workspace).status(result.run_dir.name)
+    payload = run_status_payload(workspace, result.run_dir.name)
+
+    assert payload["recorded_agent_phase"] == "completed"
+    assert payload["agent_phase"] == "needs_human"
+    assert payload["status"] == "needs_human"
+    assert payload["allowed_actions"] == ["human"]
+    assert payload["evidence_health"] == "unverified"
+    assert "Observation" in payload["integrity_warning"]
+    assert "Observation" in status
 
 
 def test_agent_finalize_recovers_after_terminal_publish_interruption(

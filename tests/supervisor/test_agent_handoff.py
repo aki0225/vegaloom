@@ -114,6 +114,21 @@ def test_handoff_records_workspace_drift_as_blocked(tmp_path: Path) -> None:
 
 def test_handoff_round_trip_between_isolated_clones(tmp_path: Path) -> None:
     repo, workspace, run_id = _stopped_run(tmp_path)
+    source_run_dir = workspace / "runs" / run_id
+    source_state = load_agent_state(source_run_dir / "agent-state.json")
+    assert source_state.latest_checkpoint_id is not None
+    source_checkpoint_path = (
+        source_run_dir
+        / "checkpoints"
+        / f"{source_state.latest_checkpoint_id}.json"
+    )
+    source_checkpoint = load_agent_checkpoint(source_checkpoint_path)
+    save_agent_checkpoint(
+        source_checkpoint_path,
+        source_checkpoint.model_copy(
+            update={"failed_attempts": ["attempt-before-handoff"]}
+        ),
+    )
     result = SupervisorAgentRuntime(workspace).handoff(
         run_id,
         reason="同机隔离副本往返验证",
@@ -132,6 +147,16 @@ def test_handoff_round_trip_between_isolated_clones(tmp_path: Path) -> None:
     assert restored.state.phase == "ready"
     assert restored.state.handoff_status == "none"
     assert restored.state.current_work_item == "W1"
+    assert restored.state.latest_checkpoint_id is not None
+    restored_checkpoint = load_agent_checkpoint(
+        restored.run_dir
+        / "checkpoints"
+        / f"{restored.state.latest_checkpoint_id}.json"
+    )
+    assert restored_checkpoint.failed_attempts == ["attempt-before-handoff"]
+    assert "attempt-before-handoff" in (
+        restored.run_dir / "task-brief.md"
+    ).read_text(encoding="utf-8")
     assert "重新对账" in (
         next_workspace / "runs" / restored.run_dir.name / "status-card.md"
     ).read_text(encoding="utf-8")

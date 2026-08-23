@@ -21,6 +21,7 @@ def apply_agent_projection(
     _, agent_state, agent_plan, metadata = load_agent_bundle(workspace, run)
     projection = build_agent_status_payload(run_dir, agent_state, agent_plan)
     state["repo_path"] = metadata["repo_path"]
+    state["persisted_agent_state"] = agent_state.model_dump(mode="json")
     state.update(
         {
             "recorded_agent_phase": projection["recorded_phase"],
@@ -66,6 +67,7 @@ def combined_decisions(
 
 def payload_fields(state: dict[str, Any]) -> dict[str, Any]:
     return {
+        "persisted_agent_state": state.get("persisted_agent_state"),
         "recorded_agent_phase": state.get("recorded_agent_phase"),
         "recorded_terminal_status": state.get("recorded_terminal_status"),
         "verification": state.get("verification"),

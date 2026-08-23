@@ -18,7 +18,7 @@ from scripts.build_showcase_data import (
     validate_payload,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_PATH = REPO_ROOT / "site/data/cases.json"
 INDEX_PATH = REPO_ROOT / "site/index.html"
 APP_PATH = REPO_ROOT / "site/app.js"
@@ -115,11 +115,15 @@ def test_ci_fetches_release_tag_before_jobs_execute_showcase_tests() -> None:
     assert py311_fetch["if"] == "github.event_name != 'pull_request'"
     assert "refs/tags/v0.2.0:refs/tags/v0.2.0" in py311_fetch["run"]
 
-    py312_steps = jobs["tests-py312"]["steps"]
+    experimental_job = jobs["tests-experimental"]
+    assert experimental_job["if"] == (
+        "github.event_name != 'pull_request' || "
+        "needs.static.outputs.run_experimental == 'true'"
+    )
+    py312_steps = experimental_job["steps"]
     py312_fetch = next(
         step for step in py312_steps if step.get("name") == "获取展示站发布证据 Tag"
     )
-    assert py312_fetch["if"] == "matrix.name == 'config-assurance-pilot'"
     assert "refs/tags/v0.2.0:refs/tags/v0.2.0" in py312_fetch["run"]
 
 

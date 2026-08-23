@@ -180,6 +180,9 @@ def resume_agent_task_card(
         state = state_from_task_card(run_id, repo_root, card, snapshot)
         capsule = card.resume_capsule
         changed_files = list(capsule.changed_files) if capsule else []
+        resumed_failed_attempts = list(dict.fromkeys(
+            [*card.failed_attempts, *(capsule.failed_attempts if capsule else [])]
+        ))
         comparison_base = (
             (
                 capsule.comparison_base_revision
@@ -206,9 +209,8 @@ def resume_agent_task_card(
             status="safe" if card.handoff_status == "handoff_ready" else "blocked",
             pending_actions=list(state.allowed_actions),
             evidence_refs=[relative_task],
-            external_side_effects=(
-                capsule.external_side_effects if capsule else "unknown"
-            ),
+            failed_attempts=resumed_failed_attempts,
+            external_side_effects=capsule.external_side_effects if capsule else "unknown",
         )
         state = update_state(
             state,
@@ -229,7 +231,7 @@ def resume_agent_task_card(
             state,
             checkpoint,
             confirmed_facts=confirmed_facts,
-            failed_attempts=capsule.failed_attempts if capsule else [],
+            failed_attempts=resumed_failed_attempts,
             artifact_refs=[relative_task],
         )
         append_agent_trace(
@@ -282,6 +284,19 @@ def write_checkpoint(
         if path.stem.removeprefix("checkpoint-").isdigit()
     ]
     checkpoint_id = f"checkpoint-{max(checkpoint_numbers, default=0) + 1:03d}"
+    previous_failed_attempts = []
+    if state.latest_checkpoint_id is not None:
+        previous_path = run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
+        previous_checkpoint = load_agent_checkpoint(previous_path)
+        if (
+            previous_checkpoint.run_id,
+            previous_checkpoint.checkpoint_id,
+            previous_checkpoint.current_work_item,
+        ) != (state.run_id, state.latest_checkpoint_id, state.current_work_item):
+            raise ValueError("前序 Checkpoint 与当前 Agent State 不一致，拒绝继承失败历史")
+        previous_failed_attempts = previous_checkpoint.failed_attempts
+    new_failed_attempts = failed_attempts or []
+    cumulative_failed_attempts = [*dict.fromkeys(previous_failed_attempts + new_failed_attempts)]
     checkpoint = AgentCheckpoint(
         checkpoint_id=checkpoint_id,
         run_id=state.run_id,
@@ -298,7 +313,7 @@ def write_checkpoint(
         workspace_fingerprint=snapshot.fingerprint,
         changed_files=list(snapshot.changed_files),
         completed_attempts=completed_attempts or [],
-        failed_attempts=failed_attempts or [],
+        failed_attempts=cumulative_failed_attempts,
         pending_actions=pending_actions,
         evidence_refs=evidence_refs or [],
     )
@@ -408,12 +423,8 @@ def write_status_card(
     next_step: str | None = None,
 ) -> None:
     _write_status_card(
-        run_dir,
-        state,
-        plan,
-        observation=observation,
-        checkpoint=checkpoint,
-        next_step=next_step,
+        run_dir, state, plan,
+        observation=observation, checkpoint=checkpoint, next_step=next_step,
     )
 
 
@@ -468,16 +479,10 @@ def state_from_task_card(
     card: AgentTaskCard,
     snapshot: ReviewWorkspaceSnapshot,
 ) -> AgentState:
-    requires_human = (
-        card.handoff_status == "handoff_blocked"
-        or card.status == "needs_human"
-    )
+    requires_human = card.handoff_status == "handoff_blocked" or card.status == "needs_human"
     allowed_actions = (
-        ["human"]
-        if requires_human
-        else list(card.resume_capsule.allowed_actions)
-        if card.resume_capsule
-        else ["human"]
+        ["human"] if requires_human
+        else list(card.resume_capsule.allowed_actions) if card.resume_capsule else ["human"]
     )
     return AgentState(
         run_id=run_id,

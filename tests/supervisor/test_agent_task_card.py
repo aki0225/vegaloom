@@ -41,6 +41,23 @@ def test_task_card_round_trip_preserves_resume_capsule() -> None:
     assert "外部副作用：无" in rendered
 
 
+@pytest.mark.parametrize(
+    ("status", "label"),
+    [("failed", "失败"), ("superseded", "已取代")],
+)
+def test_task_card_renders_all_valid_terminal_work_item_statuses(
+    status: str,
+    label: str,
+) -> None:
+    card = _handoff_card()
+    item = card.plan.work_items[0].model_copy(update={"status": status})
+    plan = card.plan.model_copy(update={"work_items": [item]})
+
+    rendered = render_task_card(card.model_copy(update={"plan": plan}))
+
+    assert f"W1 [{label}]：" in rendered
+
+
 def test_handoff_ready_requires_stopped_writer_and_explained_workspace() -> None:
     payload = _handoff_card().model_dump(mode="json")
     payload["resume_capsule"]["writer_stopped"] = False

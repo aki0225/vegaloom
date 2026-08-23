@@ -1611,7 +1611,7 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
     ready.parent.mkdir(parents=True)
 
     environment = os.environ.copy()
-    src_path = str(Path(__file__).resolve().parents[1] / "src")
+    src_path = str(Path(__file__).resolve().parents[2] / "src")
     environment["PYTHONPATH"] = os.pathsep.join(
         item for item in [src_path, environment.get("PYTHONPATH", "")] if item
     )
@@ -1625,7 +1625,7 @@ def test_owner_crash_recovery_preserves_evidence_and_continues(
             str(ready),
             str(release),
         ],
-        cwd=Path(__file__).resolve().parents[1],
+        cwd=Path(__file__).resolve().parents[2],
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

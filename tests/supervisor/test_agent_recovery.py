@@ -11,6 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from vega import agent_recovery as agent_recovery_module
+from vega import agent_repository_guard as agent_repository_guard_module
 from vega import agent_side_effect_adjudication as agent_adjudication_module
 from vega import agent_worker as agent_worker_module
 from vega.agent_contract import AgentObservation, AgentPlan, AgentWorkItem
@@ -164,7 +165,7 @@ def test_dispatch_without_execution_evidence_keeps_original_writer(
 def test_legacy_unconfirmed_operation_keeps_original_writer(
     tmp_path: Path,
 ) -> None:
-    _, workspace, run_id = _approved_run(tmp_path)
+    repo, workspace, run_id = _approved_run(tmp_path)
     worker = SupervisorAgentWorker(workspace)
     worker.bind(
         run_id,
@@ -177,6 +178,11 @@ def test_legacy_unconfirmed_operation_keeps_original_writer(
         update={"operation_started": False}
     )
     save_agent_state(state_path, legacy_state)
+    claim_path = (
+        agent_repository_guard_module._prepare_control_dir(repo)
+        / "writer-claim.json"
+    )
+    claim_path.unlink()
 
     recovered = SupervisorAgentRecovery(workspace).recover(
         run_id,
@@ -189,6 +195,7 @@ def test_legacy_unconfirmed_operation_keeps_original_writer(
     assert recovered.state.phase == "needs_human"
     assert recovered.state.active_child_run == "attempt-legacy"
     assert recovered.state.active_operation_id == "operation-legacy"
+    assert claim_path.is_file()
     checkpoint = _latest_checkpoint(run_dir)
     assert checkpoint.status == "blocked"
     assert "不能证明 operation 未启动" in checkpoint.reason
@@ -198,6 +205,12 @@ def test_legacy_unconfirmed_operation_keeps_original_writer(
 
 def test_partial_diff_after_worker_loss_requires_human(tmp_path: Path) -> None:
     repo, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    previous = _latest_checkpoint(run_dir)
+    save_agent_checkpoint(
+        run_dir / "checkpoints" / f"{previous.checkpoint_id}.json",
+        previous.model_copy(update={"failed_attempts": ["attempt-earlier"]}),
+    )
     worker = SupervisorAgentWorker(workspace)
     worker.bind(
         run_id,
@@ -205,7 +218,7 @@ def test_partial_diff_after_worker_loss_requires_human(tmp_path: Path) -> None:
         operation_id="operation-partial",
     )
     _write_execution(
-        workspace / "runs" / run_id,
+        run_dir,
         execution_id="operation-partial",
         status="failed",
     )
@@ -224,7 +237,7 @@ def test_partial_diff_after_worker_loss_requires_human(tmp_path: Path) -> None:
     assert recovered.state.phase == "needs_human"
     assert recovered.state.allowed_actions == ["human"]
     assert recovered.state.active_child_run is None
-    assert checkpoint.failed_attempts == ["attempt-partial"]
+    assert checkpoint.failed_attempts == ["attempt-earlier", "attempt-partial"]
     assert checkpoint.operation_started is True
     assert checkpoint.changed_files == ["src/example.py"]
     assert "partial diff" in checkpoint.reason

@@ -58,8 +58,15 @@ def read_status_card(
 ) -> str:
     """按当前 Artifact 重新渲染状态卡，避免重复旧的通过结论。"""
 
-    checkpoint = _load_status_checkpoint(run_dir, state)
-    observation = _load_status_observation(run_dir, state, checkpoint)
+    checkpoint, checkpoint_issue = _load_status_checkpoint_for_display(
+        run_dir,
+        state,
+    )
+    observation, observation_issue = _load_status_observation_for_display(
+        run_dir,
+        state,
+        checkpoint,
+    )
     live_workspace, workspace_issue = _capture_live_workspace(run_dir)
     card = _build_status_card(
         run_dir,
@@ -70,6 +77,8 @@ def read_status_card(
         live_workspace=live_workspace,
         workspace_checked=True,
         workspace_issue=workspace_issue,
+        checkpoint_issue=checkpoint_issue,
+        observation_issue=observation_issue,
         next_step=(
             checkpoint.reason
             if checkpoint is not None and state.phase in {"ready", "needs_human"}
@@ -90,6 +99,8 @@ def _build_status_card(
     live_workspace: ReviewWorkspaceSnapshot | None = None,
     workspace_checked: bool = False,
     workspace_issue: str | None = None,
+    checkpoint_issue: str | None = None,
+    observation_issue: str | None = None,
 ) -> AgentStatusCard:
     current_index = next(
         (
@@ -137,10 +148,12 @@ def _build_status_card(
             and live_workspace.fingerprint == expected_workspace_fingerprint
         )
     )
+    evidence_issue = checkpoint_issue or observation_issue
     evidence_health = _evidence_health(
         supervisor_evidence,
         observation,
         workspace_current=workspace_current,
+        evidence_issue=evidence_issue,
     )
     commit_recommended = bool(
         state.phase == "completed"
@@ -161,16 +174,30 @@ def _build_status_card(
         and state.terminal_status == "ready_to_commit"
         and not commit_recommended
     )
-    effective_phase = "needs_human" if terminal_evidence_invalid else state.phase
+    workspace_blocks_automatic_action = (
+        state.phase in {"ready", "finalizing", "completed"}
+        and (workspace_issue is not None or workspace_current is False)
+    )
+    projection_requires_human = (
+        evidence_issue is not None
+        or terminal_evidence_invalid
+        or workspace_blocks_automatic_action
+    )
+    effective_phase = "needs_human" if projection_requires_human else state.phase
     effective_next_step = (
-        _terminal_integrity_next_step(workspace_current, workspace_issue)
-        if terminal_evidence_invalid
+        _terminal_integrity_next_step(
+            workspace_current,
+            workspace_issue,
+            evidence_issue,
+        )
+        if projection_requires_human
         else next_step or default_next_step(state.phase, current_index)
     )
     integrity_warning = _integrity_warning(
         terminal_evidence_invalid=terminal_evidence_invalid,
         workspace_current=workspace_current,
         workspace_issue=workspace_issue,
+        evidence_issue=evidence_issue,
     )
     return AgentStatusCard(
         run_id=state.run_id,
@@ -206,10 +233,10 @@ def _build_status_card(
         risk=observation.risk if observation else "not_run",
         review=observation.review if observation else "not_run",
         terminal_status=(
-            None if terminal_evidence_invalid else state.terminal_status
+            None if projection_requires_human else state.terminal_status
         ),
         allowed_actions=(
-            ["human"] if terminal_evidence_invalid else list(state.allowed_actions)
+            ["human"] if projection_requires_human else list(state.allowed_actions)
         ),
         next_step=effective_next_step,
         evidence_health=evidence_health,
@@ -228,8 +255,15 @@ def build_agent_status_payload(
 ) -> dict[str, object]:
     """生成文本与 JSON 共用的经验证状态投影。"""
 
-    checkpoint = _load_status_checkpoint(run_dir, state)
-    observation = _load_status_observation(run_dir, state, checkpoint)
+    checkpoint, checkpoint_issue = _load_status_checkpoint_for_display(
+        run_dir,
+        state,
+    )
+    observation, observation_issue = _load_status_observation_for_display(
+        run_dir,
+        state,
+        checkpoint,
+    )
     live_workspace, workspace_issue = _capture_live_workspace(run_dir)
     card = _build_status_card(
         run_dir,
@@ -240,6 +274,8 @@ def build_agent_status_payload(
         live_workspace=live_workspace,
         workspace_checked=True,
         workspace_issue=workspace_issue,
+        checkpoint_issue=checkpoint_issue,
+        observation_issue=observation_issue,
         next_step=(
             checkpoint.reason
             if checkpoint is not None and state.phase in {"ready", "needs_human"}
@@ -263,7 +299,10 @@ def _evidence_health(
     observation: AgentObservation | None,
     *,
     workspace_current: bool | None,
+    evidence_issue: str | None = None,
 ) -> str:
+    if evidence_issue is not None:
+        return "unverified"
     if workspace_current is False:
         return "stale"
     if observation is None:
@@ -289,7 +328,10 @@ def _capture_live_workspace(
 def _terminal_integrity_next_step(
     workspace_current: bool | None,
     workspace_issue: str | None,
+    evidence_issue: str | None = None,
 ) -> str:
+    if evidence_issue is not None:
+        return f"{evidence_issue.rstrip('。')}；不要继续自动执行，先检查对应 Artifact"
     if workspace_issue is not None:
         return "当前 Workspace 无法重新采集；不要提交，先检查仓库绑定和 Git 状态"
     if workspace_current is False:
@@ -302,7 +344,10 @@ def _integrity_warning(
     terminal_evidence_invalid: bool,
     workspace_current: bool | None,
     workspace_issue: str | None,
+    evidence_issue: str | None = None,
 ) -> str | None:
+    if evidence_issue is not None:
+        return evidence_issue
     if workspace_issue is not None:
         return workspace_issue
     if workspace_current is False:
@@ -328,6 +373,30 @@ def _load_status_checkpoint(
     ):
         raise ValueError("最新 Checkpoint 与 Agent State 不一致，拒绝展示状态卡")
     return checkpoint
+
+
+def _load_status_checkpoint_for_display(
+    run_dir: Path,
+    state: AgentState,
+) -> tuple[AgentCheckpoint | None, str | None]:
+    """读取展示用 Checkpoint；损坏证据不应让状态查询崩溃。"""
+
+    if state.latest_checkpoint_id is None:
+        if state.phase in {
+            "ready",
+            "acting",
+            "observing",
+            "needs_human",
+            "finalizing",
+            "completed",
+            "stopped",
+        }:
+            return None, "最近 Checkpoint 缺失。"
+        return None, None
+    try:
+        return _load_status_checkpoint(run_dir, state), None
+    except ValueError:
+        return None, "最近 Checkpoint 缺失、损坏或与 Agent State 绑定不一致。"
 
 
 def _load_status_observation(
@@ -366,6 +435,19 @@ def _load_status_observation(
     ):
         raise ValueError("最新 Observation 与 Checkpoint 不一致，拒绝展示状态卡")
     return observation
+
+
+def _load_status_observation_for_display(
+    run_dir: Path,
+    state: AgentState,
+    checkpoint: AgentCheckpoint | None,
+) -> tuple[AgentObservation | None, str | None]:
+    """读取展示用 Observation；损坏证据只降级展示，不改变权威 State。"""
+
+    try:
+        return _load_status_observation(run_dir, state, checkpoint), None
+    except ValueError:
+        return None, "最近 Observation 缺失、损坏或与 Checkpoint 绑定不一致。"
 
 
 def default_next_step(phase: str, current_index: int) -> str:

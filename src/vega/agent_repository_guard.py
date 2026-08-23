@@ -25,10 +25,7 @@ def acquire_writer_claim(
     child_run: str,
     operation_id: str,
 ) -> None:
-    """在 Git 元数据目录中独占登记当前 Writer。
-
-    该登记只协调同一物理 Git 仓库及其 worktree，不声称覆盖不同机器上的独立 clone。
-    """
+    """在 Git 元数据目录登记 Writer；只协调同一物理仓库及其 worktree。"""
 
     path = _writer_claim_path(repo)
     payload = {
@@ -45,13 +42,18 @@ def acquire_writer_claim(
     try:
         _write_exclusive_json(path, payload)
     except FileExistsError as exc:
-        if _remove_released_writer_claim(repo, path):
+        if _remove_released_writer_claim(path):
             try:
                 _write_exclusive_json(path, payload)
                 return
             except FileExistsError:
                 pass
         owner = _read_claim(path, "Writer")
+        if owner.get("status", "active") in {"active", "releasing"} and all(
+            owner.get(key) == payload[key]
+            for key in ("repository_root", "run_dir", "run_id", "task_id", "child_run", "operation_id")
+        ):
+            return
         raise AgentRepositoryGuardError(
             "当前 Git 仓库已由另一个 Agent Writer 占用："
             f"run={owner.get('run_id', 'unknown')}，"
@@ -445,7 +447,7 @@ def _replace_claim_json(
                 pass
 
 
-def _remove_released_writer_claim(repo: Path, path: Path) -> bool:
+def _remove_released_writer_claim(path: Path) -> bool:
     """只清理已经发布无 active Writer State 的 releasing claim。"""
 
     try:
@@ -466,13 +468,19 @@ def _remove_released_writer_claim(repo: Path, path: Path) -> bool:
     run_dir = Path(raw_run_dir)
     if not run_dir.is_absolute() or run_dir.name != run_id:
         return False
+    raw_repository_root = payload.get("repository_root")
+    if not isinstance(raw_repository_root, str) or not Path(raw_repository_root).is_absolute():
+        return False
+    owner_repo = Path(raw_repository_root).resolve(strict=False)
+    if owner_repo.exists() and (not owner_repo.is_dir() or _writer_claim_path(owner_repo) != path):
+        return False
     try:
         state = load_agent_state(run_dir / "agent-state.json")
     except (OSError, AgentArtifactError):
         return False
     if (
         state.run_id != run_id
-        or state.repository_id != repository_scope(repo)
+        or state.repository_id != repository_scope(owner_repo)
         or state.active_child_run is not None
         or state.active_operation_id is not None
         or state.operation_started
@@ -486,8 +494,6 @@ def _is_link_or_reparse(path: Path) -> bool:
         metadata = path.lstat()
     except OSError:
         return False
-    if stat.S_ISLNK(metadata.st_mode):
-        return True
     attributes = getattr(metadata, "st_file_attributes", 0)
     reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-    return bool(attributes & reparse_flag)
+    return stat.S_ISLNK(metadata.st_mode) or bool(attributes & reparse_flag)
