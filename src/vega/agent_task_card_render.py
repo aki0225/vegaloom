@@ -7,7 +7,9 @@ _WORK_ITEM_STATUS = {
     "pending": "待处理",
     "active": "进行中",
     "completed": "已完成",
+    "failed": "失败",
     "blocked": "受阻",
+    "superseded": "已取代",
 }
 _HANDOFF_STATUS = {
     "none": "尚未交接",

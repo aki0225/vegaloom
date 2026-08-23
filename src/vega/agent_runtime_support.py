@@ -206,9 +206,8 @@ def resume_agent_task_card(
             status="safe" if card.handoff_status == "handoff_ready" else "blocked",
             pending_actions=list(state.allowed_actions),
             evidence_refs=[relative_task],
-            external_side_effects=(
-                capsule.external_side_effects if capsule else "unknown"
-            ),
+            failed_attempts=list(capsule.failed_attempts) if capsule else [],
+            external_side_effects=capsule.external_side_effects if capsule else "unknown",
         )
         state = update_state(
             state,
@@ -282,6 +281,12 @@ def write_checkpoint(
         if path.stem.removeprefix("checkpoint-").isdigit()
     ]
     checkpoint_id = f"checkpoint-{max(checkpoint_numbers, default=0) + 1:03d}"
+    previous_failed_attempts = []
+    if state.latest_checkpoint_id is not None:
+        previous_path = run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
+        previous_failed_attempts = load_agent_checkpoint(previous_path).failed_attempts
+    new_failed_attempts = failed_attempts or []
+    cumulative_failed_attempts = [*dict.fromkeys(previous_failed_attempts + new_failed_attempts)]
     checkpoint = AgentCheckpoint(
         checkpoint_id=checkpoint_id,
         run_id=state.run_id,
@@ -298,7 +303,7 @@ def write_checkpoint(
         workspace_fingerprint=snapshot.fingerprint,
         changed_files=list(snapshot.changed_files),
         completed_attempts=completed_attempts or [],
-        failed_attempts=failed_attempts or [],
+        failed_attempts=cumulative_failed_attempts,
         pending_actions=pending_actions,
         evidence_refs=evidence_refs or [],
     )

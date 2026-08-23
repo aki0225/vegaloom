@@ -16,6 +16,7 @@ from .agent_persistence import (
     save_agent_state,
 )
 from .agent_repository_guard import (
+    acquire_writer_claim,
     mark_writer_claim_releasing,
     release_writer_claim,
 )
@@ -59,6 +60,16 @@ class SupervisorAgentRecovery:
             write_load_failure_report(run_dir, request.reason, exc)
             raise
         require_recovery_request(state, request)
+        assert state.active_child_run is not None
+        assert state.active_operation_id is not None
+        repo = bound_repo(run_dir)
+        acquire_writer_claim(
+            repo,
+            run_dir=run_dir,
+            task_id=state.task_id,
+            child_run=state.active_child_run,
+            operation_id=state.active_operation_id,
+        )
         actual = capture_bound_workspace(run_dir)
         try:
             execution_run_dir = resolve_bound_execution_run_dir(
@@ -224,7 +235,6 @@ class SupervisorAgentRecovery:
             state_version=next_state.state_version + 1,
         )
         assert state.active_operation_id is not None
-        repo = bound_repo(run_dir)
         mark_writer_claim_releasing(
             repo,
             run_id=state.run_id,

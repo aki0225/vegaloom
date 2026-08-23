@@ -59,7 +59,11 @@ def read_status_card(
     """按当前 Artifact 重新渲染状态卡，避免重复旧的通过结论。"""
 
     checkpoint = _load_status_checkpoint(run_dir, state)
-    observation = _load_status_observation(run_dir, state, checkpoint)
+    observation, observation_issue = _load_status_observation_for_display(
+        run_dir,
+        state,
+        checkpoint,
+    )
     live_workspace, workspace_issue = _capture_live_workspace(run_dir)
     card = _build_status_card(
         run_dir,
@@ -70,6 +74,7 @@ def read_status_card(
         live_workspace=live_workspace,
         workspace_checked=True,
         workspace_issue=workspace_issue,
+        observation_issue=observation_issue,
         next_step=(
             checkpoint.reason
             if checkpoint is not None and state.phase in {"ready", "needs_human"}
@@ -90,6 +95,7 @@ def _build_status_card(
     live_workspace: ReviewWorkspaceSnapshot | None = None,
     workspace_checked: bool = False,
     workspace_issue: str | None = None,
+    observation_issue: str | None = None,
 ) -> AgentStatusCard:
     current_index = next(
         (
@@ -141,6 +147,7 @@ def _build_status_card(
         supervisor_evidence,
         observation,
         workspace_current=workspace_current,
+        observation_issue=observation_issue,
     )
     commit_recommended = bool(
         state.phase == "completed"
@@ -161,16 +168,24 @@ def _build_status_card(
         and state.terminal_status == "ready_to_commit"
         and not commit_recommended
     )
-    effective_phase = "needs_human" if terminal_evidence_invalid else state.phase
+    projection_requires_human = (
+        observation_issue is not None or terminal_evidence_invalid
+    )
+    effective_phase = "needs_human" if projection_requires_human else state.phase
     effective_next_step = (
-        _terminal_integrity_next_step(workspace_current, workspace_issue)
-        if terminal_evidence_invalid
+        _terminal_integrity_next_step(
+            workspace_current,
+            workspace_issue,
+            observation_issue,
+        )
+        if projection_requires_human
         else next_step or default_next_step(state.phase, current_index)
     )
     integrity_warning = _integrity_warning(
         terminal_evidence_invalid=terminal_evidence_invalid,
         workspace_current=workspace_current,
         workspace_issue=workspace_issue,
+        observation_issue=observation_issue,
     )
     return AgentStatusCard(
         run_id=state.run_id,
@@ -206,10 +221,10 @@ def _build_status_card(
         risk=observation.risk if observation else "not_run",
         review=observation.review if observation else "not_run",
         terminal_status=(
-            None if terminal_evidence_invalid else state.terminal_status
+            None if projection_requires_human else state.terminal_status
         ),
         allowed_actions=(
-            ["human"] if terminal_evidence_invalid else list(state.allowed_actions)
+            ["human"] if projection_requires_human else list(state.allowed_actions)
         ),
         next_step=effective_next_step,
         evidence_health=evidence_health,
@@ -229,7 +244,11 @@ def build_agent_status_payload(
     """生成文本与 JSON 共用的经验证状态投影。"""
 
     checkpoint = _load_status_checkpoint(run_dir, state)
-    observation = _load_status_observation(run_dir, state, checkpoint)
+    observation, observation_issue = _load_status_observation_for_display(
+        run_dir,
+        state,
+        checkpoint,
+    )
     live_workspace, workspace_issue = _capture_live_workspace(run_dir)
     card = _build_status_card(
         run_dir,
@@ -240,6 +259,7 @@ def build_agent_status_payload(
         live_workspace=live_workspace,
         workspace_checked=True,
         workspace_issue=workspace_issue,
+        observation_issue=observation_issue,
         next_step=(
             checkpoint.reason
             if checkpoint is not None and state.phase in {"ready", "needs_human"}
@@ -263,7 +283,10 @@ def _evidence_health(
     observation: AgentObservation | None,
     *,
     workspace_current: bool | None,
+    observation_issue: str | None = None,
 ) -> str:
+    if observation_issue is not None:
+        return "unverified"
     if workspace_current is False:
         return "stale"
     if observation is None:
@@ -289,7 +312,10 @@ def _capture_live_workspace(
 def _terminal_integrity_next_step(
     workspace_current: bool | None,
     workspace_issue: str | None,
+    observation_issue: str | None = None,
 ) -> str:
+    if observation_issue is not None:
+        return "最近 Observation 无法验证；不要继续自动执行，先检查对应 Artifact 与 Checkpoint"
     if workspace_issue is not None:
         return "当前 Workspace 无法重新采集；不要提交，先检查仓库绑定和 Git 状态"
     if workspace_current is False:
@@ -302,7 +328,10 @@ def _integrity_warning(
     terminal_evidence_invalid: bool,
     workspace_current: bool | None,
     workspace_issue: str | None,
+    observation_issue: str | None = None,
 ) -> str | None:
+    if observation_issue is not None:
+        return observation_issue
     if workspace_issue is not None:
         return workspace_issue
     if workspace_current is False:
@@ -366,6 +395,19 @@ def _load_status_observation(
     ):
         raise ValueError("最新 Observation 与 Checkpoint 不一致，拒绝展示状态卡")
     return observation
+
+
+def _load_status_observation_for_display(
+    run_dir: Path,
+    state: AgentState,
+    checkpoint: AgentCheckpoint | None,
+) -> tuple[AgentObservation | None, str | None]:
+    """读取展示用 Observation；损坏证据只降级展示，不改变权威 State。"""
+
+    try:
+        return _load_status_observation(run_dir, state, checkpoint), None
+    except ValueError:
+        return None, "最近 Observation 缺失、损坏或与 Checkpoint 绑定不一致。"
 
 
 def default_next_step(phase: str, current_index: int) -> str:

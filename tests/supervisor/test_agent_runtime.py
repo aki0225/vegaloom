@@ -340,11 +340,76 @@ def test_generic_status_latest_and_watch_recognize_agent_parent_run(
     assert status_payload["active_child_run"] is None
     assert status_payload["last_child_run"] is None
     assert agent_status_payload == status_payload
+    assert status_payload["persisted_agent_state"]["run_id"] == run.run_dir.name
+    assert status_payload["persisted_agent_state"]["phase"] == "awaiting_approval"
     assert latest_payload["run_id"] == run.run_dir.name
     assert f"run={run.run_dir.name} status=paused step=awaiting_approval" in (
         watch.output
     )
     assert "agent / 已启动" in watch.output
+
+
+@pytest.mark.parametrize("damage", ["missing", "mismatched"])
+def test_agent_status_degrades_invalid_observation_to_needs_human(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    damage: str,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    run = runtime.approve(run.run_dir.name)
+    run = _started_worker(
+        workspace,
+        run.run_dir.name,
+        child_run="attempt-status-damage",
+        operation_id="operation-status-damage",
+    )
+    observed = runtime.observe_fake_worker(
+        run.run_dir.name,
+        AgentObservation(
+            observation_id="obs-status-damage",
+            work_item_id="W1",
+            child_run="attempt-status-damage",
+            operation_id="operation-status-damage",
+            machine_summary="当前问题仍可在批准范围内修复",
+            workspace_fingerprint="0" * 64,
+            repairable_in_scope=True,
+        ),
+    )
+    observation_path = observed.run_dir / "observations" / "obs-status-damage.json"
+    if damage == "missing":
+        observation_path.unlink()
+    else:
+        payload = json.loads(observation_path.read_text(encoding="utf-8"))
+        payload["work_item_id"] = "W-other"
+        observation_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    status = CliRunner().invoke(
+        app,
+        ["status", "--run", observed.run_dir.name, "--json"],
+    )
+    text_status = CliRunner().invoke(
+        app,
+        ["agent", "status", "--run", observed.run_dir.name],
+    )
+
+    assert status.exit_code == 0, status.output
+    assert text_status.exit_code == 0, text_status.output
+    payload = json.loads(status.output)
+    assert payload["recorded_agent_phase"] == "ready"
+    assert payload["agent_phase"] == "needs_human"
+    assert payload["status"] == "needs_human"
+    assert payload["allowed_actions"] == ["human"]
+    assert payload["evidence_health"] == "unverified"
+    assert "Observation" in payload["integrity_warning"]
+    assert "Observation" in text_status.output
 
 
 def test_generic_status_retains_latest_child_after_binding_is_cleared(
