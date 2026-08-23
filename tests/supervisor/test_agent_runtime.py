@@ -1617,21 +1617,82 @@ def test_agent_cli_status_card_and_capabilities(
     capability_payload = json.loads(capabilities.output)
     assert capability_payload["langgraph"] is True
     assert capability_payload["worker"] == "codex-exec"
-    agent_help = CliRunner().invoke(app, ["agent", "--help"])
-    assert agent_help.exit_code == 0
-    assert "run" in agent_help.output
-    assert "finalize" in agent_help.output
-    finalize_help = CliRunner().invoke(app, ["agent", "finalize", "--help"])
-    assert finalize_help.exit_code == 0
-    assert "--run" in _ANSI_ESCAPE_PATTERN.sub("", finalize_help.output)
 
 
-def test_packaged_cli_entrypoint_preserves_core_commands() -> None:
+def test_packaged_cli_help_prioritizes_product_commands() -> None:
     result = CliRunner().invoke(app, ["--help"])
 
     assert result.exit_code == 0, result.output
-    for command in ("do", "loop", "goal", "agent"):
-        assert command in result.output
+    for command in (
+        "do",
+        "loop",
+        "agent",
+        "status",
+        "watch",
+        "latest",
+        "finish",
+        "stop",
+        "recover",
+        "config",
+        "adapters",
+    ):
+        assert _help_lists_command(result.output, command)
+    for command in (
+        "memory",
+        "brief",
+        "decision",
+        "goal",
+        "run",
+        "profile",
+        "reflect",
+        "plan",
+        "review-pack",
+        "review",
+        "gate",
+        "list-loops",
+    ):
+        assert not _help_lists_command(result.output, command)
+
+    hidden_help = CliRunner().invoke(app, ["run", "--help"])
+    assert hidden_help.exit_code == 0, hidden_help.output
+
+
+def test_agent_cli_help_prioritizes_supervisor_commands() -> None:
+    result = CliRunner().invoke(app, ["agent", "--help"])
+
+    assert result.exit_code == 0, result.output
+    for command in (
+        "start",
+        "approve",
+        "plan",
+        "run",
+        "finalize",
+        "recover",
+        "pause",
+        "stop",
+        "checkpoint",
+        "status",
+        "steer",
+        "resume",
+        "capabilities",
+    ):
+        assert _help_lists_command(result.output, command)
+    for command in (
+        "dispatch",
+        "observe",
+        "resume-local",
+        "adjudicate-side-effects",
+    ):
+        assert not _help_lists_command(result.output, command)
+
+    hidden_help = CliRunner().invoke(app, ["agent", "dispatch", "--help"])
+    assert hidden_help.exit_code == 0, hidden_help.output
+
+
+def _help_lists_command(output: str, command: str) -> bool:
+    clean_output = _ANSI_ESCAPE_PATTERN.sub("", output)
+    pattern = rf"(?m)^\s*(?:[│|]\s*)?{re.escape(command)}(?:\s{{2,}}|\s*$)"
+    return re.search(pattern, clean_output) is not None
 
 
 def test_resume_tracked_task_card_rebuilds_local_run(

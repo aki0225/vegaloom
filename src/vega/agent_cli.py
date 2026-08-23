@@ -80,7 +80,7 @@ def agent_plan(
     typer.echo(_runtime().status(result.run_dir.name))
 
 
-@agent_app.command("dispatch")
+@agent_app.command("dispatch", hidden=True)
 def agent_dispatch(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
     child_run: str = typer.Option(..., "--child", help="本次 Worker attempt 身份。"),
@@ -199,7 +199,7 @@ def agent_stop(
     typer.echo(_runtime().status(result.run_dir.name))
 
 
-@agent_app.command("resume-local")
+@agent_app.command("resume-local", hidden=True)
 def agent_resume_local(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
 ) -> None:
@@ -214,7 +214,7 @@ def agent_resume_local(
     typer.echo(_runtime().status(result.run_dir.name))
 
 
-@agent_app.command("adjudicate-side-effects")
+@agent_app.command("adjudicate-side-effects", hidden=True)
 def agent_adjudicate_side_effects(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
     input_path: Path = typer.Option(..., "--input", help="结构化 Recovery Request JSON。"),
@@ -270,7 +270,7 @@ def agent_checkpoint(
         )
 
 
-@agent_app.command("observe")
+@agent_app.command("observe", hidden=True)
 def agent_observe(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
     input_path: Path = typer.Option(..., "--input", help="结构化 Observation JSON。"),

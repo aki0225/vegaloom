@@ -1,5 +1,29 @@
 # Vega 后续演进路线
 
+> 当前更新时间：2026-08-24
+> 当前稳定版本：`v0.2.1`
+> 当前主线：`main@6a95970`，稳定版本后包含五个尚未发布的维护提交
+> 当前 active 计划：[`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md)
+
+## 当前执行快照
+
+Supervisor Agent V1 已随 `v0.2.0` 发布，`v0.2.1` 完成范围与恢复边界维护。稳定版本后的五个
+主线提交继续修复 Worker 可见性、状态与证据展示、单 Writer、恢复事务和测试职责，没有增加
+新的 Runtime、Agent 角色或成功路径。
+
+当前唯一下一步是继续 AI 可维护性治理；第一轮已于 2026-08-24 完成：
+
+1. 当前事实、规则与产品入口（已完成）；
+2. 测试职责与执行成本（下一步）；
+3. 已识别的源码重复和循环依赖。
+
+三轮完成并由最新主线 CI 验证后，直接进入一个真实中等复杂度 Work Item 的 Supervisor Agent
+Dogfood。治理期间不增加多 Work Item、Memory、Provider 平台、多 Reviewer、Web UI 或新 Runtime。
+没有真实使用暴露的重复问题，不追加第四轮基础设施治理。
+
+<details>
+<summary>2026-08-20 之前的阶段摘要</summary>
+
 > 更新时间：2026-08-20
 > 当前稳定基线：`v0.2.1`
 > 发布记录：`v0.2.0` 已使用 annotated Tag 和 GitHub Release 发布
@@ -28,6 +52,8 @@
 > 完成 Git-only fresh clone 恢复、Provider 失败 fail-closed、Reviewer 打回、Plan revision 2、
 > 完整 Core Gate 和人工 PR 合入，判定为 `release-acceptance-pass`。该结果不覆盖历史
 > SAG3B Case；另一台物理机器和长期价值观察不再阻断 v0.2.0，转为发布后的增强证据。
+
+</details>
 
 本文是 Vega 当前路线的统一入口，只回答：
 

@@ -52,19 +52,19 @@ do_app = typer.Typer(help="日常一键研发入口，默认执行 auto loop。"
 adapters_app = typer.Typer(help="生成 Codex / Claude 等工具的轻量接入文件。")
 decision_app = typer.Typer(help="记录和查看本地人工决策。")
 config_app = typer.Typer(help="检查 Vega 项目级配置。")
-app.add_typer(memory_app, name="memory")
-app.add_typer(brief_app, name="brief")
+app.add_typer(memory_app, name="memory", hidden=True)
+app.add_typer(brief_app, name="brief", hidden=True)
 app.add_typer(loop_app, name="loop")
 app.add_typer(do_app, name="do")
 app.add_typer(adapters_app, name="adapters")
-app.add_typer(decision_app, name="decision")
+app.add_typer(decision_app, name="decision", hidden=True)
 app.add_typer(config_app, name="config")
 
 
 def _register_goal_app() -> None:
     from .experimental.goal_cli import goal_app
 
-    app.add_typer(goal_app, name="goal")
+    app.add_typer(goal_app, name="goal", hidden=True)
 
 
 _register_goal_app()
@@ -99,7 +99,7 @@ def main(
     _install_optional_extensions()
 
 
-@app.command()
+@app.command(hidden=True)
 def run(
     loop_name: str = typer.Argument(..., help="Loop 名称，目前主线为 engineering-change。"),
     task: Path = typer.Option(..., "--task", help="任务 Markdown 文件。"),
@@ -131,7 +131,7 @@ def run(
     raise typer.Exit(code=1)
 
 
-@app.command("profile")
+@app.command("profile", hidden=True)
 def profile(repo: Path = typer.Option(..., "--repo", help="目标仓库路径。")) -> None:
     """生成项目画像，识别技术栈、测试命令、入口和项目规则。"""
     repo = require_repo_directory(repo)
@@ -140,7 +140,7 @@ def profile(repo: Path = typer.Option(..., "--repo", help="目标仓库路径。
     exit_if_failed(run_dir)
 
 
-@app.command("reflect")
+@app.command("reflect", hidden=True)
 def reflect(
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
     run: str | None = typer.Option(None, "--run", help="关联的上游 run_id 或 runs/<run_id>。"),
@@ -171,7 +171,7 @@ def reflect(
     typer.echo(f"- 或直接审查：vega review --repo {repo.resolve()} --run {run_dir.name} --runner codex-exec")
 
 
-@app.command("plan")
+@app.command("plan", hidden=True)
 def plan_change(
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
     input_path: Path | None = typer.Option(None, "--input", help="大目标或重构说明文件。"),
@@ -195,7 +195,7 @@ def plan_change(
     typer.echo(render_run_status(Path.cwd(), run_dir.name))
 
 
-@app.command("review-pack")
+@app.command("review-pack", hidden=True)
 def review_pack(
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
     run: str = typer.Option(..., "--run", help="reflect run_id 或 runs/<run_id>。"),
@@ -214,7 +214,7 @@ def review_pack(
     typer.echo(f"- 或手动查看 prompt：{run_dir / 'review-prompt.md'}")
 
 
-@app.command("review")
+@app.command("review", hidden=True)
 def review(
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
     run: str = typer.Option(..., "--run", help="reflect run_id 或 runs/<run_id>。"),
@@ -233,7 +233,7 @@ def review(
     typer.echo(render_run_status(Path.cwd(), run_dir.name))
 
 
-@app.command("gate")
+@app.command("gate", hidden=True)
 def gate(
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
     run: str = typer.Option(..., "--run", help="reflect run_id 或 runs/<run_id>。"),
@@ -326,7 +326,7 @@ def stop(
     typer.echo("- Vega runner 将负责安全停止；本命令不会扫描或 kill 其他进程。")
 
 
-@app.command("list-loops")
+@app.command("list-loops", hidden=True)
 def list_loops() -> None:
     """列出当前 workspace 中可用的 loop。"""
     from .experimental.inspection.loop_spec import list_loop_specs

@@ -12,13 +12,19 @@ Vega 是本地优先的 AI 编码工作流 harness：worker 改代码，reviewer
 
 - `src/vega/` — 核心实现(Python,包名 `vega`)
 - `tests/` — pytest 测试
+- `.github/` — CI、发布与 GitHub Pages 工作流
+- `.vega/` — 可提交的 Agent Task Card；当前任务与历史任务必须明确分开
 - `eval/` — 实验与运行证据(`cases.jsonl` 评测用例、`real-world-runs.md` 真实 Issue 运行记录)
-- `scripts/` — 评测脚本(`dogfood_eval.py`)
+- `scripts/` — 仓库门禁、站点数据、Pilot 和冻结实验脚本
+- `site/` — GitHub Pages 静态站点；案例数据由登记的生成器维护
 - `examples/` — 任务样例
 - `examples/evidence/` — 可公开复核的脱敏运行证据
 - `docs/` — 产品契约、架构、使用闭环等文档
 - `loops/` — 版本化的 LoopSpec/YAML 配置
 - `runs/` — 本地正式运行产物(state/trace/报告)，默认不提交
+- `memory/` — 本地 Memory ledger 与 proposal，默认不提交
+- `.tmp/` — 测试、缓存和可丢弃中间文件，默认不提交
+- `.local-validation/` — 人工验证日志和诊断输出，默认不提交
 
 ## 多代理协作
 
@@ -39,10 +45,11 @@ Vega 是本地优先的 AI 编码工作流 harness：worker 改代码，reviewer
 ## 验证命令(改完代码必须跑)
 
 ```powershell
-python -m compileall src scripts/check_repository_hygiene.py
+python -m compileall -q src scripts
 python scripts/check_repository_hygiene.py --base-ref origin/main
+python scripts/check_architecture_growth.py --base-ref origin/main
 python -m pytest
-ruff check src tests scripts/check_repository_hygiene.py
+ruff check src tests scripts
 git diff --check
 ```
 
@@ -52,6 +59,10 @@ PR CI 在 Python 3.12 执行 Core、Core Heavy、Supervisor 和 Security 四个�
 手工触发时完整执行。Windows 只重复 shell、junction/reparse、进程树和锁专项。
 注意两个已知环境差异:测试断言 CLI 输出时须防 CI 注入的 ANSI 渲染
 (conftest 已有 autouse fixture 清理环境变量),POSIX 进程组探测与 Windows 路径不同——本地绿不等于 CI 绿。
+
+修改文档或规则时至少执行编译、仓库卫生、相关定向测试、Ruff 和 diff check；修改 Core、
+Supervisor、安全边界、CI 或打包时按 `tests/AGENTS.md` 扩大到对应职责分片。只有完整命令明确
+结束并给出计数，才能声明完整验证通过。
 
 ## 公开仓库路径与私密文件卫生
 
