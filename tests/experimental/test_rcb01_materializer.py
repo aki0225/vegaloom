@@ -15,7 +15,7 @@ import pytest
 @pytest.fixture(scope="module")
 def materializer():
     """动态加载实验脚本，避免把 scripts 目录变成运行时 Python 包。"""
-    script = Path(__file__).resolve().parents[1] / "scripts" / "rcb01_materializer.py"
+    script = Path(__file__).resolve().parents[2] / "scripts" / "rcb01_materializer.py"
     spec = importlib.util.spec_from_file_location("rcb01_materializer_under_test", script)
     if spec is None or spec.loader is None:
         raise AssertionError("无法加载 RCB-01 物化器")
@@ -233,7 +233,7 @@ def _write_fake_materialization(
 
 def test_control_manifest_binds_all_five_real_diffs(materializer: Any) -> None:
     """五个预注册案例必须与真实历史 Diff 的字节数、哈希和文件数一致。"""
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     control = materializer.load_control_spec(repo)
     assert list(control.cases) == ["C1", "C2", "C3", "C4", "C5"]
     for case in control.cases.values():
@@ -352,7 +352,7 @@ def test_control_manifest_non_object_fails_closed(
 
 
 def test_verification_commands_are_exactly_bound(materializer: Any) -> None:
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     case = materializer.load_control_spec(repo).cases["C1"]
     payload = _verification_payload(materializer, case)
     assert materializer._validate_verification_payload(case, payload) == payload
@@ -428,7 +428,7 @@ def test_prompt_arms_and_project_context_are_separated_without_local_paths(
     materializer: Any,
 ) -> None:
     """A 组仅使用 Core Pack，B 组只能追加 Appendix，项目上下文不带本机路径。"""
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     control = materializer.load_control_spec(repo)
     case = control.cases["C1"]
     verification = _verification_payload(materializer, case)
@@ -666,7 +666,7 @@ def test_loaded_runtime_sources_must_resolve_inside_current_repo(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     external = tmp_path / "external" / "review_runtime.py"
     external.parent.mkdir(parents=True)
     external.write_text("# 外部伪造 Runtime\n", encoding="utf-8")

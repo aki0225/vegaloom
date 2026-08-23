@@ -526,13 +526,13 @@ def _write_execution(path: Path, lease: ExecutionLease) -> None:
 
 def _start_python(script: str, *arguments: Path) -> subprocess.Popen[str]:
     environment = os.environ.copy()
-    src_path = str(Path(__file__).resolve().parents[1] / "src")
+    src_path = str(Path(__file__).resolve().parents[2] / "src")
     environment["PYTHONPATH"] = os.pathsep.join(
         item for item in [src_path, environment.get("PYTHONPATH", "")] if item
     )
     return subprocess.Popen(
         [sys.executable, "-c", script, *(str(item) for item in arguments)],
-        cwd=Path(__file__).resolve().parents[1],
+        cwd=Path(__file__).resolve().parents[2],
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

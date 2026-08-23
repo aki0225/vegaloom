@@ -7,7 +7,7 @@ from types import ModuleType
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REMOVED_INTERNAL_MODULE_NAMES = (
     "adapter_runtime",
     "assurance",

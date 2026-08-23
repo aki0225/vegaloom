@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 from vega.cli import app
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_ROWS = [
     {"id": 1, "display_name": "Ada", "external_id": "cust-0001"},
     {"id": 2, "display_name": "Lin", "external_id": "cust-0002"},

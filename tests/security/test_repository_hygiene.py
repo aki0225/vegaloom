@@ -10,11 +10,11 @@ import pytest
 
 import vega.git_read as git_read_module
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_hygiene_module():
-    script_path = Path(__file__).parents[1] / "scripts" / "check_repository_hygiene.py"
+    script_path = Path(__file__).parents[2] / "scripts" / "check_repository_hygiene.py"
     spec = importlib.util.spec_from_file_location("check_repository_hygiene", script_path)
     assert spec is not None
     assert spec.loader is not None

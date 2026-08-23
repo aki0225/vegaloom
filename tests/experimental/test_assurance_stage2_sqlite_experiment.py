@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 from vega.cli import app
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _experiment_module() -> ModuleType:

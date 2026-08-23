@@ -17,7 +17,7 @@ from vega.tools import file_tools
 from vega.tools import git_tools
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_resolve_run_dir_accepts_existing_run_under_workspace_runs(tmp_path: Path) -> None:
