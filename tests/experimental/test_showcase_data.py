@@ -116,7 +116,10 @@ def test_ci_fetches_release_tag_before_jobs_execute_showcase_tests() -> None:
     assert "refs/tags/v0.2.0:refs/tags/v0.2.0" in py311_fetch["run"]
 
     experimental_job = jobs["tests-experimental"]
-    assert experimental_job["if"] == "github.event_name != 'pull_request'"
+    assert experimental_job["if"] == (
+        "github.event_name != 'pull_request' || "
+        "needs.static.outputs.run_experimental == 'true'"
+    )
     py312_steps = experimental_job["steps"]
     py312_fetch = next(
         step for step in py312_steps if step.get("name") == "获取展示站发布证据 Tag"
