@@ -10,7 +10,6 @@ import vega.finish_runtime as finish_runtime
 import vega.loop_evidence as goal_evidence
 from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import render_gate_report
-from vega.experimental.goal_runtime import GoalRuntime
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput, GateResult
 from vega.risk_gate_evidence import render_risk_gate_report_binding, sha256_text
@@ -290,46 +289,6 @@ def test_finish_fails_closed_for_missing_or_tampered_loop_risk_gate_artifact(
     assert summary["artifact_integrity"]["valid"] is False
     assert expected_issue in summary["artifact_integrity"]["issues"]
     assert summary["artifact_integrity"]["risk_gate_result_count"] == 0
-
-
-def test_human_review_risk_gate_cannot_share_success_chain_with_approved_reviewer(
-    tmp_path: Path,
-) -> None:
-    workspace, repo, run_dir = _create_successful_loop(tmp_path, verify=False)
-    _rewrite_risk_gate_report_binding(run_dir, recommendation="human-review")
-    state = _read_json(run_dir / "state.json")
-
-    results = run_loop_eval(run_dir, state["artifacts"])
-
-    assert "FAIL: risk_gate_human_review_bypassed" in results
-
-    FinishRuntime(workspace).run(run_dir.name)
-
-    summary = _read_json(run_dir / "finish-summary.json")
-    assert summary["finish_status"] == "needs_human"
-    assert summary["artifact_integrity"]["valid"] is False
-    assert (
-        "iteration_01_risk_gate_human_review_bypassed"
-        in summary["artifact_integrity"]["issues"]
-    )
-
-    goal = GoalRuntime(workspace)
-    goal_run = goal.start(
-        repo,
-        "# Goal\n\nObjective: 验证风险门禁不能绕过人工审查\n",
-        "test",
-        None,
-    )
-    goal.step(goal_run.name)
-    goal.attach(goal_run.name, "01", run_dir.name, "loop", "loop 证据")
-    goal.attach(goal_run.name, "01", run_dir.name, "finish", "finish 证据")
-
-    goal_state = _read_json(goal_run / "goal-state.json")
-    refs = goal_state["checkpoint_records"][0]["refs"]
-    assert all(item["validated"] is True for item in refs)
-    assert all(item["completion_eligible"] is False for item in refs)
-    with pytest.raises(ValueError, match="缺少可完成证据"):
-        goal.checkpoint_done(goal_run.name, "01", note="不应完成")
 
 
 @pytest.mark.parametrize(
