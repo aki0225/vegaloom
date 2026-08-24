@@ -30,6 +30,7 @@ _TRACE_PROGRESS = {
     "plan_invalidated_by_steer": ("agent", "plan_updated"),
     "worker_dispatch_committed": ("worker", "started"),
     "worker_dispatch_reconciled": ("worker", "binding_reconciled"),
+    "verification_retry_committed": ("verification", "retry_started"),
     "supervisor_next": ("agent", "supervisor_next"),
     "supervisor_repair": ("agent", "supervisor_repair"),
     "supervisor_replan": ("agent", "supervisor_replan"),
@@ -251,6 +252,25 @@ def latest_dispatch_binding(
     )
 
 
+def latest_worker_dispatch_binding(
+    run_dir: Path,
+    state: AgentState,
+) -> tuple[str, str] | None:
+    """只读取最近一次真实 Worker dispatch，不把验证恢复冒充成 Worker。"""
+
+    try:
+        trace_items = read_agent_trace(run_dir / "trace.jsonl")
+    except (OSError, ValueError) as exc:
+        raise AgentTraceReadError(
+            f"Agent run `{run_dir.name}` 的 trace.jsonl 无法安全读取。"
+        ) from exc
+    return _latest_dispatched_execution(
+        trace_items,
+        expected_run_id=state.run_id,
+        events={"worker_dispatch_committed", "worker_dispatch_reconciled"},
+    )
+
+
 def trusted_worker_label(
     run_dir: Path,
     state: AgentState,
@@ -440,17 +460,24 @@ def _latest_dispatched_execution(
     trace_items: list[dict[str, object]],
     *,
     expected_run_id: str,
+    events: set[str] | None = None,
 ) -> tuple[str, str] | None:
     latest_execution: tuple[str, str] | None = None
     operation_bindings: dict[str, str] = {}
+    accepted_events = events or {
+        "worker_dispatch_committed",
+        "worker_dispatch_reconciled",
+        "verification_retry_committed",
+    }
     for item in trace_items:
-        if item.get("event") not in {
-            "worker_dispatch_committed",
-            "worker_dispatch_reconciled",
-        }:
+        event = item.get("event")
+        if event not in accepted_events:
             continue
-        if item.get("run_id") != expected_run_id or item.get("phase") != "acting":
-            raise ValueError("worker dispatch Trace 与 Agent run 身份不一致")
+        expected_phase = (
+            "observing" if event == "verification_retry_committed" else "acting"
+        )
+        if item.get("run_id") != expected_run_id or item.get("phase") != expected_phase:
+            raise ValueError("Agent operation Trace 与 Agent run 身份不一致")
         child_run = item.get("child_run")
         operation_id = item.get("operation_id")
         if (

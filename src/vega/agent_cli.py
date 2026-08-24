@@ -12,6 +12,7 @@ from .agent_recovery import SupervisorAgentRecovery
 from .agent_recovery_request import AgentRecoveryRequest
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_side_effect_adjudication import SupervisorAgentSideEffectAdjudicator
+from .agent_verification_retry import SupervisorAgentVerificationRetry
 from .agent_worker import SupervisorAgentWorker
 from .cli_support import (
     ensure_runner_ready,
@@ -136,6 +137,21 @@ def agent_finalize(
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("Agent 终态已完成。")
+    typer.echo("")
+    typer.echo(_runtime().status(result.run_dir.name))
+
+
+@agent_app.command("retry-verification")
+def agent_retry_verification(
+    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
+) -> None:
+    """复用原 child 与 Diff，只重跑 Core 验证、风险门禁和独立 Reviewer。"""
+
+    try:
+        require_agent_runtime_dependencies()
+        result = _verification_retry().run(run)
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
     typer.echo("")
     typer.echo(_runtime().status(result.run_dir.name))
 
@@ -382,6 +398,14 @@ def _side_effect_adjudicator() -> SupervisorAgentSideEffectAdjudicator:
 
 def _adapter() -> SupervisorAgentCodexAdapter:
     return SupervisorAgentCodexAdapter(
+        Path.cwd(),
+        progress_reporter=report_execution_progress,
+        event_reporter=lambda message: typer.echo(f"[vega] {message}", err=True),
+    )
+
+
+def _verification_retry() -> SupervisorAgentVerificationRetry:
+    return SupervisorAgentVerificationRetry(
         Path.cwd(),
         progress_reporter=report_execution_progress,
         event_reporter=lambda message: typer.echo(f"[vega] {message}", err=True),

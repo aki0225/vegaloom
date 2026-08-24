@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .agent_contract import AgentState
+from .agent_contract import AgentState, AgentWorkItem
 from .agent_persistence import read_agent_trace
 from .comparison_binding import require_comparison_binding_from_mapping
 from .loop_runtime import LoopAutomationRuntime
 from .project_config import ProjectConfig
 from .runner import CodexExecRunner
+from .verification_command_preflight import require_verification_commands_preflight
 from .workspace_check import ReviewWorkspaceSnapshot
 
 
@@ -19,6 +20,15 @@ def comparison_binding_from_metadata(
         base_key="comparison_base_revision",
     )
     return comparison_base_sha, comparison_paths
+
+
+def prepare_dispatch_binding(
+    metadata: dict[str, str],
+    repo: Path,
+    work_item: AgentWorkItem,
+) -> tuple[str | None, tuple[str, ...]]:
+    require_verification_commands_preflight(repo, work_item.verification)
+    return comparison_binding_from_metadata(metadata)
 
 
 def validate_prepared_workspace(

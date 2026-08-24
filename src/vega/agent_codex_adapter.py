@@ -33,9 +33,9 @@ from .agent_codex_scope import (
     write_plan_scope_evidence,
 )
 from .agent_codex_preparation import (
-    comparison_binding_from_metadata,
     ensure_isolated_reviewer,
     next_attempt_context as _next_attempt_context,
+    prepare_dispatch_binding,
     read_task_brief as _read_task_brief,
     validate_prepared_workspace,
 )
@@ -141,8 +141,8 @@ class SupervisorAgentCodexAdapter:
             requires_clean_workspace=requires_clean_workspace,
         )
         repo = bound_repo(run_dir)
-        comparison_base_sha, comparison_paths = comparison_binding_from_metadata(
-            metadata
+        comparison_base_sha, comparison_paths = prepare_dispatch_binding(
+            metadata, repo, work_item
         )
         plan_scope_baseline = capture_plan_scope_baseline(
             repo,

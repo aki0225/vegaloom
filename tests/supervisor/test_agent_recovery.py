@@ -15,6 +15,7 @@ from vega import agent_repository_guard as agent_repository_guard_module
 from vega import agent_side_effect_adjudication as agent_adjudication_module
 from vega import agent_worker as agent_worker_module
 from vega.agent_contract import AgentObservation, AgentPlan, AgentWorkItem
+from vega.agent_execution_bridge import operation_ref
 from vega.agent_persistence import (
     load_agent_checkpoint,
     load_agent_state,
@@ -1111,6 +1112,63 @@ def test_stop_active_assist_child_targets_only_bound_operation(
     assert request["execution_id"] == "operation-stop"
     assert result.state.phase == "acting"
     assert result.state.active_child_run == child_run
+    events = [item["event"] for item in read_agent_trace(result.run_dir / "trace.jsonl")]
+    assert events[-1] == "agent_stop_requested"
+
+
+def test_stop_active_verification_retry_targets_current_core_execution(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    child_run = "assist-child-verification-retry"
+    operation_id = "verification-retry-operation"
+    bound = SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id=operation_id,
+    )
+    child_dir = _write_assist_child(workspace, repo, child_run)
+    operation_path = bound.run_dir / operation_ref(operation_id)
+    operation = json.loads(operation_path.read_text(encoding="utf-8"))
+    operation["operation_kind"] = "verification_retry"
+    operation_path.write_text(
+        json.dumps(operation, ensure_ascii=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    claim_path = (
+        agent_repository_guard_module._prepare_control_dir(repo)
+        / "writer-claim.json"
+    )
+    claim = json.loads(claim_path.read_text(encoding="utf-8"))
+    claim["operation_kind"] = "verification_retry"
+    claim_path.write_text(
+        json.dumps(claim, ensure_ascii=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    state_path = bound.run_dir / "agent-state.json"
+    state = load_agent_state(state_path).model_copy(update={"phase": "observing"})
+    save_agent_state(state_path, state)
+    _write_execution(
+        child_dir,
+        execution_id="core-verification-execution",
+        status="running",
+        step="verification",
+    )
+
+    result = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="人工请求停止当前验证恢复",
+    )
+
+    request = json.loads(
+        (
+            child_dir / "executions" / "verification" / "stop-request.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert request["execution_id"] == "core-verification-execution"
+    assert result.state.phase == "observing"
     events = [item["event"] for item in read_agent_trace(result.run_dir / "trace.jsonl")]
     assert events[-1] == "agent_stop_requested"
 

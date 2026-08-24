@@ -86,6 +86,28 @@ def test_writer_claim_reuse_requires_same_run_directory(tmp_path: Path) -> None:
     assert payload["status"] == "releasing"
 
 
+def test_writer_claim_reuse_requires_same_operation_kind(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    run_dir = tmp_path / "workspace" / "runs" / "same-run"
+    run_dir.mkdir(parents=True)
+    claim = {
+        "task_id": "same-task",
+        "child_run": "same-child",
+        "operation_id": "same-operation",
+    }
+    acquire_writer_claim(repo, run_dir=run_dir, operation_kind="worker", **claim)
+
+    with pytest.raises(AgentRepositoryGuardError, match="same-run"):
+        acquire_writer_claim(
+            repo,
+            run_dir=run_dir,
+            operation_kind="verification_retry",
+            **claim,
+        )
+
+
 def test_repository_can_replace_released_claim_after_owner_worktree_removed(
     tmp_path: Path,
 ) -> None:

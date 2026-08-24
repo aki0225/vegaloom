@@ -43,6 +43,14 @@ from .loop_prompts import (
     render_verification_fix_prompt,
     render_workspace_fix_prompt,
 )
+from .loop_project_policy import (
+    apply_runner_defaults,
+    load_stable_start_policy,
+    project_policy_changed,
+    project_policy_snapshot_text,
+    write_project_policy_change_report,
+    write_project_policy_snapshot,
+)
 from .models import (
     BriefInput,
     GateResult,
@@ -85,6 +93,10 @@ from .scope_gate import (
 from .trace import TraceWriter, active_run_finished_indices, read_trace_items
 from .tracked_workspace import normalize_comparison_paths, validate_comparison_base
 from .verification import VerificationRunResult, run_project_verification
+from .verification_retry_baseline import (
+    select_assist_workspace_baseline,
+    validate_verification_retry_request,
+)
 from .worker_rerun import worker_rerun_eval_results
 from .worker_rerun_planning import (
     initialize_auto_worker_rerun,
@@ -104,10 +116,9 @@ from .workspace_baseline import (
     LEGACY_ASSIST_INITIALIZATION_ARTIFACTS,
     WORKSPACE_BASELINE_ARTIFACT,
     capture_assist_workspace_baseline,
-    load_assist_workspace_baseline,
     require_assist_workspace_baseline_continuable,
 )
-from .workspace_check import read_head_sha, run_workspace_check
+from .workspace_check import run_workspace_check
 from .workspace_inventory import WorkspaceSnapshot
 
 LOOP_INITIALIZATION_ARTIFACTS = list(LEGACY_ASSIST_INITIALIZATION_ARTIFACTS)
@@ -163,7 +174,7 @@ class LoopAutomationRuntime:
         comparison_paths: tuple[str, ...] = (),
     ) -> Path:
         repo_path = Path(brief_input.repo_path).resolve()
-        config, policy_snapshot, initial_head_sha = _load_stable_start_policy(
+        config, policy_snapshot, initial_head_sha = load_stable_start_policy(
             repo_path
         )
         resolved_comparison_base = validate_comparison_base(
@@ -176,7 +187,7 @@ class LoopAutomationRuntime:
         )
         if normalized_comparison_paths and resolved_comparison_base is None:
             raise ValueError("comparison paths 必须与 comparison base 一起使用")
-        worker_name, reviewer_name = _apply_runner_defaults(
+        worker_name, reviewer_name = apply_runner_defaults(
             config,
             worker_name,
             reviewer_name,
@@ -230,7 +241,7 @@ class LoopAutomationRuntime:
             comparison_paths=list(comparison_paths),
             project_policy_snapshot=policy_snapshot,
             project_policy_snapshot_sha256=sha256_text(
-                _project_policy_snapshot_text(policy_snapshot)
+                project_policy_snapshot_text(policy_snapshot)
             ),
             scope_gate_required=True,
             scope_policy_sha256=scope_policy_sha256(config.scope),
@@ -246,7 +257,7 @@ class LoopAutomationRuntime:
             comparison_base_sha=comparison_base_sha,
             comparison_paths=list(comparison_paths),
         )
-        _write_project_policy_snapshot(run_dir, state.project_policy_snapshot)
+        write_project_policy_snapshot(run_dir, state.project_policy_snapshot)
         brief_run = BriefRuntime(self.workspace).run(brief_input)
         state.brief_run = run_name(brief_run)
         # brief 子 run 已形成后立即绑定根状态。若随后崩溃，recovery 至少能判断
@@ -350,11 +361,20 @@ class LoopAutomationRuntime:
         verify: bool = True,
         rerun_worker: bool = False,
         verification_commands: list[str] | None = None,
+        verification_retry_baseline: WorkspaceSnapshot | None = None,
     ) -> Path:
         if rerun_worker and (test_log is not None or note is not None):
             raise ValueError("--rerun-worker 不能与 --test-log 或 --note 同时使用。")
         if verification_commands is not None and (test_log is not None or not verify):
             raise ValueError("显式验证命令只允许在 verify=true 且未提供 --test-log 时使用。")
+        validate_verification_retry_request(
+            verification_retry_baseline,
+            rerun_worker=rerun_worker,
+            test_log=test_log,
+            note=note,
+            verify=verify,
+            verification_commands=verification_commands,
+        )
         run_dir = resolve_run_dir(self.workspace, run)
         with RunMutationLock.acquire(run_dir, "loop.continue"):
             return self._continue_assist_locked(
@@ -367,6 +387,7 @@ class LoopAutomationRuntime:
                 verify=verify,
                 rerun_worker=rerun_worker,
                 verification_commands=verification_commands,
+                verification_retry_baseline=verification_retry_baseline,
             )
 
     def _continue_assist_locked(
@@ -380,6 +401,7 @@ class LoopAutomationRuntime:
         verify: bool = True,
         rerun_worker: bool = False,
         verification_commands: list[str] | None = None,
+        verification_retry_baseline: WorkspaceSnapshot | None = None,
     ) -> Path:
         state = LoopAutomationState.model_validate_json(
             run_dir.joinpath("state.json").read_text(encoding="utf-8")
@@ -399,7 +421,7 @@ class LoopAutomationRuntime:
         require_recovery_trace_binding(run_dir, state)
         require_loop_initialization(self.workspace, run_dir, state, repo)
         config = load_project_config(repo)
-        worker_name, reviewer_name = _apply_runner_defaults(
+        worker_name, reviewer_name = apply_runner_defaults(
             config,
             worker_name,
             reviewer_name,
@@ -421,7 +443,12 @@ class LoopAutomationRuntime:
         if early_result is not None:
             return early_result
 
-        workspace_baseline = load_assist_workspace_baseline(run_dir, state)
+        workspace_baseline = select_assist_workspace_baseline(
+            run_dir,
+            state,
+            repo,
+            verification_retry_baseline,
+        )
         iteration_number = next_iteration_number(run_dir, state)
         iteration_state = LoopIterationState(
             iteration=iteration_number,
@@ -432,7 +459,11 @@ class LoopAutomationRuntime:
         state.current_step = "workspace_check"
         state.save(run_dir / "state.json")
         iteration_dir = _iteration_dir(run_dir, iteration_number)
-        trace.write("assist_continue_started", iteration=iteration_number)
+        trace.write(
+            "assist_continue_started",
+            iteration=iteration_number,
+            verification_retry=verification_retry_baseline is not None,
+        )
         _write_text_artifact(
             iteration_dir / "worker-output.txt",
             f"{state.automation_mode} continue 模式下，worker 是主会话或人工；Vega 只记录当前工作区 diff。\n",
@@ -445,6 +476,7 @@ class LoopAutomationRuntime:
                 state.initial_head_sha if workspace_baseline is not None else None
             ),
             require_clean_untracked=True,
+            allow_existing_tracked_diff=verification_retry_baseline is not None,
         )
         trace.write(
             "workspace_check_finished",
@@ -582,10 +614,10 @@ class LoopAutomationRuntime:
             return run_dir
 
         current_policy = project_policy_snapshot(repo)
-        if _project_policy_changed(repo, state.project_policy_snapshot):
+        if project_policy_changed(repo, state.project_policy_snapshot):
             if verification_status != "skipped" and auto_test_log is not None:
                 _copy_if_exists(auto_test_log, iteration_dir / "test-summary.md")
-            _write_project_policy_change_report(
+            write_project_policy_change_report(
                 iteration_dir,
                 state.project_policy_snapshot,
                 current_policy,
@@ -899,10 +931,10 @@ class LoopAutomationRuntime:
         has_test_log: bool,
         has_note: bool,
     ) -> Path | None:
-        if _project_policy_changed(repo, state.project_policy_snapshot):
+        if project_policy_changed(repo, state.project_policy_snapshot):
             iteration_number = next_iteration_number(run_dir, state)
             iteration_dir = _iteration_dir(run_dir, iteration_number)
-            _write_project_policy_change_report(
+            write_project_policy_change_report(
                 iteration_dir,
                 state.project_policy_snapshot,
                 project_policy_snapshot(repo),
@@ -1281,8 +1313,8 @@ class LoopAutomationRuntime:
                 worker_status="success",
             )
             current_policy = project_policy_snapshot(repo_path)
-            if _project_policy_changed(repo_path, state.project_policy_snapshot):
-                _write_project_policy_change_report(
+            if project_policy_changed(repo_path, state.project_policy_snapshot):
+                write_project_policy_change_report(
                     iteration_dir,
                     state.project_policy_snapshot,
                     current_policy,
@@ -1470,13 +1502,13 @@ class LoopAutomationRuntime:
                 return run_dir
 
             current_policy = project_policy_snapshot(repo_path)
-            if _project_policy_changed(repo_path, state.project_policy_snapshot):
+            if project_policy_changed(repo_path, state.project_policy_snapshot):
                 _copy_verification_summary_if_available(
                     verification_status,
                     verification_log,
                     iteration_dir,
                 )
-                _write_project_policy_change_report(
+                write_project_policy_change_report(
                     iteration_dir,
                     state.project_policy_snapshot,
                     current_policy,
@@ -1862,7 +1894,7 @@ class LoopAutomationRuntime:
         current_policy: dict[str, str | None],
     ) -> None:
         """Reflect 返回后再次锁定完整项目策略，关闭 post-check 到审查之间的窗口。"""
-        _write_project_policy_change_report(
+        write_project_policy_change_report(
             iteration_dir,
             state.project_policy_snapshot,
             current_policy,
@@ -2951,89 +2983,3 @@ def _latest_verification_passed(state: LoopAutomationState) -> bool:
         and latest.verification_failed_count == 0
         and latest.verification_failure_kind is None
     )
-
-
-def _load_stable_start_policy(
-    repo_path: Path,
-) -> tuple[ProjectConfig, dict[str, str | None], str]:
-    """在创建 run 前稳定绑定 HEAD、策略文件 bytes 与解析后的配置。"""
-    policy_before = project_policy_snapshot(repo_path)
-    head_before = read_head_sha(repo_path)
-    config = load_project_config(repo_path)
-    policy_after = project_policy_snapshot(repo_path)
-    head_after = read_head_sha(repo_path)
-    if policy_before != policy_after or head_before != head_after:
-        raise RuntimeError("loop 启动时 HEAD 或项目策略发生变化，请在工作区稳定后重试")
-    return config, policy_after, head_after
-
-
-def _project_policy_changed(
-    repo_path: Path,
-    initial_snapshot: dict[str, str | None],
-) -> bool:
-    return project_policy_snapshot(repo_path) != initial_snapshot
-
-
-def _write_project_policy_snapshot(
-    run_dir: Path,
-    snapshot: dict[str, str | None],
-) -> None:
-    run_dir.joinpath("project-policy-snapshot.json").write_text(
-        _project_policy_snapshot_text(snapshot),
-        encoding="utf-8",
-    )
-
-
-def _project_policy_snapshot_text(snapshot: dict[str, str | None]) -> str:
-    return json.dumps(redact_value(snapshot), ensure_ascii=False, indent=2) + "\n"
-
-
-def _write_project_policy_change_report(
-    iteration_dir: Path,
-    initial_snapshot: dict[str, str | None],
-    current_snapshot: dict[str, str | None],
-) -> Path:
-    path = iteration_dir / "project-policy-change-report.md"
-    _write_text_artifact(
-        path,
-        "\n".join(
-            [
-                "# Project Policy Change Report",
-                "",
-                "- worker 或人工执行后检测到 `.vega.yaml` / `.vega.yml` 发生变化。",
-                "- 为避免执行策略被运行过程改写，本轮未继续自动 verification、reflect 或 reviewer。",
-                "- Vega 未自动回滚、删除、提交、推送或发布任何内容。",
-                "",
-                "## 启动时策略快照",
-                "",
-                "```json",
-                json.dumps(initial_snapshot, ensure_ascii=False, indent=2),
-                "```",
-                "",
-                "## 当前策略快照",
-                "",
-                "```json",
-                json.dumps(current_snapshot, ensure_ascii=False, indent=2),
-                "```",
-                "",
-                "## 建议下一步",
-                "",
-                "- 人工审查策略文件改动是否属于本次任务。",
-                "- 确认后重新创建 loop，或人工完成验证和隔离审查。",
-            ]
-        ).rstrip()
-        + "\n",
-    )
-    return path
-
-
-def _apply_runner_defaults(
-    config: ProjectConfig,
-    worker_name: str,
-    reviewer_name: str,
-) -> tuple[str, str]:
-    if worker_name == "codex-exec" and config.runner.worker:
-        worker_name = config.runner.worker
-    if reviewer_name == "codex-exec" and config.runner.reviewer:
-        reviewer_name = config.runner.reviewer
-    return worker_name, reviewer_name

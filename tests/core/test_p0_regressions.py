@@ -22,6 +22,8 @@ from vega.reflect_runtime import ReflectRuntime
 from vega.review_runtime import ReviewRuntime
 from vega.runner import RunnerResult
 from vega.scope_gate import evaluate_scope_gate, validate_iteration_scope_gate_artifacts
+from vega.workspace_check import snapshot_workspace
+from vega.workspace_inventory import workspace_ignored_path_exclusions
 
 
 class CountingWorker:
@@ -429,7 +431,9 @@ def test_loop_start_rejects_head_change_while_loading_project_policy(
 ) -> None:
     workspace, repo = _init_repo(tmp_path)
     worker = CountingWorker("worker change")
-    from vega.loop_runtime import load_project_config as original_load_project_config
+    from vega.loop_project_policy import (
+        load_project_config as original_load_project_config,
+    )
 
     def load_then_commit(repo_path: Path):
         config = original_load_project_config(repo_path)
@@ -443,7 +447,7 @@ def test_loop_start_rejects_head_change_while_loading_project_policy(
         return config
 
     monkeypatch.setattr(
-        "vega.loop_runtime.load_project_config",
+        "vega.loop_project_policy.load_project_config",
         load_then_commit,
     )
 
@@ -1040,6 +1044,71 @@ def test_auto_worker_cannot_mutate_existing_ignored_content_before_verification(
         for limit in finish_summary["first_screen"]["evidence_limits"]
     )
     assert "文件数：`未知`" in finish_report
+
+
+def test_verification_retry_baseline_accepts_prevalidated_environment_change(
+    tmp_path: Path,
+) -> None:
+    config = "\n".join(
+        [
+            "version: 1",
+            "scope:",
+            "  allowed_paths:",
+            "    - README.md",
+            "verification:",
+            "  commands:",
+            '    - python -c "print(\'verified\')"',
+            "  max_commands: 1",
+        ]
+    ) + "\n"
+    workspace, repo = _init_repo(
+        tmp_path,
+        config=config,
+        files={
+            ".gitignore": "*.tmp\n",
+            "cache.tmp": "alpha\n",
+        },
+    )
+    reviewer = CountingReviewer()
+    runtime = LoopAutomationRuntime(
+        workspace,
+        reviewer_runner=reviewer,
+    )
+    run_dir = runtime.start(_brief(repo), "assist", max_iterations=2, verify=True)
+    repo.joinpath("README.md").write_text(
+        "# Demo\nworker change\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    repo.joinpath("cache.tmp").write_text(
+        "verification environment ready\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    retry_baseline = snapshot_workspace(
+        repo,
+        ignored_path_exclusions=workspace_ignored_path_exclusions(
+            workspace,
+            repo,
+        ),
+    )
+
+    runtime.continue_assist(
+        run_dir.name,
+        repo,
+        verify=True,
+        verification_commands=['python -c "print(\'verified\')"'],
+        verification_retry_baseline=retry_baseline,
+    )
+
+    state = _read_json(run_dir / "state.json")
+    workspace_check = _read_json(run_dir / "iterations" / "01" / "workspace-check.json")
+    assert state["status"] == "success"
+    assert state["current_step"] == "done"
+    assert reviewer.calls == 1
+    assert workspace_check["status"] in {"passed", "skipped"}
+    assert workspace_check["baseline_ignored_changed"] is False
+    assert workspace_check["baseline_tracked_changes_present"] is True
 
 
 @pytest.mark.parametrize("target", ["exclude", "config"])

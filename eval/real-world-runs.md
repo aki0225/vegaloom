@@ -1097,3 +1097,48 @@ GitHub Release `Vega v0.2.0` 已公开发布。发布后删除实现分支
 `release/v0.2.0`；SAG3B-03 的未完成 WIP 仅由不可移动 Tag
 `archive/sag3b-03-wip-20260816` 保留，旧远端实验分支已删除。文档候选状态在本次发布
 完成后更新为已发布，不改变前述历史实验结果。
+
+## 2026-08-24 Supervisor Agent：Echo Vault 验证环境修复后复用原 Worker
+
+本条记录验证专用恢复的真实任务，不覆盖前述 Case。目标仓库从固定提交
+`65627d99c550e6615549baa9ce2d56d2ae16b21c` 建立 detached worktree，任务是继续收紧
+Responses 流 `response.completed` 的成功状态判断，并补流式解析与失败持久化回归。
+
+- Agent run：`20260824-134628-agent`；
+- child：`20260824-134704-130098-bug-loop`；
+- 原 Worker operation：`fdb70ead797e40b3b0ed9f28ab9a581d`；
+- 验证恢复 operation：`719b3c90893c427b8e918b329ced934a`。
+
+真实 Coding Worker 只修改三个批准文件：
+
+- `.trellis/spec/backend/error-handling.md`；
+- `backend/app/ai_client.py`；
+- `backend/tests/test_chat_usage_and_export.py`。
+
+第一轮后端定向测试、后端完整测试和 `git diff --check` 通过；前端 worktree 尚未安装
+`node_modules`，因此固定版本的 pnpm 测试和构建分别因找不到 `vitest`、`tsc` 失败。
+Risk Gate 仍成功，独立 Reviewer 返回 `request_changes`，Supervisor 选择 `replan`，没有把
+Worker 的完成 Claim 或后端测试结果升级为成功。
+
+人工只补齐前端依赖环境，没有修改 tracked Diff。Plan revision 2 保持目标、范围、风险和
+验证命令不变，经重新批准后运行 `vega agent retry-verification`。Vega 重新校验原 Worker
+execution、原审查快照、HEAD、tracked Diff、未跟踪文件和 Git 控制状态，以当前 ignored
+环境建立 Core 基线，在同一个 child 追加 iteration 2；没有启动第二个 Coding Worker。
+
+第二轮五条验证命令全部通过，Risk Gate 为 low，独立 Reviewer 覆盖三个实际变更文件并返回
+`approve`。父 Agent 最终为：
+
+```text
+phase = completed
+plan_revision = 2
+checkpoint = checkpoint-006
+verification = passed
+risk = passed
+reviewer = approve
+terminal_status = ready_to_commit
+finish_sha256 = 9908ede760876e71abe3f6c3fcbaeb9b9f0f00d996c176af298322f2f18f8759
+```
+
+Vega 没有对目标仓库执行 commit、push、PR 或 merge。该 Case 证明验证环境可以在不改源码、
+不覆盖旧失败 iteration、也不启动第二个 Coding Worker 的前提下恢复；它不证明未知外部
+副作用可安全重放，也不把 ignored 环境变化当作 tracked 代码未变化之外的安全结论。
