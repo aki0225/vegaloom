@@ -101,6 +101,7 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import ast
           from pathlib import Path
 
           allowed_groups = {"core", "experimental", "security", "supervisor"}
@@ -117,6 +118,31 @@ jobs:
               raise SystemExit(f"测试文件未归入职责目录：{sorted(invalid)}")
           if not frozen_root_test.is_file():
               raise SystemExit("冻结控制测试路径缺失")
+          experimental_imports = []
+          for path in Path("tests/core").rglob("test_*.py"):
+              tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom):
+                      module = node.module or ""
+                      if module == "vega.experimental" or module.startswith(
+                          "vega.experimental."
+                      ):
+                          experimental_imports.append(
+                              f"{path.as_posix()}:{node.lineno}:{module}"
+                          )
+                  elif isinstance(node, ast.Import):
+                      for alias in node.names:
+                          if alias.name == "vega.experimental" or alias.name.startswith(
+                              "vega.experimental."
+                          ):
+                              experimental_imports.append(
+                                  f"{path.as_posix()}:{node.lineno}:{alias.name}"
+                              )
+          if experimental_imports:
+              raise SystemExit(
+                  "Core 测试不得静态导入 Experimental："
+                  f"{sorted(experimental_imports)}"
+              )
           print("测试文件均位于已登记职责目录")
           PY
 
@@ -217,6 +243,7 @@ jobs:
               --ignore=tests/core/test_evidence_freshness.py
               --ignore=tests/core/test_finish_artifact_integrity.py
               --ignore=tests/core/test_smoke.py
+              --ignore=tests/core/test_success_semantics.py
           - name: core-heavy
             test_timeout: 58
             files: >-
@@ -224,6 +251,7 @@ jobs:
               tests/core/test_evidence_freshness.py
               tests/core/test_finish_artifact_integrity.py
               tests/core/test_smoke.py
+              tests/core/test_success_semantics.py
             extra_args: ""
           - name: supervisor
             test_timeout: 58

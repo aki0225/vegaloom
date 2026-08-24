@@ -1,6 +1,6 @@
 # Vega AI 可维护性治理计划
 
-> 状态：active（第一轮实现完成，等待 PR 审阅与 CI）
+> 状态：active（第二轮完成，PR `#83` 等待合入）
 > 创建日期：2026-08-23
 > 基线：`main@6a95970`
 > 目标版本：不预设版本号；第二轮完成后先运行真实 Dogfood，再按证据决定第三轮范围
@@ -49,7 +49,7 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 
 ## 4. 第一轮：当前事实、规则与产品入口
 
-状态：`active`（2026-08-24 已完成分支实现，等待 PR 审阅、CI 与合并）
+状态：`completed`（2026-08-24，PR `#82` 已通过 CI 并合入 `main@eaea175`）
 
 完成结果：目录与验证职责已写入分层规则，文档入口已恢复为导航，历史 SAG3B Task Card 已按
 原字节归档，默认 CLI 帮助只展示 Core 与 Supervisor 主入口；兼容和实验命令仍可直接调用。
@@ -77,7 +77,62 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 
 ## 5. 第二轮：测试职责与执行成本
 
-状态：`pending`（下一步）
+状态：`completed`（2026-08-24，PR `#83` 已通过完整 CI，等待合入）
+
+### 改造前基线
+
+基线提交为 `main@eaea175`。节点按当前 PR 分片命令重新收集：
+
+| 分片 | node |
+|---|---:|
+| Core | 363 |
+| Core Heavy | 196 |
+| Supervisor | 237 |
+| Security | 406 |
+| 普通 PR 产品合计 | 1,202 |
+| Experimental 与冻结 CRWP | 207 |
+| 全量 | 1,409 |
+
+最近三次使用同一分片结构且成功结束的 PR CI，产品 Job 耗时如下：
+
+| CI run | Core | Core Heavy | Supervisor | Security | 产品关键路径 |
+|---|---:|---:|---:|---:|---:|
+| `32625925110` | 96s | 114s | 64s | 42s | 114s |
+| `32629480812` | 95s | 96s | 59s | 40s | 96s |
+| `32680716774` | 92s | 117s | 62s | 37s | 117s |
+| 中位数 | 95s | 114s | 62s | 40s | 114s |
+
+第二轮以产品关键路径中位数不高于 `91.2s` 为 20% 目标。Experimental 是否因本 PR 的路径
+变化而运行单独记录，不能拿跳过实验 Job 充当产品分片提速。
+
+### 改造结果
+
+Goal、Memory、Inspection 与 Dogfood 场景移回 Experimental；全部测试函数经过 AST 对账，
+没有缺失、重复或行为改写。`test_success_semantics.py` 仍归 Core，只调整到 Core Heavy 分片，
+让两个产品分片的耗时接近。
+
+| 分片 | 改造前 node | 改造后 node |
+|---|---:|---:|
+| Core | 363 | 332 |
+| Core Heavy | 196 | 143 |
+| Supervisor | 237 | 237 |
+| Security | 406 | 406 |
+| 普通 PR 产品合计 | 1,202 | 1,118 |
+| Experimental 与冻结 CRWP | 207 | 291 |
+| 全量 | 1,409 | 1,409 |
+
+最终分片在相同 GitHub Actions Runner 条件下连续运行三次：
+
+| CI run | Core | Core Heavy | Supervisor | Security | 产品关键路径 |
+|---|---:|---:|---:|---:|---:|
+| `32686397026` | 75s | 75s | 61s | 40s | 75s |
+| `32686603867` | 80s | 87s | 54s | 38s | 87s |
+| `32686818721` | 74s | 69s | 63s | 42s | 74s |
+| 中位数 | 75s | 75s | 61s | 40s | 75s |
+
+产品关键路径中位数从 `114s` 降至 `75s`，下降约 `34.2%`。第一次只调整测试所有权时，
+三次关键路径中位数为 `92s`，没有达到 20% 目标；随后只做分片再平衡，未删除或跳过测试。
+本 PR 因修改 Experimental 测试路径而完整运行了实验与历史重放 Job。
 
 ### 范围
 
