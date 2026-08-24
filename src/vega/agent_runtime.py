@@ -18,6 +18,7 @@ from .agent_finalization import finalize_agent_state
 from .agent_persistence import append_agent_trace, save_agent_state
 from .agent_graph import require_agent_runtime_dependencies, record_supervisor_route
 from .agent_mutation import agent_mutation
+from .agent_plan_archive import archive_agent_plan_revision
 from .agent_run import AgentRun
 from .agent_routing import decide_next_action, transition_state
 from .agent_status_card import read_status_card
@@ -49,6 +50,7 @@ from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
 from .workspace_check import capture_review_workspace
 from .workspace_inventory import prepare_verification_temp_root
+from .verification_command_preflight import require_verification_commands_preflight
 
 class SupervisorAgentRuntime:
     def __init__(self, workspace: Path) -> None:
@@ -119,7 +121,10 @@ class SupervisorAgentRuntime:
             raise ValueError("当前状态不允许批准 Plan")
         if plan.unresolved_decisions:
             raise ValueError("Plan 仍有未解决决策，不能批准")
-        validate_v1_execution_binding(plan, state.current_work_item)
+        work_item = validate_v1_execution_binding(plan, state.current_work_item)
+        require_verification_commands_preflight(
+            bound_repo(run_dir), work_item.verification
+        )
         approved = approve_plan(plan, actor=actor)
         # 批准前准备 assist 受控目录，让 safe Checkpoint 能解释首个 child 的真实前置现场。
         prepare_verification_temp_root(bound_repo(run_dir))
@@ -183,6 +188,7 @@ class SupervisorAgentRuntime:
         revised = AgentPlan.model_validate(revised.model_dump(mode="json"))
         executable_item = validate_v1_execution_plan(revised)
         snapshot = capture_bound_workspace(run_dir)
+        archived_plan_ref = archive_agent_plan_revision(run_dir, current)
         guarded_state = update_state(
             state,
             phase="awaiting_approval",
@@ -218,7 +224,10 @@ class SupervisorAgentRuntime:
             event="plan_revised",
             state=revised_state,
             observation_summary=f"Plan revision {revised.plan_revision} 已写入",
-            artifact_refs=["agent-plan.json", f"checkpoints/{checkpoint.checkpoint_id}.json"],
+            artifact_refs=[
+                "agent-plan.json", archived_plan_ref,
+                f"checkpoints/{checkpoint.checkpoint_id}.json",
+            ],
         )
         write_status_card(
             run_dir,

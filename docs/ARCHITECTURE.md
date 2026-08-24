@@ -626,7 +626,7 @@ Agent Plan / approval
   -> checkpoints/
   -> real Codex child
   -> machine Observation
-  -> next | repair | replan | human | finalize
+  -> next | repair | replan | retry-verification | human | finalize
   -> trusted Core Finish
   -> Agent completed
 ```
@@ -638,6 +638,11 @@ Supervisor 选择 `finalize` 后，Adapter 只采用已绑定且完整性、新�
 Reviewer 均通过的 Core `finish-summary.json`，把父 Agent 发布为
 `completed / ready_to_commit`。如果 Core 已完成而父终态发布前中断，可以用
 `vega agent finalize --run <agent-run>` 幂等恢复；它不创造第二套成功语义。
+当失败只来自验证命令或本地依赖环境时，人工可以提交只修改 `verification` 的 Plan revision，
+再运行 `vega agent retry-verification`。该路径复用原 Worker execution 和 child，先用原审查
+快照证明 tracked Diff 未变，并在覆盖前归档原失败 Finish；随后以当前 ignored 环境建立一次性
+Core 基线，新的 verification、Risk、Reviewer 和 Finish 仍写入下一 iteration。源码、未跟踪
+文件或 Git 控制状态漂移会转入人工处理。
 Gate 3A 已实现 Handoff Checkpoint、Resume Capsule、Git Task Card 与同机双隔离副本恢复。
 v0.2.0 发布验收又在独立 fresh clone 中完成真实 Worker 恢复、Reviewer 打回、人工 Plan
 revision 和完整 Core Finish。历史 SAG3B Case 的原始结果继续保留；发布验收不要求另一台

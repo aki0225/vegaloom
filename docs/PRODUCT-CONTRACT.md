@@ -44,6 +44,7 @@ Agent：
 ```text
 vega agent capabilities
 vega agent start / approve / run
+vega agent retry-verification
 vega agent status / pause / stop / recover
 vega agent checkpoint --handoff
 vega agent resume / finalize
@@ -52,6 +53,10 @@ vega agent resume / finalize
 `vega agent` 不是默认入口，也不是第二套编码模型。宿主主会话负责只读调查和提交 Plan，
 Vega 固定批准 revision、单 Writer、Checkpoint、机器对账与恢复，并把最终成功交回既有
 Verification、Risk、独立 Reviewer 和 Finish。
+
+`retry-verification` 只处理“代码不变、验证命令或本地依赖环境需要修正”的失败。它复用原
+Worker 和 child，要求重新批准一个除 `verification` 外不改变执行合同的 Plan revision
+（命令可以保持原值），并重新核对 tracked Diff；代码 finding 仍走普通 repair/replan。
 
 Agent CLI 以当前工作目录作为 Vega workspace。可以从任意目录执行
 `vega adapters init codex --repo <target-repo>` 写入目标仓库 Skill，但该命令不会切换 shell

@@ -23,10 +23,9 @@ def acquire_writer_claim(
     run_dir: Path,
     task_id: str,
     child_run: str,
-    operation_id: str,
+    operation_id: str, operation_kind: str = "worker",
 ) -> None:
-    """在 Git 元数据目录登记 Writer；只协调同一物理仓库及其 worktree。"""
-
+    """登记仓库级互斥操作；默认操作仍是真实 Writer。"""
     path = _writer_claim_path(repo)
     payload = {
         "schema_version": 1,
@@ -36,6 +35,7 @@ def acquire_writer_claim(
         "task_id": task_id,
         "child_run": child_run,
         "operation_id": operation_id,
+        "operation_kind": operation_kind,
         "status": "active",
         "acquired_at": datetime.now(UTC).isoformat(),
     }
@@ -49,9 +49,10 @@ def acquire_writer_claim(
             except FileExistsError:
                 pass
         owner = _read_claim(path, "Writer")
+        owner.setdefault("operation_kind", "worker")
         if owner.get("status", "active") in {"active", "releasing"} and all(
             owner.get(key) == payload[key]
-            for key in ("repository_root", "run_dir", "run_id", "task_id", "child_run", "operation_id")
+            for key in ("repository_root", "run_dir", "run_id", "task_id", "child_run", "operation_id", "operation_kind")
         ):
             return
         raise AgentRepositoryGuardError(

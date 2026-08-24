@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import threading
@@ -27,6 +28,8 @@ from vega.agent_persistence import (
     load_agent_state,
     read_agent_trace,
 )
+from vega.agent_recovery import SupervisorAgentRecovery
+from vega.agent_recovery_request import AgentRecoveryRequest
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_worker import SupervisorAgentWorker
 from vega.agent_task_card import (
@@ -35,13 +38,16 @@ from vega.agent_task_card import (
     compute_handoff_workspace_digest,
     save_task_card,
 )
+from vega.agent_verification_retry import SupervisorAgentVerificationRetry
 from vega.execution_control import ExecutionController, RunnerExecutionContext
 from vega.finish_runtime import FinishRuntime
 from vega.loop_runtime import LoopAutomationRuntime
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.project_config import ProjectConfig
+from vega.review_evidence import make_review_evidence
 from vega.run_status import run_status_payload
 from vega.runner import CodexExecRunner, RunnerResult
+from vega.workspace_check import capture_review_workspace
 from vega.workspace_inventory import prepare_verification_temp_root
 
 
@@ -121,6 +127,7 @@ class _FakeLoopRuntime:
         verify: bool = True,
         rerun_worker: bool = False,
         verification_commands: list[str] | None = None,
+        verification_retry_baseline=None,
     ) -> Path:
         del (
             worker_name,
@@ -130,6 +137,9 @@ class _FakeLoopRuntime:
             verify,
             rerun_worker,
         )
+        if verification_retry_baseline is not None:
+            assert verification_retry_baseline.capture_complete is True
+            assert verification_retry_baseline.tracked_diff_complete is True
         self.verification_commands = verification_commands
         assert self.child_dir is not None
         assert run == self.child_dir.name
@@ -142,12 +152,13 @@ class _FakeLoopRuntime:
         state = LoopAutomationState.model_validate_json(
             (self.child_dir / "state.json").read_text(encoding="utf-8")
         )
+        state.current_iteration = self.continue_count
         if self.finish_status == "ready_to_commit":
             state.status = "success"
             state.current_step = "completed"
             state.iterations = [
                 LoopIterationState(
-                    iteration=1,
+                    iteration=self.continue_count,
                     workspace_status="passed",
                     scope_gate_status="success",
                     scope_gate_post_verification_status="success",
@@ -165,7 +176,7 @@ class _FakeLoopRuntime:
             state.current_step = "review_complete"
             state.iterations = [
                 LoopIterationState(
-                    iteration=1,
+                    iteration=self.continue_count,
                     workspace_status="passed",
                     scope_gate_status="success",
                     scope_gate_post_verification_status="success",
@@ -202,6 +213,31 @@ class _FakeFinishRuntime:
         assert self.loop.child_dir is not None
         assert run == self.loop.child_dir.name
         ready = self.loop.finish_status == "ready_to_commit"
+        state = LoopAutomationState.model_validate_json(
+            (self.loop.child_dir / "state.json").read_text(encoding="utf-8")
+        )
+        changed_files = _changed_files(Path(state.repo_path))
+        reflect_run = f"{run}-reflect-{state.current_iteration:02d}"
+        reflect_dir = self.loop.workspace / "runs" / reflect_run
+        reflect_dir.mkdir(parents=True, exist_ok=True)
+        snapshot = capture_review_workspace(Path(state.repo_path))
+        review_evidence = make_review_evidence(
+            snapshot,
+            "",
+            snapshot.full_diff,
+            changed_files,
+            review_source_run=reflect_run,
+            upstream_source_run=run,
+            source_brief="",
+            reflection="",
+            diff_summary="",
+            source_brief_issues=[],
+            source_brief_diagnostics=[],
+        )
+        (reflect_dir / "review-evidence.json").write_text(
+            json.dumps(review_evidence, ensure_ascii=False),
+            encoding="utf-8",
+        )
         (self.loop.child_dir / "finish-summary.json").write_text(
             json.dumps(
                 {
@@ -212,9 +248,29 @@ class _FakeFinishRuntime:
                         self.loop.verification_status == "failed"
                     ),
                     "artifact_integrity": {"valid": self.evidence_trusted},
-                    "evidence_freshness": {"fresh": self.evidence_trusted},
+                    "evidence_freshness": {
+                        "fresh": self.evidence_trusted,
+                        "source_run": reflect_run,
+                        "snapshot_id": review_evidence["snapshot_id"],
+                        "trusted_workspace_fingerprint": snapshot.fingerprint,
+                    },
                     "latest_verdict": {
                         "verdict": "approve" if ready else "request_changes"
+                    },
+                    "first_screen": {
+                        "actual_changes": {"changed_files": changed_files},
+                        "gates": {
+                            "verification": (
+                                "passed"
+                                if self.loop.verification_status == "passed"
+                                else "failed"
+                            ),
+                            "risk": {"status": "success"},
+                        },
+                        "review": {
+                            "verdict": "approve" if ready else "request_changes",
+                            "findings": [],
+                        },
                     },
                 },
                 ensure_ascii=False,
@@ -1226,6 +1282,277 @@ def test_reviewer_request_changes_routes_back_to_repair(
     assert observation["repairable_in_scope"] is True
 
 
+def test_verification_retry_reuses_original_worker_and_completes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(
+        workspace,
+        finish_status="needs_fix",
+        verification_status="failed",
+    )
+    worker = _FakeWorkerRunner()
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=worker,
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+    failed = adapter.run(run_id, timeout_seconds=60)
+    assert failed.state.phase == "ready"
+    assert worker.run_count == 1
+
+    runtime = SupervisorAgentRuntime(workspace)
+    revised = _verification_only_revision(
+        failed.plan,
+        verification=["运行修正后的定向测试"],
+    )
+    planned = runtime.update_plan(failed.run_dir.name, revised)
+    approved = runtime.approve(planned.run_dir.name)
+    loop.finish_status = "ready_to_commit"
+    loop.verification_status = "passed"
+    retry = SupervisorAgentVerificationRetry(
+        workspace,
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    completed = retry.run(approved.run_dir.name)
+
+    assert completed.state.phase == "completed"
+    assert completed.state.terminal_status == "ready_to_commit"
+    assert worker.run_count == 1
+    assert loop.start_count == 1
+    assert loop.continue_count == 2
+    assert loop.verification_commands == ["运行修正后的定向测试"]
+    trace = read_agent_trace(completed.run_dir / "trace.jsonl")
+    assert any(item["event"] == "verification_retry_committed" for item in trace)
+    summaries = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (completed.run_dir / "children").glob("*.json")
+    ]
+    retry_summary = next(
+        item for item in summaries if item.get("operation_kind") == "verification_retry"
+    )
+    assert retry_summary["worker"]["source_operation_id"]
+    source_finish_path = completed.run_dir / retry_summary["worker"]["source_finish_ref"]
+    source_finish = json.loads(source_finish_path.read_text(encoding="utf-8"))
+    assert source_finish["finish_status"] == "needs_fix"
+    assert source_finish["latest_verification_failed"] is True
+    assert hashlib.sha256(source_finish_path.read_bytes()).hexdigest() == (
+        retry_summary["worker"]["source_finish_sha256"]
+    )
+    status = (completed.run_dir / "status-card.md").read_text(encoding="utf-8")
+    assert "复用原始 Worker execution" in status
+    assert "计划范围（验证恢复前）" in status
+    assert "计划范围（验证恢复后）" in status
+    source_finish_path.write_text("{}\n", encoding="utf-8", newline="\n")
+    assert "原始失败 Finish 归档哈希不匹配" in runtime.status(
+        completed.run_dir.name
+    )
+
+
+def test_verification_retry_allows_only_ignored_environment_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    repo.joinpath(".gitignore").write_text(
+        ".local-environment/\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", "测试：声明本地验证环境")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal=_plan().user_goal, plan=_plan())
+    approved = runtime.approve(run.run_dir.name)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(
+        workspace,
+        finish_status="needs_fix",
+        verification_status="failed",
+    )
+    worker = _FakeWorkerRunner()
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=worker,
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+    failed = adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+    environment = repo / ".local-environment"
+    environment.mkdir()
+    environment.joinpath("tool-ready.txt").write_text(
+        "ready\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    revised = _verification_only_revision(
+        failed.plan,
+        verification=["运行修正后的定向测试"],
+    )
+    planned = runtime.update_plan(failed.run_dir.name, revised)
+    approved_retry = runtime.approve(planned.run_dir.name)
+    loop.finish_status = "ready_to_commit"
+    loop.verification_status = "passed"
+
+    completed = SupervisorAgentVerificationRetry(
+        workspace,
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    ).run(approved_retry.run_dir.name)
+
+    assert completed.state.phase == "completed"
+    assert completed.state.terminal_status == "ready_to_commit"
+    assert worker.run_count == 1
+    assert loop.continue_count == 2
+
+
+def test_verification_retry_rejects_tracked_diff_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(
+        workspace,
+        finish_status="needs_fix",
+        verification_status="failed",
+    )
+    worker = _FakeWorkerRunner()
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=worker,
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+    failed = adapter.run(run_id, timeout_seconds=60)
+    repo.joinpath("src", "example.py").write_text(
+        "value = 99\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    runtime = SupervisorAgentRuntime(workspace)
+    revised = _verification_only_revision(
+        failed.plan,
+        verification=["运行修正后的定向测试"],
+    )
+    planned = runtime.update_plan(failed.run_dir.name, revised)
+    approved = runtime.approve(planned.run_dir.name)
+    trace_before = (approved.run_dir / "trace.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="tracked Workspace 已变化"):
+        SupervisorAgentVerificationRetry(
+            workspace,
+            loop_runtime=loop,
+            finish_runtime=_FakeFinishRuntime(loop),
+        ).run(approved.run_dir.name)
+
+    assert (approved.run_dir / "trace.jsonl").read_bytes() == trace_before
+    assert load_agent_state(approved.run_dir / "agent-state.json").phase == "ready"
+    assert worker.run_count == 1
+
+
+def test_verification_retry_rejects_non_verification_plan_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(
+        workspace,
+        finish_status="needs_fix",
+        verification_status="failed",
+    )
+    worker = _FakeWorkerRunner()
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=worker,
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+    failed = adapter.run(run_id, timeout_seconds=60)
+    revised = _verification_only_revision(
+        failed.plan,
+        verification=["运行修正后的定向测试"],
+    )
+    revised.work_items[0].objective = "顺便扩大代码修改范围"
+    runtime = SupervisorAgentRuntime(workspace)
+    planned = runtime.update_plan(failed.run_dir.name, revised)
+    approved = runtime.approve(planned.run_dir.name)
+    trace_before = (approved.run_dir / "trace.jsonl").read_bytes()
+
+    with pytest.raises(ValueError, match="只修改了验证命令"):
+        SupervisorAgentVerificationRetry(
+            workspace,
+            loop_runtime=loop,
+            finish_runtime=_FakeFinishRuntime(loop),
+        ).run(approved.run_dir.name)
+
+    assert (approved.run_dir / "trace.jsonl").read_bytes() == trace_before
+    assert load_agent_state(approved.run_dir / "agent-state.json").phase == "ready"
+    assert worker.run_count == 1
+
+
+def test_verification_retry_interruption_can_release_operation_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    monkeypatch.chdir(workspace)
+    loop = _FakeLoopRuntime(
+        workspace,
+        finish_status="needs_fix",
+        verification_status="failed",
+    )
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_FakeWorkerRunner(),
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+    failed = adapter.run(run_id, timeout_seconds=60)
+    runtime = SupervisorAgentRuntime(workspace)
+    revised = _verification_only_revision(
+        failed.plan,
+        verification=["运行修正后的定向测试"],
+    )
+    planned = runtime.update_plan(failed.run_dir.name, revised)
+    approved = runtime.approve(planned.run_dir.name)
+    retry = SupervisorAgentVerificationRetry(
+        workspace,
+        loop_runtime=loop,
+        finish_runtime=_FakeFinishRuntime(loop),
+    )
+
+    _, operation_id, bound = retry._prepare_and_bind(approved.run_dir.name)
+
+    assert bound.state.phase == "observing"
+    assert load_agent_state(bound.run_dir / "agent-state.json").active_operation_id == (
+        operation_id
+    )
+    recovered = SupervisorAgentRecovery(workspace).recover(
+        bound.run_dir.name,
+        AgentRecoveryRequest(
+            reason="验证恢复控制进程中断",
+            workspace_explained=True,
+            external_side_effects="none",
+        ),
+    )
+
+    assert recovered.state.phase == "needs_human"
+    assert recovered.state.active_child_run is None
+    assert recovered.state.active_operation_id is None
+    assert recovered.state.allowed_actions == ["human"]
+    assert not repo.joinpath(".git", "vega", "writer-claim.json").exists()
+
+
 def test_adapter_rejects_third_attempt_before_creating_child(
     tmp_path: Path,
 ) -> None:
@@ -1741,6 +2068,25 @@ def _plan(*, task_id: str = "task-adapter") -> AgentPlan:
     )
 
 
+def _verification_only_revision(
+    plan: AgentPlan,
+    *,
+    verification: list[str],
+) -> AgentPlan:
+    payload = plan.model_dump(mode="json")
+    payload.update(
+        {
+            "approved": False,
+            "approved_at": None,
+            "approved_by": None,
+            "approved_digest": None,
+        }
+    )
+    payload["work_items"][0]["verification"] = verification
+    payload["work_items"][0]["status"] = "pending"
+    return AgentPlan.model_validate(payload)
+
+
 def _repo(path: Path) -> Path:
     path.mkdir()
     _git(path, "init")
@@ -1753,6 +2099,32 @@ def _repo(path: Path) -> Path:
     _git(path, "add", "README.md", "src/example.py")
     _git(path, "commit", "-m", "测试：初始化仓库")
     return path
+
+
+def _changed_files(repo: Path) -> list[str]:
+    process = subprocess.run(
+        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+    )
+    assert process.returncode == 0, process.stderr
+    paths: list[str] = []
+    records = process.stdout.split(b"\0")
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record:
+            continue
+        status = record[:2]
+        path = record[3:]
+        if status[:1] in {b"R", b"C"} or status[1:2] in {b"R", b"C"}:
+            if index < len(records):
+                path = records[index]
+                index += 1
+        paths.append(path.decode("utf-8", errors="replace").replace("\\", "/"))
+    return sorted(dict.fromkeys(paths))
 
 
 def _head(repo: Path) -> str:

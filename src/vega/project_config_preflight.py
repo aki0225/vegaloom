@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from .git_read import coerce_git_output_bytes, read_git_config_value, run_git_capture
 from .redaction import redact_text
+from .verification_command_preflight import inspect_verification_commands
 
 
 PYTEST_COMMAND_PATTERN = re.compile(
@@ -119,6 +120,19 @@ def _collect_repository_preflight(
                 evidence=locations,
             )
         )
+
+    issues.extend(
+        ProjectConfigIssue(
+            code=issue.code,
+            severity="error",
+            message=(
+                f"verification.commands[{issue.command_index}] {issue.message}"
+                f" 建议改为：`{redact_text(issue.suggestion)}`"
+            ),
+            evidence=issue.evidence,
+        )
+        for issue in inspect_verification_commands(repo, verification_commands)
+    )
 
     if _is_windows_environment() and _effective_core_autocrlf(repo) is True:
         issues.append(

@@ -79,6 +79,9 @@ Plan 文件应放在临时目录或目标仓库已忽略的目录，不要直接
 
 `observed_facts` 只能写已经由代码、命令或运行结果确认的事实；推测必须放在
 `hypotheses`。允许路径、验证命令或风险发生变化时，应写入新的 Plan revision 并重新批准。
+使用 `corepack pnpm --dir/-C` 时，如果目标 `package.json` 的 `packageManager` 固定了版本，
+Plan 也要写明版本，例如 `corepack pnpm@10.10.0 --dir frontend test`。`config check` 和
+`agent approve` 会在运行前拒绝版本歧义。
 
 `external_side_effects` 必须按当前 Work Item 明确填写：
 
@@ -139,7 +142,34 @@ vega agent status --run <agent_run> --json
 `vega agent finalize --run <agent_run>` 只在父 Agent 已进入 `finalizing` 后采用已经绑定的
 可信 Core Finish，主要用于父终态发布前中断后的幂等恢复；它不会重新执行验证或 Reviewer。
 
-### 4. 本机恢复与 Git-only fresh-clone / 换目录接手
+### 4. 只修验证环境，不重跑 Coding Worker
+
+验证失败先看 Reviewer finding。只要 finding 指向代码文件、具体行或行为缺陷，就走正常
+Plan revision 和 `agent run`，让新 Worker attempt 修代码。
+
+另一类失败只来自命令或本地环境，例如包管理器版本写错、依赖尚未安装。确认 tracked Diff
+无需修改后：
+
+1. 补齐本地依赖环境；
+2. 新建 Plan revision 并重新批准；只允许调整 `verification`，命令本身没错时可保持原值；
+3. 运行验证专用恢复。
+
+```powershell
+vega agent plan --run <agent_run> --input <revised-plan.json>
+vega agent approve --run <agent_run> --actor human
+vega agent retry-verification --run <agent_run>
+```
+
+恢复会复用原 child、原 Diff 和原 Worker execution，只追加新的 Core iteration。启动前要求
+原审查快照、HEAD、tracked Diff、未跟踪文件和 Git 控制状态能够重新对账；ignored 的
+`.venv`、`node_modules`、构建缓存可以作为验证环境变化。验证过程中如果源码发生变化，
+Supervisor 转入人工处理。
+
+原失败 iteration 不会被覆盖；原失败 `finish-summary.json` 也会在 Core 重写前按哈希归档。
+控制进程中断时，`agent stop/recover` 仍按 child execution 和仓库级 operation binding 处理，
+不会借恢复启动第二个 Writer。
+
+### 5. 本机恢复与 Git-only fresh-clone / 换目录接手
 
 `resume-local` 只适用于 `needs_human` 且没有 active Writer 的 safe Checkpoint：
 

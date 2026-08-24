@@ -1459,10 +1459,17 @@ def test_default_start_requires_investigation_plan_before_approval(
     )
     planned = runtime.update_plan(run.run_dir.name, draft)
     approved = runtime.approve(planned.run_dir.name)
+    archived = AgentPlan.model_validate_json(
+        (run.run_dir / "plans" / "plan-revision-001.json").read_text(
+            encoding="utf-8"
+        )
+    )
 
     assert planned.plan.plan_revision == 2
     assert approved.state.phase == "ready"
     assert approved.plan.approval_is_current()
+    assert archived.plan_revision == 1
+    assert archived.task_id == run.plan.task_id
 
 
 def test_update_plan_rejects_empty_allowed_paths_before_revising_run(

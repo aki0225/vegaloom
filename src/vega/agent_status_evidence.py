@@ -15,6 +15,7 @@ from .agent_contract import (
     SupervisorEvidenceStatus,
     canonical_digest,
 )
+from .agent_verification_retry_archive import retry_source_finish_archive_issue
 from .execution_control import ExecutionLease
 from .project_config import ScopeConfig, scope_policy_sha256
 from .run_utils import resolve_run_dir
@@ -61,7 +62,14 @@ def build_supervisor_evidence(
         child_issue,
     )
     scope_items = [
-        _scope_evidence(run_dir, state, plan, observation, stage)
+        _scope_evidence(
+            run_dir,
+            state,
+            plan,
+            observation,
+            child_payload,
+            stage,
+        )
         for stage in _STAGES
     ]
     core_item = _core_evidence(
@@ -123,6 +131,84 @@ def _worker_evidence(
     worker = child_payload.get("worker")
     if not isinstance(worker, dict):
         return _item("Worker 执行", "stale", "Worker 摘要字段损坏")
+    if child_payload.get("operation_kind") == "verification_retry":
+        return _retry_source_worker_evidence(run_dir, child_payload, worker)
+    return _bound_worker_evidence(
+        run_dir,
+        observation.child_run,
+        observation.operation_id,
+        worker,
+    )
+
+
+def _retry_source_worker_evidence(
+    run_dir: Path,
+    child_payload: dict[str, object],
+    worker: dict[str, object],
+) -> SupervisorEvidenceItem:
+    child_run = worker.get("source_child_run")
+    operation_id = worker.get("source_operation_id")
+    summary_ref = worker.get("source_summary_ref")
+    summary_sha256 = worker.get("source_summary_sha256")
+    if (
+        not isinstance(child_run, str)
+        or child_run != child_payload.get("child_run")
+        or not isinstance(operation_id, str)
+        or not isinstance(summary_ref, str)
+        or not isinstance(summary_sha256, str)
+        or SHA256_PATTERN.fullmatch(summary_sha256) is None
+    ):
+        return _item("Worker 执行", "stale", "验证恢复缺少原始 Worker 绑定")
+    expected_ref = (
+        "children/"
+        f"{canonical_digest({'child': child_run, 'operation_id': operation_id})}.json"
+    )
+    if summary_ref != expected_ref:
+        return _item("Worker 执行", "stale", "原始 Worker 摘要引用不是 canonical 路径")
+    archive_issue = retry_source_finish_archive_issue(run_dir, child_payload, worker)
+    if archive_issue is not None:
+        return _item("Worker 执行", "stale", archive_issue)
+    try:
+        source_bytes = _safe_ref_path(run_dir, summary_ref).read_bytes()
+        source = json.loads(source_bytes.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        return _item("Worker 执行", "stale", "原始 Worker 摘要缺失或无法解析")
+    if hashlib.sha256(source_bytes).hexdigest() != summary_sha256:
+        return _item("Worker 执行", "stale", "原始 Worker 摘要哈希不匹配")
+    if (
+        not isinstance(source, dict)
+        or source.get("authority") != "child_binding_summary"
+        or source.get("agent_run_id") != child_payload.get("agent_run_id")
+        or source.get("work_item_id") != child_payload.get("work_item_id")
+        or source.get("child_run") != child_run
+        or source.get("operation_id") != operation_id
+        or source.get("operation_kind") == "verification_retry"
+    ):
+        return _item("Worker 执行", "stale", "原始 Worker 摘要身份不一致")
+    source_worker = source.get("worker")
+    if not isinstance(source_worker, dict):
+        return _item("Worker 执行", "stale", "原始 Worker 字段损坏")
+    result = _bound_worker_evidence(
+        run_dir,
+        child_run,
+        operation_id,
+        source_worker,
+    )
+    if result.status != "passed":
+        return result
+    return _item(
+        "Worker 执行",
+        "passed",
+        "复用原始 Worker execution；本轮只重跑验证、风险门禁与 Reviewer",
+    )
+
+
+def _bound_worker_evidence(
+    run_dir: Path,
+    child_run: str | None,
+    operation_id: str | None,
+    worker: dict[str, object],
+) -> SupervisorEvidenceItem:
     runner_status = worker.get("runner_status")
     lease_status = worker.get("lease_status")
     if runner_status != "success" or lease_status != "completed":
@@ -131,10 +217,10 @@ def _worker_evidence(
             "failed",
             f"runner_status={runner_status!r}，lease_status={lease_status!r}",
         )
-    if observation.child_run is None or observation.operation_id is None:
+    if child_run is None or operation_id is None:
         return _item("Worker 执行", "unverified", "Observation 缺少执行绑定")
     expected_artifact = (
-        f"executions/worker/{observation.operation_id}/execution.json"
+        f"executions/worker/{operation_id}/execution.json"
     )
     execution_artifact = worker.get("execution_artifact")
     execution_sha256 = worker.get("execution_sha256")
@@ -149,7 +235,7 @@ def _worker_evidence(
             "Worker execution 引用或摘要格式与 operation 不一致",
         )
     try:
-        child_dir = _resolve_child_dir(run_dir, observation.child_run)
+        child_dir = _resolve_child_dir(run_dir, child_run)
         execution_bytes = _safe_ref_path(
             child_dir,
             expected_artifact,
@@ -164,8 +250,8 @@ def _worker_evidence(
     if hashlib.sha256(execution_bytes).hexdigest() != execution_sha256:
         return _item("Worker 执行", "stale", "Worker execution 摘要不匹配")
     if (
-        lease.run_id != observation.child_run
-        or lease.execution_id != observation.operation_id
+        lease.run_id != child_run
+        or lease.execution_id != operation_id
         or lease.step != "worker"
         or lease.status != "completed"
         or lease.returncode != 0
@@ -188,9 +274,19 @@ def _scope_evidence(
     state: AgentState,
     plan: AgentPlan,
     observation: AgentObservation,
+    child_payload: dict[str, object] | None,
     stage: str,
 ) -> SupervisorEvidenceItem:
-    label = f"计划范围（{_STAGE_LABELS[stage]}）"
+    labels = (
+        {
+            "post-worker": "验证恢复前",
+            "post-core": "验证恢复后",
+        }
+        if child_payload is not None
+        and child_payload.get("operation_kind") == "verification_retry"
+        else _STAGE_LABELS
+    )
+    label = f"计划范围（{labels[stage]}）"
     if (
         observation.operation_id is None
         or observation.work_item_id != state.current_work_item

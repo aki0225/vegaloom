@@ -147,6 +147,17 @@ vega agent status --run <agent_run>
 当前版本只接受一个未完成 Work Item，并在同一物理 Git 仓库中保持单 Writer。Plan 的范围、
 风险、验证或成功条件发生变化时，原批准失效，需要重新确认。
 
+如果代码和 Reviewer finding 都不需要修改，只是验证命令或本地依赖环境有误，可以修订 Plan
+中的验证项并重新批准，然后复用原 child：
+
+```powershell
+vega agent retry-verification --run <agent_run>
+```
+
+这条命令不会启动第二个 Coding Worker。Vega 会重新核对原 Worker execution、原审查快照、
+HEAD 和 tracked Diff；本地 `.venv`、`node_modules` 等 ignored 环境可以补齐，源码、未跟踪
+文件或 Git 控制状态发生变化则拒绝恢复。旧的失败 iteration 和失败 Finish 摘要会保留。
+
 `vega agent status` 会重新采集当前 Workspace，并核对 Supervisor、child 和 Core Finish 证据。
 只有实时状态同时满足 `evidence_health=passed`、`workspace_current=true` 和
 `commit_recommended=true`，才会建议人工检查并提交。

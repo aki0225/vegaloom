@@ -5,6 +5,8 @@ from uuid import uuid4
 
 from .agent_contract import AgentObservation, canonical_digest
 from .agent_execution_bridge import (
+    AgentOperationKind,
+    bound_operation_kind,
     resolve_bound_execution_run_dir,
     resolve_bound_worker_execution,
     stop_active_child,
@@ -42,7 +44,7 @@ from .agent_runtime_support import (
     write_status_card,
     write_task_brief,
 )
-from .execution_control import inspect_execution_for_recovery
+from .execution_control import ExecutionRecord, inspect_execution_for_recovery
 from .redaction import write_redacted_json_once
 from .run_utils import resolve_run_dir
 
@@ -63,12 +65,14 @@ class SupervisorAgentRecovery:
         assert state.active_child_run is not None
         assert state.active_operation_id is not None
         repo = bound_repo(run_dir)
+        operation_kind = bound_operation_kind(run_dir, state)
         acquire_writer_claim(
             repo,
             run_dir=run_dir,
             task_id=state.task_id,
             child_run=state.active_child_run,
             operation_id=state.active_operation_id,
+            operation_kind=operation_kind,
         )
         actual = capture_bound_workspace(run_dir)
         try:
@@ -102,20 +106,19 @@ class SupervisorAgentRecovery:
                     "不能证明 operation 未启动"
                 ),
             )
-        assert state.active_operation_id is not None
-        try:
-            bound_record = resolve_bound_worker_execution(
-                execution_run_dir,
-                state.active_operation_id,
-            )
-        except ValueError as exc:
+        bound_record, binding_issue = _resolve_recovery_execution(
+            execution_run_dir,
+            operation_kind,
+            state.active_operation_id,
+        )
+        if binding_issue is not None:
             return block_on_execution_issue(
                 run_dir,
                 state,
                 plan,
                 actual,
                 request,
-                f"Worker execution 证据无法安全解析：{exc}",
+                binding_issue,
             )
         trace_issue = agent_trace_issue(run_dir / "trace.jsonl")
         workspace_unchanged = actual.fingerprint == state.workspace_fingerprint
@@ -141,14 +144,15 @@ class SupervisorAgentRecovery:
                 f"{canonical_digest({'operation_id': state.active_operation_id})}.json"
             )
         ]
-        evidence_refs.append(
-            write_execution_evidence_ref(
-                run_dir,
-                state,
-                execution_run_dir,
-                bound_record,
+        if bound_record is not None:
+            evidence_refs.append(
+                write_execution_evidence_ref(
+                    run_dir,
+                    state,
+                    execution_run_dir,
+                    bound_record,
+                )
             )
-        )
         trace_reconcile_issue = reconcile_missing_dispatch_trace(
             run_dir,
             state,
@@ -180,6 +184,11 @@ class SupervisorAgentRecovery:
             unknown_file_count=len(actual.untracked_files),
             external_side_effects=request.external_side_effects,
             evidence_refs=evidence_refs,
+            verification=(
+                "blocked" if operation_kind == "verification_retry" else "not_run"
+            ),
+            risk="not_run",
+            review="not_run",
         )
         observation_path = (
             run_dir / "observations" / f"{observation.observation_id}.json"
@@ -266,7 +275,6 @@ class SupervisorAgentRecovery:
             operation_id=state.active_operation_id,
         )
         return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
-
     @agent_mutation("agent.pause")
     def pause(self, run: str, *, reason: str) -> AgentRun:
         return self._hold(run, reason=reason, stopped=False)
@@ -327,7 +335,6 @@ class SupervisorAgentRecovery:
             next_step="人工确认后显式派发当前 Work Item",
         )
         return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
-
     def _hold(self, run: str, *, reason: str, stopped: bool) -> AgentRun:
         if not reason.strip():
             raise ValueError("pause/stop 必须提供原因")
@@ -450,3 +457,16 @@ class SupervisorAgentRecovery:
             ),
         )
         return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
+
+
+def _resolve_recovery_execution(
+    execution_run_dir: Path,
+    operation_kind: AgentOperationKind,
+    operation_id: str,
+) -> tuple[ExecutionRecord | None, str | None]:
+    if operation_kind != "worker":
+        return None, None
+    try:
+        return resolve_bound_worker_execution(execution_run_dir, operation_id), None
+    except ValueError as exc:
+        return None, f"Worker execution 证据无法安全解析：{exc}"
