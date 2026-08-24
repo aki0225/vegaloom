@@ -1,9 +1,9 @@
 # Vega AI 可维护性治理计划
 
-> 状态：active
+> 状态：active（第一轮实现完成，等待 PR 审阅与 CI）
 > 创建日期：2026-08-23
 > 基线：`main@6a95970`
-> 目标版本：不预设版本号；三轮完成并通过真实 Dogfood 后再决定发布
+> 目标版本：不预设版本号；第二轮完成后先运行真实 Dogfood，再按证据决定第三轮范围
 
 ## 1. 为什么现在做
 
@@ -29,7 +29,8 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 - 测试：49 个文件、1,408 个 node、约 43,000 行；普通 PR 执行 1,201 个产品 node；
 - 文档：59 个 Markdown 文件、约 17,935 行；当前路线与历史时间线混在同一入口；
 - CLI：约 23 个顶层入口、59 个叶子命令，日常、排障、兼容和实验入口展示层级接近；
-- 本地工作区：117 个 `runs/` 目录、24 个 `.local-validation/` 顶层条目及构建产物。
+- 审计机器当时存在较多 `runs/`、`.local-validation/` 与构建产物；这只用于一次性清理盘点，
+  不作为项目规模或治理成效指标。
 
 这些数字用于验证治理是否有效，不作为机械删除目标。
 
@@ -48,7 +49,7 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 
 ## 4. 第一轮：当前事实、规则与产品入口
 
-状态：`completed`（2026-08-24）
+状态：`active`（2026-08-24 已完成分支实现，等待 PR 审阅、CI 与合并）
 
 完成结果：目录与验证职责已写入分层规则，文档入口已恢复为导航，历史 SAG3B Task Card 已按
 原字节归档，默认 CLI 帮助只展示 Core 与 Supervisor 主入口；兼容和实验命令仍可直接调用。
@@ -80,7 +81,8 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 
 ### 范围
 
-1. 先记录本地与 CI 各分片的 node 数和 wall-clock，建立改造前基线。
+1. 先记录本地与 CI 各分片的 node 数和 wall-clock，建立改造前基线。同类 GitHub Actions
+   Runner 的改造前后结果各取至少三次有效运行的中位数。
 2. 将错误归入 Core 的 Experimental 测试移回对应职责，不让产品分片隐式维护冻结 Runtime。
 3. 清理 `test_smoke.py`：只保留 CLI 接线和代表性端到端场景，底层合同由所属测试文件唯一拥有。
 4. 聚合架构组合测试，减少仅由参数展开形成的独立 node。
@@ -97,7 +99,9 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 ### 验收
 
 - 每个测试场景有唯一职责所有者；
-- 普通 PR 关键路径 wall-clock 相对基线至少下降 20%，否则不得宣称测试优化有效；
+- 普通 PR 关键路径 wall-clock 相对同类 Runner 基线中位数至少下降 20%，否则不得宣称测试
+  优化有效；
+- 同时记录各分片 node 数和 main/release 全量运行范围；不能只靠少跑测试制造耗时下降；
 - 删除或合并的测试均有覆盖去向，不以 node 数减少代替行为覆盖；
 - main、release 和手工入口仍能运行完整历史与跨平台门禁；
 - 完整 CI 通过。
@@ -108,13 +112,17 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 
 ### 范围
 
-按以下顺序执行，每项使用独立提交，前一项验证通过后才进入下一项：
+第三轮不是第二轮后的默认动作。先根据真实 Dogfood 暴露的问题决定是否进入；进入后按以下
+顺序执行，每项使用独立提交，前一项验证通过后才进入下一项：
 
 1. 抽取唯一 post-worker 阶段执行器，消除 assist 与 auto 在 Verification、Reflect、Scope、Risk、
    Reviewer 和 Finish 之间的重复编排；成功状态仍由 `LoopAutomationRuntime` 唯一拥有。
 2. 统一 Supervisor operation Artifact 的路径、身份和摘要生成规则。
-3. 拆除 Core 门禁与证据模块的五模块循环依赖，明确 comparison、risk evaluation 和 freshness 的所有者。
-4. 清除无独立职责的转发 wrapper；只删除已经没有调用方的薄模块。
+3. 拆除 `comparison_binding`、`gate_runtime`、`loop_evidence`、`risk_gate_evidence`、
+   `scope_gate` 的五模块循环依赖，明确 comparison、risk evaluation 和 freshness 的所有者。
+
+清除无独立职责的转发 wrapper 不是第四个独立目标。只有前三项修改自然消除调用方时才随项
+删除对应薄模块，不为减少文件数量另开重构。
 
 ### 暂不处理
 
@@ -132,26 +140,31 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 - 源码总行数和重复函数体减少，且未增加新的超过 500 行模块；
 - Core、Supervisor、Security、Experimental、跨平台与打包验证全部通过。
 
-## 7. 真实 Dogfood 进入条件
+## 7. 真实 Dogfood 与第三轮进入条件
 
-只有三轮均完成后，才选择一个真实项目和一个中等复杂度 Work Item 执行 Supervisor Agent Dogfood。
-进入条件：
+第一轮合入、第二轮完成并通过最新主线 CI 后，立即选择一个真实项目和一个中等复杂度 Work
+Item 执行 Supervisor Agent Dogfood。进入条件：
 
 - 当前文档、规则和模块职责一致；
 - 默认 CLI 产品面明确；
 - 普通 PR 测试耗时已有可信下降；
-- 主要重复流水线和循环依赖已经处理；
 - 最新主线完整 CI 通过；
 - 没有未解释的本地脏文件或历史 Task Card。
 
 Dogfood 只使用现有 Artifact 记录人工步骤、耗时、Worker 轮次、Reviewer 打回、恢复和最终裁决，
 不再建设第二套报告或证据系统。
 
+Dogfood 结束后逐项判断第三轮的三个源码目标：
+
+- 真实任务确实暴露重复执行、Artifact 身份分散或循环依赖造成的维护问题时，进入对应修改；
+- 只有静态整洁收益、没有真实使用影响时，记录为未触发，不自动实施；
+- 第三轮如果产生源码修改，合入后再运行一次同等级任务，确认治理没有损伤 Agent 主流程。
+
 ## 8. 分支与提交边界
 
 - 第一轮：规则、文档、Task Card 状态和 CLI 展示；不含测试删减或 Runtime 重构。
 - 第二轮：测试职责和 CI；不改产品状态机。
-- 第三轮：最多三个窄源码提交；不混入新 Agent 能力。
+- 第三轮：最多三个窄源码提交；只处理 Dogfood 证据支持的目标，不混入新 Agent 能力。
 - 每轮独立验证、独立审查，确认后再进入下一轮。
 - 任一轮出现成功语义变化、兼容入口破坏或无法解释的测试回归时，停止该轮并回到主线事实核对。
 
@@ -162,6 +175,7 @@ Dogfood 只使用现有 Artifact 记录人工步骤、耗时、Worker 轮次、R
 1. 当前事实入口清楚；
 2. AI 能按规则定位模块和验证范围；
 3. 普通 PR 验证成本下降；
-4. 三项已识别的源码重复或耦合问题完成；
-5. 完整 CI 通过；
-6. 后续优化只能由真实使用中重复、可复现的问题触发。
+4. 完成一次中等复杂度真实 Agent Dogfood，并形成可复核的运行证据；
+5. 三项源码目标已完成，或已有明确证据说明本轮未触发；
+6. 完整 CI 通过；
+7. 后续优化只能由真实使用中重复、可复现的问题触发。

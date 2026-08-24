@@ -9,7 +9,7 @@
 | 安装与日常使用 | [`../README.md`](../README.md) | 用户入口与常用命令 |
 | 产品边界与成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | Core、Supervisor、证据和行为边界 |
 | 当前阶段与唯一下一步 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
-| 当前治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 三轮范围、验收与停止条件 |
+| 当前治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 治理范围、Dogfood 节点与停止条件 |
 | 完整使用流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | Core 与 Supervisor 操作 |
 | 调查和计划协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | 修改前调查、事实与假设、人工确认 |
 | Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 模块职责和数据流 |

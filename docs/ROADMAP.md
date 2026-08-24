@@ -11,15 +11,18 @@ Supervisor Agent V1 已随 `v0.2.0` 发布，`v0.2.1` 完成范围与恢复边�
 主线提交继续修复 Worker 可见性、状态与证据展示、单 Writer、恢复事务和测试职责，没有增加
 新的 Runtime、Agent 角色或成功路径。
 
-当前唯一下一步是继续 AI 可维护性治理；第一轮已于 2026-08-24 完成：
+当前唯一下一步是继续 AI 可维护性治理；第一轮已于 2026-08-24 完成分支实现，等待 PR 审阅、
+CI 与合并：
 
-1. 当前事实、规则与产品入口（已完成）；
-2. 测试职责与执行成本（下一步）；
-3. 已识别的源码重复和循环依赖。
+1. 当前事实、规则与产品入口（实现完成，等待合入）；
+2. 测试职责与执行成本（第一轮合入后开始）；
+3. 中等复杂度真实 Supervisor Agent Dogfood；
+4. 只处理 Dogfood 证据支持的源码重复和循环依赖。
 
-三轮完成并由最新主线 CI 验证后，直接进入一个真实中等复杂度 Work Item 的 Supervisor Agent
-Dogfood。治理期间不增加多 Work Item、Memory、Provider 平台、多 Reviewer、Web UI 或新 Runtime。
-没有真实使用暴露的重复问题，不追加第四轮基础设施治理。
+第二轮完成并由最新主线 CI 验证后，直接进入一个真实中等复杂度 Work Item 的 Supervisor
+Agent Dogfood。第三轮不是默认动作，只处理真实任务暴露的问题。治理期间不增加多 Work Item、
+Memory、Provider 平台、多 Reviewer、Web UI 或新 Runtime。没有真实使用影响的问题，不继续
+追加基础设施治理。
 
 <details>
 <summary>2026-08-20 之前的阶段摘要</summary>
