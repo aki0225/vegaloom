@@ -32,6 +32,36 @@
   `agent_side_effect_adjudication`。
 - 状态与展示：`agent_run_status`、`agent_status_*`、`agent_visibility`、`agent_task_card*`。
 
+## Core 模块地图
+
+- CLI 组合根：`cli_entrypoint`、`cli`、`cli_support`。这里只注册命令和组合 Runtime，不拥有
+  成功语义。
+- 任务与项目上下文：`brief_*`、`project_*`、`agents_proposal`、`content_manifest`。
+- Loop 编排：`loop_runtime`、`loop_*`、`runner`、`worker_*`。Loop 只编排已有阶段，不复制
+  Verification、Risk、Reviewer 或 Finish 的裁决。
+- 执行与进程：`execution_*`、`windows_*`、`worker_temp`。进程身份、停止和平台边界不能移入
+  展示或通用工具模块。
+- Workspace 与 Scope：`workspace_*`、`runtime_workspace`、`tracked_workspace`、`scope_*`、
+  `comparison_binding`。
+- Verification、Risk、Review 与 Finish：`verification*`、`risk_*`、`gate_runtime`、
+  `review_*`、`finish_*`。每一层保留独立错误码和证据所有权。
+- 状态、恢复与 Artifact：`run_*`、`progress`、`trace`、`recovery_*`、`artifact_rendering`。
+  状态展示只能投影权威 Artifact，不能反向创造运行事实。
+- `tools/` 和 `resources/`：受控工具实现与包内静态资源；资源镜像必须由同步测试绑定。
+
+## 改动与验证矩阵
+
+- CLI 注册、参数或帮助：运行相关 Core CLI 测试；涉及 `vega agent` 时同时运行 Supervisor CLI
+  测试。
+- Loop、Verification、Risk、Reviewer、Finish 或恢复：运行对应 Core 文件和相关 Security
+  负向合同。
+- `agent_*`：运行所属 Supervisor 文件；涉及身份、路径、Artifact 或恢复时追加相关 Security
+  文件。
+- `experimental/`：运行对应 Experimental 文件和 Core/Experimental 依赖边界测试，不把实验
+  测试塞回产品分片。
+- 打包、入口、依赖或资源：运行 wheel/sdist smoke 或等价的干净环境验证。
+- 共享边界不明确时先运行最窄完整文件，再扩大到职责目录；不要从单个绿 node 推断整个分片通过。
+
 ## 修改要求
 
 - 优先在已有职责模块内做窄修改。新增状态、Artifact、顶级命令或事实源前，先证明现有合同无法表达。

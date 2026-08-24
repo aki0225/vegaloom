@@ -45,8 +45,8 @@ python scripts\dogfood_eval.py --workspace . --runner none
 需要并行或分片运行时，应显式提供互不相同的目录：
 
 ```powershell
-python -m pytest tests\test_smoke.py --basetemp .tmp\pytest\runs\smoke-$PID
-python -m pytest tests\test_runtime_safety.py --basetemp .tmp\pytest\runs\runtime-$PID
+python -m pytest tests\core\test_smoke.py --basetemp .tmp\pytest\runs\smoke-$PID
+python -m pytest tests\security\test_runtime_safety_integration.py --basetemp .tmp\pytest\runs\runtime-$PID
 ```
 
 手工验证可以把日志重定向到 `.local-validation\`，例如：
@@ -58,3 +58,13 @@ ruff check src tests *> .local-validation\ruff.log
 
 这份规范只约束文件位置，不改变 v0.1 的运行语义，也不要求把本地运行 artifacts
 提交到 Git。
+
+## 本地产物保留与清理
+
+- `.tmp/`、`dist/`、`build/` 和 `__pycache__/` 在没有活动进程且验证结果已登记后可视为可丢弃。
+- `runs/` 先区分 active、被文档引用和普通历史 run；只按明确 run_id 清理，不使用“保留最近
+  若干个”替代证据判断。
+- `.local-validation/` 只保留尚未写入权威文档的最终诊断。已经由 CI、Release、`eval/` 或
+  `examples/evidence/` 接管的重复日志可以列为清理候选。
+- `memory/` 由人工逐条判断，不能因功能处于 Experimental 就批量删除 ledger。
+- 清理前记录目标相对路径、文件数、占用空间和活动进程；删除动作必须另行获得明确确认。
