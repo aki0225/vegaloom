@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
-from typing import Literal
 from uuid import uuid4
 
-from .agent_contract import AgentPlan, AgentState, canonical_digest
+from .agent_contract import AgentPlan, AgentState
+from .agent_operation import (
+    bound_operation_kind,
+    operation_ref,
+)
 from .agent_persistence import append_agent_trace
 from .agent_run import AgentRun
 from .agent_runtime_support import write_status_card
@@ -18,36 +20,6 @@ from .execution_control import (
 from .models import LoopAutomationState
 from .redaction import write_redacted_json_once
 from .run_utils import resolve_run_dir
-
-
-AgentOperationKind = Literal["worker", "verification_retry"]
-
-
-def bound_operation_kind(
-    run_dir: Path,
-    state: AgentState,
-) -> AgentOperationKind:
-    """读取当前 active operation 的不可变类型；旧 Artifact 视为 Worker。"""
-
-    if not state.active_operation_id or not state.active_child_run:
-        raise ValueError("当前 Agent State 缺少 active operation 绑定")
-    path = run_dir / operation_ref(state.active_operation_id)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError("active operation Artifact 缺失或无法解析") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("active operation Artifact 不是 JSON object")
-    operation_kind = payload.get("operation_kind", "worker")
-    if (
-        payload.get("run_id") != state.run_id
-        or payload.get("work_item_id") != state.current_work_item
-        or payload.get("child_run") != state.active_child_run
-        or payload.get("operation_id") != state.active_operation_id
-        or operation_kind not in {"worker", "verification_retry"}
-    ):
-        raise ValueError("active operation Artifact 身份或类型不一致")
-    return operation_kind
 
 
 def resolve_bound_execution_run_dir(
@@ -130,10 +102,6 @@ def resolve_bound_worker_execution(
     if len(bound) > 1:
         raise ValueError("当前 active operation 对应多个 Worker execution 记录")
     return bound[0]
-
-
-def operation_ref(operation_id: str) -> str:
-    return f"operations/{canonical_digest({'operation_id': operation_id})}.json"
 
 
 def stop_active_child(

@@ -15,7 +15,7 @@ from vega import agent_repository_guard as agent_repository_guard_module
 from vega import agent_side_effect_adjudication as agent_adjudication_module
 from vega import agent_worker as agent_worker_module
 from vega.agent_contract import AgentObservation, AgentPlan, AgentWorkItem
-from vega.agent_execution_bridge import operation_ref
+from vega.agent_operation import operation_ref
 from vega.agent_persistence import (
     load_agent_checkpoint,
     load_agent_state,

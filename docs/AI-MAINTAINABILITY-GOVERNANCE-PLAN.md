@@ -1,9 +1,10 @@
 # Vega AI 可维护性治理计划
 
-> 状态：active（第二轮完成，PR `#83` 等待合入）
+> 状态：active（第三轮源码修改、本地门禁与真实 Dogfood 已完成，等待 PR CI）
 > 创建日期：2026-08-23
-> 基线：`main@6a95970`
-> 目标版本：不预设版本号；第二轮完成后先运行真实 Dogfood，再按证据决定第三轮范围
+> 当前基线：`main@aadeedf`
+> 最后更新：2026-08-25
+> 目标版本：不预设版本号；按 Dogfood 证据决定第三轮范围，产生源码修改后复跑同等级任务
 
 ## 1. 为什么现在做
 
@@ -18,9 +19,9 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 
 本计划不追求最少文件或最高测试数字，只降低理解成本、重复实现和日常验证成本。
 
-## 2. 当前基线
+## 2. 治理前基线与当前快照
 
-只读审计得到以下基线：
+2026-08-23 的治理前只读审计得到以下基线：
 
 - `src/vega/`：153 个 Python 文件，约 46,546 行；129 个模块位于包根目录；
 - `agent_*`：36 个文件，约 9,939 行；
@@ -33,6 +34,32 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
   不作为项目规模或治理成效指标。
 
 这些数字用于验证治理是否有效，不作为机械删除目标。
+
+2026-08-25 在第三轮修改前的 `main@aadeedf` 重新收集：
+
+- `src/vega/`：160 个 Python 文件、48,124 行；136 个模块位于包根目录；
+- `agent_*`：40 个文件、11,223 行；
+- `loop_runtime.py`：2,985 行；`_continue_assist_locked` 为 525 行，
+  `_run_auto_iterations` 为 821 行，两条路径仍分别编排 post-worker 阶段；
+- 包根目录当前有两个静态依赖环：既有五模块 Core 依赖环，以及
+  `agent_task_card` / `agent_task_card_render` 两模块环；
+- 当前本地完整节点收集为 1,424 个；第二轮移动测试职责后保留的 1,409 个节点没有被删除，
+  PR `#84` 又补充了验证专用恢复测试；
+- `docs/`：60 个 Markdown 文件、18,118 行；
+- 顶层 CLI 仍为 23 个入口，默认帮助的产品展示层级已由第一轮调整。
+
+当前代码量增加主要来自 PR `#84` 的验证专用恢复和对应证据校验。该 Diff、真实运行记录和
+修改过程中触碰的模块将作为第三轮进入判断的输入，不能仅凭文件数或行数增长自动启动重构。
+
+第三轮本地实现后的待提交快照：
+
+- `src/vega/`：161 个 Python 文件、47,942 行；
+- `loop_runtime.py`：2,772 行；`_continue_assist_locked` 从 525 行降至 150 行，
+  `_run_auto_iterations` 从 821 行降至 435 行；
+- Ruff C901 存量从 34 个降至 33 个；
+- 新增 111 行的 `agent_operation.py`，集中 operation 与 child summary 的 canonical 引用、
+  不可变身份写入和 active operation 类型校验；
+- 五模块 Core 静态依赖环保持原状，本轮没有为消除静态环扩大修改范围。
 
 ## 3. 不可改变的边界
 
@@ -77,7 +104,7 @@ Vega 已经具备 Core Coding Harness 和可选 Supervisor Agent，但活跃产�
 
 ## 5. 第二轮：测试职责与执行成本
 
-状态：`completed`（2026-08-24，PR `#83` 已通过完整 CI，等待合入）
+状态：`completed`（2026-08-24，PR `#83` 已通过完整 CI 并合入 `main@08d008e`）
 
 ### 改造前基线
 
@@ -163,7 +190,7 @@ Goal、Memory、Inspection 与 Dogfood 场景移回 Experimental；全部测试�
 
 ## 6. 第三轮：源码职责与重复实现
 
-状态：`pending`
+状态：`in_progress`（两个目标完成实现，一个目标未触发，等待 PR CI）
 
 ### 范围
 
@@ -179,6 +206,31 @@ Goal、Memory、Inspection 与 Dogfood 场景移回 Experimental；全部测试�
 清除无独立职责的转发 wrapper 不是第四个独立目标。只有前三项修改自然消除调用方时才随项
 删除对应薄模块，不为减少文件数量另开重构。
 
+### 进入判断与处理结果
+
+1. **post-worker 重复编排：触发并完成实现。**
+   assist 与 auto 原先各自编排 Scope、Verification、Reflect、Risk 和 Reviewer；PR `#84`
+   还需要单独把验证恢复基线接进 assist 路径。当前两条入口统一调用
+   `_run_post_worker_stages`，成功状态继续由 `LoopAutomationRuntime` 裁决。
+2. **Supervisor operation Artifact 身份分散：触发并完成实现。**
+   Worker dispatch、验证专用恢复、Recovery 和状态证据此前分别生成 operation 或 child
+   canonical 路径。当前由 `agent_operation.py` 唯一拥有路径、身份保留和类型校验规则；
+   原有旧 Worker Artifact 仍按既有规则读取。
+3. **五模块 Core 依赖环：本轮未触发。**
+   静态环仍可复现，但 Echo Vault Dogfood 的失败、恢复和 PR `#84` 修改没有暴露由该环导致的
+   运行故障、错误归属或维护阻塞。按本计划的进入条件保留现状，等待真实任务给出直接证据。
+
+### 回归结果
+
+- 本地五个测试分片共 1,428 项通过；Security 另有 2 项按平台条件跳过；
+- Compileall、Ruff、仓库卫生、架构增长门禁、`git diff --check` 和展示数据一致性检查通过；
+- wheel 构建、隔离虚拟环境安装、核心模块导入和 CLI smoke 通过；
+- 确定性 Dogfood 8/8 通过；
+- Echo Vault 固定提交上的真实复验完成 Worker、五条验证、Risk、隔离 Reviewer 和验证专用
+  恢复。全部验证通过后 Reviewer 仍发现一个目标代码缺陷，Supervisor 返回 `replan /
+  needs_human`。该结果证明门禁没有被治理修改绕过，但不构成 `ready_to_commit` 成功样本；
+- 远端 PR CI 尚未运行，不能把本地结果表述为完整 CI 已通过。
+
 ### 暂不处理
 
 - 不一次性把 36 个 `agent_*` 文件搬进新包；
@@ -189,13 +241,21 @@ Goal、Memory、Inspection 与 Dogfood 场景移回 Experimental；全部测试�
 
 ### 验收
 
-- assist 与 auto 只调用同一个 post-worker 阶段实现；
-- operation Artifact 身份规则只有一个实现所有者；
-- Core 五模块循环依赖消失；
+- 已进入的目标满足：assist 与 auto 只调用同一个 post-worker 阶段实现；
+- 已进入的目标满足：operation Artifact 身份规则只有一个实现所有者；
+- 未进入的目标记录未触发证据，不以静态整洁为由继续修改；
 - 源码总行数和重复函数体减少，且未增加新的超过 500 行模块；
 - Core、Supervisor、Security、Experimental、跨平台与打包验证全部通过。
 
 ## 7. 真实 Dogfood 与第三轮进入条件
+
+状态：`completed`（2026-08-24）
+
+Echo Vault 固定提交上的真实任务已记录在 `eval/real-world-runs.md`。首次 Core 验证因
+`node_modules` 缺失而 fail-closed；人工只补齐 ignored 依赖环境，未修改 tracked Diff。
+`vega agent retry-verification` 随后在同一 child 上复用原 Worker execution，五条验证全部
+通过，Risk Gate 为 low，独立 Reviewer 返回 `approve`，父 Agent 最终为
+`completed / ready_to_commit`。该恢复能力已通过 PR `#84` 合入当前主线。
 
 第一轮合入、第二轮完成并通过最新主线 CI 后，立即选择一个真实项目和一个中等复杂度 Work
 Item 执行 Supervisor Agent Dogfood。进入条件：

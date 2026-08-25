@@ -3,14 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from .agent_contract import AgentObservation, canonical_digest
+from .agent_contract import AgentObservation
 from .agent_execution_bridge import (
-    AgentOperationKind,
-    bound_operation_kind,
     resolve_bound_execution_run_dir,
     resolve_bound_worker_execution,
     stop_active_child,
     write_execution_evidence_ref,
+)
+from .agent_operation import (
+    AgentOperationKind,
+    bound_operation_kind,
+    operation_ref,
 )
 from .agent_mutation import agent_mutation
 from .agent_persistence import (
@@ -138,12 +141,7 @@ class SupervisorAgentRecovery:
             )
 
         previous_child = state.active_child_run
-        evidence_refs = [
-            (
-                "operations/"
-                f"{canonical_digest({'operation_id': state.active_operation_id})}.json"
-            )
-        ]
+        evidence_refs = [operation_ref(state.active_operation_id)]
         if bound_record is not None:
             evidence_refs.append(
                 write_execution_evidence_ref(

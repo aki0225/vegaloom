@@ -1142,3 +1142,58 @@ finish_sha256 = 9908ede760876e71abe3f6c3fcbaeb9b9f0f00d996c176af298322f2f18f8759
 Vega 没有对目标仓库执行 commit、push、PR 或 merge。该 Case 证明验证环境可以在不改源码、
 不覆盖旧失败 iteration、也不启动第二个 Coding Worker 的前提下恢复；它不证明未知外部
 副作用可安全重放，也不把 ignored 环境变化当作 tracked 代码未变化之外的安全结论。
+
+## 2026-08-25 源码治理复验：Echo Vault Reviewer 打回
+
+本条使用第三轮源码治理后的本地工作树，在固定提交
+`65627d99c550e6615549baa9ce2d56d2ae16b21c` 上复跑前一条同等级任务。目标不是重复证明
+Echo Vault 修复正确，而是检查共用 post-worker 链和集中 operation 身份后，Supervisor
+仍能保留 Worker、Verification、Risk、Reviewer 与恢复边界。
+
+第一次准备 run `20260825-130616-agent` 时，隔离 worktree 通过 Junction 复用依赖目录。
+Workspace inventory 无法完整读取 ignored Junction，child
+`20260825-130633-263834-bug-loop` 在 Worker 启动前停于
+`workspace_baseline_unavailable`。没有绑定 Worker，也没有产生 tracked Diff。随后改用
+worktree 内独立依赖目录，重新捕获完整基线。
+
+正式复验使用：
+
+- Agent run：`20260825-131206-agent`；
+- child：`20260825-131315-571682-bug-loop`；
+- Worker operation：`834a2195d5b64c748c7847c57664e551`；
+- 验证恢复 operation：`45da552e642f4fb18b00b50a80aed93f`。
+
+真实 Worker 修改三个批准文件：
+
+- `.trellis/spec/backend/error-handling.md`；
+- `backend/app/ai_client.py`；
+- `backend/tests/test_chat_usage_and_export.py`。
+
+第一轮后端定向测试、后端完整测试和 `git diff --check` 通过。直接复制的 pnpm 依赖目录没有
+保留正确链接，前端测试和构建失败；Reviewer 返回 `needs_human`，父 Agent 保持
+`needs_human`。人工只在 ignored 目录重新执行固定版本 pnpm 安装，没有修改 tracked Diff；
+前端测试 180 项和构建随后单独通过。
+
+Plan revision 2 保持任务目标、允许路径、风险和五条验证命令不变。运行
+`vega agent retry-verification` 后，Vega 复用原 Worker execution 和三文件 Diff，在同一 child
+追加 iteration 2。五条验证全部通过，Risk Gate 为 low。独立 Reviewer 没有批准：它指出
+`response.completed` 的 payload 即使带非空 `error`，当前补丁仍会接受
+`status=completed`，与项目错误处理规范冲突，并要求补解析及失败持久化回归。
+
+父 Agent 最终保留为：
+
+```text
+phase = planning
+plan_revision = 2
+checkpoint = checkpoint-005
+verification = passed
+risk = passed
+reviewer = request_changes
+finish_status = needs_human
+finish_sha256 = 6e96dfd12c135460db876ca1f98eda508eaaccae2ef4410e58af19c4a569b6f8
+```
+
+该复验没有得到 `ready_to_commit`，也不应包装成成功案例。它证明第三轮修改后的真实链路能够
+写入两类不可变 operation Artifact、复用原 Worker 完成验证恢复，并在全部命令通过后继续接受
+Reviewer 的具体打回，而不是把验证通过等同于代码正确。目标仓库仍保留未提交 Diff；Vega
+没有执行 commit、push、PR 或 merge。

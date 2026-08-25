@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -199,6 +200,67 @@ def test_cli_cannot_eagerly_import_experimental_module(tmp_path: Path) -> None:
     assert module._core_import_issues(tmp_path) == [
         "核心模块静态依赖实验模块：src/vega/cli.py:1"
     ]
+
+
+def test_assist_and_auto_share_one_post_worker_executor() -> None:
+    source = (PROJECT_ROOT / "src" / "vega" / "loop_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    runtime = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "LoopAutomationRuntime"
+    )
+    methods = {
+        node.name: node
+        for node in runtime.body
+        if isinstance(node, ast.FunctionDef)
+    }
+
+    def called_attributes(method_name: str) -> set[str]:
+        return {
+            node.func.attr
+            for node in ast.walk(methods[method_name])
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+
+    for entrypoint in ("_continue_assist_locked", "_run_auto_iterations"):
+        calls = called_attributes(entrypoint)
+        assert "_run_post_worker_stages" in calls
+        assert "_run_review" not in calls
+
+    assert {
+        "_run_post_worker_scope_gate",
+        "_run_post_worker_verification",
+        "_run_post_worker_reflect",
+        "_run_post_worker_review",
+    } <= called_attributes("_run_post_worker_stages")
+
+
+def test_agent_operation_identity_has_one_implementation_owner() -> None:
+    expected_owner = "src/vega/agent_operation.py"
+    identity_functions = {
+        "operation_ref",
+        "child_summary_ref",
+        "reserve_operation_identity",
+        "bound_operation_kind",
+    }
+    owners: dict[str, list[str]] = {
+        function_name: [] for function_name in identity_functions
+    }
+
+    for path in sorted((PROJECT_ROOT / "src" / "vega").glob("agent_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        relative = path.relative_to(PROJECT_ROOT).as_posix()
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name in owners:
+                owners[node.name].append(relative)
+
+    assert owners == {
+        function_name: [expected_owner]
+        for function_name in identity_functions
+    }
 
 
 @pytest.mark.parametrize("module_name", REMOVED_INTERNAL_MODULE_NAMES)

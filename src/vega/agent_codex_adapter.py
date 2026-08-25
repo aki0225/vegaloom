@@ -18,7 +18,6 @@ from .agent_codex_evidence import (
     load_child_state,
     load_finish_summary,
     observation_from_child,
-    operation_ref,
     require_child_quiescent,
     require_repair_child,
     require_single_executable_work_item,
@@ -26,6 +25,7 @@ from .agent_codex_evidence import (
     require_waiting_child,
     write_child_summary,
 )
+from .agent_operation import operation_ref
 from .agent_codex_scope import (
     capture_plan_scope_baseline,
     evaluate_plan_scope,

@@ -15,6 +15,7 @@ from .agent_contract import (
     SupervisorEvidenceStatus,
     canonical_digest,
 )
+from .agent_operation import child_summary_ref
 from .agent_verification_retry_archive import retry_source_finish_archive_issue
 from .execution_control import ExecutionLease
 from .project_config import ScopeConfig, scope_policy_sha256
@@ -88,9 +89,9 @@ def _load_child_summary(
 ) -> tuple[dict[str, object] | None, str | None]:
     if observation.child_run is None or observation.operation_id is None:
         return None, "Observation 缺少 child 或 operation 绑定"
-    expected_ref = (
-        "children/"
-        f"{canonical_digest({'child': observation.child_run, 'operation_id': observation.operation_id})}.json"
+    expected_ref = child_summary_ref(
+        observation.child_run,
+        observation.operation_id,
     )
     refs = [ref for ref in observation.evidence_refs if ref.startswith("children/")]
     if refs.count(expected_ref) != 1 or len(refs) != 1:
@@ -159,10 +160,7 @@ def _retry_source_worker_evidence(
         or SHA256_PATTERN.fullmatch(summary_sha256) is None
     ):
         return _item("Worker 执行", "stale", "验证恢复缺少原始 Worker 绑定")
-    expected_ref = (
-        "children/"
-        f"{canonical_digest({'child': child_run, 'operation_id': operation_id})}.json"
-    )
+    expected_ref = child_summary_ref(child_run, operation_id)
     if summary_ref != expected_ref:
         return _item("Worker 执行", "stale", "原始 Worker 摘要引用不是 canonical 路径")
     archive_issue = retry_source_finish_archive_issue(run_dir, child_payload, worker)
