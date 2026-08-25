@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "event_id": "20260824T034024Z-GOV-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "GOV-02",
+  "transition": "completed",
+  "recorded_at": "2026-08-24T03:40:24Z",
+  "summary": "测试职责完成分类，全部节点得到保留，普通 PR 产品关键路径耗时达到计划目标。",
+  "evidence": {
+    "pull_requests": [
+      83
+    ],
+    "commits": [
+      "08d008ebe731eaa55f62f13e086abe15d6d1b0ed"
+    ],
+    "checks": [
+      "test-inventory",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "tests/AGENTS.md",
+      ".github/workflows/ci.yml"
+    ]
+  }
+}

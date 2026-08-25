@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "20260824T014954Z-GOV-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "GOV-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-24T01:49:54Z",
+  "summary": "目录职责、文档入口、分层 AGENTS 规则和默认 CLI 展示已经整理并进入主线。",
+  "evidence": {
+    "pull_requests": [
+      82
+    ],
+    "commits": [
+      "eaea17574eb08b5d190badf49862ad93571ac8b9"
+    ],
+    "checks": [
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "AGENTS.md",
+      "docs/README.md",
+      "src/vega/AGENTS.md"
+    ]
+  }
+}

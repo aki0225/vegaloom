@@ -14,6 +14,7 @@ Vega 是本地优先的 AI 编码工作流 harness：worker 改代码，reviewer
 - `tests/` — pytest 测试
 - `.github/` — CI、发布与 GitHub Pages 工作流
 - `.vega/` — 可提交的 Agent Task Card；当前任务与历史任务必须明确分开
+- `plans/` — 机器可读演进计划与追加式状态事件；当前视图由脚本生成
 - `eval/` — 实验与运行证据(`cases.jsonl` 评测用例、`real-world-runs.md` 真实 Issue 运行记录)
 - `scripts/` — 仓库门禁、站点数据、Pilot 和冻结实验脚本
 - `site/` — GitHub Pages 静态站点；案例数据由登记的生成器维护
@@ -47,6 +48,7 @@ Vega 是本地优先的 AI 编码工作流 harness：worker 改代码，reviewer
 ```powershell
 python -m compileall -q src scripts
 python scripts/check_repository_hygiene.py --base-ref origin/main
+python scripts/plan_state.py check --base-ref origin/main
 python scripts/check_architecture_growth.py --base-ref origin/main
 python -m pytest
 ruff check src tests scripts

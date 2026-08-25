@@ -1,8 +1,8 @@
 # Vega AI 可维护性治理计划
 
-> 状态：active（第三轮源码修改、本地门禁与真实 Dogfood 已完成，等待 PR CI）
+> 状态：completed（PR `#85` 的 10 项 CI 全部通过，已合入 `main@d1a4b8d`）
 > 创建日期：2026-08-23
-> 当前基线：`main@aadeedf`
+> 完成基线：`main@d1a4b8d`
 > 最后更新：2026-08-25
 > 目标版本：不预设版本号；按 Dogfood 证据决定第三轮范围，产生源码修改后复跑同等级任务
 
@@ -190,7 +190,7 @@ Goal、Memory、Inspection 与 Dogfood 场景移回 Experimental；全部测试�
 
 ## 6. 第三轮：源码职责与重复实现
 
-状态：`in_progress`（两个目标完成实现，一个目标未触发，等待 PR CI）
+状态：`completed`（两个目标完成实现，一个目标按证据未触发）
 
 ### 范围
 
@@ -229,7 +229,7 @@ Goal、Memory、Inspection 与 Dogfood 场景移回 Experimental；全部测试�
 - Echo Vault 固定提交上的真实复验完成 Worker、五条验证、Risk、隔离 Reviewer 和验证专用
   恢复。全部验证通过后 Reviewer 仍发现一个目标代码缺陷，Supervisor 返回 `replan /
   needs_human`。该结果证明门禁没有被治理修改绕过，但不构成 `ready_to_commit` 成功样本；
-- 远端 PR CI 尚未运行，不能把本地结果表述为完整 CI 已通过。
+- PR `#85` 的 10 项 CI 全部通过，并以 Squash Merge 合入 `main@d1a4b8d`。
 
 ### 暂不处理
 
@@ -294,3 +294,6 @@ Dogfood 结束后逐项判断第三轮的三个源码目标：
 5. 三项源码目标已完成，或已有明确证据说明本轮未触发；
 6. 完整 CI 通过；
 7. 后续优化只能由真实使用中重复、可复现的问题触发。
+
+以上七项已经满足。本计划不再承担当前进度维护；后续事项、依赖和完成事件由
+`../plans/vega-agent-evolution.json`、`../plans/events/` 与生成的 `CURRENT.md` 管理。

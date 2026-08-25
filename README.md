@@ -212,13 +212,15 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 
 | 内容 | 文档 |
 |---|---|
-| 文档导航和状态 | [docs/README](docs/README.md) |
+| 当前事项和下一项 | [CURRENT](docs/CURRENT.md) |
+| 文档导航 | [docs/README](docs/README.md) |
 | 日常入口、Agent 与恢复操作 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
 | 产品范围和成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
 | Supervisor 状态权威 | [SUPERVISOR-AGENT-STATE-AUTHORITY](docs/SUPERVISOR-AGENT-STATE-AUTHORITY.md) |
 | Plan-first 协议 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | Runtime、证据链和风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
-| 当前路线 | [ROADMAP](docs/ROADMAP.md) |
+| 演进计划 | [vega-agent-evolution](plans/vega-agent-evolution.json) |
+| 路线决策和历史 | [ROADMAP](docs/ROADMAP.md) |
 | v0.2.1 发布说明 | [RELEASE-NOTES-0.2.1](docs/RELEASE-NOTES-0.2.1.md) |
 | 真实任务运行记录 | [real-world-runs](eval/real-world-runs.md) |
 
@@ -229,10 +231,12 @@ vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --r
 
 ```powershell
 python -m pip install -e ".[dev]"
-python -m compileall src scripts/check_repository_hygiene.py
+python -m compileall -q src scripts
 python scripts/check_repository_hygiene.py --base-ref origin/main
+python scripts/plan_state.py check --base-ref origin/main
+python scripts/check_architecture_growth.py --base-ref origin/main
 python -m pytest
-ruff check src tests scripts/check_repository_hygiene.py
+ruff check src tests scripts
 git diff --check
 ```
 
