@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .agent_contract import AgentState, canonical_digest, validate_v1_execution_binding
+from .agent_contract import validate_v1_execution_binding
 from .agent_graph import require_agent_runtime_dependencies
 from .agent_mutation import agent_mutation
+from .agent_operation import reserve_operation_identity
 from .agent_persistence import append_agent_trace, read_agent_trace, save_agent_state
 from .agent_repository_guard import (
     acquire_writer_claim,
@@ -19,9 +20,6 @@ from .agent_runtime_support import (
     validate_dispatch_artifacts,
     write_status_card,
 )
-from .redaction import write_redacted_json_once
-
-
 class SupervisorAgentWorker:
     """管理单 Writer 绑定；真正的 Coding Agent 仍由宿主 Adapter 启动。"""
 
@@ -93,7 +91,7 @@ class SupervisorAgentWorker:
         )
         state_committed = False
         try:
-            operation_ref = _reserve_operation_identity(
+            operation_ref = reserve_operation_identity(
                 run_dir,
                 state,
                 child_run=child_run,
@@ -137,31 +135,3 @@ class SupervisorAgentWorker:
                     operation_id=operation_id,
                 )
             raise
-
-
-def _reserve_operation_identity(
-    run_dir: Path,
-    state: AgentState,
-    *,
-    child_run: str,
-    operation_id: str,
-) -> str:
-    digest = canonical_digest({"operation_id": operation_id})
-    relative = f"operations/{digest}.json"
-    try:
-        write_redacted_json_once(
-            run_dir / relative,
-            {
-                "schema_version": 1,
-                "run_id": state.run_id,
-                "state_version": state.state_version,
-                "work_item_id": state.current_work_item,
-                "child_run": child_run,
-                "operation_id": operation_id,
-            },
-        )
-    except FileExistsError as exc:
-        raise ValueError(
-            "operation_id 已在当前 Agent run 使用，禁止复用旧执行身份"
-        ) from exc
-    return relative

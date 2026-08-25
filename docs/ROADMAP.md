@@ -1,27 +1,43 @@
 # Vega 后续演进路线
 
-> 当前更新时间：2026-08-24
+> 当前更新时间：2026-08-25
 > 当前稳定版本：`v0.2.1`
-> 当前主线：`main@6a95970`，稳定版本后包含五个尚未发布的维护提交
+> 本轮源码治理基线：`main@aadeedf`
 > 当前 active 计划：[`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md)
 
 ## 当前执行快照
 
-Supervisor Agent V1 已随 `v0.2.0` 发布，`v0.2.1` 完成范围与恢复边界维护。稳定版本后的五个
-主线提交继续修复 Worker 可见性、状态与证据展示、单 Writer、恢复事务和测试职责，没有增加
-新的 Runtime、Agent 角色或成功路径。
+Supervisor Agent V1 已随 `v0.2.0` 发布，`v0.2.1` 完成范围与恢复边界维护。稳定版本后的八个
+主线提交继续处理 Worker 可见性、状态与证据展示、单 Writer、恢复事务、测试职责和验证专用
+恢复，没有增加新的 Runtime、Agent 角色或成功路径。
 
-当前唯一下一步是继续 AI 可维护性治理；第一轮已于 2026-08-24 通过 PR `#82` 合入：
+AI 可维护性治理已经完成前两轮和首次真实 Dogfood：
 
-1. 当前事实、规则与产品入口（已完成）；
-2. 测试职责与执行成本（PR `#83` 已通过完整 CI，等待合入）；
-3. 中等复杂度真实 Supervisor Agent Dogfood；
-4. 只处理 Dogfood 证据支持的源码重复和循环依赖。
+1. 当前事实、规则与产品入口：PR `#82` 已合入 `main@eaea175`；
+2. 测试职责与执行成本：PR `#83` 已合入 `main@08d008e`，保留全部测试，普通 PR 产品关键
+   路径中位数从 `114s` 降至 `75s`；
+3. 中等复杂度真实 Supervisor Agent Dogfood：Echo Vault Case 已完成。首次验证因缺少前端
+   依赖 fail-closed；补齐 ignored 环境后复用原 Worker 和 tracked Diff 完成验证、Risk、
+   独立 Reviewer 与 Finish；
+4. Dogfood 暴露的验证专用恢复缺口已由 PR `#84` 合入 `main@aadeedf`。
 
-第二轮完成并由最新主线 CI 验证后，直接进入一个真实中等复杂度 Work Item 的 Supervisor
-Agent Dogfood。第三轮不是默认动作，只处理真实任务暴露的问题。治理期间不增加多 Work Item、
-Memory、Provider 平台、多 Reviewer、Web UI 或新 Runtime。没有真实使用影响的问题，不继续
-追加基础设施治理。
+第三轮按既定顺序处理了两个证据支持的目标：
+
+1. assist 与 auto 共用一条 post-worker Scope、Verification、Reflect、Risk 和 Reviewer 链；
+2. `agent_operation.py` 集中 operation 与 child summary 的 canonical 引用、不可变身份写入和
+   active operation 类型校验。
+
+五模块 Core 静态依赖环没有在 Echo Vault Dogfood 或 PR `#84` 中造成可复现的运行故障或维护
+阻塞，本轮记为未触发。
+
+本地 1,428 项测试、静态门禁、wheel smoke 和确定性 Dogfood 已通过。Echo Vault 同等级真实
+复验完成 Worker、五条验证、Risk、Reviewer 和验证专用恢复；全部验证通过后 Reviewer 找到
+目标补丁仍遗漏非空 `error` 字段，Supervisor 正确返回 `replan / needs_human`，没有产生
+`ready_to_commit`。运行细节已追加到 `eval/real-world-runs.md`。
+
+当前唯一下一步是审阅本轮 Diff 并运行 PR CI。CI 通过后本计划完成；目标仓库的 Reviewer
+finding 属于 Echo Vault 后续修复，不扩大为 Vega Runtime 改造。本计划完成前不增加自主
+Agent 路线、多 Work Item、Memory、Provider 平台、多 Reviewer、Web UI 或新 Runtime。
 
 <details>
 <summary>2026-08-20 之前的阶段摘要</summary>

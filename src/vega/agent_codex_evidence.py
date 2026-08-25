@@ -21,10 +21,10 @@ from .agent_contract import (
     AgentPlan,
     AgentState,
     AgentWorkItem,
-    canonical_digest,
     validate_v1_execution_binding,
 )
 from .agent_codex_scope import PlanScopeBaseline
+from .agent_operation import child_summary_ref
 from .agent_persistence import load_agent_checkpoint
 from .agent_run import AgentRun
 from .agent_runtime_support import capture_bound_workspace
@@ -247,10 +247,7 @@ def write_child_summary(
     child_state: LoopAutomationState | None = None,
     finish_summary: dict[str, object] | None = None,
 ) -> str:
-    relative = (
-        "children/"
-        f"{canonical_digest({'child': child_dir.name, 'operation_id': operation_id})}.json"
-    )
+    relative = child_summary_ref(child_dir.name, operation_id)
     finish_path = child_dir / "finish-summary.json"
     write_redacted_json_once(
         run_dir / relative,
@@ -349,10 +346,6 @@ def observation_from_child(
         work_item_completed=work_item_completed,
         all_work_items_completed=all_work_items_completed,
     )
-
-
-def operation_ref(operation_id: str) -> str:
-    return f"operations/{canonical_digest({'operation_id': operation_id})}.json"
 
 
 def decision_label(result: AgentRun, observation: AgentObservation) -> str:

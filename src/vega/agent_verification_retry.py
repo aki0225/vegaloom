@@ -9,7 +9,6 @@ from .agent_codex_evidence import (
     load_child_state,
     load_finish_summary,
     observation_from_child,
-    operation_ref,
     require_child_quiescent,
     require_single_executable_work_item,
 )
@@ -27,6 +26,7 @@ from .agent_contract import (
     AgentObservation,
 )
 from .agent_graph import require_agent_runtime_dependencies
+from .agent_operation import operation_ref, reserve_operation_identity
 from .agent_persistence import (
     append_agent_trace,
     load_agent_checkpoint,
@@ -61,7 +61,7 @@ from .finish_runtime import FinishRuntime
 from .loop_runtime import LoopAutomationRuntime
 from .models import LoopAutomationState
 from .project_config import load_project_config
-from .redaction import redact_text, write_redacted_json_once
+from .redaction import redact_text
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 from .scope_gate import ScopeGateResult
@@ -235,18 +235,13 @@ class SupervisorAgentVerificationRetry:
                 operation_id,
                 prepared.source_finish_sha256,
             )
-            operation_relative = operation_ref(operation_id)
-            write_redacted_json_once(
-                prepared.run_dir / operation_relative,
-                {
-                    "schema_version": 1,
-                    "authority": "agent_operation",
-                    "operation_kind": "verification_retry",
-                    "run_id": state.run_id,
-                    "state_version": state.state_version,
-                    "work_item_id": state.current_work_item,
-                    "child_run": prepared.child_dir.name,
-                    "operation_id": operation_id,
+            operation_relative = reserve_operation_identity(
+                prepared.run_dir,
+                state,
+                child_run=prepared.child_dir.name,
+                operation_id=operation_id,
+                operation_kind="verification_retry",
+                details={
                     "source_operation_id": prepared.source_operation_id,
                     "source_finish_ref": source_finish_ref,
                     "source_finish_sha256": prepared.source_finish_sha256,

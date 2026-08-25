@@ -16,6 +16,7 @@ from .agent_contract import (
     AgentWorkItem,
     canonical_digest,
 )
+from .agent_operation import child_summary_ref
 from .agent_status_evidence import build_supervisor_evidence
 from .agent_verification_retry_archive import retry_source_finish_ref
 from .models import LoopAutomationState
@@ -395,10 +396,7 @@ def write_retry_child_summary(
     *,
     failure_reason: str | None = None,
 ) -> str:
-    relative = (
-        "children/"
-        f"{canonical_digest({'child': prepared.child_dir.name, 'operation_id': operation_id})}.json"
-    )
+    relative = child_summary_ref(prepared.child_dir.name, operation_id)
     source_path = prepared.run_dir / prepared.source_summary_ref
     finish_path = prepared.child_dir / "finish-summary.json"
     write_redacted_json_once(
