@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "20260825T075308Z-PLAN-STATE-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "PLAN-STATE-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-25T07:53:08Z",
+  "summary": "计划定义、追加式完成事件、生成状态视图和 CI 检查在同一实现中落地。",
+  "evidence": {
+    "pull_requests": [
+      86
+    ],
+    "commits": [],
+    "checks": [
+      "plan-state-tests",
+      "plan-state-ci",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "plans/vega-agent-evolution.json",
+      "plans/events/20260825T075308Z-PLAN-STATE-01-completed.json",
+      "scripts/plan_state.py",
+      "tests/security/test_plan_state.py",
+      ".github/workflows/ci.yml",
+      "docs/CURRENT.md"
+    ]
+  }
+}

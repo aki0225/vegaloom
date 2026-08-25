@@ -61,6 +61,24 @@ jobs:
             python scripts/check_repository_hygiene.py
           fi
 
+      - name: 检查版本化计划状态
+        shell: bash
+        run: |
+          event_name="${{ github.event_name }}"
+          before_sha="${{ github.event.before }}"
+          base_sha=""
+          if [[ "$event_name" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+          elif [[ "$event_name" == "push" && -n "$before_sha" && ! "$before_sha" =~ ^0+$ ]]; then
+            base_sha="$before_sha"
+          fi
+
+          if [[ -n "$base_sha" ]]; then
+            python scripts/plan_state.py check --base-ref "$base_sha"
+          else
+            python scripts/plan_state.py check
+          fi
+
       - name: 检查架构复杂度与实验依赖增量
         shell: bash
         run: |

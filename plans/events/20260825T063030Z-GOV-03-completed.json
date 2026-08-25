@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "20260825T063030Z-GOV-03-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "GOV-03",
+  "transition": "completed",
+  "recorded_at": "2026-08-25T06:30:30Z",
+  "summary": "post-worker 编排与 operation 身份完成集中，真实 Agent 复验和 PR CI 保持 fail-closed 语义。",
+  "evidence": {
+    "pull_requests": [
+      85
+    ],
+    "commits": [
+      "d1a4b8dc861b84d896e2555fcce3836f9fabe6ad"
+    ],
+    "checks": [
+      "full-test-shards",
+      "real-agent-dogfood",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_operation.py",
+      "src/vega/loop_runtime.py",
+      "eval/real-world-runs.md"
+    ]
+  }
+}

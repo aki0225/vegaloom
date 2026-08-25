@@ -8,8 +8,10 @@
 |---|---|---|
 | 安装与日常使用 | [`../README.md`](../README.md) | 用户入口与常用命令 |
 | 产品边界与成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | Core、Supervisor、证据和行为边界 |
-| 当前阶段与唯一下一步 | [`ROADMAP.md`](ROADMAP.md) | 当前路线入口 |
-| 当前治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 治理范围、Dogfood 节点与停止条件 |
+| 当前事项与下一项 | [`CURRENT.md`](CURRENT.md) | 由机器计划和事件账本生成的当前状态 |
+| 演进事项与验收 | [`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json) | 稳定事项、依赖和要求检查 |
+| 路线决策与历史 | [`ROADMAP.md`](ROADMAP.md) | 为什么选择或停止某条路线 |
+| 已完成的治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 三轮治理范围、Dogfood 和验收结果 |
 | 完整使用流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | Core 与 Supervisor 操作 |
 | 调查和计划协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | 修改前调查、事实与假设、人工确认 |
 | Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 模块职责和数据流 |
@@ -46,8 +48,8 @@ Release 是发布动作的事实来源。
 
 ## 维护规则
 
-1. 状态变化只更新权威文档，导航只调整链接和标签。
-2. 新计划必须从本页或 `ROADMAP.md` 可达，并声明 active、completed 或 archived。
+1. 实现 PR 在同一 Diff 中增加 `../plans/events/` 状态事件，并重新生成 `CURRENT.md`。
+2. 已进入主线的状态事件及其事项定义不得改写或删除；尚无事件的未来事项可以随实现证据调整。
 3. 历史预注册、失败和证据不足不得事后改写。
 4. 被 `eval/` 引用的历史路径移动前必须评估链接稳定性；不能为了目录整齐破坏证据引用。
 5. 公开文档只使用仓库相对路径和脱敏示例。

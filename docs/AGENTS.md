@@ -1,9 +1,12 @@
 # 文档治理规则
 
-- 当前产品边界和成功语义以 `PRODUCT-CONTRACT.md` 为权威，当前阶段和唯一下一步以
-  `ROADMAP.md` 为入口，`README.md` 与 `docs/README.md` 只负责使用入口和导航。
-- 当前 AI 可维护性治理范围以 `AI-MAINTAINABILITY-GOVERNANCE-PLAN.md` 为准；完成后应标记
-  终态并由 `ROADMAP.md` 接回唯一下一步，不长期保留并列 active 计划。
+- 当前产品边界和成功语义以 `PRODUCT-CONTRACT.md` 为权威；当前事项与下一项以生成的
+  `CURRENT.md` 为权威，事项、依赖和验收条件以 `../plans/vega-agent-evolution.json`
+  为权威。已有状态事件的事项定义保持不变，尚无事件的未来事项可以随实现证据调整。
+- `ROADMAP.md` 保存路线决策与历史背景，不再手写“等待 CI”“准备合并”等实时状态。
+  `AI-MAINTAINABILITY-GOVERNANCE-PLAN.md` 已完成，只作为治理过程和验收结果记录。
+- 实现 PR 在同一 Diff 中增加对应的 `../plans/events/*.json`；事件随实现进入 `main` 后，
+  `CURRENT.md` 自动指向下一项，不再创建合并后的状态修订 PR。
 - 当前源码、测试和真实运行事实与旧计划冲突时，明确更新当前文档；历史计划不能替代当前行为。
 - `archive/`、预注册、Release 文档和历史 Gate 段落记录当时事实，不作为当前执行入口。
   已发布结论、失败、超时和证据不足不得事后润色；修正使用追加勘误或新的当前文档。
@@ -11,4 +14,4 @@
 - “已发布”“CI 通过”或“实验有效”必须有对应 Tag、Release、运行结果或机器计数，不能从计划状态推断。
 - 公开文档只使用仓库相对路径和虚构示例，不得包含本机绝对路径、凭据、真实 endpoint token 或私有目录。
 - 新文档必须替代明确缺口；能够更新权威入口时，不新增并列路线、长期 handoff 或重复产品说明。
-- `docs/README.md` 不维护“当前工作”正文；版本和阶段变化只更新权威文档，再调整导航状态。
+- `CURRENT.md` 由 `scripts/plan_state.py` 生成，不手工修改。`docs/README.md` 不复制当前工作正文。
