@@ -14,13 +14,13 @@ from vega.agent_change_contract import (
 )
 from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
 from vega.execution_control import ExecutionController, RunnerExecutionContext
-from vega.finish_runtime import FinishRuntime
-from vega.loop_runtime import LoopAutomationRuntime
-from vega.models import LoopAutomationState
+from vega.models import LoopAutomationState, LoopIterationState
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.cli_entrypoint import app
+from vega.review_evidence import make_review_evidence
 from vega.run_status import run_status_payload
 from vega.runner import RunnerResult
+from vega.workspace_check import capture_review_workspace
 
 
 def test_change_run_starts_in_isolated_worktree_and_approves_contract(
@@ -122,14 +122,12 @@ def test_change_run_advances_two_work_items_on_candidate_commits(
     )
     approved = runtime.approve(started.run_dir.name, actor="user")
     reviewer = _ReviewerRunner()
+    loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
     adapter = SupervisorAgentCodexAdapter(
         workspace,
         worker_runner=_WorkerRunner(["src/one.py", "src/two.py"]),
-        loop_runtime=LoopAutomationRuntime(
-            workspace,
-            reviewer_runner=reviewer,
-        ),
-        finish_runtime=FinishRuntime(workspace),
+        loop_runtime=loop_runtime,
+        finish_runtime=_ChangeFinishRuntime(loop_runtime),
     )
 
     result = adapter.run(approved.run_dir.name, timeout_seconds=60)
@@ -230,14 +228,12 @@ def test_failed_candidate_returns_to_parent_for_repair(
     )
     approved = runtime.approve(started.run_dir.name, actor="user")
     reviewer = _ReviewerRunner(["request_changes", "approve"])
+    loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
     adapter = SupervisorAgentCodexAdapter(
         workspace,
         worker_runner=_WorkerRunner(["src/one.py", "src/one.py"]),
-        loop_runtime=LoopAutomationRuntime(
-            workspace,
-            reviewer_runner=reviewer,
-        ),
-        finish_runtime=FinishRuntime(workspace),
+        loop_runtime=loop_runtime,
+        finish_runtime=_ChangeFinishRuntime(loop_runtime),
     )
 
     first = adapter.run(approved.run_dir.name, timeout_seconds=60)
@@ -377,6 +373,200 @@ class _ReviewerRunner:
             ),
             command=["fake-reviewer"],
         )
+
+
+class _ChangeLoopRuntime:
+    """只替代已有 Core 的重型内部流水线，保留 ChangeRun 边界测试。"""
+
+    def __init__(self, workspace: Path, reviewer: _ReviewerRunner) -> None:
+        self.workspace = workspace
+        self.reviewer = reviewer
+        self.children: dict[str, Path] = {}
+
+    def _start_locked(
+        self,
+        brief_input,
+        automation_mode: str,
+        worker_name: str,
+        reviewer_name: str,
+        max_iterations: int,
+        verify: bool,
+        run_id: str,
+        run_dir: Path,
+        config,
+        policy_snapshot,
+        initial_head_sha: str,
+        comparison_base_sha: str | None,
+        comparison_paths: tuple[str, ...],
+    ) -> Path:
+        del worker_name, reviewer_name, config, policy_snapshot
+        assert automation_mode == "assist"
+        assert max_iterations == 2
+        assert verify is True
+        LoopAutomationState(
+            run_id=run_id,
+            status="needs_human",
+            task_mode=brief_input.mode,
+            automation_mode="assist",
+            repo_path=brief_input.repo_path,
+            input_source=brief_input.source,
+            current_step="waiting_for_worker",
+            initial_head_sha=initial_head_sha,
+            comparison_base_sha=comparison_base_sha,
+            comparison_paths=list(comparison_paths),
+        ).save(run_dir / "state.json")
+        (run_dir / "worker-prompt.md").write_text(
+            "根据 Task Brief 完成当前修改。\n",
+            encoding="utf-8",
+        )
+        (run_dir / "loop-plan.md").write_text(
+            "# 测试 Core Plan\n",
+            encoding="utf-8",
+        )
+        self.children[run_id] = run_dir
+        return run_dir
+
+    def continue_assist(
+        self,
+        run: str,
+        repo_path: Path,
+        worker_name: str = "codex-exec",
+        reviewer_name: str = "codex-exec",
+        test_log: Path | None = None,
+        note: str | None = None,
+        verify: bool = True,
+        rerun_worker: bool = False,
+        verification_commands: list[str] | None = None,
+        verification_retry_baseline=None,
+    ) -> Path:
+        del (
+            worker_name,
+            reviewer_name,
+            test_log,
+            note,
+            verify,
+            rerun_worker,
+            verification_commands,
+            verification_retry_baseline,
+        )
+        child_dir = self.children[run]
+        review_result = self.reviewer.run(
+            "",
+            repo_path,
+            sandbox="read-only",
+            timeout_seconds=60,
+        )
+        review_payload = json.loads(review_result.output)
+        verdict = review_payload["verdict"]
+        state = LoopAutomationState.model_validate_json(
+            (child_dir / "state.json").read_text(encoding="utf-8")
+        )
+        state.current_iteration = 1
+        state.iterations = [
+            LoopIterationState(
+                iteration=1,
+                workspace_status="passed",
+                scope_gate_status="success",
+                scope_gate_post_verification_status="success",
+                scope_gate_pre_review_status="success",
+                verification_status="passed",
+                risk_gate_status="success",
+                risk_gate_risk="low",
+                risk_gate_recommendation="isolated-review",
+                reviewer_status="success",
+                verdict=verdict,
+            )
+        ]
+        if verdict == "approve":
+            state.status = "success"
+            state.current_step = "completed"
+        else:
+            state.status = "needs_human"
+            state.current_step = "review_complete"
+            fix_prompt = child_dir / "iterations" / "iteration-01" / "fix-prompt.md"
+            fix_prompt.parent.mkdir(parents=True, exist_ok=True)
+            fix_prompt.write_text(
+                "根据 Reviewer finding 修复当前问题。\n",
+                encoding="utf-8",
+            )
+        state.save(child_dir / "state.json")
+        return child_dir
+
+
+class _ChangeFinishRuntime:
+    def __init__(self, loop_runtime: _ChangeLoopRuntime) -> None:
+        self.loop_runtime = loop_runtime
+
+    def run(self, run: str) -> Path:
+        child_dir = self.loop_runtime.children[run]
+        state = LoopAutomationState.model_validate_json(
+            (child_dir / "state.json").read_text(encoding="utf-8")
+        )
+        snapshot = capture_review_workspace(
+            Path(state.repo_path),
+            comparison_base_sha=state.comparison_base_sha,
+            comparison_paths=tuple(state.comparison_paths),
+        )
+        changed_files = list(snapshot.changed_files)
+        reflect_run = f"{run}-reflect-{state.current_iteration:02d}"
+        reflect_dir = self.loop_runtime.workspace / "runs" / reflect_run
+        reflect_dir.mkdir(parents=True, exist_ok=True)
+        review_evidence = make_review_evidence(
+            snapshot,
+            "",
+            snapshot.full_diff,
+            changed_files,
+            review_source_run=reflect_run,
+            upstream_source_run=run,
+            source_brief="",
+            reflection="",
+            diff_summary="",
+            source_brief_issues=[],
+            source_brief_diagnostics=[],
+        )
+        (reflect_dir / "review-evidence.json").write_text(
+            json.dumps(review_evidence, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        ready = state.status == "success"
+        (child_dir / "finish-summary.json").write_text(
+            json.dumps(
+                {
+                    "run_id": run,
+                    "finish_status": (
+                        "ready_to_commit" if ready else "needs_fix"
+                    ),
+                    "verification_passed": True,
+                    "latest_verification_failed": False,
+                    "artifact_integrity": {"valid": True},
+                    "evidence_freshness": {
+                        "fresh": True,
+                        "source_run": reflect_run,
+                        "snapshot_id": review_evidence["snapshot_id"],
+                        "trusted_workspace_fingerprint": snapshot.fingerprint,
+                    },
+                    "latest_verdict": {
+                        "verdict": "approve" if ready else "request_changes"
+                    },
+                    "first_screen": {
+                        "actual_changes": {"changed_files": changed_files},
+                        "gates": {
+                            "verification": "passed",
+                            "risk": {"status": "success"},
+                        },
+                        "review": {
+                            "verdict": (
+                                "approve" if ready else "request_changes"
+                            ),
+                            "findings": [],
+                        },
+                    },
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return child_dir
 
 
 def _contract() -> ChangeContract:
