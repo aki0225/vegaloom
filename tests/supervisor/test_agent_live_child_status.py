@@ -11,7 +11,8 @@ from vega.agent_persistence import save_agent_state
 from vega.cli_entrypoint import app
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_worker import SupervisorAgentWorker
-from vega.models import LoopAutomationState
+from vega.models import LoopAutomationState, LoopIterationState
+from vega.review_queue_contract import ReviewQueue, ReviewQueueItem
 from vega.run_status import render_run_status, run_status_payload
 
 
@@ -92,6 +93,117 @@ def test_agent_status_projects_child_while_worker_alive_requires_human(
     assert payload["agent_phase"] == "needs_human"
     assert payload["current_step"] == "needs_human"
     assert payload["live_child_stage"] == "review"
+
+
+def test_agent_status_projects_latest_child_review_queue(
+    tmp_path: Path,
+) -> None:
+    workspace, repo, parent, child_dir = _acting_parent(tmp_path)
+    iteration_dir = child_dir / "iterations" / "01"
+    iteration_dir.mkdir(parents=True)
+    _write_child_state(
+        child_dir,
+        repo,
+        current_step="review",
+        iterations=[
+            LoopIterationState(
+                iteration=1,
+                lifecycle="completed",
+                review_run="review-run",
+            )
+        ],
+    )
+    queue = ReviewQueue(
+        source_run="reflect-run",
+        candidate_sha="a" * 40,
+        workspace_fingerprint="b" * 64,
+        trigger=["diff_budget"],
+        status="completed",
+        max_items=8,
+        max_prompt_chars=60000,
+        max_diff_chars=1000,
+        items=[
+            ReviewQueueItem(
+                item_id="RQ-01",
+                status="completed",
+                target_files=["src/example.py"],
+                covered=["src/example.py"],
+                verdict="approve",
+                runner_status="success",
+                artifact_dir="review-queue/rq-01",
+            )
+        ],
+        covered=["src/example.py"],
+        verdict="approve",
+    )
+    (iteration_dir / "review-queue.json").write_text(
+        queue.model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    child_payload = run_status_payload(workspace, child_dir.name)
+    parent_payload = run_status_payload(workspace, parent.run_dir.name)
+    parent_text = render_run_status(workspace, parent.run_dir.name)
+
+    assert child_payload["review_queue_status"] == "completed"
+    assert parent_payload["review_queue_status"] == "completed"
+    assert parent_payload["review_queue_completed"] == 1
+    assert parent_payload["review_queue_total"] == 1
+    assert "Review Queue：`completed` / `1`/`1`" in parent_text
+
+
+def test_agent_status_does_not_project_previous_iteration_review_queue(
+    tmp_path: Path,
+) -> None:
+    workspace, repo, parent, child_dir = _acting_parent(tmp_path)
+    previous_iteration_dir = child_dir / "iterations" / "01"
+    previous_iteration_dir.mkdir(parents=True)
+    _write_child_state(
+        child_dir,
+        repo,
+        current_step="review",
+        current_iteration=2,
+        iterations=[
+            LoopIterationState(
+                iteration=1,
+                lifecycle="completed",
+                review_run="previous-review-run",
+            )
+        ],
+    )
+    queue = ReviewQueue(
+        source_run="previous-reflect-run",
+        candidate_sha="a" * 40,
+        workspace_fingerprint="b" * 64,
+        trigger=["diff_budget"],
+        status="completed",
+        max_items=8,
+        max_prompt_chars=60000,
+        max_diff_chars=1000,
+        items=[
+            ReviewQueueItem(
+                item_id="RQ-01",
+                status="completed",
+                target_files=["src/previous.py"],
+                covered=["src/previous.py"],
+                verdict="approve",
+                runner_status="success",
+                artifact_dir="review-queue/rq-01",
+            )
+        ],
+        covered=["src/previous.py"],
+        verdict="approve",
+    )
+    (previous_iteration_dir / "review-queue.json").write_text(
+        queue.model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    child_payload = run_status_payload(workspace, child_dir.name)
+    parent_payload = run_status_payload(workspace, parent.run_dir.name)
+
+    assert child_payload["review_queue_status"] == "not_used"
+    assert parent_payload["review_queue_status"] == "not_used"
 
 
 def test_agent_cli_status_projects_latest_child_stage(
@@ -179,6 +291,8 @@ def _write_child_state(
     *,
     current_step: str,
     run_id: str | None = None,
+    current_iteration: int | None = None,
+    iterations: list[LoopIterationState] | None = None,
 ) -> None:
     state = LoopAutomationState(
         run_id=run_id or child_dir.name,
@@ -188,6 +302,14 @@ def _write_child_state(
         input_source="测试",
         status="running",
         current_step=current_step,
+        current_iteration=(
+            current_iteration
+            if current_iteration is not None
+            else iterations[-1].iteration
+            if iterations
+            else 0
+        ),
+        iterations=iterations or [],
     )
     state.save(child_dir / "state.json")
 

@@ -1740,10 +1740,18 @@ def test_review_runtime_cannot_approve_truncated_evidence(tmp_path) -> None:
     state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
     verdict = json.loads(run_dir.joinpath("review-verdict.json").read_text(encoding="utf-8"))
     context = json.loads(run_dir.joinpath("review-context.json").read_text(encoding="utf-8"))
-    assert len(runner.calls) == 1
+    queue = json.loads(
+        run_dir.joinpath("review-queue.json").read_text(encoding="utf-8")
+    )
+    assert runner.calls == []
     assert context["truncated_sections"] == ["full_diff"]
+    assert queue["status"] == "blocked"
+    assert queue["covered"] == []
+    assert queue["remaining"] == ["README.md"]
     assert verdict["verdict"] == "needs_human"
-    assert verdict["findings"][0]["title"] == "Review 证据不完整"
+    assert "Review Queue 未完成" in {
+        finding["title"] for finding in verdict["findings"]
+    }
     assert state["status"] == "needs_human"
     assert state["current_step"] == "evidence_truncated"
 

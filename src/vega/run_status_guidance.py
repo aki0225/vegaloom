@@ -157,6 +157,38 @@ def latest_iteration_file(run_dir: Path, filename: str) -> Path:
     return matches[-1]
 
 
+def review_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
+    if state.get("current_step") == "context_budget":
+        return [
+            f"读取 `{run_dir / 'review-prompt-metrics.md'}`、"
+            f"`{run_dir / 'review-context-budget-report.md'}` 和 Review Queue 状态。",
+            "当前 reviewer 未启动或只完成部分队列任务；"
+            "缩小任务，或人工确认新的 prompt 预算后重跑。",
+        ]
+    if state.get("current_step") == "evidence_truncated":
+        return [
+            f"读取 `{run_dir / 'review-context.json'}` 和 "
+            f"`{run_dir / 'review-queue.json'}` 确认未覆盖文件。",
+            f"读取 `{run_dir / 'review-findings.md'}`；"
+            "当前结果不能视为完整 approve。",
+            "请缩小任务/diff 后重跑，或由人工检查完整证据。",
+        ]
+    verdict = state.get("verdict")
+    if verdict == "approve":
+        return [
+            "reviewer 已通过；回到主会话整理交付结论，人工检查后再 commit。"
+        ]
+    if verdict == "request_changes":
+        return [
+            f"读取 `{run_dir / 'review-findings.md'}`，"
+            "按 findings 修复后重新 reflect + review。"
+        ]
+    return [
+        f"读取 `{run_dir / 'review-runner-output.txt'}` 和 "
+        f"`{run_dir / 'review-findings.md'}`，人工判断或重跑 reviewer。"
+    ]
+
+
 def verification_failure_next_steps(
     run_dir: Path,
     iteration: dict[str, Any],

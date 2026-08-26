@@ -2517,8 +2517,7 @@ def _risk_gate_state_fields(evidence: LoopRiskGateEvidence) -> dict[str, object]
 
 
 def _update_iteration_state(
-    iteration: LoopIterationState,
-    **updates: Any,
+    iteration: LoopIterationState, **updates: Any,
 ) -> LoopIterationState:
     """每个 iteration 只维护一份逐阶段累积状态，避免分支重复拼装事实。"""
 
@@ -2539,6 +2538,7 @@ def _record_review(iteration_dir: Path, review_run: Path) -> None:
         "review-verdict.json",
         "review-findings.md",
         "review-runner-output.txt",
+        "review-queue.json",
         "timeout-report.md",
         "stop-report.md",
         "runner-error-report.md",

@@ -91,5 +91,6 @@ def render_review_context(inputs: dict[str, Any]) -> dict[str, Any]:
         "workspace_changed_during_review": inputs["workspace_changed_during_review"],
         "review_execution_issues": inputs["review_execution_issues"],
         "risk_gate": inputs.get("risk_gate"),
+        "review_queue": inputs.get("review_queue"),
     }
     return redact_value(context)

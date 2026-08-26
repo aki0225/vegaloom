@@ -658,6 +658,13 @@ revision 和完整 Core Finish。历史 SAG3B Case 的原始结果继续保留�
 `pause/stop` 生成的新 Checkpoint 继承最近外部副作用状态，`unknown` 不能经二次停止降级为
 可安全 Handoff。
 
+Reviewer Prompt 或完整 Diff 超过项目软预算时，Core 才启用 Review Queue。Queue 按文件组
+顺序启动短生命周期只读 Reviewer；同一 `risk.required_reviews` 命中的文件保持在一个任务中，
+每个任务都绑定同一个 Candidate SHA 和 Workspace fingerprint。`review-queue.json` 保存
+`covered`、`remaining`、`findings` 和各任务状态，父 Agent 的 `status` 会投影最新 child 的队列
+进度。单个文件组仍超预算、任务数超过 8、Runner 终态不可信或覆盖不完整时直接
+`needs_human`，不会用部分结果拼出 approve。这里没有 Reviewer 投票、辩论或第二套状态机。
+
 Task Card 位于 Git 跟踪的 `.vega/tasks/**/*.md`，只保存批准 Plan 和人工交接所需的 Resume
 Capsule。本机 Agent State、Checkpoint、Trace 和 LangGraph SQLite 图游标仍留在 `runs/`，不进入
 Git。SQLite 只保存可丢失的本机图游标，不拥有 Workspace、Verification、Reviewer 或成功语义。
@@ -759,6 +766,11 @@ Reviewer 有两层：`engineering-change` 内置 reviewer 是线性检查步骤�
 reviewer 仍会在同一目标仓库的只读视图中读取明确编译的 review pack，包括任务或 brief、
 当前 diff、验证结果、项目规则、风险门禁和可选 accepted memory。因此这里是角色、会话和输入
 边界隔离，不是完全信息隔离，也不是操作系统级安全沙箱。
+
+普通输入由一个 Reviewer 完成。只有 Prompt 或完整 Diff 超过 `.vega.yaml` 的 Reviewer 软预算时，
+Vega 才按文件组拆成最多 8 个顺序任务；每个任务使用新的只读 Reviewer 会话。队列只解决输入
+大小和覆盖进度，不改变 Verdict 语义。全部任务完成后才汇总结果，任何未覆盖文件或不可信终态
+都会保留在 `remaining` 并交还人工。
 
 当前 reviewer 检查：
 
