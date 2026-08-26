@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -23,6 +24,9 @@ from vega.agent_persistence import append_agent_trace
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_verification_retry import SupervisorAgentVerificationRetry
 from vega.cli_entrypoint import app
+
+
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
 def test_execution_plan_revision_auto_applies_inside_approved_contract(
@@ -271,15 +275,12 @@ def test_repair_decision_respects_explicit_stop_budgets(
 
 
 def test_agent_replan_command_is_registered() -> None:
-    result = CliRunner().invoke(
-        app,
-        ["agent", "replan", "--help"],
-        color=False,
-    )
+    result = CliRunner().invoke(app, ["agent", "replan", "--help"])
+    output = _ANSI_ESCAPE_PATTERN.sub("", result.output)
 
     assert result.exit_code == 0, result.output
-    assert "--contract" in result.output
-    assert "--execution-plan" in result.output
+    assert "--contract" in output
+    assert "--execution-plan" in output
 
 
 def _contract() -> ChangeContract:
