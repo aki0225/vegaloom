@@ -316,3 +316,18 @@ CLI schema 只公开 `langgraph: true`。该断言没有暴露产品失败；复
 - Compileall、Ruff、计划状态检查、仓库卫生、CI YAML 解析和 `git diff --check`：通过。
 
 最终提交的完整分片终态由同一 SHA 的 PR CI 给出；如果 CI 未通过，本完成事件不能进入主线。
+
+## 2026-08-26 Amendment：PR CI 拒绝状态卡模块继续增长
+
+PR #91 的首次 `pull_request` 运行 `32990928442` 在静态检查阶段失败，后续 Job 均被跳过。
+失败原因是新增历史提示把 `src/vega/agent_status_card.py` 从 478 行推到 502 行，越过既有
+500 行模块门槛；这不是功能测试通过，也不计作 PR CI 通过。
+
+本轮没有放宽架构门禁。历史提示被移到 `agent_status_history.py`，状态卡模块回到 480 行；
+本地复测结果为：
+
+- 架构增长门禁通过：C901 `32 -> 32`，Python 模块 `185 -> 186`；
+- 两项历史提示定向测试通过；
+- Ruff、Compileall、计划状态检查、仓库卫生和 `git diff --check` 通过。
+
+修复后的最终 SHA 仍必须重新执行完整 PR CI。

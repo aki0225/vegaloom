@@ -29,7 +29,7 @@ from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_side_effect_adjudication import (
     SupervisorAgentSideEffectAdjudicator,
 )
-from vega.agent_status_card import _history_note
+from vega.agent_status_history import status_history_note
 from vega.agent_worker import SupervisorAgentWorker
 from vega.cli_entrypoint import app
 from vega.execution_control import ExecutionLease
@@ -684,7 +684,7 @@ def test_history_note_marks_previous_revision_evidence_as_historical(
     checkpoint_payload = checkpoint.model_dump(mode="json")
     checkpoint_payload["failed_attempts"] = ["attempt-history"]
 
-    note = _history_note(
+    note = status_history_note(
         state,
         checkpoint.model_validate(checkpoint_payload),
         None,

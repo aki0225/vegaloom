@@ -16,6 +16,7 @@ from .agent_persistence import load_agent_checkpoint
 from .agent_repository_binding import capture_bound_workspace
 from .agent_run_status import read_live_child_stage, trusted_worker_label
 from .agent_status_evidence import build_supervisor_evidence
+from .agent_status_history import status_history_note
 from .agent_visibility import render_agent_status_card
 from .redaction import redact_text, write_redacted_text
 from .workspace_snapshot import ReviewWorkspaceSnapshot
@@ -244,7 +245,7 @@ def _build_status_card(
         workspace_current=workspace_current,
         commit_recommended=commit_recommended,
         integrity_warning=integrity_warning,
-        history_note=_history_note(state, checkpoint, observation),
+        history_note=status_history_note(state, checkpoint, observation),
         plan_risk_notes=list(current_item.risk_notes) if current_item else [],
         supervisor_evidence=supervisor_evidence,
     )
@@ -316,29 +317,6 @@ def _evidence_health(
         if status in statuses:
             return status
     return "unverified"
-
-
-def _history_note(
-    state: AgentState,
-    checkpoint: AgentCheckpoint | None,
-    observation: AgentObservation | None,
-) -> str | None:
-    """说明旧 attempt 的证据为何没有出现在当前门禁状态中。"""
-
-    if observation is not None or checkpoint is None or not checkpoint.failed_attempts:
-        return None
-    count = len(checkpoint.failed_attempts)
-    contract_revision = state.contract_revision or 0
-    execution_plan_revision = state.execution_plan_revision or 0
-    if contract_revision > 1 or execution_plan_revision > 1:
-        return (
-            f"保留 {count} 个历史失败 attempt；当前门禁只对应 Contract r"
-            f"{contract_revision} / Plan r{execution_plan_revision}，"
-            "旧结果不能作为本 revision 的通过证据。"
-        )
-    return (
-        f"保留 {count} 个历史失败 attempt；当前卡片只显示仍能用于当前状态的门禁证据。"
-    )
 
 
 def _capture_live_workspace(

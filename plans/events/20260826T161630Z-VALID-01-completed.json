@@ -16,6 +16,7 @@
       "recovery-tests",
       "status-tests",
       "ci-yaml-parse",
+      "architecture-growth",
       "repository-hygiene",
       "pr-ci"
     ],
@@ -23,6 +24,7 @@
       "src/vega/agent_change_revision_runtime.py",
       "src/vega/agent_execution_bridge.py",
       "src/vega/agent_status_card.py",
+      "src/vega/agent_status_history.py",
       "tests/supervisor/test_agent_change_revision.py",
       "tests/supervisor/test_agent_recovery.py",
       "eval/bounded-change-loop-valid01.md",
