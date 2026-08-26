@@ -17,6 +17,7 @@ from .agent_codex_completion import (
     verification_status as _verification_status,
 )
 from .agent_change_run import ChangeRunContext, current_change_work_item
+from .agent_change_fix_packet import ChangeFixPacket, render_fix_packet
 from .agent_contract import (
     AgentObservation,
     AgentPlan,
@@ -168,8 +169,19 @@ def require_repair_child(
     return child_dir
 
 
-def build_repair_prompt(child_dir: Path, task_brief: str) -> str:
-    """只把当前 Task Brief 与 Core 生成的最新 fix prompt 交给新 Worker。"""
+def build_repair_prompt(
+    child_dir: Path,
+    task_brief: str,
+    *,
+    fix_packet: ChangeFixPacket | None = None,
+) -> str:
+    """只把当前 Task Brief 与结构化修复要求交给新 Worker。"""
+
+    if fix_packet is not None:
+        return (
+            f"{task_brief.rstrip()}\n\n"
+            f"{render_fix_packet(fix_packet).strip()}\n"
+        )
 
     candidates = sorted(child_dir.glob("iterations/*/fix-prompt.md"))
     if not candidates:

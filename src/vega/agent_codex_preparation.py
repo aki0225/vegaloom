@@ -60,7 +60,12 @@ def read_task_brief(run_dir: Path) -> str:
     return content
 
 
-def next_attempt_context(run_dir: Path, state: AgentState) -> tuple[int, bool]:
+def next_attempt_context(
+    run_dir: Path,
+    state: AgentState,
+    *,
+    max_repair_rounds: int = 1,
+) -> tuple[int, bool]:
     trace = read_agent_trace(run_dir / "trace.jsonl")
     epoch_indexes = [
         index
@@ -68,6 +73,7 @@ def next_attempt_context(run_dir: Path, state: AgentState) -> tuple[int, bool]:
         if item.get("event") in {
             "plan_approved",
             "change_contract_approved",
+            "change_execution_plan_auto_applied",
             "task_card_resumed",
         }
     ]
@@ -80,10 +86,11 @@ def next_attempt_context(run_dir: Path, state: AgentState) -> tuple[int, bool]:
         if item.get("event") == "worker_dispatch_committed"
         and item.get("work_item") == state.current_work_item
     )
-    if attempts >= 2:
+    max_attempts = max_repair_rounds + 1
+    if attempts >= max_attempts:
         raise ValueError(
-            "当前 Work Item 已用完一次初始 attempt 和一次 repair attempt；"
-            "必须由人工修改 Plan 或停止任务"
+            "当前 Work Item 的 Worker attempt 预算已用完："
+            f"{attempts}/{max_attempts}；必须由人工修改 Contract、Plan 或停止任务"
         )
     has_historical_dispatch = any(
         item.get("event") == "worker_dispatch_committed" for item in trace

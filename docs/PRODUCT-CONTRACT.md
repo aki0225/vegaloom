@@ -45,6 +45,14 @@ Execution Plan 保存假设、Work Item、候选文件和实现策略，可以�
 任何合同字段变化都需要重新批准；即使合同文本没有改变，实际 Git Diff 命中冻结风险或越出
 授权范围时也必须停止并请求人工决定。
 
+普通 Reviewer finding 由 Supervisor 转成 Fix Packet，交给新的单 Writer attempt。Fix Packet
+记录 finding、门禁状态和来源 Artifact，不携带 Reviewer 完整会话。Repair、自动 Replan、
+Review 和验证专用恢复分别使用 Approved Contract 中的预算；达到上限后只允许人工处理。
+
+Replan 同时比较声明变化和实际现场。Execution Plan 内部调整可以自动采用；Contract 字段变化
+需要重新批准。当前 Diff 越出提议范围、命中未授权的 `risk.required_reviews`，或声明了项目
+不存在的风险 ID 时，revision 不会进入自动执行。风险授权不能覆盖 Core 的高风险人工检查。
+
 代码快照以 Git revision 为权威。显式自主 ChangeRun 可以在 Vega 管理的隔离 Worktree 和本地
 任务分支中，由控制器在范围检查后创建 Candidate/Checkpoint Commit；Worker 不能自行提交或
 切换分支。Vega 不操作用户当前分支，也不自动 push、merge、rebase、release。Task Card 只保存
@@ -72,6 +80,7 @@ Agent：
 ```text
 vega agent capabilities
 vega agent start / approve / run
+vega agent replan
 vega agent retry-verification
 vega agent status / pause / stop / recover
 vega agent checkpoint --handoff

@@ -25,6 +25,7 @@ from .agent_codex_scope import (
 from .agent_contract import (
     AgentObservation,
 )
+from .agent_change_control import require_change_verification_retry_budget
 from .agent_graph import require_agent_runtime_dependencies
 from .agent_operation import operation_ref, reserve_operation_identity
 from .agent_persistence import (
@@ -110,6 +111,12 @@ class SupervisorAgentVerificationRetry:
         if state.phase != "ready" or state.active_child_run or state.active_operation_id:
             raise ValueError("当前 Agent 状态不允许验证专用恢复")
         validate_dispatch_artifacts(run_dir, state, plan)
+        require_change_verification_retry_budget(
+            run_dir,
+            state,
+            plan,
+            metadata,
+        )
         work_item = require_single_executable_work_item(plan, state)
         if work_item.external_side_effects != "none":
             raise ValueError("验证专用恢复只接受 external_side_effects=none 的 Work Item")

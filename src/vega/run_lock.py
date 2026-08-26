@@ -22,6 +22,7 @@ _ALLOWED_OPERATIONS = {
     "agent.pause",
     "agent.plan",
     "agent.recover",
+    "agent.replan",
     "agent.resume",
     "agent.retry-verification",
     "agent.steer",

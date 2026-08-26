@@ -59,7 +59,9 @@ def test_contract_change_requires_new_human_approval() -> None:
             },
         }
     )
-    proposed_plan = _execution_plan().model_copy(update={"contract_revision": 2})
+    proposed_plan = _execution_plan().model_copy(
+        update={"contract_revision": 2, "plan_revision": 2}
+    )
 
     assessment = classify_declared_revision(
         current_contract=current_contract,

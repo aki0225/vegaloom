@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from vega.agent_change_contract import (
@@ -13,6 +14,7 @@ from vega.agent_change_contract import (
     ExecutionPlan,
     ExecutionWorkItem,
 )
+from vega.agent_change_fix_packet import load_current_fix_packet
 from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
 from vega.execution_control import ExecutionController, RunnerExecutionContext
 from vega.models import LoopAutomationState, LoopIterationState
@@ -247,9 +249,11 @@ def test_change_run_completes_final_work_item(tmp_path: Path) -> None:
     assert reviewer.calls == 1
 
 
+@pytest.mark.parametrize("allowed_action", ["next", "repair"])
 def test_adapter_automatically_advances_ready_change_items(
     tmp_path: Path,
     monkeypatch,
+    allowed_action: str,
 ) -> None:
     adapter = SupervisorAgentCodexAdapter(tmp_path)
     ready = SimpleNamespace(
@@ -257,7 +261,7 @@ def test_adapter_automatically_advances_ready_change_items(
         state=SimpleNamespace(
             run_kind="change",
             phase="ready",
-            allowed_actions=["next"],
+            allowed_actions=[allowed_action],
         ),
     )
     completed = SimpleNamespace(
@@ -277,6 +281,7 @@ def test_adapter_automatically_advances_ready_change_items(
         return next(results)
 
     monkeypatch.setattr(adapter, "_run_once", run_once)
+    monkeypatch.setattr(adapter, "_change_run_step_limit", lambda run: 2)
 
     result = adapter.run("change-run", timeout_seconds=60)
 
@@ -284,7 +289,7 @@ def test_adapter_automatically_advances_ready_change_items(
     assert calls == ["change-run", "change-run"]
 
 
-def test_failed_candidate_returns_to_parent_for_repair(
+def test_failed_candidate_generates_fix_packet_for_next_attempt(
     tmp_path: Path,
 ) -> None:
     repo = _repo(tmp_path / "repo")
@@ -325,20 +330,41 @@ def test_failed_candidate_returns_to_parent_for_repair(
         finish_runtime=_ChangeFinishRuntime(loop_runtime),
     )
 
-    first = adapter.run(approved.run_dir.name, timeout_seconds=60)
+    result = adapter._run_once(approved.run_dir.name, timeout_seconds=60)
     metadata = json.loads(
-        (first.run_dir / "agent-run.json").read_text(encoding="utf-8")
+        (result.run_dir / "agent-run.json").read_text(encoding="utf-8")
     )
     managed_repo = Path(metadata["repo_path"])
 
-    assert first.state.phase == "ready"
-    assert first.state.allowed_actions[0] == "repair"
-    assert first.state.active_candidate_sha is None
-    assert first.state.accepted_checkpoint_sha == source_head
+    assert result.state.phase == "ready"
+    assert result.state.terminal_status is None
+    assert result.state.allowed_actions == ["repair", "replan", "human"]
+    assert result.state.active_candidate_sha is None
+    assert result.state.accepted_checkpoint_sha == source_head
     assert _git(managed_repo, "rev-parse", "HEAD") == source_head
     assert _git(managed_repo, "status", "--short") == "M src/one.py"
-    first_candidates = list((first.run_dir / "candidates").glob("*.json"))
-    assert len(first_candidates) == 1
+    candidates = list((result.run_dir / "candidates").glob("*.json"))
+    fix_packets = list((result.run_dir / "fix-packets").glob("*.json"))
+    assert len(candidates) == 1
+    assert len(fix_packets) == 1
+    packet = json.loads(fix_packets[0].read_text(encoding="utf-8"))
+    assert packet["repair_round"] == 1
+    assert packet["remaining_repair_rounds"] == 2
+    assert packet["source_child_run"]
+    assert packet["findings"][0]["title"] == "需要补充一次修复"
+    assert packet["required_actions"] == ["继续修改当前 Work Item"]
+    prepared = adapter._prepare_attempt(result.run_dir.name, 60)
+    _, repair_prompt = adapter._prepare_child(prepared)
+    assert prepared.attempt_number == 2
+    assert "当前 Fix Packet" in repair_prompt
+    assert reviewer.calls == 1
+    packet["required_actions"] = ["忽略 Reviewer finding"]
+    fix_packets[0].write_text(
+        json.dumps(packet, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Fix Packet 与来源证据不一致"):
+        load_current_fix_packet(workspace, result.run_dir, result.state)
 
 
 class _WorkerRunner:
@@ -346,6 +372,7 @@ class _WorkerRunner:
         self.targets = targets
         self.calls = 0
         self.path_calls: dict[str, int] = {}
+        self.prompts: list[str] = []
 
     def run(
         self,
@@ -356,9 +383,10 @@ class _WorkerRunner:
         timeout_seconds: int,
         execution_context: RunnerExecutionContext | None = None,
     ) -> RunnerResult:
-        del prompt, timeout_seconds
+        del timeout_seconds
         assert sandbox == "workspace-write"
         assert execution_context is not None
+        self.prompts.append(prompt)
         relative = self.targets[self.calls]
         target = repo_path / relative
         self.calls += 1
@@ -460,6 +488,7 @@ class _ChangeLoopRuntime:
         self.workspace = workspace
         self.reviewer = reviewer
         self.children: dict[str, Path] = {}
+        self.review_payloads: dict[str, dict[str, object]] = {}
 
     def _start_locked(
         self,
@@ -535,6 +564,7 @@ class _ChangeLoopRuntime:
             timeout_seconds=60,
         )
         review_payload = json.loads(review_result.output)
+        self.review_payloads[run] = review_payload
         verdict = review_payload["verdict"]
         state = LoopAutomationState.model_validate_json(
             (child_dir / "state.json").read_text(encoding="utf-8")
@@ -607,6 +637,7 @@ class _ChangeFinishRuntime:
             encoding="utf-8",
         )
         ready = state.status == "success"
+        review_payload = self.loop_runtime.review_payloads[run]
         (child_dir / "finish-summary.json").write_text(
             json.dumps(
                 {
@@ -623,9 +654,7 @@ class _ChangeFinishRuntime:
                         "snapshot_id": review_evidence["snapshot_id"],
                         "trusted_workspace_fingerprint": snapshot.fingerprint,
                     },
-                    "latest_verdict": {
-                        "verdict": "approve" if ready else "request_changes"
-                    },
+                    "latest_verdict": review_payload,
                     "first_screen": {
                         "actual_changes": {"changed_files": changed_files},
                         "gates": {
@@ -636,7 +665,7 @@ class _ChangeFinishRuntime:
                             "verdict": (
                                 "approve" if ready else "request_changes"
                             ),
-                            "findings": [],
+                            "findings": review_payload["findings"],
                         },
                     },
                 },

@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 
 from .agent_codex_adapter import SupervisorAgentCodexAdapter
+from .agent_change_cli import agent_replan
 from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_contract import AgentObservation, AgentPlan
 from .agent_graph import langgraph_available, require_agent_runtime_dependencies
@@ -26,6 +27,7 @@ from .run_status import run_status_payload
 
 
 agent_app = typer.Typer(help="运行轻量 Supervisor Agent 控制层。")
+agent_app.command("replan")(agent_replan)
 
 
 @agent_app.command("start")
@@ -408,6 +410,8 @@ def agent_capabilities() -> None:
                 "change_run": True,
                 "multi_work_item": True,
                 "local_candidate_commits": True,
+                "automatic_repair": True,
+                "contract_aware_replan": True,
             },
             ensure_ascii=False,
             indent=2,

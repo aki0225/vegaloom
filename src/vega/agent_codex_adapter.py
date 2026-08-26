@@ -19,6 +19,8 @@ from .agent_codex_evidence import (
     require_waiting_child,
     write_child_summary,
 )
+from .agent_change_control import require_change_review_budget
+from .agent_change_fix_packet import load_current_fix_packet
 from .agent_change_run import load_change_run_context
 from .agent_change_core import (
     initialize_change_core_child,
@@ -89,20 +91,30 @@ class SupervisorAgentCodexAdapter:
     def run(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
         require_agent_runtime_dependencies()
         result = self._run_once(run, timeout_seconds=timeout_seconds)
-        advances = 0
+        steps = 1
         while (
             getattr(getattr(result, "state", None), "run_kind", None) == "change"
             and result.state.phase == "ready"
-            and "next" in result.state.allowed_actions
+            and {"next", "repair"}.intersection(result.state.allowed_actions)
         ):
-            advances += 1
-            if advances > 8:
-                raise ValueError("ChangeRun 自动推进超过 Work Item 上限")
+            max_steps = self._change_run_step_limit(result.run_dir.name)
+            if steps >= max_steps:
+                raise ValueError("ChangeRun 自动推进超过合同允许的总 attempt 上限")
+            steps += 1
             result = self._run_once(
                 result.run_dir.name,
                 timeout_seconds=timeout_seconds,
             )
         return result
+
+    def _change_run_step_limit(self, run: str) -> int:
+        run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
+        context = load_change_run_context(run_dir, state, plan, metadata)
+        if context is None:
+            return 1
+        return len(context.execution_plan.work_items) * (
+            context.contract.authority_envelope.max_repair_rounds + 1
+        )
 
     def _run_once(
         self,
@@ -159,9 +171,21 @@ class SupervisorAgentCodexAdapter:
             plan,
             metadata,
         )
-        attempt_number, requires_clean_workspace = _next_attempt_context(run_dir, state)
         if change_context is not None:
-            requires_clean_workspace = attempt_number == 1
+            require_change_review_budget(
+                run_dir,
+                state,
+                change_context.contract,
+            )
+        attempt_number, requires_clean_workspace = _next_attempt_context(
+            run_dir,
+            state,
+            max_repair_rounds=(
+                change_context.contract.authority_envelope.max_repair_rounds
+                if change_context is not None
+                else 1
+            ),
+        )
         before = capture_bound_workspace(run_dir)
         validate_prepared_workspace(
             before,
@@ -229,7 +253,16 @@ class SupervisorAgentCodexAdapter:
                     prepared.state,
                     prepared.repo,
                 )
-                prompt = build_repair_prompt(previous_child, prepared.task_brief)
+                fix_packet = load_current_fix_packet(
+                    self.workspace,
+                    prepared.run_dir,
+                    prepared.state,
+                )
+                prompt = build_repair_prompt(
+                    previous_child,
+                    prepared.task_brief,
+                    fix_packet=fix_packet,
+                )
             child_dir = reserve_change_core_child(self.loop_runtime)
             self._event(f"ChangeRun child 已预留：{child_dir.name}")
             return child_dir, prompt

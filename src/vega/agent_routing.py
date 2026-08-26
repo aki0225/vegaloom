@@ -49,6 +49,11 @@ def transition_state(
             f"动作 {decision.selected_action} 已被确定性规则拒绝；"
             f"允许动作：{expected.allowed_actions}"
         )
+    if (
+        decision.selected_action not in decision.allowed_actions
+        or not set(decision.allowed_actions).issubset(expected.allowed_actions)
+    ):
+        raise ValueError("Decision 声明了确定性规则未授权的动作")
     if state.approved_plan_digest != plan.approved_digest:
         raise ValueError("Agent State 与已批准 Plan digest 不一致")
     if (
@@ -64,7 +69,7 @@ def transition_state(
             "phase": _TRANSITION_PHASES[decision.selected_action],
             "state_version": state.state_version + 1,
             "workspace_fingerprint": observation.workspace_fingerprint,
-            "allowed_actions": list(expected.allowed_actions),
+            "allowed_actions": list(decision.allowed_actions),
             "updated_at": utc_now(),
         }
     )
