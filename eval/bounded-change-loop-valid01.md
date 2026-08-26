@@ -124,3 +124,34 @@ Candidate。第二次 Contract revision 和 approve 同样未生效；验收脚�
 
 修复后使用相同目标、测试、风险规则、模型配置和 timeout 建立全新 run。首次失败与新 run 都写入
 最终结果；不更换题目，也不把失败 attempt 改写成成功。
+
+## 2026-08-26 Amendment：Core state 初始化前无法停止 Worker
+
+首次 `VALID01-INTERRUPT` 使用 Agent run `20260826-224617-agent`、child
+`20260826-224630-801046-bug-loop`。Worker 于 `2026-08-26T14:46:37Z` 启动；管理 Worktree
+在 `2026-08-26T14:47:21Z` 首次出现 `src/text_rules.py` 的 partial Diff。测试驱动在约
+1.33 秒后执行 identity-bound `agent stop`，命令返回退出码 `2`：
+
+```text
+active child 存在，但无法验证其 assist loop 身份
+```
+
+停止请求没有写入 child。Worker 继续运行并于 `2026-08-26T14:49:11Z` 完成，随后 Candidate
+被冻结。Core Verification 因案例测试总时长超过 60 秒而 `timed_out`；Risk 和 Reviewer
+均未运行，父 Agent 最终回到 `planning`，只允许 `replan` 或 `human`，没有进入
+`ready_to_commit`。
+
+失败原因是 Agent 已预留 child 和不可变 operation 身份，Worker execution 也已落盘，但
+普通 Core `state.json` 要等 Worker 返回并冻结 Candidate 后才创建。`agent stop` 在这段真实
+执行窗口错误地要求 Core state 已存在，导致已绑定的 Worker 无法被停止。
+
+允许做一次最小 Runtime 修复：
+
+1. Core state 不存在时，只接受 `operation_kind=worker`；
+2. child 目录内必须存在与 active operation 完全一致的 Worker execution；
+3. execution 的 `run_id` 必须等于 active child；
+4. Core state 已存在但损坏时继续 fail-closed；
+5. `verification_retry` 仍必须依赖已初始化的 Core state；
+6. 修复后使用相同题目建立全新 run，并在首次 partial Diff 后再次发出 stop。
+
+首次失败 run、未生效的 stop 和后续 Verification timeout 都保留，不计作中断案例通过。

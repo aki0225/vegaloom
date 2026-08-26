@@ -1116,6 +1116,109 @@ def test_stop_active_assist_child_targets_only_bound_operation(
     assert events[-1] == "agent_stop_requested"
 
 
+def test_stop_reserved_worker_before_assist_state_exists(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    child_run = "reserved-child-stop"
+    SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id="reserved-operation-stop",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir(parents=True)
+    _write_execution(
+        child_dir,
+        execution_id="reserved-operation-stop",
+        status="running",
+    )
+
+    result = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="Core state 落盘前停止已预留 Worker",
+    )
+
+    request = json.loads(
+        (
+            child_dir / "executions" / "worker" / "stop-request.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert request["execution_id"] == "reserved-operation-stop"
+    assert not (child_dir / "state.json").exists()
+    assert result.state.active_child_run == child_run
+    events = [item["event"] for item in read_agent_trace(result.run_dir / "trace.jsonl")]
+    assert events[-1] == "agent_stop_requested"
+
+
+def test_stop_reserved_worker_rejects_execution_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    child_run = "reserved-child-mismatch"
+    SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id="reserved-operation-expected",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir(parents=True)
+    _write_execution(
+        child_dir,
+        execution_id="reserved-operation-other",
+        status="running",
+    )
+
+    with pytest.raises(ValueError, match="operation 身份不一致"):
+        SupervisorAgentRecovery(workspace).stop(
+            run_id,
+            reason="拒绝误停未绑定的预留 Worker",
+        )
+
+    assert not (
+        child_dir / "executions" / "worker" / "stop-request.json"
+    ).exists()
+
+
+def test_stop_reserved_verification_retry_requires_core_state(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    child_run = "reserved-verification-retry"
+    operation_id = "reserved-verification-operation"
+    bound = SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id=operation_id,
+    )
+    operation_path = bound.run_dir / operation_ref(operation_id)
+    operation = json.loads(operation_path.read_text(encoding="utf-8"))
+    operation["operation_kind"] = "verification_retry"
+    operation_path.write_text(
+        json.dumps(operation, ensure_ascii=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir(parents=True)
+    _write_execution(
+        child_dir,
+        execution_id="core-verification-execution",
+        status="running",
+        step="verification",
+    )
+
+    with pytest.raises(ValueError, match="当前 operation 不是 Worker"):
+        SupervisorAgentRecovery(workspace).stop(
+            run_id,
+            reason="验证恢复必须等待 Core state",
+        )
+
+    assert not (
+        child_dir / "executions" / "verification" / "stop-request.json"
+    ).exists()
+
+
 def test_stop_active_verification_retry_targets_current_core_execution(
     tmp_path: Path,
 ) -> None:
