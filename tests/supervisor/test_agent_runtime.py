@@ -1624,6 +1624,9 @@ def test_agent_cli_status_card_and_capabilities(
     capability_payload = json.loads(capabilities.output)
     assert capability_payload["langgraph"] is True
     assert capability_payload["worker"] == "codex-exec"
+    assert capability_payload["change_run"] is True
+    assert capability_payload["multi_work_item"] is True
+    assert capability_payload["local_candidate_commits"] is True
 
 
 def test_packaged_cli_help_prioritizes_product_commands() -> None:

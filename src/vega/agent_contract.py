@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
-import re
-from datetime import UTC, datetime
-from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -16,9 +11,16 @@ from pydantic import (
     model_validator,
 )
 
+from .agent_contract_support import (
+    AGENT_SCHEMA_VERSION,
+    canonical_digest,
+    normalize_relative_paths as _normalize_relative_paths,
+    normalize_repo_relative_path as _normalize_repo_relative_path,
+    utc_now,
+    validate_schema_version as _validate_schema_version,
+)
+from .agent_change_state import validate_change_state_bindings
 
-AGENT_SCHEMA_VERSION = 1
-SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 AgentPhase = Literal[
     "planning",
@@ -31,6 +33,7 @@ AgentPhase = Literal[
     "completed",
     "stopped",
 ]
+AgentRunKind = Literal["legacy", "change"]
 AgentAction = Literal["next", "repair", "replan", "human", "finalize"]
 ObservationAuthority = Literal[
     "external_claim",
@@ -53,6 +56,7 @@ SupervisorEvidenceStatus = Literal["passed", "failed", "stale", "unverified"]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 RelativePathText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Sha256Text = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+GitOidText = Annotated[str, StringConstraints(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
 ArtifactIdText = Annotated[
     str,
     StringConstraints(
@@ -62,53 +66,6 @@ ArtifactIdText = Annotated[
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
     ),
 ]
-
-
-def utc_now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def canonical_digest(value: BaseModel | dict[str, object]) -> str:
-    payload = value.model_dump(mode="json") if isinstance(value, BaseModel) else value
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _validate_schema_version(value: int) -> int:
-    if value != AGENT_SCHEMA_VERSION:
-        raise ValueError(
-            f"不支持的 Agent schema_version：{value}；"
-            f"当前仅支持 {AGENT_SCHEMA_VERSION}"
-        )
-    return value
-
-
-def _normalize_repo_relative_path(value: str) -> str:
-    normalized = value.strip().replace("\\", "/")
-    candidate = PurePosixPath(normalized)
-    if (
-        not normalized
-        or candidate.is_absolute()
-        or normalized.startswith("//")
-        or re.match(r"^[A-Za-z]:", normalized)
-        or any(part in {"", ".", ".."} for part in candidate.parts)
-    ):
-        raise ValueError(f"路径必须是仓库相对路径：{value}")
-    return candidate.as_posix()
-
-
-def _normalize_relative_paths(values: list[str]) -> list[str]:
-    normalized = [_normalize_repo_relative_path(value) for value in values]
-    if len(set(normalized)) != len(normalized):
-        raise ValueError("仓库相对路径不能重复")
-    return normalized
-
-
 class StrictAgentModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
@@ -155,7 +112,7 @@ class AgentPlan(StrictAgentModel):
     observed_facts: list[NonEmptyText] = Field(default_factory=list)
     hypotheses: list[NonEmptyText] = Field(default_factory=list)
     unresolved_decisions: list[NonEmptyText] = Field(default_factory=list)
-    work_items: list[AgentWorkItem] = Field(min_length=1, max_length=4)
+    work_items: list[AgentWorkItem] = Field(min_length=1, max_length=8)
     approved: bool = False
     approved_at: str | None = None
     approved_by: str | None = None
@@ -441,11 +398,17 @@ class AgentState(StrictAgentModel):
     run_id: NonEmptyText
     task_id: NonEmptyText
     repository_id: NonEmptyText
+    run_kind: AgentRunKind = "legacy"
     phase: AgentPhase = "planning"
     state_version: int = Field(default=1, ge=1)
     goal_revision: int = Field(default=1, ge=1)
     plan_revision: int = Field(default=1, ge=1)
     approved_plan_digest: Sha256Text | None = None
+    contract_revision: int | None = Field(default=None, ge=1)
+    approved_contract_digest: Sha256Text | None = None
+    execution_plan_revision: int | None = Field(default=None, ge=1)
+    accepted_checkpoint_sha: GitOidText | None = None
+    active_candidate_sha: GitOidText | None = None
     current_work_item: NonEmptyText | None = None
     active_child_run: NonEmptyText | None = None
     active_operation_id: NonEmptyText | None = None
@@ -474,6 +437,7 @@ class AgentState(StrictAgentModel):
             raise ValueError("completed 阶段必须包含 terminal_status")
         if self.phase != "completed" and self.terminal_status is not None:
             raise ValueError("只有 completed 阶段可以包含 terminal_status")
+        validate_change_state_bindings(self)
         return self
 
 

@@ -6,15 +6,16 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import ValidationError
 
+from .agent_candidate_evidence import candidate_scope_expectation
 from .agent_contract import (
     AgentObservation,
     AgentPlan,
     AgentState,
-    SHA256_PATTERN,
     SupervisorEvidenceItem,
     SupervisorEvidenceStatus,
     canonical_digest,
 )
+from .agent_contract_support import SHA256_PATTERN
 from .agent_operation import child_summary_ref
 from .agent_verification_retry_archive import retry_source_finish_archive_issue
 from .execution_control import ExecutionLease
@@ -113,7 +114,7 @@ def _load_child_summary(
     if (
         payload.get("authority") != "child_binding_summary"
         or payload.get("agent_run_id") != state.run_id
-        or payload.get("work_item_id") != state.current_work_item
+        or payload.get("work_item_id") != observation.work_item_id
         or payload.get("child_run") != observation.child_run
         or payload.get("operation_id") != observation.operation_id
     ):
@@ -287,19 +288,19 @@ def _scope_evidence(
     label = f"计划范围（{labels[stage]}）"
     if (
         observation.operation_id is None
-        or observation.work_item_id != state.current_work_item
+        or observation.work_item_id is None
     ):
-        return _item(label, "unverified", "Observation 缺少当前 Work Item 的 operation 绑定")
+        return _item(label, "unverified", "Observation 缺少 Work Item 的 operation 绑定")
     work_item = next(
         (
             item
             for item in plan.work_items
-            if item.work_item_id == state.current_work_item
+            if item.work_item_id == observation.work_item_id
         ),
         None,
     )
     if work_item is None:
-        return _item(label, "unverified", "Plan 缺少当前 Work Item")
+        return _item(label, "unverified", "Plan 缺少 Observation 对应 Work Item")
     expected_ref = (
         f"plan-scope/{stage}-"
         f"{canonical_digest({'operation_id': observation.operation_id, 'stage': stage})}.json"
@@ -330,12 +331,28 @@ def _scope_evidence(
         allowed_paths=list(work_item.allowed_paths),
         forbidden_paths=forbidden_paths,
     )
+    candidate_scope, candidate_issue = candidate_scope_expectation(
+        run_dir,
+        state,
+        observation,
+    )
+    if candidate_issue is not None:
+        return _item(label, "stale", candidate_issue)
+    expected_head = (
+        candidate_scope.post_worker_head
+        if stage == "post-worker"
+        else candidate_scope.post_core_head
+    )
     if (
         result.allowed_paths != expected_scope.allowed_paths
         or result.forbidden_paths != expected_scope.forbidden_paths
         or result.scope_policy_sha256 != scope_policy_sha256(expected_scope)
-        or sorted(result.changed_files) != sorted(observation.changed_files)
+        or sorted(result.changed_files) != sorted(candidate_scope.changed_files)
         or not _matching_git_heads(result.expected_head_sha, result.current_head_sha)
+        or (
+            expected_head is not None
+            and result.current_head_sha != expected_head
+        )
     ):
         return _item(
             label,
@@ -360,8 +377,6 @@ def _scope_evidence(
         "unverified",
         f"ScopeGateResult status={result.status}，violations={len(result.violations)}",
     )
-
-
 def _core_evidence(
     run_dir: Path,
     observation: AgentObservation,

@@ -25,8 +25,8 @@
 </div>
 
 Vega 接在编码 Agent 和代码仓库之间：记录真实 Diff，运行项目验证，并在前置门禁通过且配置
-启用时启动独立 Reviewer，再根据证据给出交付状态。可选的 Supervisor Agent 为长任务增加
-Plan 批准、单 Writer、Checkpoint 和 Git Task Card 恢复。
+启用时启动独立 Reviewer，再根据证据给出交付状态。Supervisor Agent 为长任务增加人工批准
+的变更合同、单 Writer、Git Checkpoint 和恢复控制。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，worker 与 reviewer 使用独立会话，失败 fail-closed 交还人工">
@@ -90,7 +90,8 @@ vega do feature --repo . --text "新增批量导入用户功能"
 - 会话隔离不是容器或操作系统级安全沙箱。
 - 没有可靠验证命令的项目，Vega 也无法凭空生成可信测试证据。
 - 数据库迁移、支付、部署等变更仍需要人工风险判断和真实环境验证。
-- Vega 不自动 commit、push、release、删除文件或接受长期 Memory。
+- Vega 不操作用户当前分支，也不自动 push、merge、release、删除用户文件或接受长期
+  Memory。显式 ChangeRun 只在独立 Worktree 中创建本地 Candidate/Checkpoint Commit。
 
 ## 核心设计
 
@@ -103,8 +104,8 @@ Vega 将 Worker Claim、机器 Observation 和最终 Decision 分开记录，交
   Diff、验证和风险证据。这层隔离作用于会话上下文。
 - **交付判断。** 验证命令来自 `.vega.yaml` 或项目画像。Finish 综合验证、证据时效、
   Risk Gate 和 Reviewer verdict，生成最终状态。
-- **长任务控制。** Supervisor 管理 Plan、单 Writer、Checkpoint 和 Task Card。现场或证据
-  发生漂移时转入 `needs_human`，保留 Diff、state、trace 和报告。
+- **长任务控制。** Supervisor 在隔离 Worktree 中顺序执行有限 Work Item，每项绑定独立
+  Candidate SHA。现场或证据漂移时转入 `needs_human`，保留 Git 状态、state、trace 和报告。
 
 ## 入口怎么选
 
@@ -120,8 +121,8 @@ Verification、Risk、Reviewer 和 Finish 判断链。
 
 ## Supervisor Agent
 
-Supervisor Agent 是可选入口，不替换日常 `do / loop`。它接受一个已经调查过的 Work Item，
-等待人工批准后再启动真实 Worker，并在主会话中持续展示当前阶段、Workspace、风险和下一步。
+Supervisor Agent 是可选入口，不替换日常 `do / loop`。它接受调查后形成的 Change Contract
+和 Execution Plan，等待人工批准后在独立 Worktree 中顺序执行有限 Work Item。
 
 安装 Agent 依赖：
 
@@ -130,22 +131,27 @@ python -m pip install -e ".[agent]"
 vega agent capabilities
 ```
 
-先按 [Supervisor Agent 使用说明](docs/USAGE-WALKTHROUGH.md#supervisor-agent-v1)中的完整示例
-准备 `plan.json`。Plan 必须尚未批准，`user_goal` 与 `--text` 完全一致；当前版本要求恰好一个
-未完成 Work Item、至少一个 `allowed_paths`，并且没有待决问题。
+先按 [Supervisor Agent 使用说明](docs/USAGE-WALKTHROUGH.md#bounded-change-run)准备
+`change-contract.json` 和 `execution-plan.json`。Contract 冻结目标、验收、风险、副作用和
+授权范围；Execution Plan 保存 Agent 可以调整的实现步骤。
 
 创建、批准并运行：
 
 ```powershell
-vega agent start --repo . --plan <plan.json> --text "修复导出按钮无响应"
+vega agent start --repo . `
+  --contract <change-contract.json> `
+  --execution-plan <execution-plan.json>
 vega status --run <agent_run>
 vega agent approve --run <agent_run> --actor human
 vega agent run --run <agent_run> --timeout 900
 vega agent status --run <agent_run>
 ```
 
-当前版本只接受一个未完成 Work Item，并在同一物理 Git 仓库中保持单 Writer。Plan 的范围、
-风险、验证或成功条件发生变化时，原批准失效，需要重新确认。
+Vega 为这次任务创建本地 `vega/<run-id>` 分支和仓库外的隔离 Worktree。每个 Work Item
+产生一个 Candidate Commit，通过现有 Verification、Risk、Reviewer 和 Finish 后才成为
+Accepted Checkpoint。用户当前分支保持不动；最终是否 push、创建 PR 或合并仍由人工决定。
+
+旧的单 Work Item `--plan` 入口继续兼容，用于既有 V1 Task Card 和恢复流程。
 
 如果代码和 Reviewer finding 都不需要修改，只是验证命令或本地依赖环境有误，可以修订 Plan
 中的验证项并重新批准，然后复用原 child：

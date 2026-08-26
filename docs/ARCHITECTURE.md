@@ -440,8 +440,9 @@ runs/<run_id>-loop/
   eval.md
 ```
 
-Vega 只负责编译上下文、调用 runner、记录证据和控制迭代；不自动 commit、push、
-release，也不要求每次运行生成长期经验候选。
+Vega 负责编译上下文、调用 runner、记录证据和控制迭代。显式 ChangeRun 会在管理的隔离
+Worktree 中创建本地 Candidate/Checkpoint Commit；用户当前分支保持不动，push、merge、
+rebase 和 release 仍由人工决定。长期经验候选不会自动接受。
 
 因此 Vega 是控制面，Codex、Claude Code 或人工主会话是执行面。宿主可以选择直接实现或调用
 原生子代理，但 Vega 不接管宿主内部的多 Worker 调度，也不依赖 Worker 自述判断完成；是否进入
@@ -517,7 +518,8 @@ finish-report.md
 finish-summary.json
 ```
 
-Finish 的作用是把“能不能交付、提交前还要检查什么、哪些经验需要人工沉淀”整理清楚。它不会自动 commit、push、release，也不会自动接受 memory。
+Finish 的作用是把“能不能交付、提交前还要检查什么、哪些经验需要人工沉淀”整理清楚。
+它只读取当前 Git 与运行证据，不执行 Git 写入、发布或 memory 接受动作。
 
 `finish-summary.json.first_screen` 是从同一次可信证据快照派生的兼容性展示视图，原有摘要字段
 继续保留。`finish-report.md` 第一屏固定按当前裁决、实际变更、确定性 Gate、验证结果、

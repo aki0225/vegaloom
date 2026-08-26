@@ -5,25 +5,27 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：4 / 12
-- 最近事件：`20260825T075308Z-PLAN-STATE-01-completed`
+- 已完成：7 / 10
+- 最近事件：`20260825T185103Z-AUTO-01-completed`
 
 ## 当前事项
 
-### 下一项：`ARCH-01` 冻结实际模块边界与包级规则
+### 下一项：`AUTO-02` 实现自动 Repair 与 Contract-aware Replan
 
-确定 Core、Supervisor、Execution、Workspace 和 Context 的所有权、依赖方向及包级 AGENTS 规则。
+Reviewer 只返回结构化裁决；合同内问题自动修复或调整执行计划，触及冻结边界时生成具体审批问题。
 
 验收条件：
 
-- 每个主要职责边界都有明确所有者、允许依赖和禁止依赖
-- 包级 AGENTS 说明修改范围、Artifact 和验证矩阵
-- 目标结构不依赖一次性搬迁全部模块
+- approve、repair、replan 和 needs_human 具有唯一结构化语义
+- 普通 Finding 自动生成 Fix Packet 并回到单 Writer
+- Contract 字段差异与实际 Git Diff、风险路径共同决定是否需要重新批准
+- Repair、Replan、验证重试和 Review 都有明确预算与停止条件
 
 要求检查：
 
-- `architecture-review`
-- `repository-hygiene`
+- `supervisor-tests`
+- `security-tests`
+- `real-agent-dogfood`
 - `pr-ci`
 
 ## 全部事项
@@ -34,14 +36,12 @@
 | 已完成 | `GOV-02` | 整理测试职责与 CI 成本 | `GOV-01` |
 | 已完成 | `GOV-03` | 处理证据支持的源码重复 | `GOV-02` |
 | 已完成 | `PLAN-STATE-01` | 让计划状态随实现进入主线 | `GOV-03` |
-| 待开始 | `ARCH-01` | 冻结实际模块边界与包级规则 | `PLAN-STATE-01` |
-| 待开始 | `ARCH-02` | 迁移 Supervisor 垂直职责 | `ARCH-01` |
-| 待开始 | `ARCH-03` | 迁移 Core、Execution 与 Workspace 职责 | `ARCH-02` |
-| 待开始 | `AUTO-01` | 实现多 Work Item 顺序执行 | `ARCH-03` |
-| 待开始 | `AUTO-02` | 建立 Work Item Checkpoint 与增量证据 | `AUTO-01` |
-| 待开始 | `AUTO-03` | 支持长任务恢复与上下文续接 | `AUTO-02` |
-| 待开始 | `AUTO-04` | 完成主会话状态与人工控制 | `AUTO-03` |
-| 待开始 | `VALID-01` | 完成全自动 Agent 真实验收 | `AUTO-04` |
+| 已完成 | `ARCH-01` | 冻结 Bounded Change Loop 权威边界 | `PLAN-STATE-01` |
+| 已完成 | `ARCH-02` | 建立隔离 Worktree 与 Git Candidate | `ARCH-01` |
+| 已完成 | `AUTO-01` | 统一 ChangeRun 与 Work Item 执行 | `ARCH-02` |
+| 待开始 | `AUTO-02` | 实现自动 Repair 与 Contract-aware Replan | `AUTO-01` |
+| 待开始 | `AUTO-03` | 完成进度、Review Queue 与恢复 | `AUTO-02` |
+| 待开始 | `VALID-01` | 完成 Bounded Change Loop 真实验收 | `AUTO-03` |
 
 ## 状态规则
 

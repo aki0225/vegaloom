@@ -26,6 +26,34 @@ Vega 的核心价值不是“拥有更多 Agent 功能”，而是回答四个�
 3. 如何用测试和隔离 reviewer 避免 worker 自证正确？
 4. 中断、超时或 provider 异常后，如何保留现场并安全交还人工？
 
+## Bounded Change Loop 演进合同
+
+当前 Agent 主线采用一条受人工批准边界约束的自动变更循环：
+
+```text
+Approved Contract
+  -> Execution Plan
+  -> 隔离 Worktree 与单 Writer
+  -> Git Candidate
+  -> Verification / Risk / Reviewer
+  -> repair / replan / needs_human / next
+  -> ready_to_commit
+```
+
+人工批准的是目标、验收条件、不变量、非目标、风险与副作用边界、必需验证和授权范围。
+Execution Plan 保存假设、Work Item、候选文件和实现策略，可以在 Approved Contract 内调整。
+任何合同字段变化都需要重新批准；即使合同文本没有改变，实际 Git Diff 命中冻结风险或越出
+授权范围时也必须停止并请求人工决定。
+
+代码快照以 Git revision 为权威。显式自主 ChangeRun 可以在 Vega 管理的隔离 Worktree 和本地
+任务分支中，由控制器在范围检查后创建 Candidate/Checkpoint Commit；Worker 不能自行提交或
+切换分支。Vega 不操作用户当前分支，也不自动 push、merge、rebase、release。Task Card 只保存
+跨会话或换机恢复所需的任务语义，不能替代当前 Git、Verification 或 Reviewer 事实。
+
+`v0.2.1` 已发布 Runtime 仍保持单 Work Item 和无自动 Commit 的既有行为。当前 `main` 的
+Bounded ChangeRun 通过 `agent start --contract ... --execution-plan ...` 显式启用；旧
+`--plan` 入口及 `do / loop` 保持原有 Git 行为。
+
 ## 日常入口
 
 边界清晰的一次性任务只要求理解以下入口：

@@ -121,11 +121,17 @@ def _publish_completed_artifacts(
         plan,
         observation=observation,
         checkpoint=checkpoint,
-        next_step=(
-            "读取 Core Finish 报告并完成人工提交前检查；"
-            "Vega 不自动 commit、push 或 release"
-        ),
+        next_step=_completed_next_step(state),
     )
+
+
+def _completed_next_step(state: AgentState) -> str:
+    if state.run_kind == "change":
+        return (
+            "读取 Core Finish 与 Accepted Checkpoint，人工检查累计 Diff，"
+            "再决定是否 push、创建 PR 或合并"
+        )
+    return "读取 Core Finish 报告并完成人工提交前检查，再决定 commit 与 push"
 
 
 def _completion_trace_exists(

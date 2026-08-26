@@ -6,7 +6,9 @@
   Harness 拥有；`vega agent` 是复用该链的可选 Supervisor 控制层，不得形成第二套成功语义。
 - `vega do / loop` 是 Core 执行入口，`vega agent` 负责 Plan、批准、单 Writer、Checkpoint、
   恢复和交接。Goal、Memory、Assurance 与 Inspection 属于实验或兼容能力。
-- 保持本地文件优先、fail-closed、无自动 Git、无自动发布和无自动长期 Memory。
+- 保持本地文件优先和 fail-closed。自主 ChangeRun 只允许在 Vega 管理的隔离 Worktree 中由
+  控制器创建本地 Candidate/Checkpoint Commit；用户分支、push、merge、rebase、release 和
+  长期 Memory 继续由人工控制。
 
 ## 依赖与事实权威
 
@@ -14,6 +16,9 @@
   Core 不得静态导入 `vega.experimental`，实验命令只能在调用时延迟导入。
 - 用户指令、仓库规则、`.vega.yaml` 和当前已批准 Plan 拥有任务意图；Git、真实 Workspace、
   活动进程和新鲜 Artifact 拥有运行事实；Worker Claim 只能作为待验证输入。
+- Bounded Change Loop 中，Approved Contract 拥有人工授权边界，Execution Plan 只拥有可调整
+  的实现安排。Git Candidate SHA 拥有代码快照事实；Task Card 只保存跨会话恢复所需的目标、
+  当前步骤和下一动作。
 - Agent State 只拥有本机控制状态。Diff、Verification、Risk、Reviewer 和 Finish 事实继续由
   Core Artifact 拥有；Trace 是追加式审计线索，Graph checkpoint 只拥有图游标。
 - 文本状态和 JSON 状态必须使用同一实时证据投影。证据缺失、损坏、过期或 Workspace 漂移时，
@@ -25,9 +30,11 @@
 
 - 入口与编排：`agent_cli`、`agent_runtime*`、`agent_routing`、`agent_graph`、`agent_worker`、
   `agent_finalization`。
-- 合同与持久化：`agent_contract`、`agent_persistence`、`agent_run`、`agent_mutation`。
+- 合同与持久化：`agent_contract`、`agent_change_contract`、`agent_persistence`、`agent_run`、
+  `agent_mutation`。
 - Codex 执行桥：`agent_codex_*`、`agent_execution_bridge`。
-- 仓库与上下文：`agent_context`、`agent_repository_*`、`agent_runtime_support`。
+- 仓库与上下文：`agent_context`、`agent_repository_*`、`agent_git_worktree`、
+  `agent_git_candidate`、`agent_runtime_support`。
 - 恢复与交接：`agent_recovery*`、`agent_handoff*`、`agent_resume_validation`、
   `agent_side_effect_adjudication`。
 - 状态与展示：`agent_run_status`、`agent_status_*`、`agent_visibility`、`agent_task_card*`。
@@ -65,5 +72,7 @@
 ## 修改要求
 
 - 优先在已有职责模块内做窄修改。新增状态、Artifact、顶级命令或事实源前，先证明现有合同无法表达。
+- Worker 进程不得直接创建提交或切换分支；涉及 Candidate/Checkpoint Commit 的 Git 写操作必须
+  由隔离 Worktree 所有者执行，并在写入前完成范围与工作区检查。
 - 状态兼容不能通过默认值或 shim 掩盖证据不足；安全兼容应保留旧信息，同时输出当前有效投影。
 - 修改成功语义、恢复、Writer 所有权或证据绑定时，至少覆盖正常、损坏或越界、恢复三个相关场景。

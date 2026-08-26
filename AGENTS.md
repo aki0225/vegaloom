@@ -109,4 +109,7 @@ Supervisor、安全边界、CI 或打包时按 `tests/AGENTS.md` 扩大到对应
    风险门禁和可选 accepted memory，但不得为了"提升效果"接收 worker 的完整对话、自述或中间
    推理。read-only sandbox 是共享仓库的只读视图，不等于容器或操作系统级隔离。
 4. **成功语义不掺水**——不得新增任何绕过确定性验证就把 run 标记为成功的路径;人工裁决关闭的 run 记录为人工裁决,不记录为验证成功。
-5. Vega 不自动 commit、push、release、删除文件或写入长期 Memory——这是行为边界,不是待实现功能。
+5. Vega 不操作用户当前分支，不自动 push、merge、rebase、release、删除用户文件或写入长期
+   Memory。显式启用的自主 ChangeRun 可以在 Vega 管理的隔离 Worktree 和本地任务分支中，
+   由控制器在范围检查后创建 Candidate/Checkpoint Commit；Worker 本身不得提交或切换分支，
+   这些本地提交也不代表已获准交付。

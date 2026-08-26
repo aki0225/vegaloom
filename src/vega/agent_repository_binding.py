@@ -95,6 +95,7 @@ def write_run_metadata(
     comparison_base_revision: str | None = None,
     comparison_paths: list[str] | None = None,
     task_card_sha256: str | None = None,
+    change_run: dict[str, object] | None = None,
 ) -> None:
     repo_root = require_git_root(repo)
     _require_revision(repo_root, base_revision, "base revision 不属于目标仓库")
@@ -118,6 +119,8 @@ def write_run_metadata(
             comparison_base_revision,
             "comparison base 不属于目标仓库",
         )
+    if change_run is not None:
+        payload["change_run"] = change_run
     write_redacted_json(run_dir / "agent-run.json", payload)
 
 

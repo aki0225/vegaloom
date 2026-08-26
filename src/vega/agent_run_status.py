@@ -25,11 +25,16 @@ _PHASE_STATUS = {
 }
 _TRACE_PROGRESS = {
     "agent_started": ("agent", "started"),
+    "change_run_started": ("agent", "started"),
     "plan_approved": ("agent", "plan_updated"),
+    "change_contract_approved": ("agent", "plan_updated"),
     "plan_revised": ("agent", "plan_updated"),
     "plan_invalidated_by_steer": ("agent", "plan_updated"),
     "worker_dispatch_committed": ("worker", "started"),
     "worker_dispatch_reconciled": ("worker", "binding_reconciled"),
+    "candidate_bound": ("agent", "candidate_bound"),
+    "candidate_accepted": ("agent", "checkpoint_accepted"),
+    "candidate_restored_for_repair": ("agent", "candidate_restored"),
     "verification_retry_committed": ("verification", "retry_started"),
     "supervisor_next": ("agent", "supervisor_next"),
     "supervisor_repair": ("agent", "supervisor_repair"),
@@ -92,6 +97,7 @@ def load_agent_status_state(
         "status": _PHASE_STATUS[state.phase],
         "current_step": state.phase,
         "agent_phase": state.phase,
+        "agent_run_kind": state.run_kind,
         "task_id": state.task_id,
         "current_work_item": state.current_work_item,
         "active_child_run": state.active_child_run,
@@ -100,6 +106,8 @@ def load_agent_status_state(
         "latest_checkpoint_id": state.latest_checkpoint_id,
         "allowed_actions": list(state.allowed_actions),
         "terminal_status": state.terminal_status,
+        "accepted_checkpoint_sha": state.accepted_checkpoint_sha,
+        "active_candidate_sha": state.active_candidate_sha,
     }
     live_child_stage = read_live_child_stage(run_dir, state)
     if live_child_stage is not None:
@@ -321,67 +329,24 @@ def agent_status_lines(payload: dict[str, Any]) -> list[str]:
         lines.append(f"- Core 子流程：`{payload['live_child_stage']}`")
     if payload.get("terminal_status"):
         lines.append(f"- Finish：`{payload['terminal_status']}`")
+    lines.extend(_candidate_status_lines(payload))
+    return lines
+
+
+def _candidate_status_lines(payload: dict[str, Any]) -> list[str]:
+    lines = []
+    if payload.get("accepted_checkpoint_sha"):
+        value = str(payload["accepted_checkpoint_sha"])[:12]
+        lines.append(f"- Accepted Checkpoint：`{value}`")
+    if payload.get("active_candidate_sha"):
+        value = str(payload["active_candidate_sha"])[:12]
+        lines.append(f"- Active Candidate：`{value}`")
     return lines
 
 
 def agent_live_stage_payload(state: dict[str, Any]) -> dict[str, str]:
     stage = state.get("live_child_stage")
     return {"live_child_stage": stage} if isinstance(stage, str) else {}
-
-
-def agent_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
-    phase = state.get("agent_phase")
-    if phase in {"planning", "awaiting_approval"}:
-        return [
-            f"读取 `{run_dir / 'agent-plan.json'}`，由主会话完成只读调查并提交单 Work Item Plan。",
-            f"写入新 Plan：`vega agent plan --run {run_dir.name} --input <plan.json>`。",
-            f"仅在人工明确批准后运行：`vega agent approve --run {run_dir.name}`。",
-        ]
-    if phase == "ready":
-        return [
-            f"执行当前批准 Work Item：`vega agent run --run {run_dir.name}`。",
-            f"另一个终端可运行：`vega watch --run {run_dir.name} --follow`。",
-        ]
-    if phase in {"acting", "observing"}:
-        return [
-            f"当前 Agent 仍在执行或对账；运行：`vega watch --run {run_dir.name} --follow`。",
-            f"如需人工停止：`vega agent stop --run {run_dir.name} --reason \"...\"`。",
-        ]
-    if phase == "finalizing":
-        return [
-            f"Core Finish 已完成但 Supervisor 终态尚未发布；运行：`vega agent finalize --run {run_dir.name}`。",
-        ]
-    if phase == "completed":
-        return [
-            f"读取 `{run_dir / 'status-card.md'}` 和 child Core Finish 证据。",
-            "人工检查全部 Diff 与验证结果后自行 commit；Vega 不自动 commit、push 或 release。",
-        ]
-    if phase == "needs_human":
-        return [
-            f"读取 `{run_dir / 'status-card.md'}`、最新 Checkpoint 与 Trace，确认阻断原因。",
-            "根据现场选择 steer、resume-local、recover、handoff 或停止；不要在证据不明时启动第二 Writer。",
-        ]
-    if phase == "stopped":
-        return [
-            f"读取 `{run_dir / 'status-card.md'}` 和最新 Checkpoint，确认保留的 Workspace。",
-            "当前本机 run 已停止，不能使用 resume-local；如需继续，请人工创建 Handoff 或新的 Agent run。",
-        ]
-    return [f"读取 `{run_dir / 'agent-state.json'}`，人工确认 Agent 状态。"]
-
-
-def agent_artifact_names(state: dict[str, Any]) -> list[str]:
-    names = [
-        "agent-state.json",
-        "agent-plan.json",
-        "status-card.md",
-        "task-brief.md",
-        "task-brief-manifest.json",
-        "trace.jsonl",
-    ]
-    checkpoint_id = state.get("latest_checkpoint_id")
-    if isinstance(checkpoint_id, str):
-        names.append(f"checkpoints/{checkpoint_id}.json")
-    return names
 
 
 def agent_progress_items(

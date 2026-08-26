@@ -126,8 +126,9 @@ def _commit_all(repo: Path, message: str) -> None:
 def test_repository_plan_and_generated_current_view_are_consistent() -> None:
     snapshot = plan_state.load_snapshot(PROJECT_ROOT)
 
-    assert snapshot.current_item_id == "ARCH-01"
-    assert snapshot.completed_count == 4
+    # 当前事项和完成数必须由追加式事件推导；这里不能把瞬时值重新写成维护负担。
+    assert snapshot.plan.plan_id == "vega-agent-evolution"
+    assert snapshot.events
     assert plan_state.check_current_view(PROJECT_ROOT, snapshot) == []
 
 

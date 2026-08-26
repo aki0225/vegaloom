@@ -77,6 +77,8 @@ def build_worker_prompt(
         "",
         "硬性约束：",
         "- 只修改满足需求所需的文件。",
+        "- Agent Brief 指定当前 Work Item 时，本轮只处理该项；"
+        "不要提前实现其他 Work Item。",
         "- 不要 git commit、git push、发布或改长期 memory。",
         "- Vega 会在 worker 返回后独立执行 Runtime 策略中的固定验证命令。",
         "- Worker 自检不得新增或修改 ignored、未跟踪文件或 Git 控制状态；"

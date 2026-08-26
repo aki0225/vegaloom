@@ -51,6 +51,12 @@ def compile_task_brief(
     )
     if work_item is None:
         raise ValueError(f"Plan 中不存在 Work Item：{work_item_id}")
+    other_pending_items = [
+        f"{item.work_item_id}: {item.objective}"
+        for item in plan.work_items
+        if item.work_item_id != work_item_id
+        and item.status not in {"completed", "superseded"}
+    ]
 
     normalized_refs = tuple(_normalize_artifact_ref(value) for value in artifact_refs)
     if checkpoint is not None:
@@ -69,10 +75,20 @@ def compile_task_brief(
                 f"Approved digest: {plan.approved_digest}",
             ],
         ),
-        ("当前 Work Item", [f"{work_item.work_item_id}: {work_item.objective}"]),
+        (
+            "当前 Work Item（本轮唯一修改目标）",
+            [f"{work_item.work_item_id}: {work_item.objective}"],
+        ),
+        (
+            "其他未完成 Work Item（本轮不处理）",
+            other_pending_items or ["无"],
+        ),
         ("允许范围", work_item.allowed_paths or ["未声明"]),
         ("禁止范围", work_item.forbidden_paths or ["未声明"]),
-        ("成功条件", plan.success_conditions or ["未声明"]),
+        (
+            "最终合同条件（全部 Work Item 完成后判断）",
+            plan.success_conditions or ["未声明"],
+        ),
         ("验证要求", work_item.verification or ["未声明"]),
         (
             "风险提示",
@@ -89,7 +105,8 @@ def compile_task_brief(
         (
             "下一动作",
             [
-                "只处理当前 Work Item；遇到范围变化、未知副作用或证据冲突时停止并请求人工。"
+                "只处理当前 Work Item；即使后续事项位于相同文件，也不要提前实现。"
+                "遇到范围变化、未知副作用或证据冲突时停止并请求人工。"
             ],
         ),
     ]

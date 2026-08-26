@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "20260825T153927Z-ARCH-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "ARCH-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-25T15:39:27Z",
+  "summary": "Approved Contract 与 Execution Plan 已分离，Git Candidate、Task Card 和隔离 Worktree 的事实与权限边界已进入代码合同和项目规则。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "supervisor-contract-tests",
+      "plan-state-tests",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "AGENTS.md",
+      "src/vega/AGENTS.md",
+      "src/vega/agent_change_contract.py",
+      "tests/supervisor/test_agent_change_contract.py",
+      "docs/PRODUCT-CONTRACT.md",
+      "docs/ROADMAP.md",
+      "plans/vega-agent-evolution.json",
+      "plans/events/20260825T153927Z-ARCH-01-completed.json",
+      "docs/CURRENT.md"
+    ]
+  }
+}

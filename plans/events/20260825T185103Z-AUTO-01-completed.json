@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "20260825T185103Z-AUTO-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTO-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-25T18:51:03Z",
+  "summary": "ChangeRun 已能在隔离 Worktree 中顺序推进多个 Work Item；每项绑定独立 Candidate、Core 门禁和 Accepted Checkpoint，真实 Codex dogfood 完成两项连续修改。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "core-tests",
+      "supervisor-tests",
+      "security-tests",
+      "real-agent-dogfood",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_change_run.py",
+      "src/vega/agent_change_runtime.py",
+      "src/vega/agent_codex_reconcile.py",
+      "tests/supervisor/test_agent_change_run.py",
+      "plans/events/20260825T185103Z-AUTO-01-completed.json",
+      "docs/CURRENT.md"
+    ]
+  }
+}

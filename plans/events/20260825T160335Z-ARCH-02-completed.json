@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "20260825T160335Z-ARCH-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "ARCH-02",
+  "transition": "completed",
+  "recorded_at": "2026-08-25T16:03:35Z",
+  "summary": "隔离 Worktree、本地任务分支和 Git Candidate 已建立；Worker 改写 HEAD、范围越界或 Candidate 后漂移都会 fail-closed。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "workspace-tests",
+      "supervisor-tests",
+      "security-tests",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_git_worktree.py",
+      "src/vega/agent_git_candidate.py",
+      "tests/supervisor/test_agent_git_candidate.py",
+      "plans/events/20260825T160335Z-ARCH-02-completed.json",
+      "docs/CURRENT.md"
+    ]
+  }
+}
