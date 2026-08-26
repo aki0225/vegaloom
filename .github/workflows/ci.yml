@@ -298,13 +298,38 @@ jobs:
         shell: bash
         run: |
           mkdir -p .tmp/pytest/runs
+          log_path=".tmp/pytest/${{ matrix.name }}.log"
+          set +e
           python -m pytest -q \
             --timeout="${{ matrix.test_timeout }}" \
             --timeout-method=signal \
             --durations=30 \
             --durations-min=0.20 \
             --basetemp=".tmp/pytest/runs/linux-${{ matrix.name }}" \
-            ${{ matrix.files }} ${{ matrix.extra_args }}
+            ${{ matrix.files }} ${{ matrix.extra_args }} 2>&1 | tee "$log_path"
+          test_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$test_status" -ne 0 ]]; then
+            failure_detail="$(
+              python - "$log_path" <<'PY'
+          from pathlib import Path
+          import sys
+
+          lines = Path(sys.argv[1]).read_text(
+              encoding="utf-8",
+              errors="replace",
+          ).splitlines()
+          detail = "\n".join(lines[-120:])
+          print(
+              detail.replace("%", "%25")
+              .replace("\r", "%0D")
+              .replace("\n", "%0A")
+          )
+          PY
+            )"
+            echo "::error title=测试分片失败摘要::$failure_detail"
+          fi
+          exit "$test_status"
 
   tests-experimental:
     name: Python 3.12 实验与历史重放
