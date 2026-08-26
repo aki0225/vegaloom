@@ -22,6 +22,7 @@ from .review_queue_contract import (
     MAX_REVIEW_QUEUE_ITEMS,
     ReviewQueue,
     ReviewQueueItem,
+    render_redacted_queue_verdict,
 )
 from .review_queue_plan import PreparedReviewTask, prepare_review_queue
 from .runner import Runner, RunnerResult
@@ -32,7 +33,6 @@ VerdictParser = Callable[[RunnerResult], ReviewVerdict]
 TrustedResult = Callable[[RunnerResult], bool]
 ProgressReporter = Callable[[str, int], None]
 TraceReporter = Callable[..., None]
-
 
 @dataclass(frozen=True)
 class ReviewQueueOutcome:
@@ -438,7 +438,7 @@ def _write_task_result(
         newline="\n",
     )
     directory.joinpath("verdict.json").write_text(
-        verdict.model_dump_json(indent=2) + "\n",
+        render_redacted_queue_verdict(verdict),
         encoding="utf-8",
         newline="\n",
     )

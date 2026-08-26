@@ -10,8 +10,10 @@ from .prompt_metrics import PromptMetrics
 from .review_contract import (
     ReviewFinding,
     ReviewRiskDisclosure,
+    ReviewVerdict,
     normalize_review_path,
 )
+from .redaction import redact_value
 from .run_utils import resolve_run_dir
 
 MAX_REVIEW_QUEUE_ITEMS = 8
@@ -117,6 +119,14 @@ def queue_context_summary(queue: ReviewQueue) -> dict[str, object]:
     }
 
 
+def render_redacted_queue_verdict(verdict: ReviewVerdict) -> str:
+    return json.dumps(
+        redact_value(verdict.model_dump(mode="json")),
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
+
+
 def review_queue_status_payload(
     run_dir: Path,
     *,
@@ -209,19 +219,18 @@ def _read_child_state(run_dir: Path) -> dict[str, Any] | None:
 
 
 def _latest_iteration_number(state: dict[str, Any]) -> int | None:
+    candidates: list[int] = []
     iterations = state.get("iterations")
     if isinstance(iterations, list) and iterations:
         latest = iterations[-1]
         if isinstance(latest, dict):
             value = latest.get("iteration")
             if isinstance(value, int) and not isinstance(value, bool):
-                return value
+                candidates.append(value)
     value = state.get("current_iteration")
-    return (
-        value
-        if isinstance(value, int) and not isinstance(value, bool)
-        else None
-    )
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        candidates.append(value)
+    return max(candidates) if candidates else None
 
 
 def _invalid_status_payload() -> dict[str, object]:

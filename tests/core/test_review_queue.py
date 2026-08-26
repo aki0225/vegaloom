@@ -6,6 +6,9 @@ import subprocess
 from pathlib import Path
 
 from vega.reflect_runtime import ReflectRuntime
+from vega.review_contract import ReviewVerdict
+from vega.review_queue import _write_task_result
+from vega.review_queue_contract import ReviewQueueItem
 from vega.review_runtime import ReviewRuntime
 from vega.run_status import render_run_status, run_status_payload
 from vega.runner import RunnerResult
@@ -286,6 +289,42 @@ def test_required_risk_files_stay_in_one_review_task(tmp_path: Path) -> None:
         )
         for group in target_groups
     )
+
+
+def test_review_queue_redacts_each_task_verdict(tmp_path: Path) -> None:
+    marker = "sk-review-queue-fake-secret-123456"
+    item = ReviewQueueItem(
+        item_id="RQ-01",
+        status="completed",
+        target_files=["src/example.py"],
+        covered=["src/example.py"],
+        verdict="approve",
+        runner_status="success",
+        artifact_dir="review-queue/rq-01",
+    )
+    verdict = ReviewVerdict(
+        verdict="approve",
+        summary=f"api_key={marker}",
+        reviewed_files=["src/example.py"],
+        checked_items=["文件覆盖"],
+    )
+
+    _write_task_result(
+        tmp_path,
+        item,
+        RunnerResult(
+            status="success",
+            output="",
+            command=["queue-reviewer"],
+        ),
+        verdict,
+    )
+
+    persisted = (
+        tmp_path / "review-queue" / "rq-01" / "verdict.json"
+    ).read_text(encoding="utf-8")
+    assert marker not in persisted
+    assert "[REDACTED]" in persisted
 
 
 def _target_files(prompt: str) -> list[str]:

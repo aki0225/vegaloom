@@ -152,6 +152,60 @@ def test_agent_status_projects_latest_child_review_queue(
     assert "Review Queue：`completed` / `1`/`1`" in parent_text
 
 
+def test_agent_status_does_not_project_previous_iteration_review_queue(
+    tmp_path: Path,
+) -> None:
+    workspace, repo, parent, child_dir = _acting_parent(tmp_path)
+    previous_iteration_dir = child_dir / "iterations" / "01"
+    previous_iteration_dir.mkdir(parents=True)
+    _write_child_state(
+        child_dir,
+        repo,
+        current_step="review",
+        current_iteration=2,
+        iterations=[
+            LoopIterationState(
+                iteration=1,
+                lifecycle="completed",
+                review_run="previous-review-run",
+            )
+        ],
+    )
+    queue = ReviewQueue(
+        source_run="previous-reflect-run",
+        candidate_sha="a" * 40,
+        workspace_fingerprint="b" * 64,
+        trigger=["diff_budget"],
+        status="completed",
+        max_items=8,
+        max_prompt_chars=60000,
+        max_diff_chars=1000,
+        items=[
+            ReviewQueueItem(
+                item_id="RQ-01",
+                status="completed",
+                target_files=["src/previous.py"],
+                covered=["src/previous.py"],
+                verdict="approve",
+                runner_status="success",
+                artifact_dir="review-queue/rq-01",
+            )
+        ],
+        covered=["src/previous.py"],
+        verdict="approve",
+    )
+    (previous_iteration_dir / "review-queue.json").write_text(
+        queue.model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    child_payload = run_status_payload(workspace, child_dir.name)
+    parent_payload = run_status_payload(workspace, parent.run_dir.name)
+
+    assert child_payload["review_queue_status"] == "not_used"
+    assert parent_payload["review_queue_status"] == "not_used"
+
+
 def test_agent_cli_status_projects_latest_child_stage(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -237,6 +291,7 @@ def _write_child_state(
     *,
     current_step: str,
     run_id: str | None = None,
+    current_iteration: int | None = None,
     iterations: list[LoopIterationState] | None = None,
 ) -> None:
     state = LoopAutomationState(
@@ -248,7 +303,11 @@ def _write_child_state(
         status="running",
         current_step=current_step,
         current_iteration=(
-            iterations[-1].iteration if iterations else 0
+            current_iteration
+            if current_iteration is not None
+            else iterations[-1].iteration
+            if iterations
+            else 0
         ),
         iterations=iterations or [],
     )

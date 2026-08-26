@@ -200,8 +200,9 @@ vega agent status --run <agent_run> --json
 
 Reviewer 输入在软预算内时仍由一个独立会话完成。超过 Reviewer Prompt 或完整 Diff 软预算后，
 Vega 会按文件组顺序执行 Review Queue，并在 `status` 中显示
-`Review Queue：<status> / <completed>/<total>`。详细覆盖记录位于 child 最新 iteration 的
-`review-queue.json` 和 `review-queue/rq-*/`：
+`Review Queue：<status> / <completed>/<total>`。child 最新 iteration 保存队列汇总
+`review-queue.json`；逐任务 Prompt、指标和结果保留在该 iteration 绑定的 Review run 的
+`review-queue/rq-*/`：
 
 - `covered`：已由可信 Reviewer 精确声明覆盖的文件；
 - `remaining`：尚未完成可信审查的文件；
