@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from vega.agent_change_contract import (
@@ -247,9 +248,11 @@ def test_change_run_completes_final_work_item(tmp_path: Path) -> None:
     assert reviewer.calls == 1
 
 
+@pytest.mark.parametrize("allowed_action", ["next", "repair"])
 def test_adapter_automatically_advances_ready_change_items(
     tmp_path: Path,
     monkeypatch,
+    allowed_action: str,
 ) -> None:
     adapter = SupervisorAgentCodexAdapter(tmp_path)
     ready = SimpleNamespace(
@@ -257,7 +260,7 @@ def test_adapter_automatically_advances_ready_change_items(
         state=SimpleNamespace(
             run_kind="change",
             phase="ready",
-            allowed_actions=["next"],
+            allowed_actions=[allowed_action],
         ),
     )
     completed = SimpleNamespace(
@@ -285,7 +288,7 @@ def test_adapter_automatically_advances_ready_change_items(
     assert calls == ["change-run", "change-run"]
 
 
-def test_failed_candidate_returns_to_parent_for_repair(
+def test_failed_candidate_generates_fix_packet_for_next_attempt(
     tmp_path: Path,
 ) -> None:
     repo = _repo(tmp_path / "repo")
@@ -326,25 +329,22 @@ def test_failed_candidate_returns_to_parent_for_repair(
         finish_runtime=_ChangeFinishRuntime(loop_runtime),
     )
 
-    result = adapter.run(approved.run_dir.name, timeout_seconds=60)
+    result = adapter._run_once(approved.run_dir.name, timeout_seconds=60)
     metadata = json.loads(
         (result.run_dir / "agent-run.json").read_text(encoding="utf-8")
     )
     managed_repo = Path(metadata["repo_path"])
 
-    assert result.state.phase == "completed"
-    assert result.state.terminal_status == "ready_to_commit"
+    assert result.state.phase == "ready"
+    assert result.state.terminal_status is None
+    assert result.state.allowed_actions == ["repair", "replan", "human"]
     assert result.state.active_candidate_sha is None
-    assert result.state.accepted_checkpoint_sha == _git(
-        managed_repo,
-        "rev-parse",
-        "HEAD",
-    )
-    assert result.state.accepted_checkpoint_sha != source_head
-    assert _git(managed_repo, "status", "--short") == ""
+    assert result.state.accepted_checkpoint_sha == source_head
+    assert _git(managed_repo, "rev-parse", "HEAD") == source_head
+    assert _git(managed_repo, "status", "--short") == "M src/one.py"
     candidates = list((result.run_dir / "candidates").glob("*.json"))
     fix_packets = list((result.run_dir / "fix-packets").glob("*.json"))
-    assert len(candidates) == 2
+    assert len(candidates) == 1
     assert len(fix_packets) == 1
     packet = json.loads(fix_packets[0].read_text(encoding="utf-8"))
     assert packet["repair_round"] == 1
@@ -352,8 +352,11 @@ def test_failed_candidate_returns_to_parent_for_repair(
     assert packet["source_child_run"]
     assert packet["findings"][0]["title"] == "需要补充一次修复"
     assert packet["required_actions"] == ["继续修改当前 Work Item"]
-    assert "当前 Fix Packet" in adapter.worker_runner.prompts[1]
-    assert reviewer.calls == 2
+    prepared = adapter._prepare_attempt(result.run_dir.name, 60)
+    _, repair_prompt = adapter._prepare_child(prepared)
+    assert prepared.attempt_number == 2
+    assert "当前 Fix Packet" in repair_prompt
+    assert reviewer.calls == 1
 
 
 class _WorkerRunner:
