@@ -385,6 +385,7 @@ class AgentStatusCard(StrictAgentModel):
     commit_recommended: bool = False
     integrity_warning: NonEmptyText | None = None
     # 这些字段都是展示层可选信息，旧的调用方不需要补充即可继续构造状态卡。
+    history_note: NonEmptyText | None = None
     plan_risk_notes: list[NonEmptyText] = Field(default_factory=list)
     supervisor_evidence: list[SupervisorEvidenceItem] = Field(default_factory=list)
 

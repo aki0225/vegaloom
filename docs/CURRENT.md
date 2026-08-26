@@ -5,28 +5,12 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：9 / 10
-- 最近事件：`20260826T112133Z-AUTO-03-completed`
+- 已完成：10 / 10
+- 最近事件：`20260826T161630Z-VALID-01-completed`
 
 ## 当前事项
 
-### 下一项：`VALID-01` 完成 Bounded Change Loop 真实验收
-
-用真实任务比较 Vega 与原生 Review、CI 和人工中转的操作成本、恢复能力与错误放行情况。
-
-验收条件：
-
-- 普通多轮 Repair、合同越界 Replan 和 Worker 或 Reviewer 中断各有一个真实案例
-- 正常路径除初始批准和最终 PR 判断外不需要人工转贴上下文或命令
-- 验证失败、风险越界或 Review 未完成不能进入 ready_to_commit
-- 验收记录人工操作数、恢复耗时、最终理解耗时和运行开销，并据此决定发布或删除无价值机制
-
-要求检查：
-
-- `full-test-shards`
-- `package-smoke`
-- `real-agent-acceptance`
-- `pr-ci`
+当前没有可执行事项；计划已经完成，或剩余事项处于阻塞/已替代状态。
 
 ## 全部事项
 
@@ -41,7 +25,7 @@
 | 已完成 | `AUTO-01` | 统一 ChangeRun 与 Work Item 执行 | `ARCH-02` |
 | 已完成 | `AUTO-02` | 实现自动 Repair 与 Contract-aware Replan | `AUTO-01` |
 | 已完成 | `AUTO-03` | 完成进度、Review Queue 与恢复 | `AUTO-02` |
-| 待开始 | `VALID-01` | 完成 Bounded Change Loop 真实验收 | `AUTO-03` |
+| 已完成 | `VALID-01` | 完成 Bounded Change Loop 真实验收 | `AUTO-03` |
 
 ## 状态规则
 

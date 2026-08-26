@@ -29,6 +29,7 @@ from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_side_effect_adjudication import (
     SupervisorAgentSideEffectAdjudicator,
 )
+from vega.agent_status_card import _history_note
 from vega.agent_worker import SupervisorAgentWorker
 from vega.cli_entrypoint import app
 from vega.execution_control import ExecutionLease
@@ -638,6 +639,60 @@ def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> No
     assert "任务已停止" in status
     assert "不能使用 resume-local" in status
     assert "resume-local --run" not in status
+
+
+def test_status_explains_failed_attempts_after_current_evidence_is_cleared(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    checkpoint = _latest_checkpoint(run_dir)
+    payload = checkpoint.model_dump(mode="json")
+    payload["failed_attempts"] = ["attempt-history"]
+    save_agent_checkpoint(
+        run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json",
+        checkpoint.model_validate(payload),
+    )
+
+    stopped = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="结束带历史 attempt 的任务",
+    )
+    status = SupervisorAgentRuntime(workspace).status(stopped.run_dir.name)
+
+    assert "历史：保留 1 个历史失败 attempt" in status
+    assert "当前卡片只显示仍能用于当前状态的门禁证据" in status
+
+
+def test_history_note_marks_previous_revision_evidence_as_historical(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    legacy_state = load_agent_state(run_dir / "agent-state.json")
+    state = legacy_state.model_validate(
+        {
+            **legacy_state.model_dump(mode="json"),
+            "run_kind": "change",
+            "contract_revision": 2,
+            "approved_contract_digest": "a" * 64,
+            "execution_plan_revision": 2,
+            "accepted_checkpoint_sha": "b" * 40,
+        }
+    )
+    checkpoint = _latest_checkpoint(run_dir)
+    checkpoint_payload = checkpoint.model_dump(mode="json")
+    checkpoint_payload["failed_attempts"] = ["attempt-history"]
+
+    note = _history_note(
+        state,
+        checkpoint.model_validate(checkpoint_payload),
+        None,
+    )
+
+    assert note is not None
+    assert "当前门禁只对应 Contract r2 / Plan r2" in note
+    assert "旧结果不能作为本 revision 的通过证据" in note
 
 
 def test_stop_inherits_unknown_side_effect_and_remains_blocked(

@@ -39,6 +39,7 @@ def apply_agent_projection(
             "commit_recommended": projection["commit_recommended"],
             "supervisor_evidence": projection["supervisor_evidence"],
             "integrity_warning": projection["integrity_warning"],
+            "history_note": projection["history_note"],
         }
     )
     if projection["effective_phase"] != projection["recorded_phase"]:
@@ -83,6 +84,7 @@ def payload_fields(state: dict[str, Any]) -> dict[str, Any]:
         "commit_recommended": state.get("commit_recommended"),
         "supervisor_evidence": state.get("supervisor_evidence"),
         "integrity_warning": state.get("integrity_warning"),
+        "history_note": state.get("history_note"),
     }
 
 
