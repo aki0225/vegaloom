@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import ValidationError
 
-from .agent_contract import AgentObservation, AgentState
+from .agent_contract import AgentCheckpoint, AgentObservation, AgentState
 from .agent_git_candidate import CandidateCommit
 
 
@@ -51,6 +51,34 @@ def candidate_scope_expectation(
             post_core_head=candidate.candidate_sha,
         ),
         None,
+    )
+
+
+def matches_accepted_candidate_transition(
+    run_dir: Path,
+    state: AgentState,
+    checkpoint: AgentCheckpoint,
+    observation: AgentObservation,
+) -> bool:
+    """验证上一 Work Item 的 Observation 是否正好产生当前 Accepted Checkpoint。"""
+
+    if (
+        state.run_kind != "change"
+        or checkpoint.phase != "ready"
+        or checkpoint.pending_actions != ["next", "replan", "human"]
+        or not observation.work_item_completed
+        or observation.all_work_items_completed
+    ):
+        return False
+    candidate_scope, issue = candidate_scope_expectation(
+        run_dir,
+        state,
+        observation,
+    )
+    return bool(
+        issue is None
+        and candidate_scope.post_core_head is not None
+        and candidate_scope.post_core_head == state.accepted_checkpoint_sha
     )
 
 

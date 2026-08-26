@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from .agent_candidate_evidence import matches_accepted_candidate_transition
 from .agent_contract import (
     AgentCheckpoint,
     AgentObservation,
@@ -430,7 +431,15 @@ def _load_status_observation(
         raise ValueError("最新 Observation 无法验证，拒绝展示状态卡") from exc
     if (
         path.name != f"{observation.observation_id}.json"
-        or observation.work_item_id != state.current_work_item
+        or (
+            observation.work_item_id != state.current_work_item
+            and not matches_accepted_candidate_transition(
+                run_dir,
+                state,
+                checkpoint,
+                observation,
+            )
+        )
         or observation.workspace_fingerprint != checkpoint.workspace_fingerprint
     ):
         raise ValueError("最新 Observation 与 Checkpoint 不一致，拒绝展示状态卡")

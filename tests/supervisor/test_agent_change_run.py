@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
@@ -106,7 +107,7 @@ def test_agent_start_cli_accepts_change_contract_without_duplicate_text(
     assert state["data"]["run_kind"] == "change"
 
 
-def test_change_run_advances_two_work_items_on_candidate_commits(
+def test_change_run_accepts_candidate_and_advances_to_next_work_item(
     tmp_path: Path,
 ) -> None:
     repo = _repo(tmp_path / "repo")
@@ -130,7 +131,7 @@ def test_change_run_advances_two_work_items_on_candidate_commits(
         finish_runtime=_ChangeFinishRuntime(loop_runtime),
     )
 
-    result = adapter.run(approved.run_dir.name, timeout_seconds=60)
+    result = adapter._run_once(approved.run_dir.name, timeout_seconds=60)
     metadata = json.loads(
         (result.run_dir / "agent-run.json").read_text(encoding="utf-8")
     )
@@ -142,8 +143,9 @@ def test_change_run_advances_two_work_items_on_candidate_commits(
     ]
     candidates.sort(key=lambda item: item["created_at"])
 
-    assert result.state.phase == "completed"
-    assert result.state.terminal_status == "ready_to_commit"
+    assert result.state.phase == "ready"
+    assert result.state.current_work_item == "WI-02"
+    assert "next" in result.state.allowed_actions
     assert result.state.active_candidate_sha is None
     assert result.state.accepted_checkpoint_sha == _git(
         managed_repo,
@@ -152,25 +154,21 @@ def test_change_run_advances_two_work_items_on_candidate_commits(
     )
     assert [item.status for item in result.plan.work_items] == [
         "completed",
-        "completed",
+        "pending",
     ]
-    assert [item["work_item_id"] for item in candidates] == ["WI-01", "WI-02"]
+    assert [item["work_item_id"] for item in candidates] == ["WI-01"]
     assert candidates[0]["parent_sha"] == source_head
-    assert candidates[1]["parent_sha"] == candidates[0]["candidate_sha"]
-    assert _git(managed_repo, "rev-list", "--count", f"{source_head}..HEAD") == "2"
+    assert _git(managed_repo, "rev-list", "--count", f"{source_head}..HEAD") == "1"
     assert _git(repo, "rev-parse", "HEAD") == source_head
     assert _git(repo, "status", "--short") == source_status
-    assert reviewer.calls == 2
+    assert reviewer.calls == 1
     status = runtime.status(result.run_dir.name)
     assert "- 证据健康：`passed`" in status
     assert "已过期" not in status
     status_payload = run_status_payload(workspace, result.run_dir.name)
     assert status_payload["agent_run_kind"] == "change"
     assert status_payload["accepted_checkpoint_sha"] == result.state.accepted_checkpoint_sha
-    assert any(
-        "Accepted Checkpoint" in step
-        for step in status_payload["next_steps"]
-    )
+    assert any("vega agent run" in step for step in status_payload["next_steps"])
     assert any(
         path.endswith("change-contract.json")
         for path in status_payload["key_artifacts"]
@@ -191,8 +189,99 @@ def test_change_run_advances_two_work_items_on_candidate_commits(
     ]
     assert comparison_bases == [
         source_head,
-        candidates[0]["candidate_sha"],
     ]
+    next_attempt = adapter._prepare_attempt(result.run_dir.name, 60)
+    assert next_attempt.state.current_work_item == "WI-02"
+    assert next_attempt.comparison_base_sha == candidates[0]["candidate_sha"]
+
+    candidate_artifacts[0].write_text("{}\n", encoding="utf-8")
+    degraded_status = runtime.status(result.run_dir.name)
+    assert "证据告警" in degraded_status
+    assert "等待人工" in degraded_status
+
+
+def test_change_run_completes_final_work_item(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    contract = _contract().model_copy(
+        update={
+            "task_id": "task-single",
+            "goal": "完成单项修改",
+        }
+    )
+    execution_plan = ExecutionPlan(
+        task_id="task-single",
+        contract_revision=1,
+        work_items=[
+            ExecutionWorkItem(
+                work_item_id="WI-01",
+                objective="更新第一个模块",
+                likely_files=["src/one.py"],
+                verification=["python -m pytest tests/test_one.py -q"],
+            )
+        ],
+    )
+    started = runtime.start_change(
+        repo,
+        contract=contract,
+        execution_plan=execution_plan,
+    )
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    reviewer = _ReviewerRunner()
+    loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_WorkerRunner(["src/one.py"]),
+        loop_runtime=loop_runtime,
+        finish_runtime=_ChangeFinishRuntime(loop_runtime),
+    )
+
+    result = adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+    assert result.state.phase == "completed"
+    assert result.state.terminal_status == "ready_to_commit"
+    assert result.state.active_candidate_sha is None
+    assert [item.status for item in result.plan.work_items] == ["completed"]
+    assert reviewer.calls == 1
+
+
+def test_adapter_automatically_advances_ready_change_items(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    adapter = SupervisorAgentCodexAdapter(tmp_path)
+    ready = SimpleNamespace(
+        run_dir=tmp_path / "runs" / "change-run",
+        state=SimpleNamespace(
+            run_kind="change",
+            phase="ready",
+            allowed_actions=["next"],
+        ),
+    )
+    completed = SimpleNamespace(
+        run_dir=ready.run_dir,
+        state=SimpleNamespace(
+            run_kind="change",
+            phase="completed",
+            allowed_actions=[],
+        ),
+    )
+    results = iter([ready, completed])
+    calls: list[str] = []
+
+    def run_once(run: str, *, timeout_seconds: int):
+        assert timeout_seconds == 60
+        calls.append(run)
+        return next(results)
+
+    monkeypatch.setattr(adapter, "_run_once", run_once)
+
+    result = adapter.run("change-run", timeout_seconds=60)
+
+    assert result is completed
+    assert calls == ["change-run", "change-run"]
 
 
 def test_failed_candidate_returns_to_parent_for_repair(
@@ -250,17 +339,6 @@ def test_failed_candidate_returns_to_parent_for_repair(
     assert _git(managed_repo, "status", "--short") == "M src/one.py"
     first_candidates = list((first.run_dir / "candidates").glob("*.json"))
     assert len(first_candidates) == 1
-
-    completed = adapter.run(first.run_dir.name, timeout_seconds=60)
-
-    assert completed.state.phase == "completed"
-    assert completed.state.accepted_checkpoint_sha == _git(
-        managed_repo,
-        "rev-parse",
-        "HEAD",
-    )
-    assert _git(managed_repo, "status", "--short") == ""
-    assert len(list((completed.run_dir / "candidates").glob("*.json"))) == 2
 
 
 class _WorkerRunner:
