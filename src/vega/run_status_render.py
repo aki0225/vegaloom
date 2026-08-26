@@ -22,6 +22,13 @@ def render_run_status_payload(payload: dict[str, Any]) -> str:
         lines.append(f"- 风险等级：`{payload['risk']}`")
     if payload.get("recommendation"):
         lines.append(f"- 建议：`{payload['recommendation']}`")
+    if payload.get("review_queue_status") not in {None, "not_used"}:
+        lines.append(
+            "- Review Queue："
+            f"`{payload['review_queue_status']}` / "
+            f"`{payload.get('review_queue_completed') or 0}`"
+            f"/`{payload.get('review_queue_total') or 0}`"
+        )
     lines.extend(agent_status_lines(payload))
     if payload.get("decision_count"):
         lines.append(f"- 人工决策：`{payload['decision_count']}` 条")

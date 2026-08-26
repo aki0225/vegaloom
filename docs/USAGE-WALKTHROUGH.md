@@ -198,6 +198,19 @@ vega agent status --run <agent_run> --json
 文本和 JSON 共用同一份实时证据投影；`agent-state.json` 与 `status-card.md` 都不能单独作为
 当前可提交结论。
 
+Reviewer 输入在软预算内时仍由一个独立会话完成。超过 Reviewer Prompt 或完整 Diff 软预算后，
+Vega 会按文件组顺序执行 Review Queue，并在 `status` 中显示
+`Review Queue：<status> / <completed>/<total>`。详细覆盖记录位于 child 最新 iteration 的
+`review-queue.json` 和 `review-queue/rq-*/`：
+
+- `covered`：已由可信 Reviewer 精确声明覆盖的文件；
+- `remaining`：尚未完成可信审查的文件；
+- `findings`：已经完成的队列任务返回的问题；
+- `status=blocked`：单个文件组仍超预算、任务数超过上限、Runner 中断或覆盖不完整。
+
+同一高风险规则命中的文件不会被拆散。队列任务全部完成前，部分 `approve` 不能让 Core 或父
+Agent 成功。这里没有新增命令；继续使用 `vega status`、`vega watch` 和现有恢复流程。
+
 `vega finish --run <loop_run>` 面向普通 Core run，生成或读取 Core 的交付结论。
 `vega agent finalize --run <agent_run>` 只在父 Agent 已进入 `finalizing` 后采用已经绑定的
 可信 Core Finish，主要用于父终态发布前中断后的幂等恢复；它不会重新执行验证或 Reviewer。

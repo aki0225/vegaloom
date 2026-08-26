@@ -185,6 +185,9 @@ HEAD 和 tracked Diff；本地 `.venv`、`node_modules` 等 ignored 环境可以
 只有实时状态同时满足 `evidence_health=passed`、`workspace_current=true` 和
 `commit_recommended=true`，才会建议人工检查并提交。
 
+Review 输入超出软预算时，Vega 按文件组顺序拆成最多 8 个只读任务；`status` 显示队列进度，
+未覆盖文件保留在 `remaining`，不会进入成功状态。
+
 每个 Work Item 都要声明仓库外副作用为 `none`、`known` 或 `unknown`。数据库写入、支付、
 部署和外部 API 等动作不会因为命令退出码为 0 就自动视为安全；`known` 或 `unknown` 会停在
 人工处理。

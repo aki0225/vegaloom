@@ -5,29 +5,27 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：8 / 10
-- 最近事件：`20260826T045725Z-AUTO-02-completed`
+- 已完成：9 / 10
+- 最近事件：`20260826T112133Z-AUTO-03-completed`
 
 ## 当前事项
 
-### 下一项：`AUTO-03` 完成进度、Review Queue 与恢复
+### 下一项：`VALID-01` 完成 Bounded Change Loop 真实验收
 
-主会话显示低频进度并接受人工控制；Provider 会话优先续接，失效后由 Git 与 Task Card 重建任务语义。
+用真实任务比较 Vega 与原生 Review、CI 和人工中转的操作成本、恢复能力与错误放行情况。
 
 验收条件：
 
-- 主会话能查看阶段、Work Item、命令、变更、验证、Reviewer 和下一步
-- steer、pause、stop 和 resume 不会打通 Worker 与 Reviewer 的会话边界
-- Reviewer 输入超过软预算时才拆分 Review Queue，并保存 covered、remaining 和 findings
-- 跨会话或换机后可以从任务分支、Candidate SHA 和 Git 跟踪的 Task Card 恢复
+- 普通多轮 Repair、合同越界 Replan 和 Worker 或 Reviewer 中断各有一个真实案例
+- 正常路径除初始批准和最终 PR 判断外不需要人工转贴上下文或命令
+- 验证失败、风险越界或 Review 未完成不能进入 ready_to_commit
+- 验收记录人工操作数、恢复耗时、最终理解耗时和运行开销，并据此决定发布或删除无价值机制
 
 要求检查：
 
-- `status-tests`
-- `context-tests`
-- `recovery-tests`
-- `git-only-resume-dogfood`
-- `real-agent-dogfood`
+- `full-test-shards`
+- `package-smoke`
+- `real-agent-acceptance`
 - `pr-ci`
 
 ## 全部事项
@@ -42,7 +40,7 @@
 | 已完成 | `ARCH-02` | 建立隔离 Worktree 与 Git Candidate | `ARCH-01` |
 | 已完成 | `AUTO-01` | 统一 ChangeRun 与 Work Item 执行 | `ARCH-02` |
 | 已完成 | `AUTO-02` | 实现自动 Repair 与 Contract-aware Replan | `AUTO-01` |
-| 待开始 | `AUTO-03` | 完成进度、Review Queue 与恢复 | `AUTO-02` |
+| 已完成 | `AUTO-03` | 完成进度、Review Queue 与恢复 | `AUTO-02` |
 | 待开始 | `VALID-01` | 完成 Bounded Change Loop 真实验收 | `AUTO-03` |
 
 ## 状态规则

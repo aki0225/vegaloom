@@ -22,10 +22,12 @@ from .run_status_guidance import (
     initialization_next_steps as _initialization_next_steps,
     latest_iteration_file as _latest_iteration_file,
     recovery_next_steps as _recovery_next_steps,
+    review_next_steps as _review_next_steps,
     verification_failure_next_steps as _verification_failure_next_steps,
 )
 from .run_status_render import render_run_status_payload
 from .run_utils import resolve_run_dir, resolve_runs_root
+from .review_queue_contract import projected_review_queue_status_payload
 
 
 def latest_run_dir(workspace: Path, kind: str = "all") -> Path | None:
@@ -78,6 +80,9 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         "latest_checkpoint_id": state.get("latest_checkpoint_id"),
         "allowed_actions": state.get("allowed_actions"),
         "terminal_status": state.get("terminal_status"),
+        **projected_review_queue_status_payload(
+            workspace, run_dir, state, kind
+        ),
         **asp.payload_fields(state),
         **agent_live_stage_payload(state),
         "next_steps": next_steps_for_run(workspace, run_dir, state, kind),
@@ -132,27 +137,7 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
             f"或手动复制 `{run_dir / 'review-prompt.md'}` 给干净 reviewer 会话。",
         ]
     if run_kind == "review":
-        if state.get("current_step") == "context_budget":
-            return [
-                f"读取 `{run_dir / 'review-prompt-metrics.md'}` 和 `{run_dir / 'review-context-budget-report.md'}`。",
-                "当前 reviewer 未启动；请缩小 review 输入或人工确认新的 prompt 预算后重跑。",
-            ]
-        if state.get("current_step") == "evidence_truncated":
-            return [
-                f"读取 `{run_dir / 'review-context.json'}` 确认被截断的 sections。",
-                f"读取 `{run_dir / 'review-findings.md'}`；当前结果不能视为完整 approve。",
-                "请缩小任务/diff 后重跑，或由人工检查完整证据。",
-            ]
-        verdict = state.get("verdict")
-        if verdict == "approve":
-            return ["reviewer 已通过；回到主会话整理交付结论，人工检查后再 commit。"]
-        if verdict == "request_changes":
-            return [
-                f"读取 `{run_dir / 'review-findings.md'}`，按 findings 修复后重新 reflect + review。",
-            ]
-        return [
-            f"读取 `{run_dir / 'review-runner-output.txt'}` 和 `{run_dir / 'review-findings.md'}`，人工判断或重跑 reviewer。",
-        ]
+        return _review_next_steps(run_dir, state)
     if run_kind == "gate":
         recommendation = state.get("recommendation")
         if recommendation == "self-check":
@@ -210,6 +195,7 @@ def key_artifacts_for_run(run_dir: Path, state: dict[str, Any], kind: str | None
             "eval.md",
         ],
         "review": [
+            "review-queue.json",
             "review-findings.md",
             "review-verdict.json",
             "review-runner-output.txt",
@@ -502,6 +488,7 @@ def _latest_iteration_artifacts(run_dir: Path, state: dict[str, Any]) -> list[st
             iteration_dir / "review-checklist.md",
             iteration_dir / "review-findings.md",
             iteration_dir / "review-verdict.json",
+            iteration_dir / "review-queue.json",
         ]
         result = [str(path.resolve()) for path in candidates if path.exists()]
         for pattern in [

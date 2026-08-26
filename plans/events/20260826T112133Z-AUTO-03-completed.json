@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "event_id": "20260826T112133Z-AUTO-03-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTO-03",
+  "transition": "completed",
+  "recorded_at": "2026-08-26T11:21:33Z",
+  "summary": "主会话状态已能投影最新 Core child 的 Review Queue 进度。Reviewer 输入超过软预算时才按文件组顺序拆分，必审风险文件保持原子分组，并持久化 covered、remaining 和 findings；不完整或不可信任务继续 fail-closed。现有 steer、pause、stop、resume 与 Git Task Card 恢复合同已通过定向测试和 fresh-clone 模拟，真实 Codex dogfood 由两个独立 Reviewer 完成队列审查并进入 ready_to_commit。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "status-tests",
+      "context-tests",
+      "recovery-tests",
+      "git-only-resume-dogfood",
+      "real-agent-dogfood",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/review_queue.py",
+      "src/vega/review_queue_contract.py",
+      "src/vega/review_queue_plan.py",
+      "src/vega/review_prompt.py",
+      "src/vega/review_eval.py",
+      "tests/core/test_review_queue.py",
+      "tests/supervisor/test_agent_live_child_status.py",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "docs/USAGE-WALKTHROUGH.md",
+      "plans/events/20260826T112133Z-AUTO-03-completed.json",
+      "docs/CURRENT.md"
+    ]
+  }
+}

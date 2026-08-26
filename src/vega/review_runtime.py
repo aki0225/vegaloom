@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -14,12 +15,7 @@ from .comparison_binding import (
     safe_comparison_paths as _safe_comparison_paths,
 )
 from .execution_control import RunnerExecutionContext
-from .models import (
-    BriefState, GateResult,
-    ReviewFinding,
-    ReviewState,
-    ReviewVerdict,
-)
+from .models import BriefState, GateResult, ReviewFinding, ReviewState, ReviewVerdict
 from .project_config import (
     ProjectConfig,
     load_project_config,
@@ -39,9 +35,20 @@ from .progress import make_execution_progress_reporter
 from .redaction import redact_text, redact_value
 from .review_coverage import (
     review_file_coverage_issues_for_verdict,
-    run_review_file_coverage_eval,
 )
 from .review_evidence import review_evidence_issues as _review_evidence_issues
+from .review_eval import (
+    append_review_eval_outcome as _append_review_eval_outcome,
+    render_eval,
+    run_review_pack_eval,
+)
+from .review_queue import ReviewQueueOutcome, run_review_queue
+from .review_queue_contract import (
+    REVIEW_QUEUE_ARTIFACT,
+    queue_context_summary,
+    review_queue_required,
+)
+from .review_prompt import render_review_pack, render_review_prompt
 from .review_runner_contract import (
     review_result_diagnostic,
     review_result_is_trusted,
@@ -56,7 +63,6 @@ from .risk_review_reporting import (
     render_review_checklist,
     render_review_findings,
     render_runner_output, verdict_output_schema as _verdict_output_schema,
-    verdict_schema_example as _verdict_schema_example,
 )
 from .risk_review_runtime import (
     build_required_review_failure_reasons,
@@ -65,12 +71,6 @@ from .risk_review_runtime import (
     enforce_required_risk_review,
     needs_human_verdict as _needs_human_verdict,
     redact_review_verdict as _redact_review_verdict,
-    render_required_review_pack_lines,
-    render_required_review_prompt_rules,
-    required_review_outcome_line,
-    required_reviews_from_inputs,
-    run_required_review_pack_eval,
-    run_required_review_prompt_eval,
 )
 from .run_utils import create_run_dir, resolve_run_dir
 from .runner import Runner, RunnerResult, make_runner
@@ -132,6 +132,108 @@ def _review_risk_gate_payload(
         "source_run": source_run,
         "result": precomputed.result.model_dump(mode="json"),
     }
+
+
+@dataclass(frozen=True)
+class _ReviewerExecution:
+    result: RunnerResult
+    queue_outcome: ReviewQueueOutcome | None
+    reviewer_started: bool
+    budget_artifact: str | None
+
+
+def _execute_reviewer(
+    *,
+    run_dir: Path,
+    repo_path: Path,
+    inputs: dict[str, Any],
+    metrics: PromptMetrics,
+    pre_review_evidence_issues: list[str],
+    risk_gate_result: GateResult | None,
+    runner: Runner | None,
+    runner_name: str,
+    execution_config: ProjectConfig,
+    execution_context: RunnerExecutionContext,
+    timeout_seconds: int,
+    prompt: str,
+    trace: TraceWriter,
+) -> _ReviewerExecution:
+    if pre_review_evidence_issues:
+        return _ReviewerExecution(
+            result=RunnerResult(
+                status="skipped",
+                output="",
+                error="review 证据与当前工作区不属于同一快照，未启动外部 reviewer。",
+                command=[],
+            ),
+            queue_outcome=None,
+            reviewer_started=False,
+            budget_artifact=None,
+        )
+    if risk_gate_result is None:
+        return _ReviewerExecution(
+            result=RunnerResult(
+                status="skipped",
+                output="",
+                error="review 风险门禁评估失败，未启动外部 reviewer。",
+                command=[],
+            ),
+            queue_outcome=None,
+            reviewer_started=False,
+            budget_artifact=None,
+        )
+    if review_queue_required(inputs, metrics):
+        queue_outcome = run_review_queue(
+            run_dir,
+            repo_path,
+            inputs,
+            runner_factory=lambda required_reviews: (
+                runner
+                or make_runner(
+                    runner_name,
+                    options=execution_config.runner.codex_exec.reviewer,
+                    output_schema=_verdict_output_schema(required_reviews),
+                )
+            ),
+            render_prompt=render_review_prompt,
+            parse_verdict=_review_verdict_from_result,
+            trusted_result=review_result_is_trusted,
+            execution_context=execution_context,
+            timeout_seconds=timeout_seconds,
+            max_prompt_chars=execution_config.prompt_budget.reviewer_max_chars,
+            max_diff_chars=execution_config.prompt_budget.reviewer_diff_max_chars,
+            progress_reporter=execution_context.progress_reporter,
+            trace_reporter=trace.write,
+        )
+        inputs["review_queue"] = queue_context_summary(queue_outcome.queue)
+        budget_artifact = (
+            write_context_budget_report(run_dir, "review", metrics)
+            if metrics.exceeded and queue_outcome.queue.status != "completed"
+            else None
+        )
+        return _ReviewerExecution(
+            result=queue_outcome.result,
+            queue_outcome=queue_outcome,
+            reviewer_started=queue_outcome.reviewer_started,
+            budget_artifact=budget_artifact,
+        )
+    direct_runner = runner or make_runner(
+        runner_name,
+        options=execution_config.runner.codex_exec.reviewer,
+        output_schema=_verdict_output_schema(risk_gate_result.required_reviews),
+    )
+    return _ReviewerExecution(
+        result=direct_runner.run(
+            prompt,
+            repo_path.resolve(),
+            sandbox="read-only",
+            timeout_seconds=timeout_seconds,
+            execution_context=execution_context,
+        ),
+        queue_outcome=None,
+        reviewer_started=True,
+        budget_artifact=None,
+    )
 
 
 class ReviewPackRuntime:
@@ -321,55 +423,38 @@ class ReviewRuntime:
         state.current_step = "run_reviewer"
         state.save(run_dir / "state.json")
         prompt = run_dir.joinpath("review-prompt.md").read_text(encoding="utf-8")
-        budget_artifact: str | None = None
-        reviewer_started = False
         reviewer_start_fingerprint = inputs["current_workspace_fingerprint"]
-        if pre_review_evidence_issues:
-            result = RunnerResult(
-                status="skipped",
-                output="",
-                error="review 证据与当前工作区不属于同一快照，未启动外部 reviewer。",
-                command=[],
-            )
-        elif metrics.exceeded:
-            budget_artifact = write_context_budget_report(run_dir, "review", metrics)
-            result = RunnerResult(
-                status="skipped",
-                output="",
-                error="reviewer prompt 超过项目上下文预算，未启动外部 runner。",
-                command=[],
-            )
-        elif risk_gate_result is None:
-            result = RunnerResult(
-                status="skipped",
-                output="",
-                error="review 风险门禁评估失败，未启动外部 reviewer。",
-                command=[],
-            )
-        else:
-            runner = self.runner or make_runner(
-                runner_name, options=execution_config.runner.codex_exec.reviewer,
-                output_schema=_verdict_output_schema(risk_gate_result.required_reviews),
-            )
-            execution_context = execution_context or RunnerExecutionContext(
-                execution_root=run_dir,
-                execution_dir=run_dir / "executions" / "reviewer",
-                run_id=run_id,
-                step="reviewer",
-                progress_reporter=make_execution_progress_reporter(run_dir, self.progress_reporter),
-            )
-            reviewer_started = True
-            result = runner.run(
-                prompt,
-                repo_path.resolve(),
-                sandbox="read-only",
-                timeout_seconds=self.timeout_seconds,
-                execution_context=execution_context,
-            )
-        result = _redact_runner_result(result)
+        inputs["_review_prompt_exceeded"] = metrics.exceeded
+        execution_context = execution_context or RunnerExecutionContext(
+            execution_root=run_dir,
+            execution_dir=run_dir / "executions" / "reviewer",
+            run_id=run_id,
+            step="reviewer",
+            progress_reporter=make_execution_progress_reporter(
+                run_dir,
+                self.progress_reporter,
+            ),
+        )
+        execution = _execute_reviewer(
+            run_dir=run_dir,
+            repo_path=repo_path,
+            inputs=inputs,
+            metrics=metrics,
+            pre_review_evidence_issues=pre_review_evidence_issues,
+            risk_gate_result=risk_gate_result,
+            runner=self.runner,
+            runner_name=runner_name,
+            execution_config=execution_config,
+            execution_context=execution_context,
+            timeout_seconds=self.timeout_seconds,
+            prompt=prompt,
+            trace=trace,
+        )
+        queue_outcome = execution.queue_outcome
+        result = _redact_runner_result(execution.result)
         review_execution_issues = _capture_post_review_workspace(
             run_dir, self.workspace, repo_path, inputs,
-            reviewer_started=reviewer_started,
+            reviewer_started=execution.reviewer_started,
             reviewer_start_fingerprint=reviewer_start_fingerprint,
             termination_unconfirmed=result.termination_unconfirmed,
         )
@@ -383,10 +468,24 @@ class ReviewRuntime:
             result,
             step="reviewer",
         )
-        verdict = _review_verdict_from_result(result)
+        queue_completed = bool(
+            queue_outcome is not None
+            and queue_outcome.queue.status == "completed"
+        )
+        unresolved_truncated_sections = [
+            section
+            for section in inputs["truncated_sections"]
+            if not (queue_completed and section == "full_diff")
+        ]
+        prompt_budget_blocked = metrics.exceeded and not queue_completed
+        verdict = (
+            queue_outcome.verdict
+            if queue_outcome is not None
+            else _review_verdict_from_result(result)
+        )
         verdict = _enforce_complete_review_evidence(
             verdict,
-            [*inputs["truncated_sections"], *pre_review_evidence_issues],
+            [*unresolved_truncated_sections, *pre_review_evidence_issues],
         )
         verdict, _ = _enforce_review_file_coverage(
             verdict,
@@ -400,9 +499,9 @@ class ReviewRuntime:
         )
         required_review_failures = build_required_review_failure_reasons(
             evidence_issues=pre_review_evidence_issues,
-            truncated_sections=inputs["truncated_sections"],
+            truncated_sections=unresolved_truncated_sections,
             workspace_issues=review_execution_issues,
-            prompt_budget_exceeded=metrics.exceeded,
+            prompt_budget_exceeded=prompt_budget_blocked,
             runner_status=result.status,
             runner_error=result.error,
             termination_unconfirmed=result.termination_unconfirmed,
@@ -449,13 +548,18 @@ class ReviewRuntime:
 
         state.current_step = "eval"
         run_dir.joinpath("eval.md").write_text("# Eval\n\n(pending)\n", encoding="utf-8")
-        eval_results = run_review_pack_eval(run_dir, REVIEW_ARTIFACTS)
+        review_artifacts = [
+            *REVIEW_ARTIFACTS,
+            *([REVIEW_QUEUE_ARTIFACT] if queue_outcome is not None else []),
+        ]
+        eval_results = run_review_pack_eval(run_dir, review_artifacts)
         _append_review_eval_outcome(
             eval_results,
             result=result,
             review_execution_issues=review_execution_issues,
             pre_review_evidence_issues=pre_review_evidence_issues,
             metrics=metrics,
+            prompt_budget_blocked=prompt_budget_blocked,
             risk_gate_result=risk_gate_result,
             verdict=verdict,
             risk_disclosure_issues=risk_disclosure_issues,
@@ -463,9 +567,9 @@ class ReviewRuntime:
         run_dir.joinpath("eval.md").write_text(render_eval(eval_results), encoding="utf-8")
         state.eval_results = eval_results
         state.artifacts = [
-            *REVIEW_ARTIFACTS,
+            *review_artifacts,
             *([interruption_artifact] if interruption_artifact else []),
-            *([budget_artifact] if budget_artifact else []),
+            *([execution.budget_artifact] if execution.budget_artifact else []),
         ]
         state.verdict = verdict.verdict
         if result.termination_unconfirmed:
@@ -477,7 +581,21 @@ class ReviewRuntime:
         elif pre_review_evidence_issues:
             state.status = "needs_human"
             state.current_step = "evidence_stale"
-        elif metrics.exceeded:
+        elif queue_outcome is not None and not queue_completed:
+            state.status = "needs_human"
+            state.current_step = (
+                untrusted_review_current_step(result)
+                if (
+                    queue_outcome.reviewer_started
+                    and not review_result_is_trusted(result)
+                )
+                else (
+                    "context_budget"
+                    if metrics.exceeded
+                    else "evidence_truncated"
+                )
+            )
+        elif prompt_budget_blocked:
             state.status = "needs_human"
             state.current_step = "context_budget"
         elif risk_gate_result is None:
@@ -486,7 +604,7 @@ class ReviewRuntime:
         elif not review_result_is_trusted(result):
             state.status = "needs_human"
             state.current_step = untrusted_review_current_step(result)
-        elif inputs["truncated_sections"]:
+        elif unresolved_truncated_sections:
             state.status = "needs_human"
             state.current_step = "evidence_truncated"
         elif risk_gate_result.recommendation == "human-review":
@@ -679,6 +797,8 @@ def collect_review_inputs(
         "source_workspace_fingerprint": str(
             source_evidence.get("workspace_fingerprint") or ""
         ),
+        # 仅供本次 Runtime 构造逐文件 Review Queue；不会写入 review-context.json。
+        "_current_head_sha": current_snapshot.head_sha,
         "current_workspace_fingerprint": current_snapshot.fingerprint,
         "current_index_flags_sha256": current_snapshot.index_flags_sha256,
         "current_unsafe_index_paths": [
@@ -701,137 +821,6 @@ def collect_review_inputs(
             for item in knowledge.agents_instructions
         ],
     }
-
-
-def render_review_pack(inputs: dict[str, Any]) -> str:
-    risk_gate = inputs.get("risk_gate")
-    required_review_lines: list[str] = []
-    risk_gate_note = [
-        f"- ignored 证据覆盖：Reflect `{inputs['source_ignored_coverage_level']}`，当前 "
-        f"`{inputs['current_ignored_coverage_level']}`；`metadata_bounded` 仅表示稳定元数据检测。"
-    ]
-    if isinstance(risk_gate, dict) and risk_gate.get("status") == "success":
-        try:
-            result = GateResult.model_validate(risk_gate.get("result"))
-        except ValidationError:
-            risk_gate_note.append("- 风险门禁结果格式不合法；本次审查不能作为自动通过结论。")
-        else:
-            risk_gate_note.append(
-                f"- 风险门禁：`{result.risk}` / `{result.recommendation}`。"
-            )
-            if result.recommendation == "human-review":
-                risk_gate_note.append(
-                    "- 风险门禁要求人工审查；本次 reviewer 只提供辅助发现，不能替代人工确认。"
-                )
-            required_review_lines.extend(
-                render_required_review_pack_lines(result.required_reviews)
-            )
-    elif risk_gate is not None:
-        risk_gate_note.append("- 风险门禁评估失败；本次审查不能作为自动通过结论。")
-    text = "\n".join(
-        [
-            "# Review Pack",
-            "",
-            "## 审查边界",
-            "",
-            "- 这是隔离 reviewer 的输入包，只基于事实材料审查当前 diff。",
-            "- 不包含 worker 的完整聊天记录，避免被实现过程污染。",
-            "- reviewer 只使用已存在的文件、diff、测试摘要、日志和项目上下文；不运行会写文件或缓存的命令，也不修改、提交、推送或发布。",
-            *(
-                [
-                    "- 以下证据已截断："
-                    + "、".join(f"`{name}`" for name in inputs["truncated_sections"])
-                    + "。reviewer 可以指出已发现的问题，但不得返回 approve。"
-                ]
-                if inputs["truncated_sections"]
-                else []
-            ),
-            *(
-                [
-                    "- Review 证据已过期或完整性校验失败："
-                    + "、".join(f"`{name}`" for name in inputs["evidence_issues"])
-                    + "。外部 reviewer 不会启动，请重新执行 reflect。"
-                    + (
-                        "\n- 持久化诊断："
-                        + "；".join(inputs["evidence_diagnostics"])
-                        if inputs["evidence_diagnostics"]
-                        else ""
-                    )
-                ]
-                if inputs["evidence_issues"]
-                else []
-            ),
-            *risk_gate_note,
-            "",
-            "## 完整变更文件清单",
-            "",
-            *(
-                [f"- `{path}`" for path in inputs["changed_files"]]
-                if inputs["changed_files"]
-                else ["- 未获得可信变更文件清单。"]
-            ),
-            "",
-            *required_review_lines,
-            "## 原始需求 / Agent Brief",
-            "",
-            inputs["source_brief"] or "- 未找到上游 agent-brief.md。",
-            "",
-            "## 执行后复盘",
-            "",
-            inputs["reflection"] or "- 未找到 reflection.md。",
-            "",
-            "## Diff Summary",
-            "",
-            inputs["diff_summary"] or "- 未找到 diff-summary.md。",
-            "",
-            "## Test Summary",
-            "",
-            inputs["test_summary"] or "- 未提供测试摘要。",
-            "",
-            "## 项目上下文",
-            "",
-            inputs["project_context"],
-            "",
-            "## Full Diff",
-            "",
-            "```diff",
-            inputs["full_diff"].strip() or "<empty>",
-            "```",
-        ]
-    ).rstrip() + "\n"
-    return redact_text(text)
-
-
-def render_review_prompt(inputs: dict[str, Any]) -> str:
-    required_reviews = required_reviews_from_inputs(inputs)
-    text = "\n".join(
-        [
-            "# 任务：隔离代码审查",
-            "",
-            "你是独立 reviewer。你没有 worker 的聊天上下文，只能基于下面的 review pack 审查当前变更。",
-            "",
-            "硬性要求：",
-            "- 只读审查，只使用已存在的文件、diff、测试摘要、日志和项目上下文；不要自行运行验证命令或补造证据。",
-            "- 不要运行测试、构建、安装依赖、格式化、代码生成或其他可能写入文件/缓存的命令，也不要修改、提交、推送、发布、删除或执行破坏性操作。",
-            "- 重点找真实 bug、遗漏测试、需求不满足、项目规则违反和安全风险。",
-            "- 必须逐项检查 Review Pack 的完整变更文件清单；`reviewed_files` 必须精确列出全部变更文件，不得省略，也不得加入清单外路径。",
-            "- 如果证据不足，不要强行 approve，返回 needs_human。",
-            *render_required_review_prompt_rules(required_reviews),
-            "- 最终只能输出一个 JSON 对象，不要包 Markdown 代码块。",
-            "",
-            "JSON schema：",
-            "```json",
-            json.dumps(
-                _verdict_schema_example(required_reviews),
-                ensure_ascii=False,
-                indent=2,
-            ),
-            "```",
-            "",
-            render_review_pack(inputs),
-        ]
-    ).rstrip() + "\n"
-    return redact_text(text)
 
 
 def parse_review_verdict(output: str, error: str | None = None) -> ReviewVerdict:
@@ -857,53 +846,6 @@ def _review_verdict_from_result(result: RunnerResult) -> ReviewVerdict:
             f"（{review_result_diagnostic(result)}），未读取或采用 runner 输出。"
         )
     return parse_review_verdict(result.output)
-
-
-def _append_review_eval_outcome(
-    eval_results: list[str],
-    *,
-    result: RunnerResult,
-    review_execution_issues: list[str],
-    pre_review_evidence_issues: list[str],
-    metrics: PromptMetrics,
-    risk_gate_result: GateResult | None,
-    verdict: ReviewVerdict,
-    risk_disclosure_issues: list[str],
-) -> None:
-    eval_results.extend(
-        f"FAIL: required risk disclosure：{issue}" for issue in risk_disclosure_issues
-    )
-    if result.termination_unconfirmed:
-        eval_results.append(
-            "FAIL: reviewer owned process tree 终止未确认，未读取或采用 runner 输出"
-        )
-    elif review_execution_issues:
-        eval_results.append("FAIL: reviewer 执行期间工作区发生变化或无法完成快照校验")
-    elif pre_review_evidence_issues:
-        return
-    elif metrics.exceeded:
-        eval_results.append("FAIL: reviewer prompt 超过上下文预算，未启动外部 runner")
-    elif risk_gate_result is None:
-        eval_results.append("FAIL: review 风险门禁评估失败，未启动外部 runner")
-    elif not review_result_is_trusted(result):
-        eval_results.append(
-            "FAIL: reviewer Runner 未形成可采信结论"
-            f"（{review_result_diagnostic(result)}），"
-            "未读取或采用 runner 输出"
-        )
-    elif risk_gate_result.recommendation == "human-review":
-        eval_results.append(
-            required_review_outcome_line(
-                risk_gate_result,
-                verdict,
-                risk_disclosure_issues,
-            )
-        )
-    elif verdict.verdict == "needs_human":
-        if not _has_failures(eval_results):
-            eval_results.append("PASS: reviewer 输出可信的 needs_human 人工阻断结论")
-    else:
-        eval_results.append("PASS: reviewer 输出 verdict 可解析")
 
 
 def _write_runner_status_report(
@@ -951,82 +893,6 @@ def _write_runner_status_report(
     ).rstrip() + "\n"
     run_dir.joinpath(filename).write_text(redact_text(report), encoding="utf-8")
     return filename
-
-
-def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
-    results = [f"{'PASS' if (run_dir / item).exists() else 'FAIL'}: artifact 存在：{item}" for item in artifacts]
-    prompt = run_dir / "review-prompt.md"
-    prompt_text = ""
-    if prompt.exists():
-        prompt_text = prompt.read_text(encoding="utf-8", errors="replace")
-        results.append("PASS: review prompt 标记不包含 worker 聊天" if "worker 的完整聊天记录" in prompt_text else "FAIL: review prompt 缺少隔离说明")
-    metrics_path = run_dir / "review-prompt-metrics.json"
-    if metrics_path.exists():
-        metrics = PromptMetrics.model_validate_json(metrics_path.read_text(encoding="utf-8"))
-        results.append(
-            "FAIL: review prompt 超过上下文预算"
-            if metrics.exceeded
-            else "PASS: review prompt 未超过上下文预算"
-        )
-    context = _read_json(run_dir / "review-context.json")
-    truncated_sections = context.get("truncated_sections") or []
-    if truncated_sections:
-        results.append("WARN: review evidence 已截断：" + ", ".join(truncated_sections))
-    else:
-        results.append("PASS: review evidence 未截断")
-    evidence_issues = context.get("evidence_issues") or []
-    if evidence_issues:
-        results.append("FAIL: review 证据与当前工作区不属于同一快照")
-        results.extend(
-            f"FAIL: review evidence issue：{issue}"
-            for issue in evidence_issues
-        )
-        results.extend(
-            f"FAIL: review evidence diagnostic：{diagnostic}"
-            for diagnostic in (context.get("evidence_diagnostics") or [])
-        )
-    else:
-        results.append("PASS: review 证据与当前工作区属于同一快照")
-    changed_files = _string_list(context.get("changed_files"))
-    results.extend(
-        run_review_file_coverage_eval(
-            run_dir,
-            artifacts,
-            changed_files,
-            prompt_text,
-        )
-    )
-    risk_gate = context.get("risk_gate")
-    if risk_gate is not None:
-        if not isinstance(risk_gate, dict):
-            results.append("FAIL: review 风险门禁记录格式不合法")
-        elif risk_gate.get("status") != "success":
-            results.append("FAIL: review 风险门禁评估失败")
-        else:
-            try:
-                result = GateResult.model_validate(risk_gate.get("result"))
-            except ValidationError:
-                results.append("FAIL: review 风险门禁结果格式不合法")
-            else:
-                if "review-verdict.json" in artifacts:
-                    results.extend(
-                        run_required_review_pack_eval(
-                            result,
-                            run_dir / "review-verdict.json",
-                        )
-                    )
-                else:
-                    results.extend(
-                        run_required_review_prompt_eval(
-                            result,
-                            prompt_text,
-                        )
-                    )
-    return results
-
-
-def render_eval(results: list[str]) -> str:
-    return redact_text("# Eval\n\n" + "\n".join(f"- {item}" for item in results) + "\n")
 
 
 def _write_review_pack_artifacts(run_dir: Path, inputs: dict[str, Any]) -> PromptMetrics:
