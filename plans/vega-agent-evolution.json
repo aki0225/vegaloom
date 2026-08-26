@@ -2,7 +2,7 @@
   "schema_version": 1,
   "plan_id": "vega-agent-evolution",
   "title": "Vega Agent 演进计划",
-  "summary": "先建立清晰的模块所有权和机器可读计划状态，再实现多 Work Item、长任务恢复与主会话控制。",
+  "summary": "把 Vega 收敛为受人工批准合同约束的 Bounded Change Loop：Git 保存代码事实，确定性状态机负责路由，Coding Agent 负责调查、实现与独立审查。",
   "items": [
     {
       "id": "GOV-01",
@@ -74,72 +74,59 @@
     },
     {
       "id": "ARCH-01",
-      "title": "冻结实际模块边界与包级规则",
-      "summary": "确定 Core、Supervisor、Execution、Workspace 和 Context 的所有权、依赖方向及包级 AGENTS 规则。",
+      "title": "冻结 Bounded Change Loop 权威边界",
+      "summary": "分离人工批准的变更合同与 Agent 自主维护的执行计划，并明确 Git、状态、验证、审查和 Task Card 各自拥有的事实。",
       "depends_on": [
         "PLAN-STATE-01"
       ],
       "acceptance": [
-        "每个主要职责边界都有明确所有者、允许依赖和禁止依赖",
-        "包级 AGENTS 说明修改范围、Artifact 和验证矩阵",
-        "目标结构不依赖一次性搬迁全部模块"
+        "Approved Contract 与 Execution Plan 具有独立、严格且可测试的机器合同",
+        "合同字段变化必须重新批准，执行计划在合同内可以自主修订",
+        "代码事实由 Git revision 拥有，Task Card 只保存跨会话恢复所需的任务语义",
+        "隔离 Worktree 本地 Checkpoint Commit 的权限边界进入项目规则，既有成功语义保持不变"
       ],
       "required_checks": [
-        "architecture-review",
+        "supervisor-contract-tests",
+        "plan-state-tests",
         "repository-hygiene",
         "pr-ci"
       ]
     },
     {
       "id": "ARCH-02",
-      "title": "迁移 Supervisor 垂直职责",
-      "summary": "先迁移合同、调度、恢复、状态和 Adapter 等 Supervisor 职责，并建立导入门禁。",
+      "title": "建立隔离 Worktree 与 Git Candidate",
+      "summary": "由 Vega 在自有 Worktree 和本地任务分支中冻结 Candidate Commit，以 Git SHA 绑定后续验证与审查。",
       "depends_on": [
         "ARCH-01"
       ],
       "acceptance": [
-        "Supervisor 代码进入真实包边界而不是继续依赖文件名前缀分组",
-        "Core 不反向依赖 Supervisor",
-        "旧实现被删除且没有长期兼容死代码"
+        "用户当前工作区与分支不会被自主执行修改",
+        "Worker 不能创建提交或切换分支，Vega 在范围检查后统一创建 Candidate Commit",
+        "Candidate SHA 变化会使旧 Verification 与 Reviewer 结果失效",
+        "Vega 不自动 push、merge、rebase、release 或重放未知外部副作用"
       ],
       "required_checks": [
+        "workspace-tests",
         "supervisor-tests",
         "security-tests",
         "pr-ci"
       ]
     },
     {
-      "id": "ARCH-03",
-      "title": "迁移 Core、Execution 与 Workspace 职责",
-      "summary": "按事实所有权拆分可信完成链、进程执行和 Git 工作区边界。",
+      "id": "AUTO-01",
+      "title": "统一 ChangeRun 与 Work Item 执行",
+      "summary": "用一条确定性状态机顺序推进有限 Work Item，复用现有 Verification、Risk、Reviewer 与 Finish。",
       "depends_on": [
         "ARCH-02"
       ],
       "acceptance": [
-        "Verification、Risk、Reviewer 和 Finish 仍只有一条成功语义",
-        "进程事实与 Workspace 事实不由展示或 Supervisor 创造",
-        "依赖门禁覆盖主要包边界"
+        "一个 ChangeRun 只有一个 Approved Contract、一个当前 Execution Plan 和一个可写 Worker",
+        "小任务可以只有一个 Work Item，大任务按粗粒度 Work Item 顺序推进",
+        "每个 Work Item 从上一 Accepted Checkpoint 产生独立 Candidate",
+        "既有 do、loop 和 agent 入口复用同一成功语义，不新增同义终态"
       ],
       "required_checks": [
         "core-tests",
-        "security-tests",
-        "package-smoke",
-        "pr-ci"
-      ]
-    },
-    {
-      "id": "AUTO-01",
-      "title": "实现多 Work Item 顺序执行",
-      "summary": "用户批准总体 Plan 后，由单 Writer 按 Work Item 顺序执行、验证、审查和推进。",
-      "depends_on": [
-        "ARCH-03"
-      ],
-      "acceptance": [
-        "每个 Work Item 有独立范围、机器 Observation 和证据边界",
-        "Reviewer 打回可以进入有界 repair 或 replan",
-        "任意时刻只有一个可写 Worker"
-      ],
-      "required_checks": [
         "supervisor-tests",
         "security-tests",
         "real-agent-dogfood",
@@ -148,72 +135,58 @@
     },
     {
       "id": "AUTO-02",
-      "title": "建立 Work Item Checkpoint 与增量证据",
-      "summary": "在不自动 commit 的前提下绑定前后 Workspace、累计 Diff 和当前 Work Item 的增量事实。",
+      "title": "实现自动 Repair 与 Contract-aware Replan",
+      "summary": "Reviewer 只返回结构化裁决；合同内问题自动修复或调整执行计划，触及冻结边界时生成具体审批问题。",
       "depends_on": [
         "AUTO-01"
       ],
       "acceptance": [
-        "前一 Work Item 的 Diff 不会被错误归因给下一 Worker",
-        "Checkpoint 可以解释完成、未完成和失败尝试",
-        "Workspace 漂移或未知副作用继续 fail-closed"
+        "approve、repair、replan 和 needs_human 具有唯一结构化语义",
+        "普通 Finding 自动生成 Fix Packet 并回到单 Writer",
+        "Contract 字段差异与实际 Git Diff、风险路径共同决定是否需要重新批准",
+        "Repair、Replan、验证重试和 Review 都有明确预算与停止条件"
       ],
       "required_checks": [
-        "workspace-tests",
-        "recovery-tests",
+        "supervisor-tests",
         "security-tests",
+        "real-agent-dogfood",
         "pr-ci"
       ]
     },
     {
       "id": "AUTO-03",
-      "title": "支持长任务恢复与上下文续接",
-      "summary": "在粗粒度节点生成 Task Brief、Checkpoint 和 Resume Capsule，应对压缩、429、中断和换机。",
+      "title": "完成进度、Review Queue 与恢复",
+      "summary": "主会话显示低频进度并接受人工控制；Provider 会话优先续接，失效后由 Git 与 Task Card 重建任务语义。",
       "depends_on": [
         "AUTO-02"
       ],
       "acceptance": [
-        "新会话不依赖旧聊天即可恢复目标、约束、现场和下一步",
-        "上下文只补充关键事实并保持有界软上限",
-        "旧验证和 Reviewer 结果不会被当作当前证据"
-      ],
-      "required_checks": [
-        "context-tests",
-        "recovery-tests",
-        "git-only-resume-dogfood",
-        "pr-ci"
-      ]
-    },
-    {
-      "id": "AUTO-04",
-      "title": "完成主会话状态与人工控制",
-      "summary": "让主会话持续展示阶段、Work Item、风险、Checkpoint 和路由原因，并接受 steer、pause、stop 和 replan。",
-      "depends_on": [
-        "AUTO-03"
-      ],
-      "acceptance": [
-        "主会话能看到低频关键事件和按需证据",
-        "人工控制不会打通 Worker 与 Reviewer 上下文",
-        "控制中断后仍能从权威状态恢复"
+        "主会话能查看阶段、Work Item、命令、变更、验证、Reviewer 和下一步",
+        "steer、pause、stop 和 resume 不会打通 Worker 与 Reviewer 的会话边界",
+        "Reviewer 输入超过软预算时才拆分 Review Queue，并保存 covered、remaining 和 findings",
+        "跨会话或换机后可以从任务分支、Candidate SHA 和 Git 跟踪的 Task Card 恢复"
       ],
       "required_checks": [
         "status-tests",
+        "context-tests",
         "recovery-tests",
+        "git-only-resume-dogfood",
         "real-agent-dogfood",
         "pr-ci"
       ]
     },
     {
       "id": "VALID-01",
-      "title": "完成全自动 Agent 真实验收",
-      "summary": "使用真实中长任务验证一次批准后自动推进、Reviewer 打回、恢复和可信 Finish。",
+      "title": "完成 Bounded Change Loop 真实验收",
+      "summary": "用真实任务比较 Vega 与原生 Review、CI 和人工中转的操作成本、恢复能力与错误放行情况。",
       "depends_on": [
-        "AUTO-04"
+        "AUTO-03"
       ],
       "acceptance": [
-        "真实任务覆盖至少两个 Work Item 和一次非 happy path",
-        "最终结论由 Verification、Risk、Reviewer 和 Finish 共同决定",
-        "验收结果能够支持版本发布或指出明确阻断"
+        "普通多轮 Repair、合同越界 Replan 和 Worker 或 Reviewer 中断各有一个真实案例",
+        "正常路径除初始批准和最终 PR 判断外不需要人工转贴上下文或命令",
+        "验证失败、风险越界或 Review 未完成不能进入 ready_to_commit",
+        "验收记录人工操作数、恢复耗时、最终理解耗时和运行开销，并据此决定发布或删除无价值机制"
       ],
       "required_checks": [
         "full-test-shards",

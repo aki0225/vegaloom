@@ -20,10 +20,14 @@ Echo Vault 同等级真实复验完成 Worker、五条验证、Risk、Reviewer �
 `replan / needs_human`，没有把测试通过包装成 `ready_to_commit`。五模块 Core 静态依赖环
 没有在本轮造成可复现故障，因此没有为静态整洁扩大修改范围。
 
-治理完成后的主线顺序已经登记在机器计划中：先冻结实际模块边界和包级规则，再迁移
-Supervisor、Core、Execution 与 Workspace，随后实现多 Work Item、Checkpoint、长任务恢复、
-主会话控制和真实全自动 Agent 验收。每项实现随同一 PR 增加状态事件；事件合入后，
-`CURRENT.md` 自动显示下一项。
+治理完成后的主线已经进一步压缩为 Bounded Change Loop。人工批准 Approved Contract，
+Coding Agent 在合同内维护 Execution Plan；Vega 用隔离 Worktree、Git Candidate、现有
+Verification/Risk/Reviewer/Finish 和确定性状态机推进有限 Work Item。普通 Finding 自动回到
+单 Writer，只有合同字段或实际风险边界变化时请求人工批准。
+
+机器计划依次登记权威边界、隔离 Worktree 与 Git Candidate、统一 ChangeRun、自动 Repair/Replan、
+进度与恢复、真实对比验收。历史已完成事项和状态事件保持不变；尚未开始的未来事项按这次路线
+决策重写。每项实现随同一 PR 增加状态事件，事件合入后 `CURRENT.md` 自动显示下一项。
 
 <details>
 <summary>2026-08-20 之前的阶段摘要</summary>

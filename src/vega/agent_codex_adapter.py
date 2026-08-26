@@ -5,32 +5,30 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import ValidationError
-
 from .agent_codex_evidence import (
     ExecutedCodexAttempt,
     PreparedCodexAttempt,
     WorkerClaim,
     build_repair_prompt,
     decision_label,
-    evaluate_worker_claim,
     hash_evidence_refs,
-    load_child_state,
-    load_finish_summary,
-    observation_from_child,
     require_child_quiescent,
+    require_executable_work_item,
     require_repair_child,
-    require_single_executable_work_item,
     require_terminal_worker_execution,
     require_waiting_child,
     write_child_summary,
 )
+from .agent_change_run import load_change_run_context
+from .agent_change_core import (
+    initialize_change_core_child,
+    reserve_change_core_child,
+)
+from .agent_git_candidate import CandidateCommit
+from .agent_codex_reconcile import reconcile_codex_attempt
 from .agent_operation import operation_ref
 from .agent_codex_scope import (
     capture_plan_scope_baseline,
-    evaluate_plan_scope,
-    plan_scope_failure,
-    write_plan_scope_evidence,
 )
 from .agent_codex_preparation import (
     ensure_isolated_reviewer,
@@ -90,6 +88,28 @@ class SupervisorAgentCodexAdapter:
 
     def run(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
         require_agent_runtime_dependencies()
+        result = self._run_once(run, timeout_seconds=timeout_seconds)
+        advances = 0
+        while (
+            getattr(getattr(result, "state", None), "run_kind", None) == "change"
+            and result.state.phase == "ready"
+            and "next" in result.state.allowed_actions
+        ):
+            advances += 1
+            if advances > 8:
+                raise ValueError("ChangeRun 自动推进超过 Work Item 上限")
+            result = self._run_once(
+                result.run_dir.name,
+                timeout_seconds=timeout_seconds,
+            )
+        return result
+
+    def _run_once(
+        self,
+        run: str,
+        *,
+        timeout_seconds: int,
+    ) -> AgentRun:
         prepared, child_dir, prompt, operation_id, bound = self._prepare_and_bind(
             run,
             timeout_seconds,
@@ -132,8 +152,16 @@ class SupervisorAgentCodexAdapter:
             raise ValueError("Worker timeout 必须在 60..3600 秒之间")
         run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
         validate_dispatch_artifacts(run_dir, state, plan)
-        work_item = require_single_executable_work_item(plan, state)
+        work_item = require_executable_work_item(plan, state)
+        change_context = load_change_run_context(
+            run_dir,
+            state,
+            plan,
+            metadata,
+        )
         attempt_number, requires_clean_workspace = _next_attempt_context(run_dir, state)
+        if change_context is not None:
+            requires_clean_workspace = attempt_number == 1
         before = capture_bound_workspace(run_dir)
         validate_prepared_workspace(
             before,
@@ -141,9 +169,15 @@ class SupervisorAgentCodexAdapter:
             requires_clean_workspace=requires_clean_workspace,
         )
         repo = bound_repo(run_dir)
-        comparison_base_sha, comparison_paths = prepare_dispatch_binding(
-            metadata, repo, work_item
-        )
+        if change_context is None:
+            comparison_base_sha, comparison_paths = prepare_dispatch_binding(
+                metadata, repo, work_item
+            )
+        else:
+            if before.head_sha != state.accepted_checkpoint_sha:
+                raise ValueError("ChangeRun 当前 HEAD 不是 Accepted Checkpoint")
+            comparison_base_sha = state.accepted_checkpoint_sha
+            comparison_paths = ()
         plan_scope_baseline = capture_plan_scope_baseline(
             repo,
             plan,
@@ -175,6 +209,7 @@ class SupervisorAgentCodexAdapter:
             plan_scope_baseline=plan_scope_baseline,
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
+            change_context=change_context,
         )
 
     def _ensure_isolated_reviewer(self, config: ProjectConfig) -> None:
@@ -184,6 +219,20 @@ class SupervisorAgentCodexAdapter:
         self,
         prepared: PreparedCodexAttempt,
     ) -> tuple[Path, str]:
+        if prepared.change_context is not None:
+            if prepared.attempt_number == 1:
+                prompt = prepared.task_brief
+            else:
+                previous_child = require_repair_child(
+                    self.workspace,
+                    prepared.run_dir,
+                    prepared.state,
+                    prepared.repo,
+                )
+                prompt = build_repair_prompt(previous_child, prepared.task_brief)
+            child_dir = reserve_change_core_child(self.loop_runtime)
+            self._event(f"ChangeRun child 已预留：{child_dir.name}")
+            return child_dir, prompt
         if prepared.attempt_number == 1:
             child_dir = self.loop_runtime.start(
                 BriefInput(
@@ -261,186 +310,30 @@ class SupervisorAgentCodexAdapter:
         )
 
     def _reconcile_attempt(self, executed: ExecutedCodexAttempt) -> AgentRun:
-        prepared = executed.prepared
-        run_dir = prepared.run_dir
-        state = prepared.state
-        plan = prepared.plan
-        repo = prepared.repo
-        before = prepared.before
-        attempt_number = prepared.attempt_number
-        child_dir = executed.child_dir
-        child_run = child_dir.name
-        operation_id = executed.operation_id
-        worker_record = executed.worker_record
-        result = executed.result
-        plan_scope = evaluate_plan_scope(
-            repo,
-            prepared.plan_scope_baseline,
-            expected_head_sha=before.head_sha,
-            iteration=attempt_number,
-            comparison_base_sha=prepared.comparison_base_sha,
-            comparison_paths=prepared.comparison_paths,
-        )
-        plan_scope_ref = write_plan_scope_evidence(
-            run_dir,
-            operation_id,
-            plan_scope,
-            stage="post-worker",
-        )
-        if plan_scope.status == "failed":
-            return self._observe_failure(
-                executed.bound,
-                child_dir,
-                operation_id,
-                worker_record,
-                result,
-                reason=plan_scope_failure(plan_scope),
-                external_side_effects=prepared.external_side_effects if result.status == "success" else "unknown",
-                plan_contradicted=True,
-                extra_evidence_refs=[plan_scope_ref],
-            )
-        after_worker = capture_bound_workspace(run_dir)
-        if (
-            attempt_number > 1
-            and result.status == "success"
-            and after_worker.fingerprint == before.fingerprint
-        ):
-            return self._observe_failure(
-                executed.bound,
-                child_dir,
-                operation_id,
-                worker_record,
-                result,
-                reason=(
-                    "repair Worker 未产生新的 Workspace 变化；"
-                    "不能把上一 attempt 的 Diff 重新记为本次修复证据"
-                ),
-                external_side_effects=prepared.external_side_effects,
-                extra_evidence_refs=[plan_scope_ref],
-            )
+        return reconcile_codex_attempt(self, executed)
 
-        if result.status != "success":
-            return self._observe_failure(
-                executed.bound,
-                child_dir,
-                operation_id,
-                worker_record,
-                result,
-                reason=result.error or f"Worker 终态为 {result.status}",
-                external_side_effects="unknown",
-                extra_evidence_refs=[plan_scope_ref],
-            )
-
-        claim, failure_reason = evaluate_worker_claim(result.output)
-        if failure_reason:
-            return self._observe_failure(
-                executed.bound, child_dir, operation_id, worker_record, result,
-                reason=failure_reason,
-                external_side_effects="unknown",
-                claim=claim,
-                extra_evidence_refs=[plan_scope_ref],
-            )
-
-        assert claim is not None
-        try:
-            self.loop_runtime.continue_assist(
-                child_run,
-                repo,
-                worker_name="codex-exec",
-                reviewer_name="codex-exec",
-                verify=True,
-                verification_commands=list(prepared.verification_commands),
-            )
-            self.finish_runtime.run(child_run)
-            require_child_quiescent(child_dir)
-            child_state = load_child_state(child_dir, repo)
-            finish_summary = load_finish_summary(child_dir, child_run)
-        except (OSError, ValueError, ValidationError) as exc:
-            require_child_quiescent(child_dir)
-            return self._observe_failure(
-                executed.bound,
-                child_dir,
-                operation_id,
-                worker_record,
-                result,
-                reason=f"现有 Vega Core 未形成可采用终态：{exc}",
-                external_side_effects=prepared.external_side_effects,
-                claim=claim,
-                extra_evidence_refs=[plan_scope_ref],
-            )
-
-        final_plan_scope = evaluate_plan_scope(
-            repo,
-            prepared.plan_scope_baseline,
-            expected_head_sha=before.head_sha,
-            iteration=attempt_number,
-            comparison_base_sha=prepared.comparison_base_sha,
-            comparison_paths=prepared.comparison_paths,
+    def _initialize_change_core(
+        self,
+        prepared: PreparedCodexAttempt,
+        child_dir: Path,
+        candidate: CandidateCommit,
+    ) -> None:
+        initialized = initialize_change_core_child(
+            self.loop_runtime,
+            child_dir.name,
+            BriefInput(
+                mode="bug",
+                text=prepared.task_brief,
+                source=f"agent-task-brief:{prepared.state.run_id}",
+                repo_path=str(prepared.repo),
+            ),
+            comparison_base_sha=candidate.parent_sha,
+            comparison_paths=tuple(candidate.changed_files),
         )
-        final_plan_scope_ref = write_plan_scope_evidence(
-            run_dir,
-            operation_id,
-            final_plan_scope,
-            stage="post-core",
-        )
-        if final_plan_scope.status == "failed":
-            return self._observe_failure(
-                executed.bound,
-                child_dir,
-                operation_id,
-                worker_record,
-                result,
-                reason=(
-                    "现有 Core 执行后，"
-                    f"{plan_scope_failure(final_plan_scope)}"
-                ),
-                external_side_effects=prepared.external_side_effects,
-                claim=claim,
-                plan_contradicted=True,
-                extra_evidence_refs=[
-                    plan_scope_ref,
-                    final_plan_scope_ref,
-                ],
-                child_state=child_state,
-                finish_summary=finish_summary,
-            )
-
-        summary_ref = write_child_summary(
-            run_dir,
-            state,
-            child_dir,
-            operation_id,
-            worker_record,
-            result,
-            claim=claim,
-            child_state=child_state,
-            finish_summary=finish_summary,
-        )
-        observation = observation_from_child(
-            run_dir,
-            state,
-            plan,
-            child_dir,
-            operation_id,
-            claim,
-            child_state,
-            finish_summary,
-            evidence_refs=[
-                operation_ref(operation_id),
-                plan_scope_ref,
-                final_plan_scope_ref,
-                summary_ref,
-            ],
-            external_side_effects=prepared.external_side_effects,
-        )
-        self._event("Workspace 与现有 Core Artifact 已完成对账")
-        routed = self.runtime.observe_machine(run_dir.name, observation)
-        self._event(f"Supervisor 选择：{decision_label(routed, observation)}")
-        if routed.state.phase == "finalizing":
-            self._event("正在采用可信 Core Finish 终态")
-            routed = self.runtime.finalize(routed.run_dir.name)
-            self._event("Supervisor 已完成：ready_to_commit")
-        return routed
+        if initialized.resolve() != child_dir.resolve():
+            raise ValueError("预留 child 初始化到了不同目录")
+        require_waiting_child(child_dir, prepared.repo)
+        self._event(f"Candidate Core baseline 已冻结：{child_dir.name}")
 
     def _observe_failure(
         self,

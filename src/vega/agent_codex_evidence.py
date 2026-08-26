@@ -16,6 +16,7 @@ from .agent_codex_completion import (
     scope_remained_inside_plan as _scope_remained_inside_plan,
     verification_status as _verification_status,
 )
+from .agent_change_run import ChangeRunContext, current_change_work_item
 from .agent_contract import (
     AgentObservation,
     AgentPlan,
@@ -77,6 +78,7 @@ class PreparedCodexAttempt:
     plan_scope_baseline: PlanScopeBaseline
     comparison_base_sha: str | None = None
     comparison_paths: tuple[str, ...] = ()
+    change_context: ChangeRunContext | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,27 @@ def require_single_executable_work_item(
     state: AgentState,
 ) -> AgentWorkItem:
     work_item = validate_v1_execution_binding(plan, state.current_work_item)
+    commands = [command.strip() for command in work_item.verification]
+    if not commands:
+        raise ValueError("真实 Adapter Work Item 必须冻结至少一个验证命令")
+    if any("\n" in command or "\r" in command for command in commands):
+        raise ValueError("真实 Adapter Work Item 的验证命令必须是单行")
+    if len(set(commands)) != len(commands):
+        raise ValueError("真实 Adapter Work Item 的验证命令不能重复")
+    return work_item
+
+
+def require_executable_work_item(
+    plan: AgentPlan,
+    state: AgentState,
+) -> AgentWorkItem:
+    """legacy run 保持单项限制；ChangeRun 只取状态机当前项。"""
+
+    work_item = (
+        current_change_work_item(plan, state)
+        if state.run_kind == "change"
+        else validate_v1_execution_binding(plan, state.current_work_item)
+    )
     commands = [command.strip() for command in work_item.verification]
     if not commands:
         raise ValueError("真实 Adapter Work Item 必须冻结至少一个验证命令")
@@ -315,10 +338,17 @@ def observation_from_child(
         for item in plan.work_items
     )
     repairable = (
-        finish_status == "needs_fix"
-        and latest is not None
-        and latest.workspace_status == "passed"
+        latest is not None
         and _scope_remained_inside_plan(latest)
+        and not _finish_evidence_untrusted(finish_summary)
+        and (
+            finish_status == "needs_fix"
+            or (
+                review == "failed"
+                and verification == "passed"
+                and risk == "passed"
+            )
+        )
     )
     snapshot = capture_bound_workspace(agent_run_dir)
     return AgentObservation(

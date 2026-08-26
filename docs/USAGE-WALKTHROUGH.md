@@ -16,14 +16,41 @@
 独立 Reviewer 与 Finish。区别在于 Agent 额外管理 Plan 批准、单 Writer、Checkpoint、
 主会话状态和 Git Task Card；它不会放宽成功条件。
 
+<a id="bounded-change-run"></a>
+
+## Bounded ChangeRun：顺序执行有限 Work Item
+
+新任务优先使用 Change Contract 与 Execution Plan。Contract 冻结用户目标、验收条件、
+不变量、非目标、外部副作用和授权路径；Execution Plan 保存 Agent 可以在合同内调整的
+Work Item。两份 JSON 都必须处于未批准状态。
+
+```powershell
+vega agent start `
+  --repo <target-repo> `
+  --contract <change-contract.json> `
+  --execution-plan <execution-plan.json>
+
+vega agent approve --run <agent_run> --actor human
+vega agent run --run <agent_run> --timeout 900
+vega status --run <agent_run>
+```
+
+启动时，Vega 从当前 HEAD 创建仓库外的隔离 Worktree 和本地 `vega/<run-id>` 分支。Worker
+不能提交或切换分支；控制器在范围检查后冻结 Candidate Commit，并把 Verification、Risk、
+Reviewer 和 Finish 绑定到该 SHA。当前 Work Item 通过后，Candidate 成为 Accepted
+Checkpoint，下一项从这个提交继续。
+
+`agent run` 会顺序推进已批准的 Work Item，直到全部完成、Reviewer 要求修复、证据不足或
+越出合同边界。用户当前分支不会被修改。Vega 不执行 push、merge、rebase 或 release。
+
 <a id="supervisor-agent-v1"></a>
 
-## Supervisor Agent V1：长任务、暂停与接手
+## Supervisor Agent V1：兼容的单 Work Item 与接手流程
 
-Supervisor Agent 是 `v0.2.0` 发布的 opt-in 能力；`v0.2.1` 维护版本不改变它的成功语义。
+Supervisor Agent V1 是 `v0.2.0` 发布的 opt-in 能力；`v0.2.1` 维护版本不改变它的成功语义。
 它适合一次修改可能跨多个会话、需要中途停下，或需要把 WIP 与关键约束提交到任务分支后在
-fresh clone / 新目录中继续的场景。V1 当前只接受一个未完成 Work Item，不自动连续派发多个
-任务。
+fresh clone / 新目录中继续的场景。这里记录旧 `--plan` 入口和 Task Card 恢复合同；
+新任务的多 Work Item 执行见上一节。
 
 ### 1. 安装并检查能力
 

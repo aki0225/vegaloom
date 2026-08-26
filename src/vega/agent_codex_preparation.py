@@ -65,7 +65,11 @@ def next_attempt_context(run_dir: Path, state: AgentState) -> tuple[int, bool]:
     epoch_indexes = [
         index
         for index, item in enumerate(trace)
-        if item.get("event") in {"plan_approved", "task_card_resumed"}
+        if item.get("event") in {
+            "plan_approved",
+            "change_contract_approved",
+            "task_card_resumed",
+        }
     ]
     if not epoch_indexes:
         raise ValueError("当前 Plan 缺少可验证的 attempt epoch，拒绝启动 Worker")
@@ -86,7 +90,8 @@ def next_attempt_context(run_dir: Path, state: AgentState) -> tuple[int, bool]:
     )
     requires_clean_workspace = (
         not has_historical_dispatch
-        and trace[epoch_index].get("event") == "plan_approved"
+        and trace[epoch_index].get("event")
+        in {"plan_approved", "change_contract_approved"}
     )
     return attempts + 1, requires_clean_workspace
 

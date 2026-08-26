@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 
 from .agent_codex_adapter import SupervisorAgentCodexAdapter
+from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_contract import AgentObservation, AgentPlan
 from .agent_graph import langgraph_available, require_agent_runtime_dependencies
 from .agent_recovery import SupervisorAgentRecovery
@@ -33,15 +34,42 @@ def agent_start(
     input_path: Path | None = typer.Option(None, "--input", help="任务或 Agent Plan 文件。"),
     text: str | None = typer.Option(None, "--text", help="用户目标。"),
     plan_path: Path | None = typer.Option(None, "--plan", help="可选的结构化 Agent Plan JSON。"),
+    contract_path: Path | None = typer.Option(
+        None,
+        "--contract",
+        help="Bounded Change Loop 的 Change Contract JSON。",
+    ),
+    execution_plan_path: Path | None = typer.Option(
+        None,
+        "--execution-plan",
+        help="Bounded Change Loop 的 Execution Plan JSON。",
+    ),
 ) -> None:
-    """创建 Agent run，捕获 Workspace，并等待人工批准 Plan。"""
+    """创建 Agent run，捕获 Workspace，并等待人工批准 Contract 或 Plan。"""
 
     repo = require_repo_directory(repo)
-    goal, _ = load_brief_input(input_path, text)
-    plan = _load_plan(plan_path) if plan_path else None
+    if (contract_path is None) != (execution_plan_path is None):
+        raise typer.BadParameter("--contract 与 --execution-plan 必须同时提供")
+    if plan_path is not None and contract_path is not None:
+        raise typer.BadParameter("--plan 不能与 ChangeRun 合同同时使用")
     try:
-        result = _runtime().start(repo, goal=goal.strip(), plan=plan)
-    except ValueError as exc:
+        if contract_path is not None and execution_plan_path is not None:
+            contract = _load_change_contract(contract_path)
+            execution_plan = _load_execution_plan(execution_plan_path)
+            if input_path is not None or text is not None:
+                goal, _ = load_brief_input(input_path, text)
+                if goal.strip() != contract.goal:
+                    raise ValueError("命令行目标与 Change Contract goal 不一致")
+            result = _runtime().start_change(
+                repo,
+                contract=contract,
+                execution_plan=execution_plan,
+            )
+        else:
+            goal, _ = load_brief_input(input_path, text)
+            plan = _load_plan(plan_path) if plan_path else None
+            result = _runtime().start(repo, goal=goal.strip(), plan=plan)
+    except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Agent 已创建：{result.run_dir.name}")
     typer.echo("")
@@ -53,13 +81,17 @@ def agent_approve(
     run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
     actor: str = typer.Option("human", "--actor", help="批准人标识。"),
 ) -> None:
-    """批准当前 Plan revision，并生成 Task Brief 与启动前 Checkpoint。"""
+    """批准当前 Contract/Plan revision，并生成 Task Brief 与启动前 Checkpoint。"""
 
     try:
         result = _runtime().approve(run, actor=actor)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    typer.echo("Plan 已批准。")
+    typer.echo(
+        "Change Contract 已批准。"
+        if result.state.run_kind == "change"
+        else "Plan 已批准。"
+    )
     typer.echo("")
     typer.echo(_runtime().status(result.run_dir.name))
 
@@ -373,6 +405,9 @@ def agent_capabilities() -> None:
                 "langgraph": langgraph_available(),
                 "worker": "codex-exec",
                 "finish_owned_by_core": True,
+                "change_run": True,
+                "multi_work_item": True,
+                "local_candidate_commits": True,
             },
             ensure_ascii=False,
             indent=2,
@@ -417,3 +452,17 @@ def _load_plan(path: Path) -> AgentPlan:
         return AgentPlan.model_validate_json(path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise typer.BadParameter(f"无法读取 Agent Plan：{path.name}") from exc
+
+
+def _load_change_contract(path: Path) -> ChangeContract:
+    try:
+        return ChangeContract.model_validate_json(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise typer.BadParameter(f"无法读取 Change Contract：{path.name}") from exc
+
+
+def _load_execution_plan(path: Path) -> ExecutionPlan:
+    try:
+        return ExecutionPlan.model_validate_json(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise typer.BadParameter(f"无法读取 Execution Plan：{path.name}") from exc

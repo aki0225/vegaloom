@@ -8,12 +8,14 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from .agent_checkpoint_history import inherited_failed_attempts
 from .agent_context import (
     DEFAULT_TASK_BRIEF_MAX_BYTES,
     TaskBrief,
     compile_task_brief,
     task_brief_manifest,
 )
+from .agent_change_run import load_change_run_context
 from .agent_contract import (
     AgentCheckpoint,
     AgentDecision,
@@ -131,6 +133,7 @@ def load_agent_bundle(
         ):
             raise ValueError("Agent State 与当前批准 Plan 不一致")
     validate_run_repository_binding(run_dir, state, metadata)
+    load_change_run_context(run_dir, state, plan, metadata)
     return run_dir, state, plan, metadata
 
 
@@ -277,6 +280,7 @@ def write_checkpoint(
     failed_attempts: list[str] | None = None,
     operation_started: bool | None = None,
     external_side_effects: Literal["none", "known", "unknown"] | None = None,
+    allow_work_item_advance: bool = False,
 ) -> AgentCheckpoint:
     checkpoint_numbers = [
         int(path.stem.removeprefix("checkpoint-"))
@@ -284,17 +288,11 @@ def write_checkpoint(
         if path.stem.removeprefix("checkpoint-").isdigit()
     ]
     checkpoint_id = f"checkpoint-{max(checkpoint_numbers, default=0) + 1:03d}"
-    previous_failed_attempts = []
-    if state.latest_checkpoint_id is not None:
-        previous_path = run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
-        previous_checkpoint = load_agent_checkpoint(previous_path)
-        if (
-            previous_checkpoint.run_id,
-            previous_checkpoint.checkpoint_id,
-            previous_checkpoint.current_work_item,
-        ) != (state.run_id, state.latest_checkpoint_id, state.current_work_item):
-            raise ValueError("前序 Checkpoint 与当前 Agent State 不一致，拒绝继承失败历史")
-        previous_failed_attempts = previous_checkpoint.failed_attempts
+    previous_failed_attempts = inherited_failed_attempts(
+        run_dir,
+        state,
+        allow_work_item_advance=allow_work_item_advance,
+    )
     new_failed_attempts = failed_attempts or []
     cumulative_failed_attempts = [*dict.fromkeys(previous_failed_attempts + new_failed_attempts)]
     checkpoint = AgentCheckpoint(

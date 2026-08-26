@@ -245,7 +245,7 @@ def _next_steps(
     if finish_status == "ready_to_commit":
         return [
             "人工检查完整 staged/unstaged diff、验证命令和高风险位置，不只查看 Reviewer 重点。",
-            "确认无误后由用户自行 commit；Vega 不会自动 commit、push 或 release。",
+            "确认无误后由用户决定如何整理和提交当前 Git 变更；Vega 不会自动 push、merge 或 release。",
         ]
     if finish_status == "needs_fix":
         return [
@@ -433,7 +433,7 @@ def _render_details(summary: dict[str, Any]) -> list[str]:
         _render_bullets(
             "明确边界",
             [
-                "Finish 不会自动 commit、push、release。",
+                "Finish 只生成交付裁决，不执行 Git 写入或发布动作。",
                 "Finish 不会自动接受 memory proposal。",
                 "是否提交或接受经验候选，仍由用户人工决定。",
             ],

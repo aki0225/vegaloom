@@ -163,7 +163,7 @@ def _commit_checklist(
 ) -> list[str]:
     checklist = [
         "人工检查 `git diff`，确认没有无关文件或调试残留。",
-        "确认没有自动 commit、push、release 或写入长期 memory。",
+        "确认当前 Git 提交状态与运行模式一致，且没有自动 push、merge、release 或写入长期 memory。",
     ]
     if latest_verdict and latest_verdict.verdict == "approve":
         checklist.append("隔离 reviewer 已 approve。")

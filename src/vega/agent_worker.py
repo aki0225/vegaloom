@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .agent_change_run import current_change_work_item
 from .agent_contract import validate_v1_execution_binding
 from .agent_graph import require_agent_runtime_dependencies
 from .agent_mutation import agent_mutation
@@ -65,7 +66,11 @@ class SupervisorAgentWorker:
 
         require_agent_runtime_dependencies()
         run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
-        validate_v1_execution_binding(plan, state.current_work_item)
+        (
+            current_change_work_item(plan, state)
+            if state.run_kind == "change"
+            else validate_v1_execution_binding(plan, state.current_work_item)
+        )
         if state.phase != "ready" or not {"next", "repair"}.intersection(
             state.allowed_actions
         ):
