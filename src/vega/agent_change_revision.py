@@ -295,6 +295,13 @@ def _revision_outcome(
         question = f"是否批准 Contract revision 对这些冻结字段的修改：{fields}？"
         return "requires_approval", question, declared.reason
     if declared.decision == "auto_apply":
+        if budget.review_rounds_used >= budget.max_review_rounds:
+            question = (
+                "当前 Work Item 的 Review 预算已用完："
+                f"{budget.review_rounds_used}/{budget.max_review_rounds}。"
+                "请决定扩大合同预算、人工修订或停止任务。"
+            )
+            return "needs_human", question, "Review 达到停止条件"
         if budget.auto_replans_used >= budget.max_auto_replans:
             question = (
                 "自动 Replan 预算已用完："

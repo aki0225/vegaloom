@@ -18,8 +18,9 @@ from vega.agent_change_control import (
     ChangeBudgetSnapshot,
     change_budget_snapshot,
     guard_change_decision_budget,
+    require_change_review_budget,
 )
-from vega.agent_contract import AgentDecision, AgentState
+from vega.agent_contract import AgentDecision, AgentObservation, AgentState
 from vega.agent_persistence import append_agent_trace
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_verification_retry import SupervisorAgentVerificationRetry
@@ -173,6 +174,47 @@ def test_auto_replan_budget_exhaustion_stops_for_human(tmp_path: Path) -> None:
     )["approval_question"]
 
 
+def test_contract_revision_also_advances_execution_plan_revision(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    started = runtime.start_change(
+        repo,
+        contract=_contract(),
+        execution_plan=_execution_plan(),
+    )
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    current_contract = _load_contract(approved.run_dir)
+    proposed_contract = ChangeContract.model_validate(
+        {
+            **current_contract.model_dump(
+                mode="json",
+                exclude={
+                    "approved",
+                    "approved_at",
+                    "approved_by",
+                    "approved_digest",
+                },
+            ),
+            "contract_revision": 2,
+            "goal": "更新两个模块",
+        }
+    )
+    stale_plan_revision = _execution_plan().model_copy(
+        update={"contract_revision": 2}
+    )
+
+    with pytest.raises(ValueError, match="plan_revision 必须递增 1"):
+        runtime.revise_change(
+            approved.run_dir.name,
+            proposed_contract=proposed_contract,
+            proposed_execution_plan=stale_plan_revision,
+        )
+
+
 def test_change_run_verification_retry_respects_contract_budget(
     tmp_path: Path,
 ) -> None:
@@ -229,6 +271,66 @@ def test_review_budget_fails_closed_on_invalid_observation(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="Observation 无法验证"):
         change_budget_snapshot(run_dir, state, _contract())
+
+
+def test_current_observation_consumes_review_budget(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "agent-current-review"
+    (run_dir / "observations").mkdir(parents=True)
+    state = AgentState(
+        run_id="agent-current-review",
+        task_id="task-change-revision",
+        repository_id="repo@example",
+        run_kind="change",
+        phase="observing",
+        goal_revision=1,
+        plan_revision=1,
+        approved_plan_digest="a" * 64,
+        contract_revision=1,
+        approved_contract_digest="b" * 64,
+        execution_plan_revision=1,
+        accepted_checkpoint_sha="c" * 40,
+        current_work_item="WI-01",
+    )
+    observation = AgentObservation(
+        observation_id="observation-current-review",
+        work_item_id="WI-01",
+        child_run="child-current-review",
+        operation_id="operation-current-review",
+        machine_summary="Reviewer 要求继续修改",
+        workspace_fingerprint="d" * 64,
+        authority="machine_reconcile",
+        repairable_in_scope=True,
+        review="failed",
+    )
+    (run_dir / "observations/observation-current-review.json").write_text(
+        observation.model_dump_json(indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "trace.jsonl").write_text("", encoding="utf-8")
+    contract = _contract().model_copy(
+        update={
+            "authority_envelope": _contract().authority_envelope.model_copy(
+                update={"max_review_rounds": 1}
+            )
+        }
+    )
+
+    budget = change_budget_snapshot(
+        run_dir,
+        state,
+        contract,
+        current_observation=observation,
+    )
+
+    assert budget.review_rounds_used == 1
+    append_agent_trace(
+        run_dir / "trace.jsonl",
+        event="supervisor_repair",
+        state=state,
+        artifact_refs=["observations/observation-current-review.json"],
+    )
+    with pytest.raises(ValueError, match="Review 预算已用完：1/1"):
+        require_change_review_budget(run_dir, state, contract)
 
 
 @pytest.mark.parametrize(

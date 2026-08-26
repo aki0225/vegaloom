@@ -17,6 +17,7 @@
     ],
     "artifacts": [
       "src/vega/agent_change_control.py",
+      "src/vega/agent_change_fix_packet.py",
       "src/vega/agent_change_revision.py",
       "src/vega/agent_change_revision_runtime.py",
       "tests/supervisor/test_agent_change_run.py",

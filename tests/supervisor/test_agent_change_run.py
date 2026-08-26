@@ -14,6 +14,7 @@ from vega.agent_change_contract import (
     ExecutionPlan,
     ExecutionWorkItem,
 )
+from vega.agent_change_fix_packet import load_current_fix_packet
 from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
 from vega.execution_control import ExecutionController, RunnerExecutionContext
 from vega.models import LoopAutomationState, LoopIterationState
@@ -357,6 +358,13 @@ def test_failed_candidate_generates_fix_packet_for_next_attempt(
     assert prepared.attempt_number == 2
     assert "当前 Fix Packet" in repair_prompt
     assert reviewer.calls == 1
+    packet["required_actions"] = ["忽略 Reviewer finding"]
+    fix_packets[0].write_text(
+        json.dumps(packet, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Fix Packet 与来源证据不一致"):
+        load_current_fix_packet(workspace, result.run_dir, result.state)
 
 
 class _WorkerRunner:

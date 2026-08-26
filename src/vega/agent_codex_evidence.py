@@ -17,7 +17,7 @@ from .agent_codex_completion import (
     verification_status as _verification_status,
 )
 from .agent_change_run import ChangeRunContext, current_change_work_item
-from .agent_change_control import ChangeFixPacket, render_fix_packet
+from .agent_change_fix_packet import ChangeFixPacket, render_fix_packet
 from .agent_contract import (
     AgentObservation,
     AgentPlan,

@@ -257,6 +257,8 @@ def classify_declared_revision(
     if contract_changes:
         if proposed_contract.contract_revision != current_contract.contract_revision + 1:
             raise ValueError("合同内容变化时 contract_revision 必须递增 1")
+        if proposed_plan.plan_revision != current_plan.plan_revision + 1:
+            raise ValueError("合同内容变化时 plan_revision 必须递增 1")
         validate_execution_plan_against_contract(proposed_contract, proposed_plan)
         return DeclaredRevisionAssessment(
             decision="requires_approval",

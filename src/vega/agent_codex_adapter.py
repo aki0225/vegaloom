@@ -19,7 +19,8 @@ from .agent_codex_evidence import (
     require_waiting_child,
     write_child_summary,
 )
-from .agent_change_control import load_current_fix_packet
+from .agent_change_control import require_change_review_budget
+from .agent_change_fix_packet import load_current_fix_packet
 from .agent_change_run import load_change_run_context
 from .agent_change_core import (
     initialize_change_core_child,
@@ -170,6 +171,12 @@ class SupervisorAgentCodexAdapter:
             plan,
             metadata,
         )
+        if change_context is not None:
+            require_change_review_budget(
+                run_dir,
+                state,
+                change_context.contract,
+            )
         attempt_number, requires_clean_workspace = _next_attempt_context(
             run_dir,
             state,
@@ -247,6 +254,7 @@ class SupervisorAgentCodexAdapter:
                     prepared.repo,
                 )
                 fix_packet = load_current_fix_packet(
+                    self.workspace,
                     prepared.run_dir,
                     prepared.state,
                 )
