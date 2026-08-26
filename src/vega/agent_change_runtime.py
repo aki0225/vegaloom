@@ -25,7 +25,7 @@ from .agent_change_run import (
 from .agent_contract import AgentPlan, AgentState
 from .agent_git_candidate import (
     CandidateCommit,
-    restore_candidate_for_repair,
+    restore_candidate_as_wip,
     validate_candidate_binding,
 )
 from .agent_git_worktree import prepare_managed_worktree
@@ -384,7 +384,7 @@ def _restore_failed_candidate(
         raise ValueError("当前路由没有授权 Candidate repair")
     if state.current_work_item != candidate.work_item_id:
         raise ValueError("repair Candidate 与当前 Work Item 不一致")
-    restore_candidate_for_repair(
+    restore_candidate_as_wip(
         context.worktree,
         candidate=candidate,
         contract=context.contract,

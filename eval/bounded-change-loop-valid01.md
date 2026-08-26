@@ -100,3 +100,27 @@ Verification、Risk、Reviewer 和恢复串起来以后，是否真的减少人�
 5. Review 未完成、验证失败或风险越界均不能进入 `ready_to_commit`；
 6. 完成 package smoke、完整测试分片、仓库卫生检查和 PR CI；
 7. 根据度量明确列出保留、降级或删除的机制，不以“以后可能有用”为理由继续扩张。
+
+## 2026-08-26 Amendment：高风险 Candidate 无法进入 Replan
+
+首次 `VALID01-REPLAN` 使用 Agent run `20260826-222337-agent`、child
+`20260826-222349-405477-bug-loop`。真实 Worker 只修改
+`src/payments/idempotency.py`；Verification 通过，`payment` 必审 Risk 和 Reviewer 完成，
+Core 保持 `needs_human`，没有进入 `ready_to_commit`。
+
+随后按固定协议提交 Execution Plan revision 2 时，CLI 返回“当前状态不能修订 ChangeRun”。
+原因不是风险判断本身，而是 Core 已冻结 `active_candidate_sha`，revision 入口禁止任何 active
+Candidate。第二次 Contract revision 和 approve 同样未生效；验收脚本最后显式 stop，run 变为
+`stopped`。这次失败不计作合同边界 Replan 通过，也不覆盖原 Artifact。
+
+该结果暴露了产品控制缺口：Vega 能要求人处理高风险，却没有让人把处理结果写回 Contract 的
+可达路径。允许做一次最小 Runtime 修复：
+
+1. `agent replan` 先按旧 Contract、旧 Execution Plan 和 Candidate ref 校验 Git Candidate；
+2. 校验通过后，把 Candidate 同内容还原为 parent 上的 WIP，保留旧 Candidate ref；
+3. 未授权风险仍保持 `needs_human`；
+4. 只有新增风险授权的 Contract revision 才进入 `awaiting_approval`；
+5. 高风险 Core 的人工检查语义保持不变。
+
+修复后使用相同目标、测试、风险规则、模型配置和 timeout 建立全新 run。首次失败与新 run 都写入
+最终结果；不更换题目，也不把失败 attempt 改写成成功。

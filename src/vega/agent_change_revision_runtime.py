@@ -14,10 +14,13 @@ from .agent_change_revision import (
 from .agent_change_run import (
     CHANGE_CONTRACT_ARTIFACT,
     EXECUTION_PLAN_ARTIFACT,
+    ChangeRunContext,
+    load_candidate_artifact,
     load_change_run_context,
     save_change_run_artifacts,
 )
 from .agent_contract import AgentPlan, AgentState
+from .agent_git_candidate import restore_candidate_as_wip
 from .agent_persistence import append_agent_trace, save_agent_state
 from .agent_run import AgentRun
 from .agent_runtime_logic import update_state
@@ -47,7 +50,6 @@ def revise_change_run(
         state.run_kind != "change"
         or state.active_child_run
         or state.active_operation_id
-        or state.active_candidate_sha
     ):
         raise ValueError("当前状态不能修订 ChangeRun")
     if state.phase not in {"planning", "ready", "needs_human"}:
@@ -68,6 +70,14 @@ def revise_change_run(
         budget=budget,
     )
     assessment_ref = write_revision_assessment(run_dir, assessment)
+    restored_candidate_ref: str | None = None
+    if state.active_candidate_sha and assessment.outcome != "unchanged":
+        state, snapshot, restored_candidate_ref = _restore_candidate_for_replan(
+            run_dir,
+            state,
+            context,
+            assessment_ref=assessment_ref,
+        )
     if assessment.outcome == "unchanged":
         append_agent_trace(
             run_dir / "trace.jsonl",
@@ -91,6 +101,11 @@ def revise_change_run(
             snapshot,
             assessment_ref=assessment_ref,
             reason=assessment.approval_question or assessment.reason,
+            extra_evidence_refs=(
+                [restored_candidate_ref]
+                if restored_candidate_ref is not None
+                else []
+            ),
         )
 
     archived_refs = archive_change_revision(
@@ -99,6 +114,8 @@ def revise_change_run(
         execution_plan=context.execution_plan,
         projected_plan=plan,
     )
+    if restored_candidate_ref is not None:
+        archived_refs.append(restored_candidate_ref)
     revised_plan = project_revised_agent_plan(
         current_plan=plan,
         current_execution_plan=context.execution_plan,
@@ -289,7 +306,9 @@ def _block_change_revision(
     *,
     assessment_ref: str,
     reason: str,
+    extra_evidence_refs: list[str] | None = None,
 ) -> AgentRun:
+    evidence_refs = [assessment_ref, *(extra_evidence_refs or [])]
     blocked_state = update_state(
         state,
         phase="needs_human",
@@ -304,7 +323,7 @@ def _block_change_revision(
         reason=reason,
         status="blocked",
         pending_actions=["replan", "human"],
-        evidence_refs=[assessment_ref],
+        evidence_refs=evidence_refs,
     )
     blocked_state = update_state(
         blocked_state,
@@ -319,7 +338,7 @@ def _block_change_revision(
         observation_summary="ChangeRun revision 未改变当前合同或计划",
         route_reason=reason,
         artifact_refs=[
-            assessment_ref,
+            *evidence_refs,
             f"checkpoints/{checkpoint.checkpoint_id}.json",
         ],
     )
@@ -331,3 +350,54 @@ def _block_change_revision(
         next_step=reason,
     )
     return AgentRun(run_dir=run_dir, state=blocked_state, plan=plan)
+
+
+def _restore_candidate_for_replan(
+    run_dir: Path,
+    state: AgentState,
+    context: ChangeRunContext,
+    *,
+    assessment_ref: str,
+) -> tuple[AgentState, ReviewWorkspaceSnapshot, str]:
+    """显式 Replan 时把旧 Candidate 退回同内容 WIP，旧 ref 继续保留。"""
+
+    candidate_sha = state.active_candidate_sha
+    assert candidate_sha is not None
+    candidate_refs = []
+    for path in sorted((run_dir / "candidates").glob("*.json")):
+        relative = path.relative_to(run_dir).as_posix()
+        candidate = load_candidate_artifact(run_dir, relative)
+        if candidate.candidate_sha == candidate_sha:
+            candidate_refs.append((relative, candidate))
+    if len(candidate_refs) != 1:
+        raise ValueError("当前 active Candidate 缺少唯一可信 Artifact")
+    candidate_ref, candidate = candidate_refs[0]
+    if candidate.work_item_id != state.current_work_item:
+        raise ValueError("当前 active Candidate 与 Work Item 不一致")
+
+    restore_candidate_as_wip(
+        context.worktree,
+        candidate=candidate,
+        contract=context.contract,
+        execution_plan=context.execution_plan,
+    )
+    snapshot = capture_bound_workspace(run_dir)
+    if set(snapshot.changed_files) != set(candidate.changed_files):
+        raise ValueError("Replan 恢复后的 WIP 与 Candidate 变更范围不一致")
+    restored_state = update_state(
+        state,
+        state_version=state.state_version + 1,
+        active_candidate_sha=None,
+        workspace_fingerprint=snapshot.fingerprint,
+        allowed_actions=["replan", "human"],
+    )
+    append_agent_trace(
+        run_dir / "trace.jsonl",
+        event="candidate_restored_for_replan",
+        state=restored_state,
+        observation_summary=(
+            f"{candidate.work_item_id} Candidate 已还原为待重规划 WIP"
+        ),
+        artifact_refs=[candidate_ref, assessment_ref],
+    )
+    return restored_state, snapshot, candidate_ref

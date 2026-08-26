@@ -52,6 +52,8 @@ Review 和验证专用恢复分别使用 Approved Contract 中的预算；达到
 Replan 同时比较声明变化和实际现场。Execution Plan 内部调整可以自动采用；Contract 字段变化
 需要重新批准。当前 Diff 越出提议范围、命中未授权的 `risk.required_reviews`，或声明了项目
 不存在的风险 ID 时，revision 不会进入自动执行。风险授权不能覆盖 Core 的高风险人工检查。
+如果 Core 已冻结 Candidate 后要求人工处理，显式 Replan 会先校验 Candidate 的 Git 绑定，再把
+同一内容还原为 WIP；Candidate ref 和旧验证仍保留，但不再拥有当前完成资格。
 
 代码快照以 Git revision 为权威。显式自主 ChangeRun 可以在 Vega 管理的隔离 Worktree 和本地
 任务分支中，由控制器在范围检查后创建 Candidate/Checkpoint Commit；Worker 不能自行提交或
