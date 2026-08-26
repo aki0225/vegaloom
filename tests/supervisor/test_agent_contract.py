@@ -198,6 +198,47 @@ def test_finalize_is_rejected_when_verification_failed() -> None:
         transition_state(state, plan, observation, forced_finalize)
 
 
+def test_transition_preserves_a_deterministic_action_subset() -> None:
+    plan = _approved_plan()
+    observation = AgentObservation(
+        observation_id="obs-budget",
+        work_item_id="W1",
+        child_run="attempt-01",
+        operation_id="operation-01",
+        machine_summary="Reviewer 要求在原范围内继续修改",
+        workspace_fingerprint=FINGERPRINT,
+        authority="machine_reconcile",
+        repairable_in_scope=True,
+        verification="passed",
+        risk="passed",
+        review="failed",
+    )
+    decision = decide_next_action(plan, observation).model_copy(
+        update={
+            "allowed_actions": ["human"],
+            "selected_action": "human",
+            "reason": "自动 Repair 预算已用完",
+        }
+    )
+    state = AgentState(
+        run_id="agent-budget",
+        task_id=plan.task_id,
+        repository_id="repo-1",
+        phase="observing",
+        approved_plan_digest=plan.approved_digest,
+        workspace_fingerprint=FINGERPRINT,
+        current_work_item="W1",
+        active_child_run="attempt-01",
+        active_operation_id="operation-01",
+        operation_started=True,
+    )
+
+    result = transition_state(state, plan, observation, decision)
+
+    assert result.phase == "needs_human"
+    assert result.allowed_actions == ["human"]
+
+
 def test_external_observation_cannot_promote_claim_to_progress() -> None:
     observation = AgentObservation(
         observation_id="obs-forged",

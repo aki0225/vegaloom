@@ -5,26 +5,28 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：7 / 10
-- 最近事件：`20260825T185103Z-AUTO-01-completed`
+- 已完成：8 / 10
+- 最近事件：`20260826T045725Z-AUTO-02-completed`
 
 ## 当前事项
 
-### 下一项：`AUTO-02` 实现自动 Repair 与 Contract-aware Replan
+### 下一项：`AUTO-03` 完成进度、Review Queue 与恢复
 
-Reviewer 只返回结构化裁决；合同内问题自动修复或调整执行计划，触及冻结边界时生成具体审批问题。
+主会话显示低频进度并接受人工控制；Provider 会话优先续接，失效后由 Git 与 Task Card 重建任务语义。
 
 验收条件：
 
-- approve、repair、replan 和 needs_human 具有唯一结构化语义
-- 普通 Finding 自动生成 Fix Packet 并回到单 Writer
-- Contract 字段差异与实际 Git Diff、风险路径共同决定是否需要重新批准
-- Repair、Replan、验证重试和 Review 都有明确预算与停止条件
+- 主会话能查看阶段、Work Item、命令、变更、验证、Reviewer 和下一步
+- steer、pause、stop 和 resume 不会打通 Worker 与 Reviewer 的会话边界
+- Reviewer 输入超过软预算时才拆分 Review Queue，并保存 covered、remaining 和 findings
+- 跨会话或换机后可以从任务分支、Candidate SHA 和 Git 跟踪的 Task Card 恢复
 
 要求检查：
 
-- `supervisor-tests`
-- `security-tests`
+- `status-tests`
+- `context-tests`
+- `recovery-tests`
+- `git-only-resume-dogfood`
 - `real-agent-dogfood`
 - `pr-ci`
 
@@ -39,7 +41,7 @@ Reviewer 只返回结构化裁决；合同内问题自动修复或调整执行�
 | 已完成 | `ARCH-01` | 冻结 Bounded Change Loop 权威边界 | `PLAN-STATE-01` |
 | 已完成 | `ARCH-02` | 建立隔离 Worktree 与 Git Candidate | `ARCH-01` |
 | 已完成 | `AUTO-01` | 统一 ChangeRun 与 Work Item 执行 | `ARCH-02` |
-| 待开始 | `AUTO-02` | 实现自动 Repair 与 Contract-aware Replan | `AUTO-01` |
+| 已完成 | `AUTO-02` | 实现自动 Repair 与 Contract-aware Replan | `AUTO-01` |
 | 待开始 | `AUTO-03` | 完成进度、Review Queue 与恢复 | `AUTO-02` |
 | 待开始 | `VALID-01` | 完成 Bounded Change Loop 真实验收 | `AUTO-03` |
 

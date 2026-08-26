@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "20260826T045725Z-AUTO-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTO-02",
+  "transition": "completed",
+  "recorded_at": "2026-08-26T04:57:25Z",
+  "summary": "ChangeRun 已能把普通 Reviewer finding 转成绑定 Finish 的 Fix Packet 并自动交给新的单 Writer；Execution Plan 可在 Approved Contract 内自动修订，合同字段、真实 Git Diff 和风险路径共同决定是否重新批准。真实 Codex dogfood 经一次 Reviewer 打回和自动 Repair 后完成。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "supervisor-tests",
+      "security-tests",
+      "real-agent-dogfood",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_change_control.py",
+      "src/vega/agent_change_revision.py",
+      "src/vega/agent_change_revision_runtime.py",
+      "tests/supervisor/test_agent_change_run.py",
+      "tests/supervisor/test_agent_change_revision.py",
+      "plans/events/20260826T045725Z-AUTO-02-completed.json",
+      "docs/CURRENT.md"
+    ]
+  }
+}

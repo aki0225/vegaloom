@@ -1574,7 +1574,7 @@ def test_adapter_rejects_third_attempt_before_creating_child(
         finish_runtime=_FakeFinishRuntime(loop),
     )
 
-    with pytest.raises(ValueError, match="已用完一次初始 attempt"):
+    with pytest.raises(ValueError, match="Worker attempt 预算已用完：2/2"):
         adapter.run(run_id, timeout_seconds=60)
 
     assert loop.child_dir is None

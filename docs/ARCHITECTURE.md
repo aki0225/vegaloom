@@ -628,10 +628,16 @@ Agent Plan / approval
   -> checkpoints/
   -> real Codex child
   -> machine Observation
-  -> next | repair | replan | retry-verification | human | finalize
+  -> next | Fix Packet + repair | replan | retry-verification | human | finalize
   -> trusted Core Finish
   -> Agent completed
 ```
+
+显式 ChangeRun 使用 Approved Contract 冻结人工授权，用 Execution Plan 保存可调整的实现
+步骤。Reviewer 的普通 finding 会生成结构化 Fix Packet；新的 Worker 只读取当前 Task Brief、
+Fix Packet 和仓库规则。Contract 内的 Execution Plan revision 可以直接采用，Contract 字段
+变化必须重新批准。revision 裁决还读取当前 Git Diff 与 `.vega.yaml` 必审风险路径，避免只改
+计划文本来掩盖已经发生的越界。Repair、Replan、Review 和验证重试预算都由状态机计数。
 
 真实 Adapter 当前只接受一个未完成 Work Item。Gate 2B 已证明真实 Worker Claim 不会越过
 Workspace Gate，并证明 partial Diff 可以通过 identity-bound stop 保留并交还人工；Gate 2C

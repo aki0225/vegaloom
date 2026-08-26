@@ -40,6 +40,8 @@ class ChangeAuthorityEnvelope(StrictAgentModel):
     max_changed_files: int | None = Field(default=None, ge=1, le=10_000)
     max_repair_rounds: int = Field(default=3, ge=0, le=20)
     max_auto_replans: int = Field(default=1, ge=0, le=10)
+    max_review_rounds: int = Field(default=4, ge=1, le=50)
+    max_verification_retries: int = Field(default=1, ge=0, le=10)
 
     @field_validator("allowed_paths", "forbidden_paths")
     @classmethod
@@ -70,6 +72,10 @@ class ChangeContract(StrictAgentModel):
     acceptance: list[NonEmptyText] = Field(min_length=1)
     invariants: list[NonEmptyText] = Field(default_factory=list)
     non_goals: list[NonEmptyText] = Field(default_factory=list)
+    authorized_risk_reviews: list[NonEmptyText] = Field(
+        default_factory=list,
+        max_length=64,
+    )
     side_effect_policy: ChangeSideEffectPolicy = Field(
         default_factory=ChangeSideEffectPolicy
     )
@@ -79,6 +85,13 @@ class ChangeContract(StrictAgentModel):
     approved_at: str | None = None
     approved_by: str | None = None
     approved_digest: Sha256Text | None = None
+
+    @field_validator("authorized_risk_reviews")
+    @classmethod
+    def validate_authorized_risk_reviews(cls, values: list[str]) -> list[str]:
+        if len(set(values)) != len(values):
+            raise ValueError("authorized_risk_reviews 不能包含重复风险领域")
+        return values
 
     @model_validator(mode="after")
     def validate_approval(self) -> ChangeContract:

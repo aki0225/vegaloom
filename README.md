@@ -151,6 +151,23 @@ Vega 为这次任务创建本地 `vega/<run-id>` 分支和仓库外的隔离 Wor
 产生一个 Candidate Commit，通过现有 Verification、Risk、Reviewer 和 Finish 后才成为
 Accepted Checkpoint。用户当前分支保持不动；最终是否 push、创建 PR 或合并仍由人工决定。
 
+Reviewer 返回普通 `request_changes` 时，Vega 会从绑定的 Finish 生成 Fix Packet，把失败
+Candidate 还原为 WIP，再启动新的单 Writer attempt。Repair、Review、Replan 和验证重试
+都受 Contract 中的预算限制；预算耗尽后进入 `needs_human`。
+
+执行方向需要调整时，由宿主主会话或人工提交新的 Contract 与 Execution Plan：
+
+```powershell
+vega agent replan --run <agent_run> `
+  --contract <change-contract.json> `
+  --execution-plan <execution-plan.json>
+```
+
+只改 Execution Plan 且仍在已批准合同内时直接采用；Contract 字段变化则等待重新批准。
+Vega 同时检查当前 Git Diff、授权路径和 `.vega.yaml` 的必审风险路径，不能靠改计划文本
+解释已经越界的代码。Contract 中的风险授权只说明允许继续规划，不会跳过 Risk Gate 或人工
+高风险检查。
+
 旧的单 Work Item `--plan` 入口继续兼容，用于既有 V1 Task Card 和恢复流程。
 
 如果代码和 Reviewer finding 都不需要修改，只是验证命令或本地依赖环境有误，可以修订 Plan

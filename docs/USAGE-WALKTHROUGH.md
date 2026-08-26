@@ -40,8 +40,41 @@ vega status --run <agent_run>
 Reviewer 和 Finish 绑定到该 SHA。当前 Work Item 通过后，Candidate 成为 Accepted
 Checkpoint，下一项从这个提交继续。
 
-`agent run` 会顺序推进已批准的 Work Item，直到全部完成、Reviewer 要求修复、证据不足或
-越出合同边界。用户当前分支不会被修改。Vega 不执行 push、merge、rebase 或 release。
+`agent run` 会顺序推进已批准的 Work Item。Reviewer 返回普通 `request_changes` 时，
+Vega 从绑定的 Finish 生成 Fix Packet，把失败 Candidate 还原为 WIP，并启动新的单 Writer
+attempt。全部完成、预算耗尽、证据不足或越出合同边界时停止。用户当前分支不会被修改。
+Vega 不执行 push、merge、rebase 或 release。
+
+Contract 的 `authority_envelope` 同时保存自动停止预算：
+
+```json
+{
+  "max_repair_rounds": 3,
+  "max_auto_replans": 1,
+  "max_review_rounds": 4,
+  "max_verification_retries": 1
+}
+```
+
+Fix Packet 只带当前 Work Item、门禁结果、Reviewer finding、必须处理项和来源 Artifact。
+它不复制 Reviewer 会话，也不把 Reviewer 结论升级为测试事实。
+
+如果新证据推翻原假设，先修改 Contract 或 Execution Plan，再提交 revision：
+
+```powershell
+vega agent replan `
+  --run <agent_run> `
+  --contract <change-contract.json> `
+  --execution-plan <execution-plan.json>
+```
+
+- 只改 Execution Plan，且真实 Diff 仍在 Approved Contract 内：自动采用。
+- Contract 字段变化：写入新 revision，等待 `agent approve`。
+- 真实 Diff 越出新授权范围，或命中尚未写入 Contract 的
+  `.vega.yaml risk.required_reviews`：进入 `needs_human`。
+
+`authorized_risk_reviews` 只表示人工允许 Agent 在该风险领域继续规划。Verification、Risk
+Gate、独立 Reviewer 和最终人工检查仍照常执行。
 
 <a id="supervisor-agent-v1"></a>
 

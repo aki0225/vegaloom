@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .agent_change_contract import ChangeContract, ExecutionPlan
+from .agent_change_control import prepare_change_decision
 from .agent_change_run import current_change_work_item
 from .agent_change_runtime import (
     approve_change_run,
@@ -10,6 +11,7 @@ from .agent_change_runtime import (
     settle_change_candidate,
     start_change_run,
 )
+from .agent_change_revision_mixin import ChangeRevisionRuntimeMixin
 from .agent_git_candidate import CandidateCommit
 from .agent_handoff import HandoffResult, create_handoff
 from .agent_contract import (
@@ -50,7 +52,7 @@ from .agent_runtime_support import (
 )
 from .redaction import write_redacted_json, write_redacted_json_once
 
-class SupervisorAgentRuntime:
+class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace.resolve()
 
@@ -225,7 +227,7 @@ class SupervisorAgentRuntime:
         *,
         authority: ObservationAuthority,
     ) -> AgentRun:
-        run_dir, state, plan, _ = self._load_run(run)
+        run_dir, state, plan, metadata = self._load_run(run)
         work_item = (
             current_change_work_item(plan, state)
             if state.run_kind == "change"
@@ -259,6 +261,16 @@ class SupervisorAgentRuntime:
                 f"{reconciled.observation_id}"
             ) from exc
         decision = decide_next_action(plan, reconciled)
+        prepared_decision = prepare_change_decision(
+            self.workspace,
+            run_dir,
+            state,
+            plan,
+            metadata,
+            reconciled,
+            decision,
+        )
+        decision = prepared_decision.decision
         write_redacted_json(
             run_dir / "decisions" / f"{decision.decision_id}.json",
             decision.model_dump(mode="json"),
@@ -300,6 +312,7 @@ class SupervisorAgentRuntime:
             evidence_refs=[
                 f"observations/{reconciled.observation_id}.json",
                 f"decisions/{decision.decision_id}.json",
+                *prepared_decision.evidence_refs,
             ],
             completed_attempts=(
                 [attempt]
@@ -334,6 +347,7 @@ class SupervisorAgentRuntime:
                 state,
                 checkpoint,
                 failed_attempts=checkpoint.failed_attempts,
+                artifact_refs=prepared_decision.task_brief_refs,
             )
         # Plan 进度只有在 Checkpoint 与下一轮 Task Brief 均成功后才发布。
         # State 仍是最后的调度安全闩；此前任一步失败都会保留旧 active Writer。
