@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "event_id": "20260826T161630Z-VALID-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "VALID-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-26T16:16:30Z",
+  "summary": "Bounded Change Loop 已完成真实 Repair、合同边界 Replan、Worker 中断和 Review 未完成验收。四个案例均未要求人工转贴 Worker 与 Reviewer 上下文，失败或不完整证据没有进入 ready_to_commit；验收同时修复了高风险 Candidate 无法写回合同修订、Core state 初始化前无法停止 Worker，以及 Replan 状态卡缺少历史门禁提示三个实际问题。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "full-test-shards",
+      "package-smoke",
+      "real-agent-acceptance",
+      "recovery-tests",
+      "status-tests",
+      "ci-yaml-parse",
+      "architecture-growth",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_change_revision_runtime.py",
+      "src/vega/agent_execution_bridge.py",
+      "src/vega/agent_status_card.py",
+      "src/vega/agent_status_history.py",
+      "tests/supervisor/test_agent_change_revision.py",
+      "tests/supervisor/test_agent_recovery.py",
+      "eval/bounded-change-loop-valid01.md",
+      ".github/workflows/ci.yml",
+      "docs/RELEASE-CHECKLIST.md",
+      "plans/events/20260826T161630Z-VALID-01-completed.json",
+      "docs/CURRENT.md"
+    ]
+  }
+}

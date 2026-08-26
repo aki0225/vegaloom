@@ -167,14 +167,14 @@ def validate_candidate_binding(
     _require_clean_candidate_workspace(handle, candidate.candidate_sha)
 
 
-def restore_candidate_for_repair(
+def restore_candidate_as_wip(
     handle: ManagedChangeWorktree,
     *,
     candidate: CandidateCommit,
     contract: ChangeContract,
     execution_plan: ExecutionPlan,
 ) -> None:
-    """把失败 Candidate 还原为 parent 上的可解释 WIP，供新的 Worker 接手。"""
+    """把 Candidate 还原为 parent 上的同内容 WIP，供新的 Worker 接手。"""
 
     validate_candidate_binding(
         handle,

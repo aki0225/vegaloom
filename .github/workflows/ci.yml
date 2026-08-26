@@ -555,6 +555,8 @@ jobs:
           .tmp/release-validation/agent-venv/bin/python -m pip check
           .tmp/release-validation/agent-venv/bin/vega agent capabilities \
             > .tmp/release-validation/agent-capabilities.json
+          .tmp/release-validation/agent-venv/bin/python -I -c \
+            "from langgraph.checkpoint.sqlite import SqliteSaver; print(SqliteSaver.__name__)"
           .tmp/release-validation/agent-venv/bin/python -I - <<'PY'
           import json
           from pathlib import Path

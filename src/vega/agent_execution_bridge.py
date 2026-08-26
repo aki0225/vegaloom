@@ -28,7 +28,7 @@ def resolve_bound_execution_run_dir(
     state: AgentState,
     metadata: dict[str, object],
 ) -> Path:
-    """优先使用真实 assist child；旧 Fake Worker 仍回退到 Agent run。"""
+    """定位当前 operation 的执行目录，并验证它仍属于已绑定 child。"""
 
     if not state.active_child_run:
         return agent_run_dir
@@ -36,9 +36,13 @@ def resolve_bound_execution_run_dir(
         child_dir = resolve_run_dir(workspace, state.active_child_run)
     except FileNotFoundError:
         return agent_run_dir
+    child_state_path = child_dir / "state.json"
+    if not child_state_path.exists():
+        _validate_reserved_worker_child(agent_run_dir, child_dir, state)
+        return child_dir
     try:
         child_state = LoopAutomationState.model_validate_json(
-            (child_dir / "state.json").read_text(encoding="utf-8")
+            child_state_path.read_text(encoding="utf-8")
         )
     except (OSError, ValueError) as exc:
         raise ValueError("active child 存在，但无法验证其 assist loop 身份") from exc
@@ -53,6 +57,21 @@ def resolve_bound_execution_run_dir(
     ):
         raise ValueError("active child 与 Agent run 的仓库或运行身份不一致")
     return child_dir
+
+
+def _validate_reserved_worker_child(
+    agent_run_dir: Path,
+    child_dir: Path,
+    state: AgentState,
+) -> None:
+    """Core state 落盘前，只凭不可变 operation 和精确 execution 身份开放 stop/recover。"""
+
+    if bound_operation_kind(agent_run_dir, state) != "worker":
+        raise ValueError("active child 尚未初始化 Core state，且当前 operation 不是 Worker")
+    assert state.active_operation_id is not None
+    record = resolve_bound_worker_execution(child_dir, state.active_operation_id)
+    if record.lease.run_id != state.active_child_run:
+        raise ValueError("预留 Worker execution 与 active child 身份不一致")
 
 
 def write_execution_evidence_ref(

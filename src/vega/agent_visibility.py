@@ -87,6 +87,11 @@ def render_agent_status_card(card: AgentStatusCard) -> str:
         f"- Verification：{_GATE_LABELS[card.verification]}",
         f"- Risk：{_GATE_LABELS[card.risk]}",
         f"- Reviewer：{_GATE_LABELS[card.review]}",
+        *(
+            [f"- 历史：{card.history_note}"]
+            if card.history_note is not None
+            else []
+        ),
         f"- 证据健康：`{card.evidence_health}`",
         *(
             [

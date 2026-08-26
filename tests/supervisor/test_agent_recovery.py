@@ -29,6 +29,7 @@ from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_side_effect_adjudication import (
     SupervisorAgentSideEffectAdjudicator,
 )
+from vega.agent_status_history import status_history_note
 from vega.agent_worker import SupervisorAgentWorker
 from vega.cli_entrypoint import app
 from vega.execution_control import ExecutionLease
@@ -640,6 +641,60 @@ def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> No
     assert "resume-local --run" not in status
 
 
+def test_status_explains_failed_attempts_after_current_evidence_is_cleared(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    checkpoint = _latest_checkpoint(run_dir)
+    payload = checkpoint.model_dump(mode="json")
+    payload["failed_attempts"] = ["attempt-history"]
+    save_agent_checkpoint(
+        run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json",
+        checkpoint.model_validate(payload),
+    )
+
+    stopped = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="结束带历史 attempt 的任务",
+    )
+    status = SupervisorAgentRuntime(workspace).status(stopped.run_dir.name)
+
+    assert "历史：保留 1 个历史失败 attempt" in status
+    assert "当前卡片只显示仍能用于当前状态的门禁证据" in status
+
+
+def test_history_note_marks_previous_revision_evidence_as_historical(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    legacy_state = load_agent_state(run_dir / "agent-state.json")
+    state = legacy_state.model_validate(
+        {
+            **legacy_state.model_dump(mode="json"),
+            "run_kind": "change",
+            "contract_revision": 2,
+            "approved_contract_digest": "a" * 64,
+            "execution_plan_revision": 2,
+            "accepted_checkpoint_sha": "b" * 40,
+        }
+    )
+    checkpoint = _latest_checkpoint(run_dir)
+    checkpoint_payload = checkpoint.model_dump(mode="json")
+    checkpoint_payload["failed_attempts"] = ["attempt-history"]
+
+    note = status_history_note(
+        state,
+        checkpoint.model_validate(checkpoint_payload),
+        None,
+    )
+
+    assert note is not None
+    assert "当前门禁只对应 Contract r2 / Plan r2" in note
+    assert "旧结果不能作为本 revision 的通过证据" in note
+
+
 def test_stop_inherits_unknown_side_effect_and_remains_blocked(
     tmp_path: Path,
 ) -> None:
@@ -1114,6 +1169,109 @@ def test_stop_active_assist_child_targets_only_bound_operation(
     assert result.state.active_child_run == child_run
     events = [item["event"] for item in read_agent_trace(result.run_dir / "trace.jsonl")]
     assert events[-1] == "agent_stop_requested"
+
+
+def test_stop_reserved_worker_before_assist_state_exists(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    child_run = "reserved-child-stop"
+    SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id="reserved-operation-stop",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir(parents=True)
+    _write_execution(
+        child_dir,
+        execution_id="reserved-operation-stop",
+        status="running",
+    )
+
+    result = SupervisorAgentRecovery(workspace).stop(
+        run_id,
+        reason="Core state 落盘前停止已预留 Worker",
+    )
+
+    request = json.loads(
+        (
+            child_dir / "executions" / "worker" / "stop-request.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert request["execution_id"] == "reserved-operation-stop"
+    assert not (child_dir / "state.json").exists()
+    assert result.state.active_child_run == child_run
+    events = [item["event"] for item in read_agent_trace(result.run_dir / "trace.jsonl")]
+    assert events[-1] == "agent_stop_requested"
+
+
+def test_stop_reserved_worker_rejects_execution_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    child_run = "reserved-child-mismatch"
+    SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id="reserved-operation-expected",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir(parents=True)
+    _write_execution(
+        child_dir,
+        execution_id="reserved-operation-other",
+        status="running",
+    )
+
+    with pytest.raises(ValueError, match="operation 身份不一致"):
+        SupervisorAgentRecovery(workspace).stop(
+            run_id,
+            reason="拒绝误停未绑定的预留 Worker",
+        )
+
+    assert not (
+        child_dir / "executions" / "worker" / "stop-request.json"
+    ).exists()
+
+
+def test_stop_reserved_verification_retry_requires_core_state(
+    tmp_path: Path,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    child_run = "reserved-verification-retry"
+    operation_id = "reserved-verification-operation"
+    bound = SupervisorAgentWorker(workspace).bind(
+        run_id,
+        child_run=child_run,
+        operation_id=operation_id,
+    )
+    operation_path = bound.run_dir / operation_ref(operation_id)
+    operation = json.loads(operation_path.read_text(encoding="utf-8"))
+    operation["operation_kind"] = "verification_retry"
+    operation_path.write_text(
+        json.dumps(operation, ensure_ascii=False),
+        encoding="utf-8",
+        newline="\n",
+    )
+    child_dir = workspace / "runs" / child_run
+    child_dir.mkdir(parents=True)
+    _write_execution(
+        child_dir,
+        execution_id="core-verification-execution",
+        status="running",
+        step="verification",
+    )
+
+    with pytest.raises(ValueError, match="当前 operation 不是 Worker"):
+        SupervisorAgentRecovery(workspace).stop(
+            run_id,
+            reason="验证恢复必须等待 Core state",
+        )
+
+    assert not (
+        child_dir / "executions" / "verification" / "stop-request.json"
+    ).exists()
 
 
 def test_stop_active_verification_retry_targets_current_core_execution(
