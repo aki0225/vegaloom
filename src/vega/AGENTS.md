@@ -28,11 +28,14 @@
 
 当前 `agent_*` 文件保持扁平结构，按以下职责查找，不为整理文件数量做批量搬迁：
 
-- 入口与编排：`agent_cli`、`agent_runtime*`、`agent_routing`、`agent_graph`、`agent_worker`、
+- 入口与编排：`agent_cli`、`agent_runtime*`、`agent_routing`、`agent_worker`、
   `agent_finalization`。
 - 合同与持久化：`agent_contract`、`agent_change_contract`、`agent_persistence`、`agent_run`、
   `agent_mutation`。
-- Codex 执行桥：`agent_codex_*`、`agent_execution_bridge`。
+- Provider 无关执行后置流程：`agent_candidate_pipeline`、`agent_worker_evidence`、
+  `agent_plan_scope`、`agent_core_observation`。
+- Codex 会话接入：`agent_codex_adapter`、`agent_codex_preparation`；
+  process stop/recover 复用 `agent_execution_bridge`。
 - 仓库与上下文：`agent_context`、`agent_repository_*`、`agent_git_worktree`、
   `agent_git_candidate`、`agent_runtime_support`。
 - 恢复与交接：`agent_recovery*`、`agent_handoff*`、`agent_resume_validation`、

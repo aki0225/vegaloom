@@ -10,6 +10,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REMOVED_INTERNAL_MODULE_NAMES = (
+    "agent_graph",
     "adapter_runtime",
     "assurance",
     "context_loader",
@@ -24,6 +25,24 @@ REMOVED_INTERNAL_MODULE_NAMES = (
     "state",
     "tool_broker",
 )
+
+
+def test_candidate_pipeline_does_not_import_codex_modules() -> None:
+    path = PROJECT_ROOT / "src" / "vega" / "agent_candidate_pipeline.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imported_modules = {
+        node.module or ""
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+    }
+    imported_modules.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
+
+    assert not any("codex" in module for module in imported_modules)
 
 
 def _architecture_module() -> ModuleType:

@@ -24,7 +24,6 @@ from .agent_contract import (
 )
 from .agent_finalization import finalize_agent_state
 from .agent_persistence import append_agent_trace, save_agent_state
-from .agent_graph import require_agent_runtime_dependencies, record_supervisor_route
 from .agent_legacy_lifecycle import approve_legacy_plan, start_legacy_agent
 from .agent_mutation import agent_mutation
 from .agent_plan_archive import archive_agent_plan_revision
@@ -68,7 +67,6 @@ class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
             repo,
             goal=goal,
             plan=plan,
-            require_dependencies=require_agent_runtime_dependencies,
         )
 
     def start_change(
@@ -83,7 +81,6 @@ class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
             repo,
             contract=contract,
             execution_plan=execution_plan,
-            require_dependencies=require_agent_runtime_dependencies,
         )
 
     @agent_mutation("agent.approve")
@@ -275,9 +272,6 @@ class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
             run_dir / "decisions" / f"{decision.decision_id}.json",
             decision.model_dump(mode="json"),
         )
-        interrupted = record_supervisor_route(run_dir, state, decision)
-        if interrupted != (decision.selected_action in {"replan", "human"}):
-            raise ValueError("LangGraph interrupt 与确定性 Decision 不一致")
         if state.workspace_fingerprint != reconciled.workspace_fingerprint:
             state = update_state(
                 state,
@@ -483,7 +477,6 @@ class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
         run_dir, _, _, _ = self._load_run(run)
         return run_dir / "agent-state.json"
     def resume_task_card(self, repo: Path, task_path: Path | None = None) -> AgentRun:
-        require_agent_runtime_dependencies()
         return resume_agent_task_card(self.workspace, repo, task_path)
 
     @agent_mutation("agent.handoff")

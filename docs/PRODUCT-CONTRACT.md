@@ -60,9 +60,10 @@ Replan 同时比较声明变化和实际现场。Execution Plan 内部调整可�
 切换分支。Vega 不操作用户当前分支，也不自动 push、merge、rebase、release。Task Card 只保存
 跨会话或换机恢复所需的任务语义，不能替代当前 Git、Verification 或 Reviewer 事实。
 
-`v0.2.1` 已发布 Runtime 仍保持单 Work Item 和无自动 Commit 的既有行为。当前 `main` 的
-Bounded ChangeRun 通过 `agent start --contract ... --execution-plan ...` 显式启用；旧
-`--plan` 入口及 `do / loop` 保持原有 Git 行为。
+`v0.2.1` 的发布行为保持不变。当前 `main` 的新 Agent run 统一通过
+`agent start --contract ... --execution-plan ...` 创建；`do / loop` 保持原有 Git 行为。
+已发布的旧 Task Card 仍可由 `agent resume` 读取，但旧 Plan 只属于恢复兼容材料，不会被
+解释成新的 Change Contract 授权。
 
 ## 日常入口
 
@@ -89,13 +90,13 @@ vega agent checkpoint --handoff
 vega agent resume / finalize
 ```
 
-`vega agent` 不是默认入口，也不是第二套编码模型。宿主主会话负责只读调查和提交 Plan，
-Vega 固定批准 revision、单 Writer、Checkpoint、机器对账与恢复，并把最终成功交回既有
-Verification、Risk、独立 Reviewer 和 Finish。
+`vega agent` 不是默认入口，也不是第二套编码模型。宿主主会话负责只读调查并提交 Change
+Contract 与 Execution Plan；Vega 管理批准 revision、单 Writer、Checkpoint、机器对账与
+恢复，并把最终成功交回既有 Verification、Risk、独立 Reviewer 和 Finish。
 
 `retry-verification` 只处理“代码不变、验证命令或本地依赖环境需要修正”的失败。它复用原
-Worker 和 child，要求重新批准一个除 `verification` 外不改变执行合同的 Plan revision
-（命令可以保持原值），并重新核对 tracked Diff；代码 finding 仍走普通 repair/replan。
+Worker 和 child，只接受除 `verification` 外不改变执行安排的 revision（命令可以保持原值），
+并重新核对 tracked Diff；代码 finding 仍走普通 repair/replan。
 
 Agent CLI 以当前工作目录作为 Vega workspace。可以从任意目录执行
 `vega adapters init codex --repo <target-repo>` 写入目标仓库 Skill，但该命令不会切换 shell

@@ -469,7 +469,7 @@ def default_next_step(phase: str, current_index: int) -> str:
     if phase == "needs_human":
         return "查看最近 Observation 与 Checkpoint 后选择人工动作"
     if phase == "finalizing":
-        return "调用现有 Vega Finish，Agent Graph 不能自行宣称成功"
+        return "调用现有 Vega Finish；Supervisor 不能自行宣称成功"
     if phase == "completed":
         return "读取 Core Finish 结论并完成人工提交前检查；Vega 不自动执行 Git 操作"
     if phase == "stopped":

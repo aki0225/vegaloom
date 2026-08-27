@@ -18,7 +18,6 @@ from vega.agent_contract import (
     AgentPlan,
     AgentWorkItem,
 )
-from vega.agent_graph import compile_gate1_graph
 from vega.agent_persistence import (
     append_agent_trace,
     load_agent_checkpoint,
@@ -1533,60 +1532,38 @@ def test_approve_rejects_legacy_plan_without_allowed_paths_before_checkpoint(
     assert not (run.run_dir / "checkpoints").exists()
 
 
-def test_start_and_resume_fail_before_creating_run_when_agent_dependencies_missing(
+def test_deterministic_human_route_does_not_create_graph_checkpoint(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     runtime = SupervisorAgentRuntime(workspace)
-
-    def missing_dependencies() -> None:
-        raise ValueError(
-            '当前环境缺少 Supervisor Agent 运行依赖；请执行：'
-            'python -m pip install "vegaloom[agent]"'
-        )
-
-    monkeypatch.setattr(
-        agent_runtime_module,
-        "require_agent_runtime_dependencies",
-        missing_dependencies,
+    plan = _single_item_plan(user_goal="验证确定性人工路由")
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
+    run = runtime.approve(run.run_dir.name)
+    run = _started_worker(
+        workspace,
+        run.run_dir.name,
+        child_run="attempt-human-route",
+        operation_id="operation-human-route",
+    )
+    result = runtime.observe_fake_worker(
+        run.run_dir.name,
+        AgentObservation(
+            observation_id="obs-human-route",
+            work_item_id="W1",
+            child_run="attempt-human-route",
+            operation_id="operation-human-route",
+            machine_summary="检测到未知外部副作用",
+            workspace_fingerprint=run.state.workspace_fingerprint,
+            external_side_effects="unknown",
+        ),
     )
 
-    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
-        runtime.start(repo, goal="不应创建运行")
-    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
-        runtime.resume_task_card(repo)
-
-    assert not (workspace / "runs").exists()
-
-
-def test_langgraph_route_and_interrupt_are_visible() -> None:
-    graph = compile_gate1_graph()
-    next_result = graph.invoke(
-        {
-            "run_id": "run-next",
-            "phase": "observing",
-            "route": "next",
-            "route_reason": "当前项完成",
-        },
-        {"configurable": {"thread_id": "thread-next"}},
-    )
-    human_result = graph.invoke(
-        {
-            "run_id": "run-human",
-            "phase": "needs_human",
-            "route": "human",
-            "route_reason": "副作用未知",
-        },
-        {"configurable": {"thread_id": "thread-human"}},
-    )
-
-    assert "__interrupt__" not in next_result
-    assert human_result["__interrupt__"][0].value["reason"] == "副作用未知"
-    state = graph.get_state({"configurable": {"thread_id": "thread-human"}})
-    assert state.next == ("await_human",)
+    assert result.state.phase == "needs_human"
+    assert result.state.allowed_actions == ["human"]
+    assert not (result.run_dir / "graph-checkpoints.sqlite").exists()
 
 
 def test_agent_cli_status_card_and_capabilities(
@@ -1596,24 +1573,18 @@ def test_agent_cli_status_card_and_capabilities(
     repo = _repo(tmp_path / "repo")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    plan_path = workspace / "plan.json"
-    plan_path.write_text(
-        _single_item_plan().model_dump_json(indent=2),
-        encoding="utf-8",
-    )
+    runtime = SupervisorAgentRuntime(workspace)
+    plan = _single_item_plan()
+    run = runtime.start(repo, goal=plan.user_goal, plan=plan)
     monkeypatch.chdir(workspace)
 
     started = CliRunner().invoke(
         app,
         [
             "agent",
-            "start",
-            "--repo",
-            str(repo),
-            "--text",
-            "修复问题",
-            "--plan",
-            str(plan_path),
+            "status",
+            "--run",
+            run.run_dir.name,
         ],
     )
     capabilities = CliRunner().invoke(app, ["agent", "capabilities"])
@@ -1622,7 +1593,7 @@ def test_agent_cli_status_card_and_capabilities(
     assert "阶段：等待批准" in started.output
     assert capabilities.exit_code == 0
     capability_payload = json.loads(capabilities.output)
-    assert capability_payload["langgraph"] is True
+    assert capability_payload["control_plane"] == "deterministic-state-machine"
     assert capability_payload["worker"] == "codex-exec"
     assert capability_payload["change_run"] is True
     assert capability_payload["multi_work_item"] is True
@@ -1674,15 +1645,15 @@ def test_agent_cli_help_prioritizes_supervisor_commands() -> None:
     for command in (
         "start",
         "approve",
-        "plan",
         "run",
         "finalize",
+        "replan",
+        "retry-verification",
         "recover",
         "pause",
         "stop",
         "checkpoint",
         "status",
-        "steer",
         "resume",
         "capabilities",
     ):
@@ -1690,6 +1661,8 @@ def test_agent_cli_help_prioritizes_supervisor_commands() -> None:
     for command in (
         "dispatch",
         "observe",
+        "plan",
+        "steer",
         "resume-local",
         "adjudicate-side-effects",
     ):

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 from .agent_change_contract import (
     ChangeContract,
@@ -55,12 +54,10 @@ def start_change_run(
     *,
     contract: ChangeContract,
     execution_plan: ExecutionPlan,
-    require_dependencies: Callable[[], None],
 ) -> AgentRun:
     """创建由 Approved Contract 和隔离 Worktree 驱动的 ChangeRun。"""
 
     repo_root = require_git_root(repo)
-    require_dependencies()
     revision = resolve_git_revision(repo_root)
     if revision is None:
         raise ValueError("目标目录不是 Git 仓库")

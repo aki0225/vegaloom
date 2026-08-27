@@ -109,11 +109,16 @@ Plan 并再次确认。
 
 ## 6. Supervisor Agent 使用方式
 
-需要暂停恢复、主会话控制或 Git-only 接手时，调查后生成结构化 Agent Plan：
+需要暂停恢复、主会话控制或 Git-only 接手时，调查后生成两份结构化文件：
+
+- Change Contract：目标、验收、不变量、非目标、风险授权、验证和可修改范围；
+- Execution Plan：事实、假设、Work Item、候选文件和实现方式。
 
 ```powershell
 vega agent capabilities
-vega agent start --repo . --plan <plan.json> --text "<用户需求>"
+vega agent start --repo . `
+  --contract <change-contract.json> `
+  --execution-plan <execution-plan.json>
 vega status --run <agent_run>
 ```
 
@@ -124,10 +129,18 @@ vega agent approve --run <agent_run> --actor human
 vega agent run --run <agent_run> --timeout 900
 ```
 
-`steer`、新事实、范围、风险、验证或成功条件变化都会使旧批准失效。此时必须使用
-`vega agent plan --run <agent_run> --input <plan.json>` 写入新 revision，并再次等待批准。
+新事实需要调整实施方式时，提交新的 Execution Plan。目标、范围、风险、验证或成功条件变化
+时，同时提交新的 Change Contract：
+
+```powershell
+vega agent replan --run <agent_run> `
+  --contract <change-contract.json> `
+  --execution-plan <execution-plan.json>
+```
+
+只有 Execution Plan 变化且仍在已批准合同内时可以自动采用；合同字段变化会再次等待批准。
 完整状态与 Handoff 流程见
-[`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md#supervisor-agent-v1)。
+[`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md#bounded-change-run)。
 
 ## 7. Codex 使用方式
 

@@ -15,6 +15,7 @@ SOURCE_ROOT = Path("src/vega")
 MODULE_SOFT_LIMIT = 500
 COMPLEXITY_PATTERN = re.compile(r"\((?P<actual>\d+)\s*>\s*(?P<limit>\d+)\)")
 REMOVED_INTERNAL_MODULE_NAMES = (
+    "agent_graph",
     "adapter_runtime",
     "assurance",
     "context_loader",

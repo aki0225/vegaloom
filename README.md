@@ -124,10 +124,10 @@ Verification、Risk、Reviewer 和 Finish 判断链。
 Supervisor Agent 是可选入口，不替换日常 `do / loop`。它接受调查后形成的 Change Contract
 和 Execution Plan，等待人工批准后在独立 Worktree 中顺序执行有限 Work Item。
 
-安装 Agent 依赖：
+Agent 控制面只使用基础安装：
 
 ```powershell
-python -m pip install -e ".[agent]"
+python -m pip install -e .
 vega agent capabilities
 ```
 
@@ -168,10 +168,12 @@ Vega 同时检查当前 Git Diff、授权路径和 `.vega.yaml` 的必审风险�
 解释已经越界的代码。Contract 中的风险授权只说明允许继续规划，不会跳过 Risk Gate 或人工
 高风险检查。
 
-旧的单 Work Item `--plan` 入口继续兼容，用于既有 V1 Task Card 和恢复流程。
+新任务只使用 Change Contract 与 Execution Plan。`v0.2.1` 已生成的 Task Card 仍可通过
+`vega agent resume` 接手；其中的旧 Plan 只作为恢复材料，不会扩大当前合同授权。
 
-如果代码和 Reviewer finding 都不需要修改，只是验证命令或本地依赖环境有误，可以修订 Plan
-中的验证项并重新批准，然后复用原 child：
+如果代码和 Reviewer finding 都不需要修改，只是验证命令或本地依赖环境有误，可以只修订
+Execution Plan 中当前 Work Item 的 `verification`。合同不变时该 revision 可直接采用，然后
+复用原 child：
 
 ```powershell
 vega agent retry-verification --run <agent_run>

@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "20260827T144502Z-SIMP-03-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SIMP-03",
+  "transition": "completed",
+  "recorded_at": "2026-08-27T14:45:02Z",
+  "summary": "新 Agent run 已统一使用 Change Contract 与 Execution Plan；旧 AgentPlan 仅保留已发布 Task Card 的读取和恢复兼容。",
+  "evidence": {
+    "pull_requests": [
+      92
+    ],
+    "commits": [],
+    "checks": [
+      "contract-tests",
+      "supervisor-tests",
+      "handoff-tests",
+      "recovery-tests",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_cli.py",
+      "src/vega/agent_legacy_lifecycle.py",
+      "tests/supervisor/test_agent_change_run.py",
+      "tests/supervisor/test_agent_handoff.py",
+      "docs/USAGE-WALKTHROUGH.md"
+    ]
+  }
+}

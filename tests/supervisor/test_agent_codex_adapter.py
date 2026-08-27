@@ -10,15 +10,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from vega import agent_codex_adapter as agent_codex_adapter_module
 from vega import agent_finalization as agent_finalization_module
-from vega import agent_worker as agent_worker_module
 from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
-from vega.agent_codex_evidence import (
+from vega.agent_worker_evidence import (
     _verification_status,
     require_single_executable_work_item,
 )
-from vega.agent_codex_scope import (
+from vega.agent_plan_scope import (
     capture_plan_scope_baseline,
     evaluate_plan_scope,
 )
@@ -31,7 +29,6 @@ from vega.agent_persistence import (
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_recovery_request import AgentRecoveryRequest
 from vega.agent_runtime import SupervisorAgentRuntime
-from vega.agent_worker import SupervisorAgentWorker
 from vega.agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
@@ -358,65 +355,6 @@ def test_adapter_serializes_child_creation_before_writer_binding(
         "completed",
     ]
     assert child_count == 1
-
-
-def test_adapter_dependency_preflight_rejects_before_creating_child_or_writer(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    adapter = SupervisorAgentCodexAdapter(workspace)
-
-    def missing_dependencies() -> None:
-        raise ValueError(
-            '当前环境缺少 Supervisor Agent 运行依赖；请执行：'
-            'python -m pip install "vegaloom[agent]"'
-        )
-
-    def unexpected_prepare(*args, **kwargs):
-        pytest.fail("缺少 Agent 依赖时不应创建 child 或 Writer binding")
-
-    monkeypatch.setattr(
-        agent_codex_adapter_module,
-        "require_agent_runtime_dependencies",
-        missing_dependencies,
-    )
-    monkeypatch.setattr(adapter, "_prepare_and_bind", unexpected_prepare)
-
-    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
-        adapter.run("missing-agent-run", timeout_seconds=60)
-
-    assert not (workspace / "runs").exists()
-
-
-def test_worker_binding_preflights_dependencies_before_reading_run(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-
-    def missing_dependencies() -> None:
-        raise ValueError(
-            '当前环境缺少 Supervisor Agent 运行依赖；请执行：'
-            'python -m pip install "vegaloom[agent]"'
-        )
-
-    monkeypatch.setattr(
-        agent_worker_module,
-        "require_agent_runtime_dependencies",
-        missing_dependencies,
-    )
-
-    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
-        SupervisorAgentWorker(workspace).bind(
-            "missing-agent-run",
-            child_run="child-not-created",
-            operation_id="operation-not-created",
-        )
-
-    assert not (workspace / "runs").exists()
 
 
 def test_verification_failure_takes_precedence_over_passed_finish_flag() -> None:

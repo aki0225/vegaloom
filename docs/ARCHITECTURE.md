@@ -33,7 +33,7 @@ vega do / vega loop
 
 ```text
 vega agent
-  -> 宿主主会话只读调查并提交 Agent Plan
+  -> 宿主主会话只读调查并提交 Change Contract / Execution Plan
   -> 人工批准与 Task Brief
   -> 单 Writer / operation / child binding
   -> 真实 Codex Worker
@@ -618,11 +618,13 @@ Windows Job 或 POSIX process group 时只等待；child 状态为 running 但�
 ## Supervisor Agent（opt-in V1）
 
 Supervisor Agent 是当前 `main` 的可选控制层，不改变 `vega do/loop` 的默认行为。宿主主会话
-负责只读调查并提交结构化 Agent Plan；Vega Runtime 不内置 Planner 模型，负责 Plan 版本与批准、
-Task Brief、单 Writer、operation/child 对账、Checkpoint、状态卡、恢复和条件路由。
+负责只读调查并提交 Change Contract 与 Execution Plan；Vega Runtime 不内置 Planner 模型，
+负责合同批准、Task Brief、单 Writer、operation/child 对账、Checkpoint、状态卡、恢复和
+确定性路由。
 
 ```text
-Agent Plan / approval
+Change Contract / approval
+  -> Execution Plan
   -> agent-state.json
   -> task-brief.md
   -> checkpoints/
@@ -639,18 +641,19 @@ Fix Packet 和仓库规则。Contract 内的 Execution Plan revision 可以直�
 变化必须重新批准。revision 裁决还读取当前 Git Diff 与 `.vega.yaml` 必审风险路径，避免只改
 计划文本来掩盖已经发生的越界。Repair、Replan、Review 和验证重试预算都由状态机计数。
 
-真实 Adapter 当前只接受一个未完成 Work Item。Gate 2B 已证明真实 Worker Claim 不会越过
-Workspace Gate，并证明 partial Diff 可以通过 identity-bound stop 保留并交还人工；Gate 2C
-已补齐 Verification、Risk、独立 Reviewer、Finish 和 Supervisor `finalize` 的完整成功路径。
+真实 Adapter 按 Execution Plan 顺序处理有限 Work Item，同一时刻只绑定一个当前 Work Item
+和一个 Writer。Gate 2B 已证明真实 Worker Claim 不会越过 Workspace Gate，并证明 partial
+Diff 可以通过 identity-bound stop 保留并交还人工；Gate 2C 已补齐 Verification、Risk、
+独立 Reviewer、Finish 和 Supervisor `finalize` 的完整成功路径。
 Supervisor 选择 `finalize` 后，Adapter 只采用已绑定且完整性、新鲜度、Verification、Risk、
 Reviewer 均通过的 Core `finish-summary.json`，把父 Agent 发布为
 `completed / ready_to_commit`。如果 Core 已完成而父终态发布前中断，可以用
 `vega agent finalize --run <agent-run>` 幂等恢复；它不创造第二套成功语义。
-当失败只来自验证命令或本地依赖环境时，人工可以提交只修改 `verification` 的 Plan revision，
-再运行 `vega agent retry-verification`。该路径复用原 Worker execution 和 child，先用原审查
-快照证明 tracked Diff 未变，并在覆盖前归档原失败 Finish；随后以当前 ignored 环境建立一次性
-Core 基线，新的 verification、Risk、Reviewer 和 Finish 仍写入下一 iteration。源码、未跟踪
-文件或 Git 控制状态漂移会转入人工处理。
+当失败只来自验证命令或本地依赖环境时，人工可以提交只修改 `verification` 的 Execution Plan
+revision，再运行 `vega agent retry-verification`。该路径复用原 Worker execution 和 child，
+先用原审查快照证明 tracked Diff 未变，并在覆盖前归档原失败 Finish；随后以当前 ignored 环境
+建立一次性 Core 基线，新的 verification、Risk、Reviewer 和 Finish 仍写入下一 iteration。
+源码、未跟踪文件或 Git 控制状态漂移会转入人工处理。
 Gate 3A 已实现 Handoff Checkpoint、Resume Capsule、Git Task Card 与同机双隔离副本恢复。
 v0.2.0 发布验收又在独立 fresh clone 中完成真实 Worker 恢复、Reviewer 打回、人工 Plan
 revision 和完整 Core Finish。历史 SAG3B Case 的原始结果继续保留；发布验收不要求另一台
@@ -666,8 +669,9 @@ Reviewer Prompt 或完整 Diff 超过项目软预算时，Core 才启用 Review 
 `needs_human`，不会用部分结果拼出 approve。这里没有 Reviewer 投票、辩论或第二套状态机。
 
 Task Card 位于 Git 跟踪的 `.vega/tasks/**/*.md`，只保存批准 Plan 和人工交接所需的 Resume
-Capsule。本机 Agent State、Checkpoint、Trace 和 LangGraph SQLite 图游标仍留在 `runs/`，不进入
-Git。SQLite 只保存可丢失的本机图游标，不拥有 Workspace、Verification、Reviewer 或成功语义。
+Capsule。本机 Agent State、Checkpoint 和 Trace 仍留在 `runs/`，不进入 Git。人工暂停与恢复
+由 State、`allowed_actions` 和 Checkpoint 表达；Workspace、Verification、Reviewer 与成功
+语义仍由各自的权威 Artifact 拥有。
 
 ## Tool Adapter
 
@@ -686,8 +690,8 @@ vega adapters init codex --repo <repo>
 ```
 
 这些 skill 只描述什么时候调用现有 `loop / gate / review / agent / status / watch` 命令，不安装
-hook，不修改全局配置，也不自动执行危险动作。`vega-agent` 让主会话负责只读调查、单 Work
-Item Plan、人工批准和控制；真实状态仍只存在于 Agent run。
+hook，不修改全局配置，也不自动执行危险动作。`vega-agent` 让主会话负责只读调查、变更合同、
+执行计划、人工批准和控制；真实状态仍只存在于 Agent run。
 
 通用 `status` 直接校验 `agent-state.json` envelope。通用 `watch` 不新增第二份 Agent 进度账本，
 而是把父 `trace.jsonl` 的白名单事件与已绑定 child 的 `progress.jsonl` 合并展示；模型正文、
@@ -696,9 +700,11 @@ Item Plan、人工批准和控制；真实状态仍只存在于 Agent run。
 旧版生成的 `.codex/skills` 不会被自动删除或改写；新命令只管理 `.agents/skills`
 下的三个 Vega Skill。
 
-Supervisor Agent 另有一个真实 Codex Adapter，用于启动受身份绑定的单 Writer child。它不是通用
-Provider SDK，也不承诺 Claude Code Worker 兼容；V1 之后若增加其他宿主，只复用相同 CLI、
-Task Card、Task Brief 和机器对账合同。
+Supervisor Agent 另有一个真实 Codex Adapter，用于启动受身份绑定的单 Writer child。
+Adapter 只处理 Codex 会话、JSONL 与 Worker 终态；后续的 Plan Scope、Git Candidate、Core
+Verification/Risk/Reviewer、Observation 和 Supervisor 路由由 Provider 无关的 Candidate
+Pipeline 处理。Vega 不扩张成通用 Provider SDK；其他宿主优先通过 assist 接入同一 Core 成功
+语义，需要自动 Worker 时再实现相同的窄 Worker 结果合同。
 
 初始化会先解析整批目标文件的真实路径；任一目标越过目标仓库或无法确认边界时，在写入前
 停止。创建父目录后还会在写文件前再次解析，`--force` 只能覆盖仓库内文件，不能绕过边界。
@@ -827,6 +833,5 @@ v0.1 重点是证明 loop、state、tool、eval、trace 的基本闭环。文件
 - 容易手动清理。
 - 不引入过早复杂度。
 
-Supervisor Agent 可以使用 run-local SQLite 保存 LangGraph 图游标，但它是可丢失的本机派生状态，
-不是共享数据库或业务事实权威。当 memory ledger 增长到需要复杂查询、审计和并发写入时，再单独
-考虑 SQLite + FTS5。
+Supervisor 的路由状态直接保存在 `agent-state.json` 与 Checkpoint 中，不需要额外图数据库。
+当 memory ledger 增长到需要复杂查询、审计和并发写入时，再单独考虑 SQLite + FTS5。

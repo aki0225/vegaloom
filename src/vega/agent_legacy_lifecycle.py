@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 from .agent_contract import (
     AgentPlan,
@@ -38,10 +37,8 @@ def start_legacy_agent(
     *,
     goal: str,
     plan: AgentPlan | None,
-    require_dependencies: Callable[[], None],
 ) -> AgentRun:
     repo_root = require_git_root(repo)
-    require_dependencies()
     revision = resolve_git_revision(repo_root)
     if revision is None:
         raise ValueError("目标目录不是 Git 仓库")

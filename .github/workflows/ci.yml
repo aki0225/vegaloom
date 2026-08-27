@@ -546,30 +546,39 @@ jobs:
                   pass
           PY
 
-      - name: 在独立环境验证 Agent extra
+      - name: 在独立环境验证 Agent 控制面
         shell: bash
         run: |
           python -m venv .tmp/release-validation/agent-venv
           .tmp/release-validation/agent-venv/bin/python -m pip install \
-            "dist/vegaloom-0.2.1-py3-none-any.whl[agent]"
+            dist/vegaloom-0.2.1-py3-none-any.whl
           .tmp/release-validation/agent-venv/bin/python -m pip check
           .tmp/release-validation/agent-venv/bin/vega agent capabilities \
             > .tmp/release-validation/agent-capabilities.json
-          .tmp/release-validation/agent-venv/bin/python -I -c \
-            "from langgraph.checkpoint.sqlite import SqliteSaver; print(SqliteSaver.__name__)"
           .tmp/release-validation/agent-venv/bin/python -I - <<'PY'
+          import importlib.util
           import json
           from pathlib import Path
 
+          removed = (
+              "langgraph",
+              "vega.agent_graph",
+              "vega.agent_codex_completion",
+              "vega.agent_codex_evidence",
+              "vega.agent_codex_scope",
+          )
+          assert all(importlib.util.find_spec(name) is None for name in removed)
           payload = json.loads(
               Path(".tmp/release-validation/agent-capabilities.json").read_text(
                   encoding="utf-8"
               )
           )
           assert payload["supervisor_runtime"] is True
-          assert payload["langgraph"] is True
+          assert payload["control_plane"] == "deterministic-state-machine"
           assert payload["worker"] == "codex-exec"
           assert payload["finish_owned_by_core"] is True
+          assert payload["change_run"] is True
+          assert payload["multi_work_item"] is True
           PY
 
       - name: 在第二个干净环境安装 sdist

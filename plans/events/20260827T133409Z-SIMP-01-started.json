@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "20260827T133409Z-SIMP-01-started",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SIMP-01",
+  "transition": "started",
+  "recorded_at": "2026-08-27T13:34:09Z",
+  "summary": "控制面简化已进入实现与本地验证：删除薄 LangGraph 路由和 SQLite 图游标，抽离 Provider 无关 Candidate Pipeline，并收窄新任务的 legacy Plan 公共入口。完成事件等待 PR CI 与合并证据后再追加。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "supervisor-tests",
+      "recovery-tests",
+      "dependency-smoke",
+      "repository-hygiene",
+      "full-local-pytest",
+      "architecture-growth"
+    ],
+    "artifacts": [
+      "src/vega/agent_candidate_pipeline.py",
+      "src/vega/agent_runtime.py",
+      "src/vega/agent_cli.py",
+      "pyproject.toml",
+      "plans/vega-agent-evolution.json",
+      "plans/events/20260827T133409Z-SIMP-01-started.json"
+    ]
+  }
+}

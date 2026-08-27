@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +25,8 @@ from vega.review_evidence import make_review_evidence
 from vega.run_status import run_status_payload
 from vega.runner import RunnerResult
 from vega.workspace_check import capture_review_workspace
+
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
 def test_change_run_starts_in_isolated_worktree_and_approves_contract(
@@ -66,7 +69,7 @@ def test_change_run_starts_in_isolated_worktree_and_approves_contract(
     assert len(approved.plan.work_items) == 2
 
 
-def test_agent_start_cli_accepts_change_contract_without_duplicate_text(
+def test_agent_start_cli_requires_change_contract_and_execution_plan(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -107,6 +110,34 @@ def test_agent_start_cli_accepts_change_contract_without_duplicate_text(
         (run_dirs[0] / "agent-state.json").read_text(encoding="utf-8")
     )
     assert state["data"]["run_kind"] == "change"
+
+
+def test_agent_start_cli_rejects_removed_legacy_plan_entry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    legacy_plan = tmp_path / "agent-plan.json"
+    legacy_plan.write_text("{}\n", encoding="utf-8")
+    monkeypatch.chdir(workspace)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "agent",
+            "start",
+            "--repo",
+            str(repo),
+            "--plan",
+            str(legacy_plan),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "No such option: --plan" in _ANSI_ESCAPE_PATTERN.sub("", result.output)
+    assert not (workspace / "runs").exists()
 
 
 def test_change_run_accepts_candidate_and_advances_to_next_work_item(

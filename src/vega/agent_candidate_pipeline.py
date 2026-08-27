@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 
 from pydantic import ValidationError
 
-from .agent_codex_evidence import (
-    ExecutedCodexAttempt,
+from .agent_worker_evidence import (
+    ExecutedWorkerAttempt,
+    PreparedWorkerAttempt,
     WorkerClaim,
     decision_label,
     evaluate_worker_claim,
@@ -15,7 +18,7 @@ from .agent_codex_evidence import (
     require_child_quiescent,
     write_child_summary,
 )
-from .agent_codex_scope import (
+from .agent_plan_scope import (
     evaluate_plan_scope,
     plan_scope_failure,
     write_plan_scope_evidence,
@@ -27,27 +30,38 @@ from .agent_git_candidate import (
 )
 from .agent_operation import operation_ref
 from .agent_run import AgentRun
+from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import capture_bound_workspace
+from .finish_runtime import FinishRuntime
+from .loop_runtime import LoopAutomationRuntime
 from .models import LoopAutomationState
 
-if TYPE_CHECKING:
-    from .agent_codex_adapter import SupervisorAgentCodexAdapter
 
+@dataclass(frozen=True)
+class CandidatePipeline:
+    """把 Worker 结果送入 Git Candidate、Core 门禁和 Supervisor 路由。"""
 
-def reconcile_codex_attempt(
-    adapter: SupervisorAgentCodexAdapter,
-    executed: ExecutedCodexAttempt,
-) -> AgentRun:
-    return _AttemptReconciler(adapter, executed).run()
+    runtime: SupervisorAgentRuntime
+    loop_runtime: LoopAutomationRuntime
+    finish_runtime: FinishRuntime
+    initialize_core: Callable[
+        [PreparedWorkerAttempt, Path, CandidateCommit],
+        None,
+    ]
+    observe_failure: Callable[..., AgentRun]
+    event_reporter: Callable[[str], None]
+
+    def reconcile(self, executed: ExecutedWorkerAttempt) -> AgentRun:
+        return _AttemptReconciler(self, executed).run()
 
 
 class _AttemptReconciler:
     def __init__(
         self,
-        adapter: SupervisorAgentCodexAdapter,
-        executed: ExecutedCodexAttempt,
+        pipeline: CandidatePipeline,
+        executed: ExecutedWorkerAttempt,
     ) -> None:
-        self.adapter = adapter
+        self.pipeline = pipeline
         self.executed = executed
         self.prepared = executed.prepared
         self.bound = executed.bound
@@ -139,11 +153,11 @@ class _AttemptReconciler:
                 work_item_id=self.prepared.state.current_work_item or "",
                 operation_id=self.executed.operation_id,
             )
-            self.bound, self.candidate_ref = self.adapter.runtime.bind_candidate(
+            self.bound, self.candidate_ref = self.pipeline.runtime.bind_candidate(
                 self.prepared.run_dir.name,
                 candidate=self.candidate,
             )
-            self.adapter._initialize_change_core(
+            self.pipeline.initialize_core(
                 self.prepared,
                 self.executed.child_dir,
                 self.candidate,
@@ -159,15 +173,15 @@ class _AttemptReconciler:
         assert self.claim is not None
         child_dir = self.executed.child_dir
         try:
-            self.adapter.loop_runtime.continue_assist(
+            self.pipeline.loop_runtime.continue_assist(
                 child_dir.name,
                 self.prepared.repo,
-                worker_name="codex-exec",
-                reviewer_name="codex-exec",
+                worker_name=self.prepared.worker_name,
+                reviewer_name=self.prepared.reviewer_name,
                 verify=True,
                 verification_commands=list(self.prepared.verification_commands),
             )
-            self.adapter.finish_runtime.run(child_dir.name)
+            self.pipeline.finish_runtime.run(child_dir.name)
             require_child_quiescent(child_dir)
             self.child_state = load_child_state(child_dir, self.prepared.repo)
             self.finish_summary = load_finish_summary(child_dir, child_dir.name)
@@ -260,19 +274,19 @@ class _AttemptReconciler:
             evidence_refs=[*refs, summary_ref],
             external_side_effects=self.prepared.external_side_effects,
         )
-        self.adapter._event("Workspace 与现有 Core Artifact 已完成对账")
-        routed = self.adapter.runtime.observe_machine(
+        self.pipeline.event_reporter("Workspace 与现有 Core Artifact 已完成对账")
+        routed = self.pipeline.runtime.observe_machine(
             self.prepared.run_dir.name,
             observation,
         )
-        self.adapter._event(
+        self.pipeline.event_reporter(
             f"Supervisor 选择：{decision_label(routed, observation)}"
         )
         routed = self._settle_candidate(routed, observation.work_item_completed)
         if routed.state.phase == "finalizing":
-            self.adapter._event("正在采用可信 Core Finish 终态")
-            routed = self.adapter.runtime.finalize(routed.run_dir.name)
-            self.adapter._event("Supervisor 已完成：ready_to_commit")
+            self.pipeline.event_reporter("正在采用可信 Core Finish 终态")
+            routed = self.pipeline.runtime.finalize(routed.run_dir.name)
+            self.pipeline.event_reporter("Supervisor 已完成：ready_to_commit")
         return routed
 
     def _settle_candidate(
@@ -289,16 +303,16 @@ class _AttemptReconciler:
             outcome = "repair"
         if outcome is None:
             return routed
-        routed = self.adapter.runtime.settle_candidate(
+        routed = self.pipeline.runtime.settle_candidate(
             routed.run_dir.name,
             candidate_ref=self.candidate_ref,
             outcome=outcome,
         )
         if outcome == "repair":
-            self.adapter._event("失败 Candidate 已还原为待修复 WIP")
+            self.pipeline.event_reporter("失败 Candidate 已还原为待修复 WIP")
         else:
             assert self.candidate is not None
-            self.adapter._event(
+            self.pipeline.event_reporter(
                 f"Accepted Checkpoint：{self.candidate.candidate_sha[:12]}"
             )
         return routed
@@ -310,7 +324,7 @@ class _AttemptReconciler:
         external_side_effects: str,
         plan_contradicted: bool = False,
     ) -> AgentRun:
-        return self.adapter._observe_failure(
+        return self.pipeline.observe_failure(
             self.bound,
             self.executed.child_dir,
             self.executed.operation_id,

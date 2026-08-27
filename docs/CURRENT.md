@@ -5,8 +5,8 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：10 / 10
-- 最近事件：`20260826T161630Z-VALID-01-completed`
+- 已完成：14 / 14
+- 最近事件：`20260827T144503Z-SIMP-04-completed`
 
 ## 当前事项
 
@@ -26,6 +26,10 @@
 | 已完成 | `AUTO-02` | 实现自动 Repair 与 Contract-aware Replan | `AUTO-01` |
 | 已完成 | `AUTO-03` | 完成进度、Review Queue 与恢复 | `AUTO-02` |
 | 已完成 | `VALID-01` | 完成 Bounded Change Loop 真实验收 | `AUTO-03` |
+| 已完成 | `SIMP-01` | 移除薄 LangGraph 路由层 | `VALID-01` |
+| 已完成 | `SIMP-02` | 抽离 Provider 无关 Candidate 流程 | `SIMP-01` |
+| 已完成 | `SIMP-03` | 收窄 legacy Plan 兼容面 | `SIMP-02` |
+| 已完成 | `SIMP-04` | 收敛 Agent 状态解释 | `SIMP-03` |
 
 ## 状态规则
 
