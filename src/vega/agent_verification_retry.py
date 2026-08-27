@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from .agent_codex_evidence import (
+from .agent_worker_evidence import (
     decision_label,
     hash_evidence_refs,
     load_child_state,
@@ -16,7 +16,7 @@ from .agent_codex_preparation import (
     comparison_binding_from_metadata,
     ensure_isolated_reviewer,
 )
-from .agent_codex_scope import (
+from .agent_plan_scope import (
     capture_plan_scope_baseline,
     evaluate_plan_scope,
     plan_scope_failure,
@@ -26,7 +26,6 @@ from .agent_contract import (
     AgentObservation,
 )
 from .agent_change_control import require_change_verification_retry_budget
-from .agent_graph import require_agent_runtime_dependencies
 from .agent_operation import operation_ref, reserve_operation_identity
 from .agent_persistence import (
     append_agent_trace,
@@ -91,7 +90,6 @@ class SupervisorAgentVerificationRetry:
         self.runtime = SupervisorAgentRuntime(self.workspace)
 
     def run(self, run: str) -> AgentRun:
-        require_agent_runtime_dependencies()
         prepared, operation_id, bound = self._prepare_and_bind(run)
         return self._run_core(prepared, operation_id, bound)
 

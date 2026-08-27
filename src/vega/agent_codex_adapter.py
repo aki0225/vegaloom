@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from .agent_codex_evidence import (
-    ExecutedCodexAttempt,
-    PreparedCodexAttempt,
+from .agent_worker_evidence import (
+    ExecutedWorkerAttempt,
+    PreparedWorkerAttempt,
     WorkerClaim,
     build_repair_prompt,
     decision_label,
@@ -19,6 +19,7 @@ from .agent_codex_evidence import (
     require_waiting_child,
     write_child_summary,
 )
+from .agent_candidate_pipeline import CandidatePipeline
 from .agent_change_control import require_change_review_budget
 from .agent_change_fix_packet import load_current_fix_packet
 from .agent_change_run import load_change_run_context
@@ -27,9 +28,8 @@ from .agent_change_core import (
     reserve_change_core_child,
 )
 from .agent_git_candidate import CandidateCommit
-from .agent_codex_reconcile import reconcile_codex_attempt
 from .agent_operation import operation_ref
-from .agent_codex_scope import (
+from .agent_plan_scope import (
     capture_plan_scope_baseline,
 )
 from .agent_codex_preparation import (
@@ -40,7 +40,6 @@ from .agent_codex_preparation import (
     validate_prepared_workspace,
 )
 from .agent_contract import AgentObservation
-from .agent_graph import require_agent_runtime_dependencies
 from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import (
@@ -89,7 +88,6 @@ class SupervisorAgentCodexAdapter:
         self.worker = SupervisorAgentWorker(self.workspace)
 
     def run(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
-        require_agent_runtime_dependencies()
         result = self._run_once(run, timeout_seconds=timeout_seconds)
         steps = 1
         while (
@@ -140,7 +138,7 @@ class SupervisorAgentCodexAdapter:
         self,
         run: str,
         timeout_seconds: int,
-    ) -> tuple[PreparedCodexAttempt, Path, str, str, AgentRun]:
+    ) -> tuple[PreparedWorkerAttempt, Path, str, str, AgentRun]:
         run_dir = resolve_run_dir(self.workspace, run)
         # 只串行化创建 child 与发布 Writer binding。真实 Worker 启动后立即释放
         # mutation lock，确保另一个 CLI 仍可执行 stop 或 recover。
@@ -159,7 +157,7 @@ class SupervisorAgentCodexAdapter:
         self,
         run: str,
         timeout_seconds: int,
-    ) -> PreparedCodexAttempt:
+    ) -> PreparedWorkerAttempt:
         if not 60 <= timeout_seconds <= 3600:
             raise ValueError("Worker timeout 必须在 60..3600 秒之间")
         run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
@@ -219,7 +217,7 @@ class SupervisorAgentCodexAdapter:
             output_schema=WorkerClaim.model_json_schema(),
             single_writer=True,
         )
-        return PreparedCodexAttempt(
+        return PreparedWorkerAttempt(
             run_dir=run_dir,
             state=state,
             plan=plan,
@@ -231,6 +229,8 @@ class SupervisorAgentCodexAdapter:
             verification_commands=tuple(work_item.verification),
             external_side_effects=work_item.external_side_effects,
             plan_scope_baseline=plan_scope_baseline,
+            worker_name="codex-exec",
+            reviewer_name="codex-exec",
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
             change_context=change_context,
@@ -241,7 +241,7 @@ class SupervisorAgentCodexAdapter:
 
     def _prepare_child(
         self,
-        prepared: PreparedCodexAttempt,
+        prepared: PreparedWorkerAttempt,
     ) -> tuple[Path, str]:
         if prepared.change_context is not None:
             if prepared.attempt_number == 1:
@@ -275,8 +275,8 @@ class SupervisorAgentCodexAdapter:
                     repo_path=str(prepared.repo),
                 ),
                 "assist",
-                worker_name="codex-exec",
-                reviewer_name="codex-exec",
+                worker_name=prepared.worker_name,
+                reviewer_name=prepared.reviewer_name,
                 max_iterations=2,
                 verify=True,
                 comparison_base_sha=prepared.comparison_base_sha,
@@ -298,13 +298,13 @@ class SupervisorAgentCodexAdapter:
 
     def _execute_worker(
         self,
-        prepared: PreparedCodexAttempt,
+        prepared: PreparedWorkerAttempt,
         child_dir: Path,
         prompt: str,
         timeout_seconds: int,
         operation_id: str,
         bound: AgentRun,
-    ) -> ExecutedCodexAttempt:
+    ) -> ExecutedWorkerAttempt:
         child_run = child_dir.name
 
         execution_context = RunnerExecutionContext(
@@ -333,7 +333,7 @@ class SupervisorAgentCodexAdapter:
             operation_id,
         )
         self._event(f"Worker 已退出：{result.status}")
-        return ExecutedCodexAttempt(
+        return ExecutedWorkerAttempt(
             prepared=prepared,
             bound=bound,
             child_dir=child_dir,
@@ -342,12 +342,19 @@ class SupervisorAgentCodexAdapter:
             result=result,
         )
 
-    def _reconcile_attempt(self, executed: ExecutedCodexAttempt) -> AgentRun:
-        return reconcile_codex_attempt(self, executed)
+    def _reconcile_attempt(self, executed: ExecutedWorkerAttempt) -> AgentRun:
+        return CandidatePipeline(
+            runtime=self.runtime,
+            loop_runtime=self.loop_runtime,
+            finish_runtime=self.finish_runtime,
+            initialize_core=self._initialize_change_core,
+            observe_failure=self._observe_failure,
+            event_reporter=self._event,
+        ).reconcile(executed)
 
     def _initialize_change_core(
         self,
-        prepared: PreparedCodexAttempt,
+        prepared: PreparedWorkerAttempt,
         child_dir: Path,
         candidate: CandidateCommit,
     ) -> None:

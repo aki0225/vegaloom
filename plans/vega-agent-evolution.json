@@ -194,6 +194,89 @@
         "real-agent-acceptance",
         "pr-ci"
       ]
+    },
+    {
+      "id": "SIMP-01",
+      "title": "移除薄 LangGraph 路由层",
+      "summary": "由现有确定性状态机直接拥有路由与人工暂停语义，删除只重复记录 Decision 的 LangGraph 图和 SQLite 游标。",
+      "depends_on": [
+        "VALID-01"
+      ],
+      "acceptance": [
+        "next、repair、replan、human 和 finalize 仍由同一套确定性规则选择",
+        "人工暂停由 Agent State、allowed_actions 和 Checkpoint 表达，不再生成 graph-checkpoints.sqlite",
+        "安装 Agent 能力不再依赖 LangGraph，既有 fail-closed、恢复和 Finish 语义保持不变"
+      ],
+      "required_checks": [
+        "supervisor-tests",
+        "recovery-tests",
+        "dependency-smoke",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "SIMP-02",
+      "title": "抽离 Provider 无关 Candidate 流程",
+      "summary": "让 Codex Adapter 只负责宿主会话和 Worker 结果，把 Workspace 对账、Candidate、Core 门禁、Reviewer 与路由放进统一执行流程。",
+      "depends_on": [
+        "SIMP-01"
+      ],
+      "acceptance": [
+        "Provider Adapter 只返回 Worker 终态、Claim 和会话元数据",
+        "Candidate 冻结、Verification、Risk、Reviewer、Observation、Decision 与 Finish 不依赖 Codex 专名",
+        "Codex 自动执行与 Codex、Claude Code 的宿主管理 assist 路径复用同一成功语义"
+      ],
+      "required_checks": [
+        "adapter-tests",
+        "core-tests",
+        "supervisor-tests",
+        "real-provider-dogfood",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "SIMP-03",
+      "title": "收窄 legacy Plan 兼容面",
+      "summary": "新任务统一使用 Change Contract 和 Execution Plan；旧 AgentPlan 只保留 Core 投影与已发布 Task Card 的恢复兼容，不再扩展第二套自主生命周期。",
+      "depends_on": [
+        "SIMP-02"
+      ],
+      "acceptance": [
+        "公开的新 Agent run 只通过 Change Contract 与 Execution Plan 创建",
+        "AgentPlan 只服务 Core、Task Brief、Reviewer 投影和既有 Task Card 恢复",
+        "旧 Task Card 仍可读取和接手，但不能被包装成新的合同授权或新的成功证据",
+        "不为删除旧格式额外引入 Task Card V2、迁移数据库或第二套恢复状态机"
+      ],
+      "required_checks": [
+        "contract-tests",
+        "supervisor-tests",
+        "handoff-tests",
+        "recovery-tests",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "SIMP-04",
+      "title": "收敛 Agent 状态解释",
+      "summary": "状态卡和 JSON 从同一份实时证据投影生成；watch 只显示安全事件，Task Card 只保存跨会话恢复语义。",
+      "depends_on": [
+        "SIMP-03"
+      ],
+      "acceptance": [
+        "状态卡与 status --json 使用同一份有效阶段、Workspace、门禁和提交建议投影",
+        "watch 不另建状态账本，Task Card 不复制实时成功结论",
+        "展示层不成为新的成功事实或恢复事实来源",
+        "公开文档准确说明 Vega Agent、宿主 Coding Agent 与独立 Reviewer 的职责边界"
+      ],
+      "required_checks": [
+        "status-tests",
+        "handoff-tests",
+        "full-test-shards",
+        "package-smoke",
+        "repository-hygiene",
+        "pr-ci"
+      ]
     }
   ]
 }

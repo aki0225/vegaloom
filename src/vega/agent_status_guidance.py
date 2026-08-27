@@ -7,10 +7,19 @@ from typing import Any
 def agent_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     phase = state.get("agent_phase")
     if phase in {"planning", "awaiting_approval"}:
+        if state.get("agent_run_kind") == "change":
+            return [
+                f"读取 `{run_dir / 'change-contract.json'}` 与 "
+                f"`{run_dir / 'execution-plan.json'}`，核对授权边界和实施步骤。",
+                f"需要修改时运行：`vega agent replan --run {run_dir.name} "
+                "--contract <change-contract.json> "
+                "--execution-plan <execution-plan.json>`。",
+                f"仅在人工明确批准后运行：`vega agent approve --run {run_dir.name}`。",
+            ]
         return [
-            f"读取 `{run_dir / 'agent-plan.json'}`，由主会话完成只读调查并提交单 Work Item Plan。",
-            f"写入新 Plan：`vega agent plan --run {run_dir.name} --input <plan.json>`。",
-            f"仅在人工明确批准后运行：`vega agent approve --run {run_dir.name}`。",
+            f"读取 `{run_dir / 'agent-plan.json'}`；这是旧 Task Card 或本机 run 的兼容状态。",
+            "需要改变目标或范围时，生成 Change Contract 与 Execution Plan，并创建新的 ChangeRun。",
+            "不要修改旧 Plan 来伪造新的人工授权。",
         ]
     if phase == "ready":
         return [
@@ -35,7 +44,7 @@ def agent_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     if phase == "needs_human":
         return [
             f"读取 `{run_dir / 'status-card.md'}`、最新 Checkpoint 与 Trace，确认阻断原因。",
-            "根据现场选择 steer、resume-local、recover、handoff 或停止；"
+            "根据现场选择 replan、resume-local、recover、handoff 或停止；"
             "不要在证据不明时启动第二 Writer。",
         ]
     if phase == "stopped":

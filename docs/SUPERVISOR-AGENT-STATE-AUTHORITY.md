@@ -7,7 +7,7 @@
 >
 > 日期：2026-08-13
 >
-> 更新：2026-08-19
+> 更新：2026-08-27
 >
 > Gate 0～2A 实施分支：`experiment/supervisor-agent-v1`（PR `#57` 合并后归档）
 >
@@ -43,7 +43,6 @@ Vega Agent V1 使用一个 Supervisor 控制层编排外部 Coding Agent，并�
 | Decision | Observation 下的允许动作、选择与理由 | 路由记录 |
 | Task Brief | 为当前角色编译的有界上下文 | 派生输入，不是状态权威 |
 | Trace | 追加式安全事件和路由线索 | 审计线索，不可重放为成功 |
-| Graph checkpoint | LangGraph 图游标和 pending interrupt | 不拥有业务事实 |
 
 详细 Diff、验证日志、Risk 和 Reviewer 继续使用现有 Core Artifact，不在 Agent 层复制。
 
@@ -76,7 +75,7 @@ next / repair / replan / human / finalize
   Checkpoint；旧 `unknown` Checkpoint 和 Trace 不得改写；
 - 只有人工把副作用明确为 `none` 才能进入 `stopped / safe`；明确为 `known` 时仍保持
   `needs_human / blocked`；
-- Graph `END` 不能写入 `ready_to_commit`。
+- 状态机进入 `finalizing` 不能直接写入 `ready_to_commit`。
 - 仓库级 Writer claim 位于 Git common dir，用于协调同一物理 Git 仓库及其 worktree；
   它不声称跨独立 clone 或跨机器提供分布式锁。
 - Worker 终态发布前先把 claim 标记为 `releasing`，再清除父 State 的 active binding。
@@ -127,17 +126,14 @@ Gate 路由变化、恢复/交接和 Finish 前写入。`safe` 只代表现场�
 Trace 每条只保存事件、节点、Work Item、operation/child、状态版本、Workspace fingerprint、
 Observation 摘要、路由理由和 Artifact 引用。不得保存完整模型输出、内部推理、凭据或完整命令日志。
 
-## 7. LangGraph 边界
+## 7. 确定性控制面边界
 
-Gate 0 的合同和 reducer 保持引擎无关。Gate 1 才引入可选 LangGraph 依赖，且仅用于：
+`AgentObservation` 进入路由函数后生成唯一 `AgentDecision`，状态迁移再次校验 Plan 摘要、
+Workspace 绑定和允许动作。`replan` 与 `human` 直接写入 `AgentState`、Checkpoint 和 Trace，
+恢复时重新读取真实 Workspace 与 Core Artifact 对账。
 
-- `StateGraph` 条件边；
-- 图游标持久化；
-- `interrupt()` 和人工 resume；
-- 低频安全事件。
-
-LangGraph checkpoint 丢失时，Vega 必须回到 Task Card、Agent State、Checkpoint、真实 Workspace 和
-Core Artifact 对账。不能以恢复 Graph checkpoint 代替恢复执行事实。
+控制面没有额外图游标。状态文件损坏、Checkpoint 缺失或现场不一致时进入人工处理，不能依赖
+某个 Provider 会话或派生进度记录恢复成功资格。
 
 ## 8. Gate 0 退出条件
 
@@ -212,7 +208,7 @@ fail-closed 约束，并补齐：
 - 真实 Codex Worker、独立 Reviewer 和父 Agent `finalize`；
 - Handoff Checkpoint、Resume Capsule 与 Git Task Card；
 - Git-only fresh clone 恢复，并把旧 Verification、Risk 和 Reviewer 降为历史证据；
-- Provider 失败、Reviewer 打回、Plan revision 和重新执行后的可信 Finish。
+- Provider 失败、Reviewer 打回、Execution Plan revision 和重新执行后的可信 Finish。
 
 SAG3B-01～08 的预注册结果仍按原记录保留，不因后续修复或发布验收而改写。2026-08-18 的
 独立发布验收已完成 partial WIP 停止、Git Task Card、fresh clone 恢复、Provider 失败
@@ -220,5 +216,6 @@ fail-closed、Reviewer 打回、Plan revision 2、完整 Core Gate 和人工 PR 
 `release-acceptance-pass`。另一台物理机器与长期使用价值改为发布后的增强证据，不再阻断
 `v0.2.0`。
 
-当前仍不支持多 Work Item 自动连续派发、多 Writer 并行、自动 Git、长期 Memory 自动写入、
-Provider 平台或第二套成功语义。
+新 ChangeRun 可以按批准的 Execution Plan 顺序推进有限 Work Item，但同一时刻仍只有一个
+Writer。当前不支持多 Writer 并行、自动 Git、长期 Memory 自动写入、Provider 平台或第二套
+成功语义；旧 Task Card 继续按单 Work Item 恢复。

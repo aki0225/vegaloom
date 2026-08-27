@@ -8,8 +8,7 @@ import typer
 from .agent_codex_adapter import SupervisorAgentCodexAdapter
 from .agent_change_cli import agent_replan
 from .agent_change_contract import ChangeContract, ExecutionPlan
-from .agent_contract import AgentObservation, AgentPlan
-from .agent_graph import langgraph_available, require_agent_runtime_dependencies
+from .agent_contract import AgentObservation
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_recovery_request import AgentRecoveryRequest
 from .agent_runtime import SupervisorAgentRuntime
@@ -18,7 +17,6 @@ from .agent_verification_retry import SupervisorAgentVerificationRetry
 from .agent_worker import SupervisorAgentWorker
 from .cli_support import (
     ensure_runner_ready,
-    load_brief_input,
     report_execution_progress,
     require_repo_directory,
 )
@@ -33,44 +31,26 @@ agent_app.command("replan")(agent_replan)
 @agent_app.command("start")
 def agent_start(
     repo: Path = typer.Option(..., "--repo", help="目标 Git 仓库根目录。"),
-    input_path: Path | None = typer.Option(None, "--input", help="任务或 Agent Plan 文件。"),
-    text: str | None = typer.Option(None, "--text", help="用户目标。"),
-    plan_path: Path | None = typer.Option(None, "--plan", help="可选的结构化 Agent Plan JSON。"),
-    contract_path: Path | None = typer.Option(
-        None,
+    contract_path: Path = typer.Option(
+        ...,
         "--contract",
         help="Bounded Change Loop 的 Change Contract JSON。",
     ),
-    execution_plan_path: Path | None = typer.Option(
-        None,
+    execution_plan_path: Path = typer.Option(
+        ...,
         "--execution-plan",
         help="Bounded Change Loop 的 Execution Plan JSON。",
     ),
 ) -> None:
-    """创建 Agent run，捕获 Workspace，并等待人工批准 Contract 或 Plan。"""
+    """创建 ChangeRun，捕获隔离 Workspace，并等待人工批准 Contract。"""
 
     repo = require_repo_directory(repo)
-    if (contract_path is None) != (execution_plan_path is None):
-        raise typer.BadParameter("--contract 与 --execution-plan 必须同时提供")
-    if plan_path is not None and contract_path is not None:
-        raise typer.BadParameter("--plan 不能与 ChangeRun 合同同时使用")
     try:
-        if contract_path is not None and execution_plan_path is not None:
-            contract = _load_change_contract(contract_path)
-            execution_plan = _load_execution_plan(execution_plan_path)
-            if input_path is not None or text is not None:
-                goal, _ = load_brief_input(input_path, text)
-                if goal.strip() != contract.goal:
-                    raise ValueError("命令行目标与 Change Contract goal 不一致")
-            result = _runtime().start_change(
-                repo,
-                contract=contract,
-                execution_plan=execution_plan,
-            )
-        else:
-            goal, _ = load_brief_input(input_path, text)
-            plan = _load_plan(plan_path) if plan_path else None
-            result = _runtime().start(repo, goal=goal.strip(), plan=plan)
+        result = _runtime().start_change(
+            repo,
+            contract=_load_change_contract(contract_path),
+            execution_plan=_load_execution_plan(execution_plan_path),
+        )
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"Agent 已创建：{result.run_dir.name}")
@@ -89,28 +69,7 @@ def agent_approve(
         result = _runtime().approve(run, actor=actor)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    typer.echo(
-        "Change Contract 已批准。"
-        if result.state.run_kind == "change"
-        else "Plan 已批准。"
-    )
-    typer.echo("")
-    typer.echo(_runtime().status(result.run_dir.name))
-
-
-@agent_app.command("plan")
-def agent_plan(
-    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
-    input_path: Path = typer.Option(..., "--input", help="主会话调查后生成的 Agent Plan JSON。"),
-) -> None:
-    """写入新的未批准 Plan revision，仍需人工显式 approve。"""
-
-    try:
-        draft = AgentPlan.model_validate_json(input_path.read_text(encoding="utf-8"))
-        result = _runtime().update_plan(run, draft)
-    except (OSError, FileNotFoundError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    typer.echo(f"Plan revision {result.plan.plan_revision} 已写入，等待人工批准。")
+    typer.echo("Change Contract 已批准。")
     typer.echo("")
     typer.echo(_runtime().status(result.run_dir.name))
 
@@ -124,7 +83,6 @@ def agent_dispatch(
     """绑定唯一 Writer，并保守进入 operation 可能已开始的边界。"""
 
     try:
-        require_agent_runtime_dependencies()
         result = _worker().bind(
             run,
             child_run=child_run,
@@ -151,7 +109,6 @@ def agent_run(
     """执行当前已批准 Work Item，并复用现有 Core 完成验证与独立评审。"""
 
     try:
-        require_agent_runtime_dependencies()
         ensure_runner_ready("codex-exec", "worker")
         result = _adapter().run(run, timeout_seconds=timeout_seconds)
     except (FileNotFoundError, OSError, ValueError) as exc:
@@ -182,7 +139,6 @@ def agent_retry_verification(
     """复用原 child 与 Diff，只重跑 Core 验证、风险门禁和独立 Reviewer。"""
 
     try:
-        require_agent_runtime_dependencies()
         result = _verification_retry().run(run)
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -361,22 +317,6 @@ def agent_status(
         raise typer.BadParameter(str(exc)) from exc
 
 
-@agent_app.command("steer")
-def agent_steer(
-    run: str = typer.Option(..., "--run", help="Agent run_id 或 runs/<run_id>。"),
-    instruction: str = typer.Option(..., "--instruction", help="新增或修改的人工约束。"),
-) -> None:
-    """使旧 Plan 批准失效，并把新约束写入下一 revision。"""
-
-    try:
-        result = _runtime().steer(run, instruction=instruction)
-    except (FileNotFoundError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    typer.echo("人工约束已记录，旧 Plan 批准已失效。")
-    typer.echo("")
-    typer.echo(_runtime().status(result.run_dir.name))
-
-
 @agent_app.command("resume")
 def agent_resume(
     repo: Path = typer.Option(..., "--repo", help="目标 Git 仓库根目录。"),
@@ -386,7 +326,6 @@ def agent_resume(
 
     repo = require_repo_directory(repo)
     try:
-        require_agent_runtime_dependencies()
         result = _runtime().resume_task_card(repo, task)
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -397,14 +336,14 @@ def agent_resume(
 
 @agent_app.command("capabilities")
 def agent_capabilities() -> None:
-    """显示当前环境能否运行 LangGraph 图游标。"""
+    """显示当前 Supervisor 控制面和执行能力。"""
 
     typer.echo(
         json.dumps(
             {
                 "schema_version": 1,
                 "supervisor_runtime": True,
-                "langgraph": langgraph_available(),
+                "control_plane": "deterministic-state-machine",
                 "worker": "codex-exec",
                 "finish_owned_by_core": True,
                 "change_run": True,
@@ -412,6 +351,7 @@ def agent_capabilities() -> None:
                 "local_candidate_commits": True,
                 "automatic_repair": True,
                 "contract_aware_replan": True,
+                "legacy_task_card_resume": True,
             },
             ensure_ascii=False,
             indent=2,
@@ -449,13 +389,6 @@ def _verification_retry() -> SupervisorAgentVerificationRetry:
         progress_reporter=report_execution_progress,
         event_reporter=lambda message: typer.echo(f"[vega] {message}", err=True),
     )
-
-
-def _load_plan(path: Path) -> AgentPlan:
-    try:
-        return AgentPlan.model_validate_json(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise typer.BadParameter(f"无法读取 Agent Plan：{path.name}") from exc
 
 
 def _load_change_contract(path: Path) -> ChangeContract:

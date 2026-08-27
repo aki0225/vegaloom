@@ -151,22 +151,22 @@ v0.1 baseline 的最小验收定义。
 
 ## v0.2.x 可选 Supervisor Agent
 
-这些能力随 `v0.2.0` 发布，但不替换默认 `do / loop`：
+这些能力从 `v0.2.0` 开始发布，但不替换默认 `do / loop`：
 
 - CLI：`vega agent capabilities`
-- CLI：`vega agent start --repo <repo> --plan <plan.json> --text <text>`
-- CLI：`vega agent plan / approve / run / finalize`
-- CLI：`vega agent status / steer / pause / stop / recover / resume-local`
+- CLI：`vega agent start --repo <repo> --contract <contract.json> --execution-plan <plan.json>`
+- CLI：`vega agent approve / run / replan / retry-verification / finalize`
+- CLI：`vega agent status / pause / stop / recover / resume-local`
 - CLI：`vega agent checkpoint --handoff` 与 `vega agent resume --repo <repo>`
 - Codex adapter 生成 `.agents/skills/vega-agent/SKILL.md`
-- 单 Work Item、单 Writer、Plan revision 与人工批准
+- 有限 Work Item、单 Writer、Change Contract、Execution Plan revision 与人工批准
 - Worker Claim、Machine Observation、Supervisor Decision 分层
 - 粗粒度 Checkpoint、主会话状态卡和低频安全 Trace
-- Git Task Card 携带 WIP、批准 Plan、约束和下一步；本机 run、SQLite、凭据与聊天不进 Git
+- Git Task Card 携带 WIP、批准范围、约束和下一步；本机 run、凭据与聊天不进 Git
 - 最终 `ready_to_commit` 仍由现有 Verification、Risk、独立 Reviewer 与 Finish 裁决
 
-Supervisor Agent 当前不支持多 Work Item 自动连续派发、多 Worker 并行、自动 Git、长期
-Memory 自动写入或 Provider 平台。
+Supervisor Agent 当前不支持多 Worker 并行、自动 push/merge/release、长期 Memory 自动写入
+或 Provider 平台。`v0.2.1` 已生成的旧 Task Card 仍可恢复，但旧 Plan 不再是新任务入口。
 
 ## 实验能力
 
@@ -232,7 +232,7 @@ experimental: Memory proposal / ledger
 隔离审查和证据化恢复；Supervisor Agent 与 Codex skills 是已发布的可选能力，Memory 保持
 实验状态，Goal P0/P1 只保留兼容和历史证据。
 
-当前稳定版本为 `v0.2.1`。v0.2.x 保留既有核心成功语义，并维护 opt-in Supervisor Agent V1：
-单 Work Item、人工批准、单 Writer、可恢复 Checkpoint、Git Task Card、机器 Observation
-以及现有 Verification、Risk、独立 Reviewer 和 Finish。多 Work Item 自动推进、长期
-Memory、Provider 平台和自动 Git 仍不在当前范围。
+当前稳定发布基线为 `v0.2.1`。既有 Task Card 仍按单 Work Item 恢复；当前 `main` 的新
+ChangeRun 使用 Change Contract 与 Execution Plan，在单 Writer 约束下顺序推进有限 Work Item，
+并复用可恢复 Checkpoint、Git Candidate、机器 Observation、Verification、Risk、独立 Reviewer
+和 Finish。多 Writer 并行、长期 Memory、Provider 平台和自动 Git 仍不在当前范围。

@@ -85,9 +85,9 @@
             <em>证据决定能否交付。</em>
           </h1>
           <p class="hero-lead">
-            Vega 用 Supervisor Agent 管理 Plan、Checkpoint 和恢复，用 Core Harness
+            Vega 用 Supervisor Agent 管理变更合同、Work Item、Checkpoint 和恢复，用 Core Harness
             核对当前 Diff、验证、风险与独立评审。Worker 中断后先核对现场，再决定继续、
-            修改 Plan 或交给人。
+            调整执行计划或交给人。
           </p>
           <div class="hero-actions">
             <a class="button button--primary" href="#replay">查看发布验收</a>
@@ -122,7 +122,7 @@
       <section class="responsibility-strip" aria-label="宿主 Agent 与 Vega 的职责边界">
         <p class="responsibility-strip__copy">
           Codex / Claude Code 继续读代码、改文件和跑命令。Vega 管理
-          <code>Plan revision</code>、单 Writer、Checkpoint 和 Finish。
+          <code>Change Contract</code>、单 Writer、Checkpoint 和 Finish。
         </p>
       </section>
 
@@ -457,7 +457,7 @@
             <p class="section-number">03 / INSTALL</p>
             <h2 id="quickstart-title">安装</h2>
             <p>
-              安装 Agent extra，为目标仓库生成 Codex adapter，再进入目标仓库。主会话里运行
+              安装 Vega，为目标仓库生成 Codex adapter，再进入目标仓库。主会话里运行
               <code>$vega-agent</code>。
             </p>
             <p class="quickstart-boundary">
@@ -478,7 +478,7 @@
             </div>
             <pre><code data-quickstart-code>git clone https://github.com/aki0225/vegaloom.git
 cd vegaloom
-python -m pip install -e ".[agent]"
+python -m pip install -e .
 $targetRepo = "&lt;target-repo&gt;"
 vega adapters init codex --repo $targetRepo
 Set-Location $targetRepo

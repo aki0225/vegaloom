@@ -7,6 +7,23 @@
 
 ## 最近一次路线决策
 
+2026-08-27，Bounded Change Loop 真实验收完成后，主线进入控制面简化：
+
+1. 保留 Change Contract、隔离 Worktree、Git Candidate、确定性验证、风险门禁、独立
+   Reviewer、恢复和 Finish；
+2. 删除只重复记录确定性 Decision 的 LangGraph 图和 SQLite 游标，人工暂停继续由 Agent
+   State、Checkpoint 与 `allowed_actions` 表达；
+3. Codex、Claude Code 或后续宿主负责会话、工具和编码能力，Vega 先统一 Candidate 到
+   Verification、Risk、Review、路由和 Finish 的控制流程；
+4. 新任务统一使用 Change Contract 与 Execution Plan。`AgentPlan` 只保留为 Core 投影和
+   已发布 Task Card 的恢复格式；当前不为删除旧格式再造 Task Card V2 或第二套迁移状态机；
+5. 最后清理状态卡、JSON、watch 与 Task Card 的重复解释。任何精简都不能放松
+   fail-closed、写审隔离和确定性验证优先级。
+
+这次调整不否定 Agent 方向。Vega Agent 的职责是：在人工批准的变更合同内驱动 Coding
+Agent 修改代码，把真实 Git Candidate 送入项目验证和独立审查，根据结果自动继续、修复、
+重规划或请求人工处理，并在最后生成可供人工决定是否合并的候选。
+
 2026-08-25，AI 可维护性治理完成：
 
 1. PR `#82` 整理当前事实、规则、产品入口和目录职责；

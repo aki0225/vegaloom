@@ -92,18 +92,7 @@ $wheel = Get-ChildItem $outDir -Filter "vegaloom-*.whl" |
 Push-Location $smokeDir
 & ".\.venv\Scripts\vega.exe" --version
 & ".\.venv\Scripts\vega.exe" list-loops
-Pop-Location
-
-$agentSmokeDir = Join-Path $root "agent-package-smoke"
-python -m venv (Join-Path $agentSmokeDir ".venv")
-$agentSmokePython = Join-Path $agentSmokeDir ".venv\Scripts\python.exe"
-& $agentSmokePython -m pip install --upgrade pip
-$agentWheel = "$($wheel.FullName)[agent]"
-& $agentSmokePython -m pip install $agentWheel
-Push-Location $agentSmokeDir
 & ".\.venv\Scripts\vega.exe" agent capabilities
-& $agentSmokePython -I -c `
-  "from langgraph.checkpoint.sqlite import SqliteSaver; print(SqliteSaver.__name__)"
 Pop-Location
 ```
 
@@ -111,8 +100,8 @@ Pop-Location
 
 - `vega --version` 输出当前版本。
 - `vega list-loops` 在源码树外仍能看到包内 baseline loop。
-- 安装 `agent` extra 后，`vega agent capabilities` 中的 `supervisor_runtime`、`langgraph`
-  为 `true`，并且 `SqliteSaver` 可以从干净环境直接导入。
+- 基础 Wheel 安装后，`vega agent capabilities` 中的 `supervisor_runtime` 为 `true`，
+  `control_plane` 为 `deterministic-state-machine`。
 - 生成的 `.tmp/release-readiness/`、`build/` 和 egg-info 中间产物不提交。
 - 如果系统 PATH 上已有旧版 `vega`，以当前 venv 或 smoke venv 中的 `vega.exe` 为准。
 

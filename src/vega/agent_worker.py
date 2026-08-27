@@ -4,7 +4,6 @@ from pathlib import Path
 
 from .agent_change_run import current_change_work_item
 from .agent_contract import validate_v1_execution_binding
-from .agent_graph import require_agent_runtime_dependencies
 from .agent_mutation import agent_mutation
 from .agent_operation import reserve_operation_identity
 from .agent_persistence import append_agent_trace, read_agent_trace, save_agent_state
@@ -34,7 +33,6 @@ class SupervisorAgentWorker:
         child_run: str,
         operation_id: str,
     ) -> AgentRun:
-        require_agent_runtime_dependencies()
         return self._bind_with_lock(
             run,
             child_run=child_run,
@@ -64,7 +62,6 @@ class SupervisorAgentWorker:
     ) -> AgentRun:
         """在调用方已经持有当前 Agent run mutation lock 时提交 Writer binding。"""
 
-        require_agent_runtime_dependencies()
         run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
         (
             current_change_work_item(plan, state)

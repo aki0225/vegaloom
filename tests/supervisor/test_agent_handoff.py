@@ -348,32 +348,6 @@ def test_handoff_and_task_brief_preserve_all_confirmed_facts(
     assert "其余" not in task_brief
 
 
-def test_direct_task_card_resume_preflights_dependencies_before_creating_run(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo = _repo(tmp_path / "repo")
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-
-    def missing_dependencies() -> None:
-        raise ValueError(
-            '当前环境缺少 Supervisor Agent 运行依赖；请执行：'
-            'python -m pip install "vegaloom[agent]"'
-        )
-
-    monkeypatch.setattr(
-        agent_runtime_support_module,
-        "require_agent_runtime_dependencies",
-        missing_dependencies,
-    )
-
-    with pytest.raises(ValueError, match=r'vegaloom\[agent\]'):
-        agent_runtime_support_module.resume_agent_task_card(workspace, repo)
-
-    assert not (workspace / "runs").exists()
-
-
 def test_resumed_run_can_adjudicate_new_unknown_side_effects(
     tmp_path: Path,
 ) -> None:

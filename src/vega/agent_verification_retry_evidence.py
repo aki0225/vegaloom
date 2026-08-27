@@ -7,8 +7,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .agent_codex_evidence import WorkerClaim, load_child_state, load_finish_summary
-from .agent_codex_scope import PlanScopeBaseline
+from .agent_worker_evidence import WorkerClaim, load_child_state, load_finish_summary
+from .agent_plan_scope import PlanScopeBaseline
 from .agent_contract import (
     AgentObservation,
     AgentPlan,

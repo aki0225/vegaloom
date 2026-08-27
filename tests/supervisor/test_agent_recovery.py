@@ -137,7 +137,6 @@ def test_dispatch_without_execution_evidence_keeps_original_writer(
     worker = SupervisorAgentWorker(workspace)
     worker.bind(run_id, child_run="attempt-old", operation_id="operation-old")
     run_dir = workspace / "runs" / run_id
-    (run_dir / "graph-checkpoints.sqlite").unlink(missing_ok=True)
 
     recovered = SupervisorAgentRecovery(workspace).recover(
         run_id,

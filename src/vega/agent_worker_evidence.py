@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
-from .agent_codex_completion import (
+from .agent_core_observation import (
     finish_evidence_untrusted as _finish_evidence_untrusted,
     review_status as _review_status,
     risk_status as _risk_status,
@@ -25,7 +25,7 @@ from .agent_contract import (
     AgentWorkItem,
     validate_v1_execution_binding,
 )
-from .agent_codex_scope import PlanScopeBaseline
+from .agent_plan_scope import PlanScopeBaseline
 from .agent_operation import child_summary_ref
 from .agent_persistence import load_agent_checkpoint
 from .agent_run import AgentRun
@@ -65,7 +65,7 @@ class WorkerClaim(BaseModel):
 
 
 @dataclass(frozen=True)
-class PreparedCodexAttempt:
+class PreparedWorkerAttempt:
     run_dir: Path
     state: AgentState
     plan: AgentPlan
@@ -77,14 +77,16 @@ class PreparedCodexAttempt:
     verification_commands: tuple[str, ...]
     external_side_effects: Literal["none", "known", "unknown"]
     plan_scope_baseline: PlanScopeBaseline
+    worker_name: str
+    reviewer_name: str
     comparison_base_sha: str | None = None
     comparison_paths: tuple[str, ...] = ()
     change_context: ChangeRunContext | None = None
 
 
 @dataclass(frozen=True)
-class ExecutedCodexAttempt:
-    prepared: PreparedCodexAttempt
+class ExecutedWorkerAttempt:
+    prepared: PreparedWorkerAttempt
     bound: AgentRun
     child_dir: Path
     operation_id: str

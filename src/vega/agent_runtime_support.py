@@ -25,7 +25,6 @@ from .agent_contract import (
     ObservationAuthority,
     canonical_digest,
 )
-from .agent_graph import require_agent_runtime_dependencies
 from .agent_handoff_safety import TaskCardError
 from .agent_persistence import (
     AgentArtifactError,
@@ -150,7 +149,6 @@ def resume_agent_task_card(
     repo: Path,
     task_path: Path | None = None,
 ) -> AgentRun:
-    require_agent_runtime_dependencies()
     repo_root = require_git_root(repo)
     resolved_task, relative_task = resolve_resume_task(repo_root, task_path)
     card, task_card_content = load_task_card_with_content(resolved_task)
