@@ -5,28 +5,12 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：10 / 14
-- 最近事件：`20260827T133409Z-SIMP-01-started`
+- 已完成：14 / 14
+- 最近事件：`20260827T144503Z-SIMP-04-completed`
 
 ## 当前事项
 
-### 进行中：`SIMP-01` 移除薄 LangGraph 路由层
-
-由现有确定性状态机直接拥有路由与人工暂停语义，删除只重复记录 Decision 的 LangGraph 图和 SQLite 游标。
-
-验收条件：
-
-- next、repair、replan、human 和 finalize 仍由同一套确定性规则选择
-- 人工暂停由 Agent State、allowed_actions 和 Checkpoint 表达，不再生成 graph-checkpoints.sqlite
-- 安装 Agent 能力不再依赖 LangGraph，既有 fail-closed、恢复和 Finish 语义保持不变
-
-要求检查：
-
-- `supervisor-tests`
-- `recovery-tests`
-- `dependency-smoke`
-- `repository-hygiene`
-- `pr-ci`
+当前没有可执行事项；计划已经完成，或剩余事项处于阻塞/已替代状态。
 
 ## 全部事项
 
@@ -42,10 +26,10 @@
 | 已完成 | `AUTO-02` | 实现自动 Repair 与 Contract-aware Replan | `AUTO-01` |
 | 已完成 | `AUTO-03` | 完成进度、Review Queue 与恢复 | `AUTO-02` |
 | 已完成 | `VALID-01` | 完成 Bounded Change Loop 真实验收 | `AUTO-03` |
-| 进行中 | `SIMP-01` | 移除薄 LangGraph 路由层 | `VALID-01` |
-| 待开始 | `SIMP-02` | 抽离 Provider 无关 Candidate 流程 | `SIMP-01` |
-| 待开始 | `SIMP-03` | 收窄 legacy Plan 兼容面 | `SIMP-02` |
-| 待开始 | `SIMP-04` | 收敛 Agent 状态解释 | `SIMP-03` |
+| 已完成 | `SIMP-01` | 移除薄 LangGraph 路由层 | `VALID-01` |
+| 已完成 | `SIMP-02` | 抽离 Provider 无关 Candidate 流程 | `SIMP-01` |
+| 已完成 | `SIMP-03` | 收窄 legacy Plan 兼容面 | `SIMP-02` |
+| 已完成 | `SIMP-04` | 收敛 Agent 状态解释 | `SIMP-03` |
 
 ## 状态规则
 

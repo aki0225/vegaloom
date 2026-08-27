@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "20260827T144503Z-SIMP-04-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SIMP-04",
+  "transition": "completed",
+  "recorded_at": "2026-08-27T14:45:03Z",
+  "summary": "状态卡与 JSON 已共享实时证据投影，watch 保持安全事件流，Task Card 只保存跨会话恢复语义；公开文档同步到当前控制面。",
+  "evidence": {
+    "pull_requests": [
+      92
+    ],
+    "commits": [],
+    "checks": [
+      "status-tests",
+      "handoff-tests",
+      "full-test-shards",
+      "package-smoke",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_status_card.py",
+      "src/vega/agent_status_guidance.py",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "site/index.html"
+    ]
+  }
+}

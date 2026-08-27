@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "20260827T144500Z-SIMP-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SIMP-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-27T14:45:00Z",
+  "summary": "确定性 Agent State 已直接拥有路由、暂停和恢复语义；LangGraph 图、SQLite 图游标及 Agent 可选依赖已移除。",
+  "evidence": {
+    "pull_requests": [
+      92
+    ],
+    "commits": [],
+    "checks": [
+      "supervisor-tests",
+      "recovery-tests",
+      "dependency-smoke",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_runtime.py",
+      "src/vega/agent_routing.py",
+      "src/vega/agent_status_card.py",
+      "pyproject.toml",
+      ".github/workflows/ci.yml"
+    ]
+  }
+}

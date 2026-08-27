@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "20260827T144501Z-SIMP-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SIMP-02",
+  "transition": "completed",
+  "recorded_at": "2026-08-27T14:45:01Z",
+  "summary": "Workspace 对账、Candidate、Core 门禁、Observation 与路由已抽离为 Provider 无关流程；Codex Adapter 只保留宿主执行职责。",
+  "evidence": {
+    "pull_requests": [
+      92
+    ],
+    "commits": [],
+    "checks": [
+      "adapter-tests",
+      "core-tests",
+      "supervisor-tests",
+      "real-provider-dogfood",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_candidate_pipeline.py",
+      "src/vega/agent_core_observation.py",
+      "src/vega/agent_plan_scope.py",
+      "src/vega/agent_worker_evidence.py",
+      "src/vega/agent_codex_adapter.py",
+      "tests/security/test_architecture_growth.py"
+    ]
+  }
+}

@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from click.utils import strip_ansi
 from typer.testing import CliRunner
 
 from vega.agent_change_contract import (
@@ -133,7 +134,7 @@ def test_agent_start_cli_rejects_removed_legacy_plan_entry(
     )
 
     assert result.exit_code != 0
-    assert "No such option: --plan" in result.output
+    assert "No such option: --plan" in strip_ansi(result.output)
     assert not (workspace / "runs").exists()
 
 
