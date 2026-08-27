@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from click.utils import strip_ansi
 from typer.testing import CliRunner
 
 from vega.agent_change_contract import (
@@ -25,6 +25,8 @@ from vega.review_evidence import make_review_evidence
 from vega.run_status import run_status_payload
 from vega.runner import RunnerResult
 from vega.workspace_check import capture_review_workspace
+
+_ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
 def test_change_run_starts_in_isolated_worktree_and_approves_contract(
@@ -134,7 +136,7 @@ def test_agent_start_cli_rejects_removed_legacy_plan_entry(
     )
 
     assert result.exit_code != 0
-    assert "No such option: --plan" in strip_ansi(result.output)
+    assert "No such option: --plan" in _ANSI_ESCAPE_PATTERN.sub("", result.output)
     assert not (workspace / "runs").exists()
 
 
