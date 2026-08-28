@@ -3,7 +3,7 @@
 - 本目录只包含显式选择的实验与兼容入口，不是默认 Runtime，也不是第二条产品主线。
 - Experimental 可以依赖 Core；Core 不得反向依赖 Experimental。CLI 只能在用户调用对应命令时
   延迟导入实验实现，导入本身不得写文件、启动进程或改变默认配置。
-- 实验不得改变 `vega do / loop / agent` 的状态、Artifact、退出码、Finish 或成功语义。
+- 实验不得改变公开 ChangeRun 的状态、Artifact、退出码、Finish 或成功语义。
 - 新实验必须先冻结范围、变量、停止条件和结论格式。失败、超时、证据不足和不利结论必须如实保留，
   不能通过扩大样本、追加 Runtime 或修改历史标签挽救假设。
 - Goal、Memory、Assurance 和 Inspection 只做兼容维护。没有新的产品决策时，不为这些入口增加角色、

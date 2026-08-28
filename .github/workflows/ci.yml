@@ -420,11 +420,11 @@ jobs:
           python -m build --wheel --outdir dist
           python -m venv .tmp/release-validation/windows-venv
           $venvPython = Resolve-Path .tmp/release-validation/windows-venv/Scripts/python.exe
-          & $venvPython -m pip install dist/vegaloom-0.2.1-py3-none-any.whl
+          & $venvPython -m pip install dist/vegaloom-0.3.0-py3-none-any.whl
           $vegaCli = Resolve-Path .tmp/release-validation/windows-venv/Scripts/vega.exe
           & $venvPython -m pip check
           $version = & $venvPython -I -c "import vega; print(vega.__version__)"
-          if ($version.Trim() -ne "0.2.1") {
+          if ($version.Trim() -ne "0.3.0") {
             throw "Windows wheel 版本不一致：$version"
           }
           & $venvPython -I -c "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); print(AdequacyResult.__name__)"
@@ -500,27 +500,27 @@ jobs:
         run: |
           python -m pip install build twine
           python -m build --outdir dist
-          test -f dist/vegaloom-0.2.1-py3-none-any.whl
-          test -f dist/vegaloom-0.2.1.tar.gz
+          test -f dist/vegaloom-0.3.0-py3-none-any.whl
+          test -f dist/vegaloom-0.3.0.tar.gz
           python -m twine check dist/*
 
       - name: 在干净环境安装并验证 wheel
         shell: bash
         run: |
           python -m venv .tmp/release-validation/venv
-          .tmp/release-validation/venv/bin/python -m pip install dist/vegaloom-0.2.1-py3-none-any.whl
+          .tmp/release-validation/venv/bin/python -m pip install dist/vegaloom-0.3.0-py3-none-any.whl
           .tmp/release-validation/venv/bin/python -m pip check
           test "$(
             .tmp/release-validation/venv/bin/python -I -c \
               "from importlib.metadata import version; print(version('vegaloom'))"
-          )" = "0.2.1"
+          )" = "0.3.0"
           test "$(
             .tmp/release-validation/venv/bin/python -I -c \
               "import vega; print(vega.__version__)"
-          )" = "0.2.1"
+          )" = "0.3.0"
           .tmp/release-validation/venv/bin/python -I -c \
             "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); print(AdequacyResult.__name__)"
-          test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.2.1"
+          test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.3.0"
           .tmp/release-validation/venv/bin/vega --help >/dev/null
 
           empty_workspace="$(mktemp -d)"
@@ -551,9 +551,9 @@ jobs:
         run: |
           python -m venv .tmp/release-validation/agent-venv
           .tmp/release-validation/agent-venv/bin/python -m pip install \
-            dist/vegaloom-0.2.1-py3-none-any.whl
+            dist/vegaloom-0.3.0-py3-none-any.whl
           .tmp/release-validation/agent-venv/bin/python -m pip check
-          .tmp/release-validation/agent-venv/bin/vega agent capabilities \
+          .tmp/release-validation/agent-venv/bin/vega capabilities \
             > .tmp/release-validation/agent-capabilities.json
           .tmp/release-validation/agent-venv/bin/python -I - <<'PY'
           import importlib.util
@@ -586,11 +586,11 @@ jobs:
         run: |
           python -m venv .tmp/release-validation/sdist-venv
           .tmp/release-validation/sdist-venv/bin/python -m pip install \
-            dist/vegaloom-0.2.1.tar.gz
+            dist/vegaloom-0.3.0.tar.gz
           .tmp/release-validation/sdist-venv/bin/python -m pip check
           test "$(
             .tmp/release-validation/sdist-venv/bin/python -I -c \
               "import vega; print(vega.__version__)"
-          )" = "0.2.1"
+          )" = "0.3.0"
           .tmp/release-validation/sdist-venv/bin/python -I -c \
             "import importlib.util, vega; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed)"

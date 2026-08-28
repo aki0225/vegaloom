@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta
       name="description"
-      content="Vega 是 AI Coding Agent + Workflow Harness。它以独立写审会话、确定性验证和可恢复状态管理约束真实代码任务。"
+      content="Vega 是软件工程 Agent：持久 Worker、独立 Reviewer、Git Candidate 和项目验证共同管理真实代码变更。"
     >
     <meta name="theme-color" content="#f2e8d7">
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Vega — AI Coding Agent + Workflow Harness">
+    <meta property="og:title" content="Vega — 软件工程 Agent">
     <meta
       property="og:description"
-      content="One writes, one reviews. 保存 Plan、Checkpoint、Workspace 状态和验证结果，证据不足时 fail-closed。"
+      content="One writes, one reviews. 主会话可看进度、可干预；最终由 Git、验证和独立审查决定。"
     >
     <meta
       property="og:image"
       content="https://aki0225.github.io/vegaloom/assets/og-image.png"
     >
-    <title>Vega — AI Coding Agent + Workflow Harness</title>
+    <title>Vega — 软件工程 Agent</title>
     <script>
       (() => {
         const storageKey = "vega-showcase-theme";
@@ -48,12 +48,12 @@
         <span class="brand-mark" aria-hidden="true">V</span>
         <span>
           <strong>Vega</strong>
-          <small>Agent + Harness</small>
+          <small>Engineering Agent</small>
         </span>
       </a>
 
       <nav class="header-links" aria-label="站点链接">
-        <span class="version-chip">证据 v0.2.0</span>
+        <span class="version-chip">v0.3.0 RC</span>
         <a href="#replay">发布验收</a>
         <a href="#cases">Reviewer 案例</a>
         <button
@@ -79,15 +79,14 @@
     <main id="main-content">
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow">AI CODING AGENT + WORKFLOW HARNESS</p>
+          <p class="eyebrow">PERSISTENT CODING AGENT CONTROL</p>
           <h1 id="hero-title">
             一个写，一个审。<br>
             <em>证据决定能否交付。</em>
           </h1>
           <p class="hero-lead">
-            Vega 用 Supervisor Agent 管理变更合同、Work Item、Checkpoint 和恢复，用 Core Harness
-            核对当前 Diff、验证、风险与独立评审。Worker 中断后先核对现场，再决定继续、
-            调整执行计划或交给人。
+            主会话先调查并固定变更边界；Worker Thread 持续实现，Reviewer Thread 独立只读。
+            你能看到 Work Item、文件变化、验证和审查进度，也能随时补充指令或接管现场。
           </p>
           <div class="hero-actions">
             <a class="button button--primary" href="#replay">查看发布验收</a>
@@ -121,8 +120,8 @@
 
       <section class="responsibility-strip" aria-label="宿主 Agent 与 Vega 的职责边界">
         <p class="responsibility-strip__copy">
-          Codex / Claude Code 继续读代码、改文件和跑命令。Vega 管理
-          <code>Change Contract</code>、单 Writer、Checkpoint 和 Finish。
+          Codex 负责代码和工具。Vega 管
+          <code>Change Contract</code>、持久会话、Git Candidate、验证和 Reviewer。
         </p>
       </section>
 
@@ -130,7 +129,7 @@
         <header class="section-heading section-heading--split">
           <div>
             <p class="section-number">01 / RELEASE ACCEPTANCE</p>
-            <h2 id="replay-title">v0.2.0 发布验收回放</h2>
+            <h2 id="replay-title">公开验收回放：v0.2.0</h2>
           </div>
           <p class="section-intro">
             这是一次设置页并发缺陷修复。任务经历了 partial WIP、fresh clone、
@@ -465,8 +464,8 @@
               <code>ready_to_commit</code>。
             </p>
             <p class="quickstart-boundary">
-              当前自动 Worker 使用 Codex CLI；Claude Code 主会话通过
-              <code>assist</code> 流程接入。
+              v0.3.0 的自动 Provider Adapter 先支持 Codex App Server；其他 Coding Agent
+              后续按同一 ChangeRun 合同接入。
             </p>
           </div>
 
@@ -482,7 +481,7 @@ python -m pip install -e .
 $targetRepo = "&lt;target-repo&gt;"
 vega adapters init codex --repo $targetRepo
 Set-Location $targetRepo
-vega agent capabilities</code></pre>
+vega capabilities</code></pre>
             <div class="terminal-prompt">
               <span>Codex 主会话入口</span>
               <code>$vega-agent</code>
@@ -504,7 +503,7 @@ vega agent capabilities</code></pre>
       <nav aria-label="页脚链接">
         <a href="https://github.com/aki0225/vegaloom">GitHub</a>
         <a href="https://github.com/aki0225/vegaloom/blob/main/README.md">使用文档</a>
-        <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.2.0">v0.2.0</a>
+        <a href="https://github.com/aki0225/vegaloom/blob/main/docs/RELEASE-NOTES-0.3.0.md">v0.3.0 候选</a>
         <a href="https://github.com/aki0225/vegaloom/blob/main/LICENSE">MIT License</a>
       </nav>
     </footer>

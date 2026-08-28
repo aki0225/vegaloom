@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "20260828T134933Z-SESSION-03-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SESSION-03",
+  "transition": "completed",
+  "recorded_at": "2026-08-28T13:49:33Z",
+  "summary": "ChangeRun 已使用统一顶层命令，旧 do、loop、agent 和 goal 入口退出公开接口；状态卡与最终报告继续从现有 Git 和 Gate 事实确定性生成。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "cli-contract-tests",
+      "status-tests",
+      "final-report-tests",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/cli.py",
+      "src/vega/agent_cli.py",
+      "src/vega/agent_run_status.py",
+      "src/vega/agent_finalization.py",
+      "docs/USAGE-WALKTHROUGH.md"
+    ]
+  }
+}

@@ -282,14 +282,16 @@ def _project_work_item(
     *,
     status: str,
 ) -> AgentWorkItem:
+    is_final_work_item = item.work_item_id == execution_plan.work_items[-1].work_item_id
+    verification_sources = [*item.verification]
+    if is_final_work_item:
+        verification_sources.extend(contract.required_verification)
+        verification_sources.extend(execution_plan.additional_checks)
+    elif not verification_sources:
+        # 中间项没有局部验证时保守回退到合同命令，避免无验证推进。
+        verification_sources.extend(contract.required_verification)
     verification = list(
-        dict.fromkeys(
-            [
-                *contract.required_verification,
-                *item.verification,
-                *execution_plan.additional_checks,
-            ]
-        )
+        dict.fromkeys(verification_sources)
     )
     external_side_effects = (
         "known"

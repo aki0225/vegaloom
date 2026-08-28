@@ -11,6 +11,7 @@ from .agent_contract import (
     AgentPlan,
     AgentState,
     AgentStatusCard,
+    ProviderSessionStatus,
 )
 from .agent_persistence import load_agent_checkpoint
 from .agent_repository_binding import capture_bound_workspace
@@ -18,12 +19,13 @@ from .agent_run_status import read_live_child_stage, trusted_worker_label
 from .agent_status_evidence import build_supervisor_evidence
 from .agent_status_history import status_history_note
 from .agent_visibility import render_agent_status_card
+from .provider_session import session_status_projection
 from .redaction import redact_text, write_redacted_text
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
 _SNAPSHOT_NOTICE = (
-    "> 这是生成时快照；实时状态请使用 `vega agent status --run <run-id>` 查看。\n\n"
+    "> 这是生成时快照；实时状态请使用 `vega status --run <run-id>` 查看。\n\n"
 )
 
 
@@ -201,6 +203,7 @@ def _build_status_card(
         workspace_issue=workspace_issue,
         evidence_issue=evidence_issue,
     )
+    session_rows, provider_session_warning = session_status_projection(run_dir)
     return AgentStatusCard(
         run_id=state.run_id,
         task_id=state.task_id,
@@ -248,6 +251,11 @@ def _build_status_card(
         history_note=status_history_note(state, checkpoint, observation),
         plan_risk_notes=list(current_item.risk_notes) if current_item else [],
         supervisor_evidence=supervisor_evidence,
+        provider_sessions=[
+            ProviderSessionStatus.model_validate(row)
+            for row in session_rows
+        ],
+        provider_session_warning=provider_session_warning,
     )
 
 

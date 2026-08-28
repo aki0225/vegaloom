@@ -63,6 +63,12 @@ def compile_task_brief(
         normalized_refs = tuple(
             dict.fromkeys([*checkpoint.evidence_refs, *normalized_refs])
         )
+    fact_title = (
+        "当前已确认事实"
+        if confirmed_facts
+        else "批准时观察事实（可能已被前序修改改变）"
+    )
+    fact_values = confirmed_facts or plan.observed_facts
 
     sections = [
         ("任务目标", [plan.user_goal]),
@@ -97,7 +103,7 @@ def compile_task_brief(
                 *(work_item.risk_notes or ["无"]),
             ],
         ),
-        ("已确认事实", _complete_lines(confirmed_facts or plan.observed_facts)),
+        (fact_title, _complete_lines(fact_values)),
         ("失败尝试", _complete_lines(failed_attempts)),
         ("门禁状态", _render_gate_summary(gate_summary)),
         ("当前现场", _render_checkpoint(checkpoint)),

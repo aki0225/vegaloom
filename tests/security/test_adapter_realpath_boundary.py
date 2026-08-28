@@ -58,7 +58,7 @@ def test_adapter_init_rejects_external_directory_link(
     outside.mkdir()
     outside_skills = [
         outside / "skills" / skill_name / "SKILL.md"
-        for skill_name in ("vega-agent", "vega-loop", "vega-review")
+        for skill_name in ("vega-agent",)
     ]
     if preexisting:
         for skill_path in outside_skills:
@@ -80,7 +80,7 @@ def test_adapter_init_rejects_external_directory_link(
         result = CliRunner().invoke(app, args)
 
         assert result.exit_code != 0
-        assert ".agents/skills/vega-loop/SKILL.md" in result.output
+        assert ".agents/skills/vega-agent/SKILL.md" in result.output
         assert str(outside) not in result.output
         if preexisting:
             assert all(
@@ -93,24 +93,23 @@ def test_adapter_init_rejects_external_directory_link(
         _remove_directory_link(link_path)
 
 
-def test_adapter_init_preflights_all_targets_before_writing(tmp_path: Path) -> None:
+def test_adapter_init_preflights_target_before_writing(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     skills_dir = repo / ".agents" / "skills"
-    outside = tmp_path / "outside-review"
+    outside = tmp_path / "outside-agent"
     skills_dir.mkdir(parents=True)
     outside.mkdir()
-    review_link = skills_dir / "vega-review"
-    _create_directory_link(review_link, outside)
+    agent_link = skills_dir / "vega-agent"
+    _create_directory_link(agent_link, outside)
 
     try:
         with pytest.raises(ValueError) as exc_info:
             init_adapter(repo, "codex")
 
         assert "adapter 写入路径越过目标仓库边界" in str(exc_info.value)
-        assert not skills_dir.joinpath("vega-loop", "SKILL.md").exists()
         assert not outside.joinpath("SKILL.md").exists()
     finally:
-        _remove_directory_link(review_link)
+        _remove_directory_link(agent_link)
 
 
 def test_adapter_init_allows_directory_link_resolving_inside_repo(tmp_path: Path) -> None:
@@ -128,7 +127,7 @@ def test_adapter_init_allows_directory_link_resolving_inside_repo(tmp_path: Path
         )
 
         assert result.exit_code == 0, result.output
-        for skill_name in ("vega-agent", "vega-loop", "vega-review"):
+        for skill_name in ("vega-agent",):
             skill_path = link_path / "skills" / skill_name / "SKILL.md"
             assert skill_path.exists()
             assert skill_path.resolve().is_relative_to(repo.resolve())

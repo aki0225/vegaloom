@@ -236,7 +236,7 @@ def _handoff_notes(
     if final_report:
         notes.append("已存在 final-report.md，可作为交付总结基础。")
     else:
-        notes.append("尚未生成 final-report.md，需要先完成 loop continue 或人工总结。")
+        notes.append("尚未生成 final-report.md，需要所属 ChangeRun 完成后置门禁。")
     if state.status == "success":
         notes.append("loop 状态为 success，可以进入人工提交前检查。")
     elif state.status == "needs_human":

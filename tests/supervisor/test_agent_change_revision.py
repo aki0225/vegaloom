@@ -489,7 +489,7 @@ def test_repair_decision_respects_explicit_stop_budgets(
 
 
 def test_agent_replan_command_is_registered() -> None:
-    result = CliRunner().invoke(app, ["agent", "replan", "--help"])
+    result = CliRunner().invoke(app, ["revise", "--help"])
     output = _ANSI_ESCAPE_PATTERN.sub("", result.output)
 
     assert result.exit_code == 0, result.output

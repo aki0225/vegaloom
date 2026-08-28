@@ -41,11 +41,9 @@ def test_cli_handoff_writes_card_checkpoint_and_manifest(
     result = CliRunner().invoke(
         app,
         [
-            "agent",
-            "checkpoint",
+            "handoff",
             "--run",
             run_id,
-            "--handoff",
             "--reason",
             "准备换机继续当前 Work Item",
         ],

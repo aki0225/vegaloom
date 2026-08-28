@@ -29,6 +29,7 @@ from .agent_git_candidate import (
     validate_candidate_binding,
 )
 from .agent_operation import operation_ref
+from .agent_contract import AgentObservation
 from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import capture_bound_workspace
@@ -50,6 +51,9 @@ class CandidatePipeline:
     ]
     observe_failure: Callable[..., AgentRun]
     event_reporter: Callable[[str], None]
+    final_observation_reviewer: (
+        Callable[[AgentObservation], AgentObservation] | None
+    ) = None
 
     def reconcile(self, executed: ExecutedWorkerAttempt) -> AgentRun:
         return _AttemptReconciler(self, executed).run()
@@ -274,6 +278,11 @@ class _AttemptReconciler:
             evidence_refs=[*refs, summary_ref],
             external_side_effects=self.prepared.external_side_effects,
         )
+        if (
+            observation.all_work_items_completed
+            and self.pipeline.final_observation_reviewer is not None
+        ):
+            observation = self.pipeline.final_observation_reviewer(observation)
         self.pipeline.event_reporter("Workspace 与现有 Core Artifact 已完成对账")
         routed = self.pipeline.runtime.observe_machine(
             self.prepared.run_dir.name,

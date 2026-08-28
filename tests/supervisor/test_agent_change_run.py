@@ -67,6 +67,13 @@ def test_change_run_starts_in_isolated_worktree_and_approves_contract(
     assert approved.state.current_work_item == "WI-01"
     assert approved.plan.approval_is_current()
     assert len(approved.plan.work_items) == 2
+    assert approved.plan.work_items[0].verification == [
+        "python -m pytest tests/test_one.py -q"
+    ]
+    assert approved.plan.work_items[1].verification == [
+        "python -m pytest tests/test_two.py -q",
+        "python -m compileall -q src",
+    ]
 
 
 def test_agent_start_cli_requires_change_contract_and_execution_plan(
@@ -91,7 +98,6 @@ def test_agent_start_cli_requires_change_contract_and_execution_plan(
     result = CliRunner().invoke(
         app,
         [
-            "agent",
             "start",
             "--repo",
             str(repo),
@@ -103,7 +109,7 @@ def test_agent_start_cli_requires_change_contract_and_execution_plan(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Agent 已创建" in result.output
+    assert "ChangeRun 已创建" in result.output
     run_dirs = list((workspace / "runs").iterdir())
     assert len(run_dirs) == 1
     state = json.loads(
@@ -126,7 +132,6 @@ def test_agent_start_cli_rejects_removed_legacy_plan_entry(
     result = CliRunner().invoke(
         app,
         [
-            "agent",
             "start",
             "--repo",
             str(repo),
@@ -201,7 +206,7 @@ def test_change_run_accepts_candidate_and_advances_to_next_work_item(
     status_payload = run_status_payload(workspace, result.run_dir.name)
     assert status_payload["agent_run_kind"] == "change"
     assert status_payload["accepted_checkpoint_sha"] == result.state.accepted_checkpoint_sha
-    assert any("vega agent run" in step for step in status_payload["next_steps"])
+    assert any("vega run" in step for step in status_payload["next_steps"])
     assert any(
         path.endswith("change-contract.json")
         for path in status_payload["key_artifacts"]
@@ -278,6 +283,62 @@ def test_change_run_completes_final_work_item(tmp_path: Path) -> None:
     assert result.state.active_candidate_sha is None
     assert [item.status for item in result.plan.work_items] == ["completed"]
     assert reviewer.calls == 1
+    report = json.loads(
+        (result.run_dir / "agent-final-report.json").read_text(encoding="utf-8")
+    )
+    assert report["candidate"]["changed_files"] == ["src/one.py"]
+    assert report["integration_review"] is None
+    assert report["supervisor_gates"] == {
+        "verification": "passed",
+        "risk": "passed",
+        "review": "passed",
+        "external_side_effects": "none",
+    }
+    assert (result.run_dir / "agent-final-report.md").is_file()
+
+
+def test_multi_item_change_run_adds_one_final_integration_review(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    started = runtime.start_change(
+        repo,
+        contract=_contract(),
+        execution_plan=_execution_plan(),
+    )
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    reviewer = _ReviewerRunner()
+    loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
+    adapter = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_WorkerRunner(["src/one.py", "src/two.py"]),
+        loop_runtime=loop_runtime,
+        finish_runtime=_ChangeFinishRuntime(loop_runtime),
+    )
+
+    result = adapter.run(approved.run_dir.name, timeout_seconds=60)
+
+    assert result.state.phase == "completed"
+    assert reviewer.calls == 3
+    integration_paths = list(
+        (result.run_dir / "integration-reviews").glob("*.json")
+    )
+    assert len(integration_paths) == 1
+    integration = json.loads(
+        integration_paths[0].read_text(encoding="utf-8")
+    )
+    assert integration["status"] == "approve"
+    report = json.loads(
+        (result.run_dir / "agent-final-report.json").read_text(encoding="utf-8")
+    )
+    assert report["candidate"]["changed_files"] == [
+        "src/one.py",
+        "src/two.py",
+    ]
+    assert report["integration_review"]["status"] == "approve"
 
 
 @pytest.mark.parametrize("allowed_action", ["next", "repair"])
@@ -459,20 +520,28 @@ class _ReviewerRunner:
         timeout_seconds: int,
         execution_context: RunnerExecutionContext | None = None,
     ) -> RunnerResult:
-        del prompt, timeout_seconds, execution_context
+        del timeout_seconds, execution_context
         assert sandbox == "read-only"
         self.calls += 1
-        reviewed_files = [
-            line
-            for line in _git(
-                repo_path,
-                "show",
-                "--format=",
-                "--name-only",
-                "HEAD",
-            ).splitlines()
-            if line
-        ]
+        final_batch = re.search(
+            r"必须在 reviewed_files 中完整列出：(\[[^\n]+\])",
+            prompt,
+        )
+        reviewed_files = (
+            json.loads(final_batch.group(1))
+            if final_batch is not None
+            else [
+                line
+                for line in _git(
+                    repo_path,
+                    "show",
+                    "--format=",
+                    "--name-only",
+                    "HEAD",
+                ).splitlines()
+                if line
+            ]
+        )
         verdict = self.verdicts[min(self.calls - 1, len(self.verdicts) - 1)]
         findings = (
             [
@@ -518,6 +587,7 @@ class _ChangeLoopRuntime:
     def __init__(self, workspace: Path, reviewer: _ReviewerRunner) -> None:
         self.workspace = workspace
         self.reviewer = reviewer
+        self.reviewer_runner = reviewer
         self.children: dict[str, Path] = {}
         self.review_payloads: dict[str, dict[str, object]] = {}
 

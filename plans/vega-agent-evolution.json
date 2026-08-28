@@ -277,6 +277,88 @@
         "repository-hygiene",
         "pr-ci"
       ]
+    },
+    {
+      "id": "SESSION-01",
+      "title": "接入持久 Provider Session",
+      "summary": "以 Provider 无关合同保存会话协调状态，并通过 Codex App Server 复用 Worker 和 Reviewer Thread；现有 Core 事实与成功语义保持不变。",
+      "depends_on": [
+        "SIMP-04"
+      ],
+      "acceptance": [
+        "Provider Session 只保存本机会话协调信息，不参与 Verification、Risk、Reviewer 或 Finish 裁决",
+        "Codex App Server 支持启动、恢复、Turn、超时、停止和异常协议处理",
+        "App Server 不可用时默认明确失败，只有显式 fresh-session 才使用短生命周期 codex exec",
+        "新增实现复用现有 Execution Control、Trace 和 Artifact，不建立平行状态系统"
+      ],
+      "required_checks": [
+        "app-server-protocol-tests",
+        "execution-control-tests",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "SESSION-02",
+      "title": "完成持久 Worker 与独立 Reviewer",
+      "summary": "在一个 ChangeRun 内复用 Worker Thread，按 Work Item 隔离 Reviewer Thread，并支持安全 Steer、人工响应和会话接管。",
+      "depends_on": [
+        "SESSION-01"
+      ],
+      "acceptance": [
+        "Worker 在 Repair 和后续 Work Item 中复用同一 Thread，合同实质变化后创建新 Thread",
+        "Reviewer 不继承 Worker Thread、完整聊天或写权限，同一 Work Item 的复查可以复用 Reviewer Thread",
+        "Steer 不能修改冻结合同，人工输入和审批请求由主会话显式处理",
+        "Takeover 与 Reclaim 保证同一时刻只有一个会话所有者"
+      ],
+      "required_checks": [
+        "persistent-session-tests",
+        "supervisor-tests",
+        "security-tests",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "SESSION-03",
+      "title": "统一 Agent 入口与交付报告",
+      "summary": "使用一套顶层命令运行 ChangeRun，删除旧 do、loop、agent 和 goal 入口，并从现有事实确定性生成主会话状态与最终报告。",
+      "depends_on": [
+        "SESSION-02"
+      ],
+      "acceptance": [
+        "公开入口统一为 start、approve、run、status、watch、steer、respond、revise、resume、stop 和 handoff 等顶层命令",
+        "旧入口没有兼容别名，仍被 ChangeRun 使用的 Core 实现继续作为内部能力",
+        "状态卡显示会话、当前动作、Diff、验证、风险和待处理交互，不显示推理、凭据或原始命令参数",
+        "最终报告只组合 Git、Verification、Risk、Reviewer 和结构化 Worker Claim，不调用额外模型总结"
+      ],
+      "required_checks": [
+        "cli-contract-tests",
+        "status-tests",
+        "final-report-tests",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "SESSION-04",
+      "title": "完成真实 Agent 验收与 v0.3.0 准备",
+      "summary": "使用 Vega 自身完成一次持久会话真实任务，核对人工操作数、恢复、审查和报告，再更新公开文档与发布材料。",
+      "depends_on": [
+        "SESSION-03"
+      ],
+      "acceptance": [
+        "真实 Codex App Server 任务证明 Worker Thread 复用、独立 Reviewer、主会话 Steer 和确定性最终报告",
+        "真实运行不需要人工转贴 Worker 与 Reviewer 内容，失败结果按原样保留",
+        "新增测试只覆盖公共合同、故障恢复和安全边界，不复制私有实现或旧入口测试",
+        "README、产品合同、架构、使用说明、Roadmap 和 v0.3.0 发布说明与实际能力一致"
+      ],
+      "required_checks": [
+        "real-agent-dogfood",
+        "full-test-shards",
+        "package-smoke",
+        "repository-hygiene",
+        "pr-ci"
+      ]
     }
   ]
 }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .agent_cli import agent_app
+from .agent_cli import register_agent_commands
 from .cli import app
 
 
-app.add_typer(agent_app, name="agent")
+register_agent_commands(app)

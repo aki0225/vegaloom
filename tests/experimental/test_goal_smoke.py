@@ -6,9 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
-from vega.cli import app
 from vega.execution_control import (
     RunnerExecutionContext,
 )
@@ -209,65 +207,6 @@ def _commit_repo_paths(repo_dir: Path, *paths: str, message: str = "test update"
     )
 
 
-def test_goal_start_creates_contract_state_trace_and_progress(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    goal_file = _write_goal_file(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        ["goal", "start", "--repo", str(repo_dir), "--input", str(goal_file), "--scope", "refactor"],
-    )
-
-    assert result.exit_code == 0, result.output
-    run_dir = next(path for path in tmp_path.joinpath("runs").iterdir() if path.name.endswith("-goal"))
-    for artifact in [
-        "state.json",
-        "goal-state.json",
-        "goal-trace.jsonl",
-        "goal-contract.md",
-        "goal-contract.json",
-        "progress.md",
-    ]:
-        assert run_dir.joinpath(artifact).exists(), artifact
-    state = json.loads(run_dir.joinpath("goal-state.json").read_text(encoding="utf-8"))
-    assert state["status"] == "created"
-    assert state["scope_profile"] == "refactor"
-    assert state["checkpoint_count"] == 0
-    assert "不调用 worker" in run_dir.joinpath("goal-contract.md").read_text(encoding="utf-8")
-    assert not tmp_path.joinpath("memory", "ledger.jsonl").exists()
-
-
-def test_goal_pause_resume_stop_and_status_are_manual_state_transitions(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    goal_file = _write_goal_file(tmp_path)
-    run_dir = GoalRuntime(tmp_path).start(repo_dir, goal_file.read_text(encoding="utf-8"), str(goal_file), None)
-    monkeypatch.chdir(tmp_path)
-
-    pause = CliRunner().invoke(
-        app,
-        ["goal", "pause", "--run", run_dir.name, "--reason", "等待人工确认"],
-    )
-    resume = CliRunner().invoke(app, ["goal", "resume", "--run", run_dir.name])
-    stop = CliRunner().invoke(
-        app,
-        ["goal", "stop", "--run", run_dir.name, "--reason", "方向变化"],
-    )
-    status = CliRunner().invoke(app, ["goal", "status", "--run", run_dir.name])
-
-    assert pause.exit_code == 0, pause.output
-    assert resume.exit_code == 0, resume.output
-    assert stop.exit_code == 0, stop.output
-    assert status.exit_code == 0, status.output
-    state = json.loads(run_dir.joinpath("goal-state.json").read_text(encoding="utf-8"))
-    assert state["status"] == "stopped"
-    assert state["current_step"] == "stopped"
-    assert "stop-report.md" in state["artifacts"]
-    assert run_dir.joinpath("stop-report.md").exists()
-    assert "类型：`goal`" in status.output
-
 
 def test_goal_step_only_writes_checkpoint_plan_without_worker_or_repo_changes(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
@@ -378,46 +317,6 @@ def test_goal_finish_evidence_rejects_forged_valid_summary_after_artifact_tamper
     assert "finish_artifact_integrity_mismatch" in evidence["validation_summary"]
     assert "finish_status_mismatch" in evidence["validation_summary"]
 
-
-def test_goal_checkpoint_done_writes_report_and_updates_status(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_clean_git_repo(repo_dir)
-    goal_file = _write_goal_file(tmp_path)
-    runtime = GoalRuntime(tmp_path)
-    run_dir = runtime.start(repo_dir, goal_file.read_text(encoding="utf-8"), str(goal_file), None)
-    runtime.step(run_dir.name)
-    child_loop = _create_successful_loop_run(tmp_path, repo_dir)
-    runtime.attach(run_dir.name, "01", child_loop.name, "loop", "loop 已通过")
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "goal",
-            "checkpoint-done",
-            "--run",
-            run_dir.name,
-            "--checkpoint",
-            "01",
-            "--note",
-            "checkpoint 01 已完成",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    state = json.loads(run_dir.joinpath("goal-state.json").read_text(encoding="utf-8"))
-    assert state["status"] == "checkpoint_done"
-    assert state["current_step"] == "checkpoint_done"
-    checkpoint = state["checkpoint_records"][0]
-    assert checkpoint["status"] == "done"
-    assert checkpoint["completion_mode"] == "validated"
-    assert checkpoint["completed_note"] == "checkpoint 01 已完成"
-    report = run_dir / "checkpoints" / "01" / "checkpoint-report.md"
-    assert report.exists()
-    assert child_loop.name in report.read_text(encoding="utf-8")
-    payload = run_status_payload(tmp_path, run_dir.name)
-    assert any("goal step" in item for item in payload["next_steps"])
-    assert any("checkpoint-report.md" in item for item in payload["key_artifacts"])
 
 
 def test_goal_rejects_parallel_checkpoint_and_missing_evidence(tmp_path) -> None:
@@ -548,39 +447,6 @@ def test_goal_manual_evidence_rejects_sensitive_path_without_persisting_it(tmp_p
     assert not run_dir.joinpath("checkpoints", "01", "checkpoint-evidence.json").exists()
 
 
-def test_goal_complete_distinguishes_success_from_stop(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_clean_git_repo(repo_dir)
-    goal_file = _write_goal_file(tmp_path)
-    runtime = GoalRuntime(tmp_path)
-    run_dir = runtime.start(repo_dir, goal_file.read_text(encoding="utf-8"), str(goal_file), None)
-    runtime.step(run_dir.name)
-    child_loop = _create_successful_loop_run(tmp_path, repo_dir)
-    runtime.attach(run_dir.name, "01", child_loop.name, "loop", "loop 已通过")
-    runtime.checkpoint_done(run_dir.name, "01", note="阶段完成")
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "goal",
-            "complete",
-            "--run",
-            run_dir.name,
-            "--note",
-            "已核对 pytest、ruff 和 checkpoint 证据",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    state = json.loads(run_dir.joinpath("goal-state.json").read_text(encoding="utf-8"))
-    assert state["status"] == "success"
-    assert state["current_step"] == "completed"
-    assert run_dir.joinpath("goal-final-report.md").exists()
-    assert run_dir.joinpath("goal-eval.md").exists()
-    assert all(item.startswith("PASS:") for item in state["eval_results"])
-    assert "Goal 已完成" in result.output
-
 
 def test_goal_complete_revalidates_checkpoint_evidence(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
@@ -605,33 +471,6 @@ def test_goal_complete_revalidates_checkpoint_evidence(tmp_path) -> None:
     assert not run_dir.joinpath("goal-final-report.md").exists()
 
 
-def test_goal_attach_cli_rejects_unknown_evidence_type(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    goal_file = _write_goal_file(tmp_path)
-    run_dir = GoalRuntime(tmp_path).start(repo_dir, goal_file.read_text(encoding="utf-8"), str(goal_file), None)
-    GoalRuntime(tmp_path).step(run_dir.name)
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "goal",
-            "attach",
-            "--run",
-            run_dir.name,
-            "--checkpoint",
-            "01",
-            "--ref",
-            "child-run",
-            "--type",
-            "worker",
-        ],
-    )
-
-    assert result.exit_code != 0
-    assert "--type 只能是" in _strip_ansi(result.output)
-
 
 def test_goal_recover_turns_running_goal_into_needs_human(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
@@ -649,27 +488,6 @@ def test_goal_recover_turns_running_goal_into_needs_human(tmp_path) -> None:
     assert recovered.joinpath("recovery-report.md").exists()
     assert "CLI 中断" in recovered.joinpath("recovery-report.md").read_text(encoding="utf-8")
 
-
-def test_goal_cli_latest_and_status_recognize_goal_runs(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    goal_file = _write_goal_file(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    started = CliRunner().invoke(
-        app,
-        ["goal", "start", "--repo", str(repo_dir), "--input", str(goal_file)],
-    )
-    assert started.exit_code == 0, started.output
-    run_dir = next(path for path in tmp_path.joinpath("runs").iterdir() if path.name.endswith("-goal"))
-
-    status_result = CliRunner().invoke(app, ["status", "--run", run_dir.name, "--json"])
-    latest_result = CliRunner().invoke(app, ["latest", "--kind", "goal", "--json"])
-
-    assert status_result.exit_code == 0, status_result.output
-    assert latest_result.exit_code == 0, latest_result.output
-    assert json.loads(status_result.output)["kind"] == "goal"
-    assert json.loads(latest_result.output)["run_id"] == run_dir.name
 
 
 def test_goal_status_highlights_latest_checkpoint_plan(tmp_path) -> None:

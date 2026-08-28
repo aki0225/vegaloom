@@ -178,7 +178,7 @@ def render_workspace_fix_prompt(next_iteration: int) -> str:
             "Vega 只排除明确的 harness-owned 路径。",
             "- Vega 不会自动删除文件、恢复 Git 状态或终止外部进程。",
             "",
-            "清理或确认完成后，再运行 `vega loop continue --repo <repo> --run <run>` 继续复盘与审查。",
+            "清理或确认完成后，回到所属 ChangeRun 继续复盘与审查。",
         ]
     ).rstrip() + "\n"
 
@@ -193,7 +193,7 @@ def render_tracked_baseline_fix_prompt(next_iteration: int) -> str:
             "",
             "Vega 无法可靠区分这些历史修改与本轮 worker 的产物，因此没有启动 worker。",
             "请先人工检查、提交、暂存外部变更到其他分支或恢复无关 diff；确认工作区干净后再重开 auto loop。",
-            "如果这些变更本来就是主会话/人工完成的实现，请使用 `vega loop continue` 或独立 reflect/review 流程，",
+            "如果这些变更本来就是主会话/人工完成的实现，请交给所属 ChangeRun 重新对账，",
             "不要把它们归因给新的 auto worker。",
         ]
     ).rstrip() + "\n"

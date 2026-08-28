@@ -7,10 +7,8 @@ from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 
-from typer.testing import CliRunner
 
 from vega import git_read as git_read_module
-from vega.cli import app
 from vega.experimental.inspection import eval as eval_runner
 from vega.experimental.inspection.context_loader import load_target_context, parse_target_files
 from vega.experimental.inspection.llm_client import LLMClient
@@ -50,18 +48,6 @@ def test_packaged_baseline_loop_is_available_without_workspace_config(tmp_path: 
     assert [spec.name for spec in specs] == ["engineering-change"]
     assert load_loop_spec(tmp_path, "engineering-change").name == "engineering-change"
 
-
-def test_list_loops_cli_uses_packaged_baseline_in_empty_workspace(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(app, ["list-loops"])
-
-    assert result.exit_code == 0
-    assert "engineering-change" in result.output
-    assert "未找到 loop 配置" not in result.output
 
 
 def _clear_vega_env(monkeypatch) -> None:
@@ -328,40 +314,6 @@ def test_llm_client_from_env_uses_safe_defaults(monkeypatch) -> None:
     assert client.timeout_seconds == 180.0
 
 
-def test_cli_run_creates_core_artifacts_without_memory_proposal(tmp_path, monkeypatch) -> None:
-    _clear_vega_env(monkeypatch)
-    _copy_loop_spec(tmp_path)
-    task_file, repo_dir = _write_task_and_repo(tmp_path)
-    tmp_path.joinpath("memory").mkdir()
-
-    monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(
-        app,
-        ["run", "engineering-change", "--task", str(task_file), "--repo", str(repo_dir)],
-    )
-
-    assert result.exit_code == 1, result.output
-    assert "运行失败" in result.output
-    run_dirs = list(tmp_path.joinpath("runs").iterdir())
-    assert len(run_dirs) == 1
-    run_dir = run_dirs[0]
-    for artifact in [
-        "state.json",
-        "trace.jsonl",
-        "plan.md",
-        "report.md",
-        "review.md",
-        "eval.md",
-    ]:
-        assert run_dir.joinpath(artifact).exists(), artifact
-
-    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
-    assert state["status"] == "failed"
-    assert state["memory_proposals"] == []
-    assert not run_dir.joinpath("memory-proposals.jsonl").exists()
-    assert "PASS: artifact 存在：eval.md" in run_dir.joinpath("eval.md").read_text(encoding="utf-8")
-    assert not tmp_path.joinpath("memory", "ledger.jsonl").exists()
-
 
 def test_runtime_uses_mock_llm_for_plan_and_report(tmp_path, monkeypatch) -> None:
     _clear_vega_env(monkeypatch)
@@ -518,37 +470,6 @@ def test_llm_exception_falls_back_and_marks_unanswered_run_failed(
     assert "llm_plan_failed" in trace_text
     assert "llm_report_failed" in trace_text
 
-
-def test_artifacts_do_not_contain_api_key_when_llm_falls_back(tmp_path, monkeypatch) -> None:
-    _copy_loop_spec(tmp_path)
-    task_file, repo_dir = _write_task_and_repo(tmp_path)
-    monkeypatch.setenv("VEGA_API_KEY", "sk-test-secret")
-    monkeypatch.setenv("VEGA_BASE_URL", "https://example.invalid/v1")
-    monkeypatch.setenv("VEGA_MODEL", "gpt-5.5")
-    monkeypatch.setenv("VEGA_REASONING_EFFORT", "xhigh")
-
-    def fail_without_leaking_secret(*args, **kwargs):
-        raise RuntimeError("simulated provider failure with sk-test-secret")
-
-    monkeypatch.setattr(
-        "vega.experimental.inspection.llm_client.LLMClient._chat",
-        fail_without_leaking_secret,
-    )
-
-    monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(
-        app,
-        ["run", "engineering-change", "--task", str(task_file), "--repo", str(repo_dir)],
-    )
-
-    assert result.exit_code == 1, result.output
-    assert "运行失败：status=failed" in result.output
-    artifact_text = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in next(tmp_path.joinpath("runs").iterdir()).iterdir()
-        if path.is_file()
-    )
-    assert "sk-test-secret" not in artifact_text
 
 
 def test_repo_run_check_allows_only_documented_checks(tmp_path, monkeypatch) -> None:

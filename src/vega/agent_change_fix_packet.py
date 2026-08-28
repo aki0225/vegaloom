@@ -73,7 +73,8 @@ def write_change_fix_packet(
         run_dir,
         observation,
     )
-    findings = _finish_findings(finish)
+    findings = _observation_findings(run_dir, observation, finish)
+    integration_refs = _integration_review_refs(observation)
     required_actions = _fix_required_actions(findings, decision.reason)
     repair_round = budget.repair_rounds_used + 1
     packet = ChangeFixPacket(
@@ -98,6 +99,7 @@ def write_change_fix_packet(
             f"observations/{observation.observation_id}.json",
             f"decisions/{decision.decision_id}.json",
             child_ref,
+            *integration_refs,
         ],
         source_finish_sha256=finish_sha256,
         repair_round=repair_round,
@@ -190,7 +192,8 @@ def load_current_fix_packet(
         run_dir,
         observation,
     )
-    findings = _finish_findings(finish)
+    findings = _observation_findings(run_dir, observation, finish)
+    integration_refs = _integration_review_refs(observation)
     required_actions = _fix_required_actions(findings, decision.reason)
     if (
         packet.run_id != state.run_id
@@ -210,7 +213,7 @@ def load_current_fix_packet(
         or packet.findings != findings
         or packet.required_actions != required_actions
         or packet.source_artifacts
-        != [observation_ref, decision_ref, child_ref]
+        != [observation_ref, decision_ref, child_ref, *integration_refs]
         or packet.source_finish_sha256 != finish_sha256
     ):
         raise ValueError("当前 Fix Packet 与来源证据不一致")
@@ -318,6 +321,55 @@ def _finish_findings(finish: dict[str, object]) -> list[ReviewFinding]:
         except ValidationError as exc:
             raise ValueError("Finish 中的 Reviewer finding 无法解析") from exc
     return findings
+
+
+def _observation_findings(
+    run_dir: Path,
+    observation: AgentObservation,
+    finish: dict[str, object],
+) -> list[ReviewFinding]:
+    findings = _finish_findings(finish)
+    for ref in _integration_review_refs(observation):
+        path = run_dir / ref
+        expected = observation.evidence_sha256.get(ref)
+        try:
+            content = path.read_bytes()
+            payload = json.loads(content.decode("utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError("最终集成 Reviewer Artifact 无法读取") from exc
+        if (
+            expected is None
+            or hashlib.sha256(content).hexdigest() != expected
+            or not isinstance(payload, dict)
+            or payload.get("run_id") != run_dir.name
+            or payload.get("status") != "request_changes"
+        ):
+            raise ValueError("最终集成 Reviewer Artifact 与 Observation 不一致")
+        batches = payload.get("batches")
+        if not isinstance(batches, list):
+            raise ValueError("最终集成 Reviewer Artifact 缺少批次")
+        for batch in batches:
+            verdict = batch.get("verdict") if isinstance(batch, dict) else None
+            values = verdict.get("findings") if isinstance(verdict, dict) else None
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                try:
+                    findings.append(ReviewFinding.model_validate(value))
+                except ValidationError as exc:
+                    raise ValueError("最终集成 Reviewer finding 无法解析") from exc
+    return findings
+
+
+def _integration_review_refs(observation: AgentObservation) -> list[str]:
+    refs = [
+        ref
+        for ref in observation.evidence_refs
+        if ref.startswith("integration-reviews/")
+    ]
+    if len(refs) > 1:
+        raise ValueError("Observation 绑定了多个最终集成 Reviewer Artifact")
+    return refs
 
 
 def _fix_required_actions(

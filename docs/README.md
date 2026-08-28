@@ -12,19 +12,20 @@
 | 演进事项与验收 | [`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json) | 稳定事项、依赖和要求检查 |
 | 路线决策与历史 | [`ROADMAP.md`](ROADMAP.md) | 为什么选择或停止某条路线 |
 | 已完成的治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 三轮治理范围、Dogfood 和验收结果 |
-| 完整使用流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | Core 与 Supervisor 操作 |
+| 完整使用流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | ChangeRun、交互、恢复和交付 |
 | 调查和计划协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | 修改前调查、事实与假设、人工确认 |
-| Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 模块职责和数据流 |
+| Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | ChangeRun、Provider Session、Core 与数据流 |
 | Supervisor 状态合同 | [`SUPERVISOR-AGENT-STATE-AUTHORITY.md`](SUPERVISOR-AGENT-STATE-AUTHORITY.md) | 状态、恢复和事实权威 |
-| 当前版本能力 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | v0.1 baseline 与 v0.2.x 可选能力 |
+| 当前版本能力 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | v0.3.0 已包含与明确不做的范围 |
+| 持久交互式 Agent 决策 | [`PERSISTENT-INTERACTIVE-AGENT-V1.md`](PERSISTENT-INTERACTIVE-AGENT-V1.md) | v0.3.0 实施边界 |
 | 工作区文件规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 临时文件、运行产物和清理边界 |
 
 ## 发布
 
-当前稳定版本为 `v0.2.1`：
+当前发布候选为 `v0.3.0`；正式 Tag 与 GitHub Release 创建前，不把它表述为已发布：
 
-- [`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md)
-- [`RELEASE-SUMMARY-0.2.1.md`](RELEASE-SUMMARY-0.2.1.md)
+- [`RELEASE-NOTES-0.3.0.md`](RELEASE-NOTES-0.3.0.md)
+- [`RELEASE-SUMMARY-0.3.0.md`](RELEASE-SUMMARY-0.3.0.md)
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)
 
 旧版本的 `RELEASE-NOTES-*` 与 `RELEASE-SUMMARY-*` 是不可变历史材料。远端 Tag 与 GitHub
@@ -35,7 +36,7 @@ Release 是发布动作的事实来源。
 - `../eval/`：追加式实验和真实运行结果；遵循 [`../eval/AGENTS.md`](../eval/AGENTS.md)。
 - [`EXPERIMENT-ARCHIVES.md`](EXPERIMENT-ARCHIVES.md)：冻结实验与归档 Tag 索引。
 - [`ASSURANCE-CONTRACT-CANDIDATE.md`](ASSURANCE-CONTRACT-CANDIDATE.md)：Threat/Evidence 候选合同。
-- [`LONG-RUNNING-GOALS.md`](LONG-RUNNING-GOALS.md)：Goal P0/P1 兼容入口与历史边界。
+- [`LONG-RUNNING-GOALS.md`](LONG-RUNNING-GOALS.md)：Goal P0/P1 历史设计与实验边界。
 - Reviewer Context、Assurance Stage、CRWP 和 Supervisor Gate 文档均为历史预注册或结果材料，
   不能作为当前执行入口。
 

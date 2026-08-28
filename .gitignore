@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .tmp/
 .tmp-pytest*/
+.vega-worktrees/
 .pytest-tmp-*/
 .local-validation/
 pytest-cache-files-*/

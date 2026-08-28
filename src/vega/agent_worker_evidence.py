@@ -82,6 +82,7 @@ class PreparedWorkerAttempt:
     comparison_base_sha: str | None = None
     comparison_paths: tuple[str, ...] = ()
     change_context: ChangeRunContext | None = None
+    timeout_seconds: int = 900
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "20260828T134932Z-SESSION-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SESSION-02",
+  "transition": "completed",
+  "recorded_at": "2026-08-28T13:49:32Z",
+  "summary": "同一 ChangeRun 已复用持久 Worker Thread，并按 Work Item 隔离 Reviewer Thread；Steer、人工响应和会话所有权均受确定性边界约束。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "persistent-session-tests",
+      "supervisor-tests",
+      "security-tests",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_codex_adapter.py",
+      "src/vega/agent_change_control.py",
+      "src/vega/agent_visibility.py",
+      "tests/supervisor/test_agent_change_run.py",
+      "tests/supervisor/test_agent_recovery.py"
+    ]
+  }
+}

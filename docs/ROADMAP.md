@@ -1,11 +1,27 @@
 # Vega 后续演进路线
 
 > 当前稳定版本：`v0.2.1`
+> 当前源码候选：`v0.3.0`，Tag 与 GitHub Release 尚未创建
 > 本文件保存路线决策和历史背景，不维护实时进度。
 > 当前事项与下一项：[`CURRENT.md`](CURRENT.md)
 > 机器可读计划：[`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json)
 
 ## 最近一次路线决策
+
+2026-08-28，Vega 把已验证的 Bounded Change Loop 提升为唯一公共 Agent 入口：
+
+1. 使用 Codex App Server 保存 Worker Thread；Repair 和后续 Work Item 不再依赖人工转贴上下文；
+2. 每个 Work Item 使用独立只读 Reviewer Thread，必要时增加累计集成审查；
+3. 主会话通过状态卡、`watch`、Steer、审批响应和原生会话接管观察并干预执行；
+4. Provider Session 只保存本机会话协调信息，成功仍由 Git Candidate、Verification、Risk、
+   Reviewer 和 Core Finish 决定；
+5. 公共 CLI 统一为顶层 ChangeRun 命令，删除 `do / loop / agent / goal / inspection` 包装；
+6. 旧 Core Runtime 继续作为内部实现，历史实验和 Release 文档保持原样；
+7. 真实 App Server Dogfood 与 package smoke 已完成；v0.3.0 发布前还需完成最终全量测试和
+   同提交 PR CI。
+
+这轮不引入多 Worker、Planner Runtime、Memory Engine、Web UI、daemon 或自动 Git 交付。
+目标是减少人工中转和重复入口，不是扩建通用 Agent 平台。
 
 2026-08-27，Bounded Change Loop 真实验收完成后，主线进入控制面简化：
 
@@ -86,8 +102,9 @@ Verification/Risk/Reviewer/Finish 和确定性状态机推进有限 Work Item。
 产品行为以 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 为准，详细 Assurance 合同以
 [`ASSURANCE-CONTRACT-CANDIDATE.md`](ASSURANCE-CONTRACT-CANDIDATE.md) 为准，历史验证证据
 以 [`../eval/assurance-validation.md`](../eval/assurance-validation.md) 为准。本文不复制这些
-文档的完整内容。当前维护版本见
-[`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md) 与
+文档的完整内容。当前稳定版本见
+[`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md)，v0.3.0 候选见
+[`RELEASE-NOTES-0.3.0.md`](RELEASE-NOTES-0.3.0.md) 与
 [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)；V1 的历史实施计划见
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)，文档状态见
 [`README.md`](README.md)。

@@ -1,291 +1,209 @@
 # 产品契约
 
-## 核心定位
+## 定位
 
-Vega 是面向个人开发者的 AI Coding Agent + Workflow Harness。opt-in Supervisor
-Agent 负责计划、状态、恢复和路由，稳定 Core Harness 负责工作区、验证、风险、独立评审与
-可信完成判断。Vega 不替代 Codex、Claude Code 或其他编码模型，而是为一次真实研发任务补上
-可控的外层闭环：
+Vega 是软件工程 Agent 的控制层。它不重新实现 Coding Agent，而是把一次代码变更约束在
+人工批准的合同内，并把实现结果交给 Git、项目验证、风险规则和独立 Reviewer。
 
 ```text
-bug / feature
-  -> 项目上下文编译
-  -> Worker 前工作区基线
-  -> 受控 worker 执行
-  -> 确定性验证
-  -> Reflect 证据与变更风险门禁
-  -> 隔离 reviewer
-  -> 修复或人工接管
-  -> 交付报告与可恢复证据
-```
-
-Vega 的核心价值不是“拥有更多 Agent 功能”，而是回答四个问题：
-
-1. worker 开始前应该看到哪些项目规则和任务事实？
-2. 外部编码会话如何限制范围、时间和工作区污染？
-3. 如何用测试和隔离 reviewer 避免 worker 自证正确？
-4. 中断、超时或 provider 异常后，如何保留现场并安全交还人工？
-
-## Bounded Change Loop 演进合同
-
-当前 Agent 主线采用一条受人工批准边界约束的自动变更循环：
-
-```text
-Approved Contract
-  -> Execution Plan
-  -> 隔离 Worktree 与单 Writer
+只读调查
+  -> Change Contract / Execution Plan
+  -> 人工批准
+  -> 隔离 Worktree
+  -> 持久 Worker
   -> Git Candidate
   -> Verification / Risk / Reviewer
-  -> repair / replan / needs_human / next
-  -> ready_to_commit
+  -> next / repair / replan / human / finalize
+  -> 最终人工 PR 判断
 ```
 
-人工批准的是目标、验收条件、不变量、非目标、风险与副作用边界、必需验证和授权范围。
-Execution Plan 保存假设、Work Item、候选文件和实现策略，可以在 Approved Contract 内调整。
-任何合同字段变化都需要重新批准；即使合同文本没有改变，实际 Git Diff 命中冻结风险或越出
-授权范围时也必须停止并请求人工决定。
+v0.3.0 只有这一条公开 ChangeRun 流程。旧 `do`、`loop`、`agent`、`goal` 和 inspection
+命令不再作为公共入口；ChangeRun 仍复用其中经过验证的 Core Runtime。
 
-普通 Reviewer finding 由 Supervisor 转成 Fix Packet，交给新的单 Writer attempt。Fix Packet
-记录 finding、门禁状态和来源 Artifact，不携带 Reviewer 完整会话。Repair、自动 Replan、
-Review 和验证专用恢复分别使用 Approved Contract 中的预算；达到上限后只允许人工处理。
+## 权威关系
 
-Replan 同时比较声明变化和实际现场。Execution Plan 内部调整可以自动采用；Contract 字段变化
-需要重新批准。当前 Diff 越出提议范围、命中未授权的 `risk.required_reviews`，或声明了项目
-不存在的风险 ID 时，revision 不会进入自动执行。风险授权不能覆盖 Core 的高风险人工检查。
-如果 Core 已冻结 Candidate 后要求人工处理，显式 Replan 会先校验 Candidate 的 Git 绑定，再把
-同一内容还原为 WIP；Candidate ref 和旧验证仍保留，但不再拥有当前完成资格。
+| 事实 | 权威来源 |
+|---|---|
+| 用户要解决什么 | 用户要求、仓库规则、Change Contract |
+| 已经确认和仍在猜测什么 | Execution Plan |
+| 当前代码内容 | Git Candidate SHA 与实际 Worktree |
+| Worker 做了什么 | 机器 Observation；Worker Claim 仅作待验证输入 |
+| 测试是否通过 | 当前 Candidate 上实际执行的 Verification Artifact |
+| 是否命中高风险 | `.vega.yaml`、批准合同和 Risk Gate |
+| Reviewer 看过什么 | Reviewer verdict、`reviewed_files` 与 finding |
+| 当前允许做什么 | Agent State 与确定性路由 |
+| 跨机器需要恢复什么 | 任务分支、Task Card、Contract、Plan 和 Candidate |
 
-代码快照以 Git revision 为权威。显式自主 ChangeRun 可以在 Vega 管理的隔离 Worktree 和本地
-任务分支中，由控制器在范围检查后创建 Candidate/Checkpoint Commit；Worker 不能自行提交或
-切换分支。Vega 不操作用户当前分支，也不自动 push、merge、rebase、release。Task Card 只保存
-跨会话或换机恢复所需的任务语义，不能替代当前 Git、Verification 或 Reviewer 事实。
+Trace、状态卡、Task Brief 和最终报告都是这些事实的投影，不能反向创造成功证据。
 
-`v0.2.1` 的发布行为保持不变。当前 `main` 的新 Agent run 统一通过
-`agent start --contract ... --execution-plan ...` 创建；`do / loop` 保持原有 Git 行为。
-已发布的旧 Task Card 仍可由 `agent resume` 读取，但旧 Plan 只属于恢复兼容材料，不会被
-解释成新的 Change Contract 授权。
+## Change Contract
 
-## 日常入口
+Change Contract 冻结人工授权：
 
-边界清晰的一次性任务只要求理解以下入口：
+- 目标、验收条件和不变量；
+- 明确不做的内容；
+- 允许和禁止的仓库范围；
+- 必跑验证；
+- 已授权的高风险审查领域；
+- 数据库、公共 API、依赖、部署、支付、权限、数据删除和外部写入策略；
+- Repair、Replan、Review 与验证重试预算。
+
+合同字段变化会使旧批准失效。实际 Git Diff 即使没有出现在新计划中，只要越出授权范围或命中
+未授权风险，也必须停止。
+
+## Execution Plan
+
+Execution Plan 记录 Agent 可以调整的实现安排：
+
+- 已观察事实与根因假设；
+- 有限、粗粒度的 Work Item；
+- 候选文件与依赖顺序；
+- 实现策略、附加检查和未决问题。
+
+合同不变时，Agent 可以拆分 Work Item、调整顺序、换实现方案或增加测试。Reviewer 发现原假设
+错误时返回 `replan`，由新的计划 revision 承接；Reviewer 本身不批准自己提出的新合同。
+
+## Worker 与 Reviewer
+
+默认 Provider 是 Codex App Server：
+
+- 一个 ChangeRun 复用一个 Worker Thread；
+- Contract revision 实质变化后，旧 Worker Thread 不再自动复用；
+- 每个 Work Item 有独立只读 Reviewer Thread；
+- 同一 Work Item 的 Repair 复查可以复用 Reviewer Thread；
+- Worker 和 Reviewer 使用不同 Thread，Reviewer 不接收 Worker 完整聊天或中间推理；
+- 多 Work Item、Replan、高风险或 Repair 后的最终候选按条件增加一次累计集成审查。
+
+Worker 沿用用户选择的 Codex profile、model 和 reasoning effort。Reviewer 同样尊重项目配置，
+但固定只读、关闭审批，并禁用个人 hooks、memories、plugins 和 MCP 配置。
+
+Provider Session 只保存本机会话协调信息：Thread ID、owner、生命周期、Turn、压缩次数、Token
+用量、待发送 Steer 和待响应请求。它不参与 Verification、Risk、Reviewer 或 Finish 裁决。
+
+## Candidate 与门禁
+
+自主执行发生在 Vega 管理的本地任务分支和隔离 Worktree：
+
+1. Worker 修改文件，但不能创建提交或切换分支；
+2. Vega 对账 Workspace、允许范围和 Git 控制状态；
+3. Vega 创建本地 Candidate Commit；
+4. Verification、Risk 和 Reviewer 绑定 Candidate SHA；
+5. SHA 或受控项目策略变化后，旧门禁结果失效；
+6. 通过的 Candidate 成为 Accepted Checkpoint。
+
+验证失败不能被 Reviewer `approve` 覆盖。缺少验证、证据损坏、Reviewer 覆盖不完整、风险披露
+不足或 Workspace 漂移都不能进入完成状态。
+
+## 路由
+
+LLM 只返回结构化结果。代码选择下一动作：
+
+| 动作 | 条件 |
+|---|---|
+| `next` | 当前 Work Item 通过，进入下一项 |
+| `repair` | 问题仍在合同内，可生成 Fix Packet |
+| `replan` | 当前假设或执行安排不成立 |
+| `human` | 合同、风险、现场、副作用或预算需要人工决定 |
+| `finalize` | 所有 Work Item 和必需门禁通过 |
+
+普通 Repair 返回同一个 Worker Thread，不需要人工转贴 Reviewer finding。预算耗尽、同一问题反复
+出现、Worker 没有形成有效 Diff、未知外部副作用或审查未完成时进入 `needs_human`。
+
+## Steer、响应和接管
+
+主会话可以：
+
+- 查看状态卡和低频安全事件；
+- 给当前 Worker 或 Reviewer 排队发送 Steer；
+- 响应 App Server 的审批或用户输入请求；
+- 暂停或停止自动调度；
+- 把 Provider Thread 交给人工原生会话。
+
+Steer 不能修改冻结合同。敏感输入不得写入 Vega Artifact；需要凭据、验证码或其他私密交互时，
+应接管原生会话。只有空闲 Session、没有 active Writer binding 且 Workspace 未变化时才允许
+直接 `reclaim`。活动 attempt 被接管时会先中断执行；人工处理后必须走 Recovery 或 Handoff，
+不能把旧 attempt 直接接回自动循环。
+
+## 上下文与压缩
+
+Task Brief 只组合当前 Contract、Plan、Work Item、Checkpoint、验证、风险和 Reviewer 结果。
+完整日志和源码通过 Artifact 路径按需读取，不复制完整聊天或内部推理。
+
+Codex 自己负责会话压缩。Vega 在检测到压缩后，于下一 Turn 追加一个不超过 32 KiB 的
+Task Anchor，帮助会话重新定位当前 run、revision、Work Item 和 Accepted Checkpoint。该软上限
+没有下限；关键约束放不下时必须停止并请求人工，不能静默省略。
+
+## 完成语义
+
+`completed / ready_to_commit` 同时要求：
+
+- 所有 Work Item 已完成；
+- 当前 Candidate 与 Workspace 一致；
+- 至少一条受信验证命令实际通过，且最新验证没有失败；
+- Scope、Risk、Artifact integrity 和 Evidence freshness 通过；
+- 独立 Reviewer 完成规定覆盖；
+- 需要的最终集成 Reviewer 已通过；
+- 外部副作用为 `none`；
+- 当前 Contract approval 仍有效。
+
+最终报告从现有结构化 Artifact 和 Git 事实确定性生成，不调用额外总结模型。报告中的 Reviewer
+优先级用于导航，完整变更事实仍以 Git 文件清单为准。
+
+`needs_human` 是正常终态：它说明 Vega 已到达授权或证据边界，不等于工具崩溃。
+
+## 跨会话和跨机器
+
+本机恢复优先复用 Provider Thread。Thread 不可用时，Vega 从当前 Git、Agent State 和最近
+Checkpoint 重新建立会话。
+
+换机器前运行 Handoff，人工把 WIP 和 Task Card 提交到任务分支并 push。新机器只需要拉取该
+分支；Task Card 保存目标、批准边界、当前 Work Item、Candidate 与下一步，不携带旧聊天、
+凭据、本机 Trace 或 Provider Thread ID。
+
+旧 Candidate 和门禁只能作为历史。恢复后必须重新核对当前 Workspace，并按需要重新运行验证
+和审查。
+
+## 公共 CLI
 
 ```text
-vega do bug|feature
+vega capabilities
+vega config check
+vega adapters init codex
+
+vega start
+vega approve
+vega run
 vega status
-vega finish
+vega watch
+vega latest
+
+vega steer
+vega respond
+vega revise
+vega retry
+vega pause
 vega stop
 vega recover
+vega adjudicate
+vega takeover
+vega reclaim
+vega handoff
+vega resume
 ```
 
-需要暂停、接手、跨会话继续或 Git-only fresh-clone / 换目录恢复时，显式选择 Supervisor
-Agent：
+内部 Runtime、Artifact helper 和 `vega.experimental.*` 不是稳定 Python SDK。稳定程序化导出
+只有 `vega.__version__`。
 
-```text
-vega agent capabilities
-vega agent start / approve / run
-vega agent replan
-vega agent retry-verification
-vega agent status / pause / stop / recover
-vega agent checkpoint --handoff
-vega agent resume / finalize
-```
+## 行为边界
 
-`vega agent` 不是默认入口，也不是第二套编码模型。宿主主会话负责只读调查并提交 Change
-Contract 与 Execution Plan；Vega 管理批准 revision、单 Writer、Checkpoint、机器对账与
-恢复，并把最终成功交回既有 Verification、Risk、独立 Reviewer 和 Finish。
-
-`retry-verification` 只处理“代码不变、验证命令或本地依赖环境需要修正”的失败。它复用原
-Worker 和 child，只接受除 `verification` 外不改变执行安排的 revision（命令可以保持原值），
-并重新核对 tracked Diff；代码 finding 仍走普通 repair/replan。
-
-Agent CLI 以当前工作目录作为 Vega workspace。可以从任意目录执行
-`vega adapters init codex --repo <target-repo>` 写入目标仓库 Skill，但该命令不会切换 shell
-目录；后续 `vega agent start / approve / run / status / finalize` 必须先进入目标仓库。
-
-`vega finish --run <loop-run>` 生成或读取普通 Core run 的交付结论。
-`vega agent finalize --run <agent-run>` 只在父 Agent 已处于 `finalizing` 时采用绑定的可信
-Core Finish 并发布父终态；它不重新运行 Core Finish，不重新验证，也不能把不合格的 child
-提升为成功。
-
-`brief`、`reflect`、`gate`、`review-pack`、`review` 和 `loop continue`
-是可单独调用的流水线阶段，主要用于排障、人工接管和解释运行过程，不要求用户每天手工编排。
-
-兼容的 `vega run engineering-change` 是 YAML 驱动的只读 Inspection Loop，用于生成计划、
-报告和 eval；它不等同于会启动 worker 的日常 Coding Harness。
-
-## Python 接口边界
-
-Vega 发布 Python distribution 是为了安装 CLI 和本地资源，不把内部 Runtime 模块承诺为
-稳定 SDK：
-
-- 稳定的程序化导出只有 `vega.__version__`。
-- 用户级稳定入口是本文记录的 `vega` CLI 及其 artifact/状态合同。
-- `vega` 下其他模块属于内部实现，可以因核心精简而移动或删除。
-- `vega.experimental.*` 明确为实验实现，不承诺导入路径、类型或调用方式跨版本稳定。
-- 已移动的内部模块不恢复 `vega.assurance`、`vega.memory`、`vega.runtime` 等兼容 shim。
-
-如果未来要提供 Python SDK，必须单独定义命名空间、版本和自动化兼容合同；不能把当前内部模块
-被外部偶然导入视为既成公共 API。
-
-## 能力分层
-
-### 核心能力
-
-- `AGENTS.md`、项目画像和任务输入的上下文编译。
-- worker/reviewer 使用独立会话和固定 sandbox；reviewer 不继承 worker 的完整聊天记录。
-- `codex exec` 角色仍可继承用户选择的 provider、profile、model 和 Windows sandbox，但 Vega
-  固定禁用个人 memories、plugins、hooks 与 legacy notify，避免个人上下文和回调污染目标仓库。
-- Codex 写工具可能留下仓库根部的空 `.agents/`。Workspace Gate 仅把完全为空的普通目录视为
-  工具残留；目录含内容、不可读取、symlink 或 Windows reparse point 时仍按工作区变化停止。
-- 验证命令、精确路径范围、变更预算、Prompt 预算与工作区污染门禁。
-- assist 在 Worker Prompt 前生成 `workspace-baseline.json`，并用根状态与 trace 绑定其版本、
-  内容哈希和 HEAD。基线捕获不完整、已有 tracked diff 或初始化期间 HEAD 漂移时，不生成
-  Worker Prompt、不创建 iteration，也不允许继续该 run；清理或稳定仓库后必须新建 loop。
-- assist continue 在创建 iteration 前重新验证 baseline artifact，并以真实工作区差异归因
-  Worker 结果。缺失、被改写或与根状态、trace 不一致时 fail-closed；没有 baseline 的旧 run
-  只允许查看，不允许继续。
-- auto 首轮拒绝已有 tracked diff；同一 run 的后续轮次保留上一轮 diff 作为基线。
-- scope gate 在 worker/人工 continue 后先检查 staged 和 unstaged tracked diff；verification 结束后再次检查，Reflect 固化 review 输入后再检查一次。`forbidden_paths` 优先于 `allowed_paths`；最后一次与 reviewer 的工作区快照校验共同防止异步进程把越界 diff 带入隔离审查。任一阶段越界时保留 result、report、state 和 trace 证据并停止，不回滚或自动清理现场。
-- loop 启动时绑定稳定的 HEAD、项目策略文件摘要和 scope 规则摘要；worker commit/checkout、
-  `assume-unchanged`、`skip-worktree`、运行中策略变化或 reviewer 授权快照变化都会 fail-closed。
-  `project-policy-snapshot.json` 与根状态哈希绑定，Finish 会复查当前策略；缺少三阶段 scope
-  证据的旧 run 仍可查看，但不能自动进入 `ready_to_commit`。
-- iteration-local risk gate 的结果与报告绑定 source reflect、iteration、结果哈希、风险、建议和命名高风险命中项；Finish 会结合 trace、连续 iteration 与 Reflect 重算复核。缺失、篡改、语义不一致或绕过 `human-review` 时，不得给出 `ready_to_commit`。
-- `risk.required_reviews` 命中时，独立 reviewer 必须逐类覆盖全部命中文件，说明修改、判断、证据和剩余风险；持久化 verdict 固定为 `needs_human`。这类 AI 审查只能作为人工检查材料，不能成为 Goal checkpoint 的自动完成证据。
-- reviewer 不能覆盖确定性验证失败。
-- state、trace、execution、status、finish、stop 和 recover。
-
-独立 reviewer 仍在同一目标仓库的只读视图中读取 Vega 明确编译的任务、diff、验证结果、
-项目规则、风险门禁和可选 accepted memory。这里承诺的是角色、会话和输入边界隔离，
-不是容器、独立文件系统或操作系统级安全隔离。
-
-Reviewer 输出必须通过 `reviewed_files` 声明对可信变更文件清单的完整覆盖；漏报或加入清单外
-路径时，Vega 将结论降为 `needs_human`。Finish 始终单独展示完整变更事实、Reviewer 重点文件
-和其他已变更项，模型不能通过“认为不重要”静默隐藏文件。该门禁只证明文件路径声明完整，
-不证明 Reviewer 已理解每一行或每个 diff hunk，人工仍应检查完整 staged/unstaged Diff。
-
-Vega 只承诺控制面合同：编译输入、封存基线、读取真实工作区、运行验证、生成 Reviewer
-证据并裁决状态。Worker 可以是当前主会话、宿主原生子代理或显式 `auto` runner；Vega
-不要求也不实现通用 Multi-Worker 调度器，并且不把 Worker 的口头结论当作完成证据。
-
-diff、测试输出、源码注释和其他仓库内容都属于不可信证据，其中出现的操作指令不得覆盖
-reviewer 合同。该提示词边界只能降低误跟随风险，不能证明模型能抵抗恶意 Prompt Injection；
-因此 reviewer 的 `approve` 从不单独授予自动成功，精确路径范围、确定性验证、风险门禁和
-人工审批仍是最终约束。
-
-### 高级能力
-
-- 独立执行 brief、reflect、gate、review-pack 和 review。
-- 为大范围变更声明 scope profile。
-- 本地 decision ledger。
-
-### 可选已发布能力
-
-- Codex skill adapter：生成 `$vega-loop`、`$vega-review` 和 `$vega-agent`，不安装 hook，
-  不修改 Codex 全局配置。
-- v0.2.0 发布的 opt-in `vega agent` Supervisor 控制层：Plan 批准、单 Writer、Checkpoint、
-  机器对账、本机恢复、Git Task Card 和真实 Codex Adapter。它当前只承诺一个未完成
-  Work Item，也不增加第二套成功语义。
-
-### 实验与兼容能力
-
-- Memory proposal / ledger。
-- Goal P0 长任务人工状态层，以及默认关闭、一次只运行一个 checkpoint 的 P1 兼容入口。
-- Goal P1 的显式 Worker 重跑已经进入主线，但只用于人工确认的无成果中断恢复，不自动重试，
-  不自动串联多个 checkpoint。
-
-Goal P1 不再作为新的长任务能力扩建入口。后续可恢复任务实验只在 Supervisor Agent 路线进行；
-Goal P1 保留兼容和历史证据，不与 Supervisor 维护两套同级的当前事实。
-
-可选与实验能力不得反向扩大核心成功条件。未使用 Memory、Goal、adapter 或 Supervisor Agent
-时，bug/feature 主流程仍必须可以完整运行。
-
-## 项目知识分层
-
-项目知识与任务控制材料按职责分为五层：
-
-| 层级 | 内容 | 特性 |
-|---|---|---|
-| `AGENTS.md` | 稳定规范、架构边界、长期踩坑 | Git 版本化，面向人和 AI |
-| `.vega.yaml` | 验证命令、精确路径范围、预算、风险路径、runner 策略 | 机器可执行 |
-| `.vega/tasks/**/*.md` | 已批准计划和 Git-only Resume Capsule | Git 版本化，只保存粗粒度任务事实 |
-| run artifacts | 本次任务、diff、验证、review 和恢复证据 | 单次运行事实 |
-| accepted memory | 已人工确认、跨任务可复用的局部经验 | 可选，不是规范来源 |
-
-稳定规则应优先进入 `AGENTS.md`，可机械执行的约束进入 `.vega.yaml`，单次任务事实留在
-run artifacts。只有无法合理归入前三层、且有明确适用范围和来源证据的经验，才适合进入
-accepted memory。
-
-## 工作区文件卫生
-
-仓库根目录不得堆放测试临时目录、验证日志或运行生成物。测试源码和静态 fixture 放在
-`tests/`，可丢弃的测试临时文件放在 `.tmp/`，人工验证输出放在 `.local-validation/`，
-Vega run artifacts 放在 `runs/`，本地 memory 数据放在 `memory/`，Python 构建产物
-放在 `dist/` 和 `build/`。不得把这些文件写入其他项目或仓库根目录；详细目录职责见
-`docs/WORKSPACE-HYGIENE.md`。
-
-## Memory 决策
-
-Memory 是可选经验账本，不是每轮必须生成的流水线产物：
-
-- brief 阶段不产生经验。
-- loop 成功不等于产生了可复用经验。
-- proposal 数量允许为 0。
-- 只有用户在 reflect 阶段明确提供经验候选时才生成 proposal。
-- 长期 ledger 仍必须由用户显式 accept/reject。
-- accepted memory 可以参与后续上下文编译，但不能覆盖代码、测试、`AGENTS.md` 或当前任务事实。
-- 仓库级 accepted memory 按本地仓库 scope 精确匹配；同名目录之间不允许自动回填。
-
-当前不引入向量数据库、embedding、自动学习、自动冲突合并或自动长期写入。
+- Reviewer 会话隔离不是容器或操作系统级安全沙箱。
+- Vega 不扫描或终止不属于当前 run 的 Codex、Node 或 Shell 进程。
+- Vega 不自动 commit、push、merge、rebase、release、部署、回滚、删除文件或接受长期
+  Memory。
+- 数据库迁移、支付、权限、数据删除、部署和外部写入必须显式声明；未知副作用不能自动重放。
+- 没有真实验证命令的项目不能获得自动完成资格。
 
 ## 增长约束
 
-新能力进入核心前，至少应改善以下一项并提供 dogfood 证据：
-
-- 任务成功率。
-- reviewer 有效缺陷发现率。
-- 人工操作步骤。
-- 中断恢复能力。
-- 无关上下文、token 或执行耗时。
-
-仅增加命令、artifact、状态字段或架构名词，不视为有效演进。没有真实使用证据的能力保持实验状态，
-不得继续扩建。
-
-## v0.1.0 历史停止线
-
-以下内容记录 v0.1.0 发布时的冻结决定。后来进入主线的 Goal P1 与 opt-in Supervisor Agent 均经过
-新的计划批准和独立 Gate，不代表默认 `vega do` 边界被放宽：
-
-- 保持上下文编译、受控执行、确定性验证、隔离审查和恢复交接稳定。
-- `loop continue` 必须绑定原仓库和 `needs_human` 状态。
-- Reflect 与 Review 必须使用同一工作区快照，证据过期时停止并交还人工。
-- Goal P0 完成前必须重新校验 child run 或 manual evidence。
-- 不实现 Goal P1、多 Agent、数据库、Web UI、向量 Memory、后台 daemon 或自动提交发布。
-- 新能力只有在多次真实 dogfood 暴露同一问题，并能改善增长指标时才重新评估。
-
-## v0.1.1 维护发布边界
-
-v0.1.1 只吸收已经通过真实 Dogfood 和完整回归的路径范围、验证隔离、恢复与并发安全
-修复，不改变产品定位或扩大功能范围。
-
-当前仍是本地单用户 CLI。同一个 loop run 的 start、continue、recover、finish 和 decision
-append 使用本地非阻塞 OS 文件锁互斥；busy 命令在修改可信业务 artifact 前 fail closed。
-`vega stop` 保持旁路，只写 active execution 的 stop request。
-
-该能力不承诺外部进程持续并发改写目标仓库时的操作系统级原子隔离。runtime 会用前后快照、
-HEAD、策略摘要、index 标记和 reviewer 授权快照发现关键阶段变化，但不会引入目标仓库全局
-锁、网络锁、分布式锁服务或数据库事务。
-
-## v0.1.2 成功语义维护边界
-
-v0.1.2 只收紧现有 Coding Harness 的成功裁决，不新增 Agent 角色、执行阶段或持久化设施：
-
-- 自动成功必须依赖最新 iteration 的非空、完整、未中断且全部通过的结构化验证记录。
-- 零条验证命令、显式跳过、部分执行、证据缺失或损坏均不得被 reviewer `approve`
-  提升为成功。
-- 写入终态前必须重新执行 eval；任一 `FAIL:` 同时使 `state.status` 和
-  `run_finished.status` 为 `failed`。
-- Finish 与 Goal 只使用最新 iteration 的受信验证结论；历史失败保留为证据，但不能覆盖
-  后续已经重新验证通过的修复。
-
-该维护版本不改变 `.vega.yaml` schema、CLI 命令、run 目录结构或 v0.1 的产品停止线。
+新能力必须明确改善人工操作、恢复、缺陷发现、上下文成本或交付理解中的至少一项，并用真实任务
+验证。只增加命令、状态、Artifact 或架构名词不算进展。

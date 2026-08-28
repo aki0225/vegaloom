@@ -2,8 +2,8 @@
 
 ## 目录职责
 
-- `core/`：日常 `do / loop`、Workspace、验证、风险、Reviewer、Finish 和通用 CLI 合同。
-- `supervisor/`：`vega agent` 的 Plan、单 Writer、状态、恢复、交接和 Codex Adapter。
+- `core/`：内部 Workspace、验证、风险、Reviewer、Finish、进程和通用 Artifact 合同。
+- `supervisor/`：公开 ChangeRun 的 Plan、单 Writer、持久会话、状态、恢复、交接和 Provider Adapter。
 - `security/`：路径边界、证据完整性、脱敏、成功语义及 fail-closed 负向合同。
 - `experimental/`：Goal、Memory、Assurance、Inspection、RCB、Showcase 与历史实验重放。
 

@@ -149,8 +149,8 @@ def write_runner_error_report(
                 "## 建议下一步",
                 "",
                 "- 先人工检查 `git status`、当前 diff 和 `worker-output.txt`。",
-                "- 如部分改动可保留，补齐后运行 `vega loop continue` 进入验证和隔离审查。",
-                "- 如改动不可用，人工清理后重开新的 loop。",
+                "- 如部分改动可保留，回到所属 ChangeRun 继续 Repair、验证和隔离审查。",
+                "- 如改动不可用，人工清理后创建新的 ChangeRun。",
             ]
         ).rstrip()
         + "\n",

@@ -16,7 +16,6 @@ from .execution_control import (
     ExecutionRecord,
     find_execution_records,
 )
-from .goal_status_guidance import goal_next_steps
 from .run_status_guidance import (
     classify_assist_initialization_status as _classify_init,
     initialization_next_steps as _initialization_next_steps,
@@ -161,10 +160,10 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
         return [
             f"人工审查 `{run_dir / 'change-plan.md'}` 和 `{run_dir / 'scope-profile.md'}`。",
             f"如确认范围合理，记录决策：`vega decision approve --run {run_dir.name} --type custom --reason \"批准 scope\" --ref change-plan.md`。",
-            "之后按 phase 拆成多个 `vega do` 或 `vega loop` 任务执行。",
+            "之后按 phase 转成 ChangeRun 的有限 Work Item。",
         ]
     if run_kind == "goal":
-        return goal_next_steps(run_dir, state)
+        return ["该 Goal run 已退役，仅供只读检查；需要继续开发时，请创建新的 ChangeRun。"]
     return [
         "读取 report/review/eval 判断是否通过。",
         "如发现跨任务可复用经验，可通过 `vega reflect --lesson \"...\"` 显式生成候选。",
@@ -260,14 +259,14 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
         return [
             f"读取 `{report}` 和对应 execution.json，确认停止位置和目标仓库现场。",
             "先人工检查目标仓库 `git status`，不要自动回滚或覆盖未知文件。",
-            f"如现场可继续，运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
+            "如现场可继续，回到所属 ChangeRun 重新对账并执行。",
         ]
     if status == "needs_human" and current_step in {"worker_error", "reviewer_error"}:
         report = _latest_iteration_file(run_dir, "runner-error-report.md")
         return [
             f"读取 `{report}`，确认 runner 错误和当前工作区现场。",
             "现有 diff 可能是部分完成结果，未经过完整 verification/review，不能直接视为可交付。",
-            f"如部分改动可保留，补齐后运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
+            "如部分改动可保留，补齐后回到所属 ChangeRun。",
         ]
     if (
         status == "needs_human"
@@ -300,7 +299,7 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
         fix_prompt = _latest_iteration_file(run_dir, "fix-prompt.md")
         return [
             f"工作区完整性检查失败，先读取 `{workspace_check}`。",
-            f"按 `{fix_prompt}` 核对新增未跟踪路径、ignored 路径、Git 控制状态和启动基线变化后，再运行：`vega loop continue --repo <repo> --run {run_dir.name}`。",
+            f"按 `{fix_prompt}` 核对新增未跟踪路径、ignored 路径、Git 控制状态和启动基线变化后，回到所属 ChangeRun。",
             "Vega 不会自动删除文件或恢复 Git 状态；请人工确认哪些变化属于需求产物。",
         ]
     verdict = latest_iteration.get("verdict") if latest_iteration else None
@@ -320,7 +319,7 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
         fix_prompt = _latest_iteration_file(run_dir, "fix-prompt.md")
         return [
             f"读取 `{fix_prompt}`，让主会话继续修复。",
-            f"修完后再次运行：`vega loop continue --repo <repo> --run {run_dir.name}`；如已有外部日志再加 `--test-log <log>`。",
+            "修完后回到所属 ChangeRun 重新执行门禁。",
         ]
     if verdict == "needs_human":
         findings = _latest_iteration_file(run_dir, "review-findings.md")

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "20260828T134934Z-SESSION-04-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SESSION-04",
+  "transition": "completed",
+  "recorded_at": "2026-08-28T13:49:34Z",
+  "summary": "最终待提交源码已完成双 Work Item 真实 Codex App Server Dogfood，证明持久 Worker、隔离 Reviewer、主会话 Steer、确定性门禁与最终报告可以连续工作。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "real-agent-dogfood",
+      "full-test-shards",
+      "package-smoke",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "eval/real-world-runs.md",
+      "docs/PERSISTENT-INTERACTIVE-AGENT-V1.md",
+      "docs/RELEASE-NOTES-0.3.0.md",
+      "docs/RELEASE-SUMMARY-0.3.0.md",
+      "README.md"
+    ]
+  }
+}
