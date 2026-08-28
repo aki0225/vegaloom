@@ -25,6 +25,7 @@ from .agent_runtime_support import (
     write_checkpoint,
     write_status_card,
 )
+from .agent_visibility import write_agent_final_report
 from .run_utils import resolve_run_dir
 
 
@@ -45,6 +46,7 @@ def finalize_agent_state(
             state,
         )
         _publish_completed_artifacts(
+            workspace,
             run_dir,
             state,
             plan,
@@ -87,6 +89,7 @@ def finalize_agent_state(
     )
     save_agent_state(run_dir / "agent-state.json", completed)
     _publish_completed_artifacts(
+        workspace,
         run_dir,
         completed,
         plan,
@@ -98,6 +101,7 @@ def finalize_agent_state(
 
 
 def _publish_completed_artifacts(
+    workspace: Path,
     run_dir: Path,
     state: AgentState,
     plan: AgentPlan,
@@ -123,6 +127,14 @@ def _publish_completed_artifacts(
         checkpoint=checkpoint,
         next_step=_completed_next_step(state),
     )
+    if state.run_kind == "change":
+        write_agent_final_report(
+            workspace,
+            run_dir,
+            state,
+            plan,
+            observation,
+        )
 
 
 def _completed_next_step(state: AgentState) -> str:

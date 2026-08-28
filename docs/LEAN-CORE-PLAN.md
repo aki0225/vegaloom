@@ -1,5 +1,9 @@
 # Vega 轻量核心精简计划
 
+> 历史说明：本文记录 2026-07-23 的精简基线和当时的模块决策，不是当前架构或命令说明。
+> 当前边界见 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 与
+> [`ARCHITECTURE.md`](ARCHITECTURE.md)。
+>
 > 基线日期：2026-07-23
 >
 > 基线提交：`521f9b9`

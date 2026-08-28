@@ -217,7 +217,7 @@ def test_agent_cli_status_projects_latest_child_stage(
 
     result = CliRunner().invoke(
         app,
-        ["agent", "status", "--run", parent.run_dir.name],
+        ["status", "--run", parent.run_dir.name],
     )
 
     assert result.exit_code == 0, result.output

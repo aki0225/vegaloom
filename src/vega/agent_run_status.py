@@ -330,6 +330,7 @@ def agent_status_lines(payload: dict[str, Any]) -> list[str]:
     if payload.get("terminal_status"):
         lines.append(f"- Finish：`{payload['terminal_status']}`")
     lines.extend(_candidate_status_lines(payload))
+    lines.extend(_provider_session_status_lines(payload))
     return lines
 
 
@@ -341,6 +342,30 @@ def _candidate_status_lines(payload: dict[str, Any]) -> list[str]:
     if payload.get("active_candidate_sha"):
         value = str(payload["active_candidate_sha"])[:12]
         lines.append(f"- Active Candidate：`{value}`")
+    return lines
+
+
+def _provider_session_status_lines(payload: dict[str, Any]) -> list[str]:
+    sessions = payload.get("provider_sessions")
+    if not isinstance(sessions, list):
+        return []
+    lines: list[str] = []
+    for item in sessions:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        lifecycle = item.get("lifecycle")
+        owner = item.get("owner")
+        if not all(isinstance(value, str) for value in (role, lifecycle, owner)):
+            continue
+        lines.append(
+            f"- 会话 `{role}`：{lifecycle}；owner={owner}；"
+            f"turns={item.get('turn_count', 0)}；"
+            f"待响应={item.get('pending_interactions', 0)}"
+        )
+    warning = payload.get("provider_session_warning")
+    if isinstance(warning, str) and warning:
+        lines.append(f"- 会话状态：{warning}")
     return lines
 
 

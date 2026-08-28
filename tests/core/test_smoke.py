@@ -4,7 +4,6 @@ import os
 import re
 import subprocess
 import sys
-import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,7 +17,6 @@ from vega.cli import app
 from vega.execution_control import (
     ExecutionLease,
     RunnerExecutionContext,
-    request_stop_for_run,
     run_owned_process,
 )
 from vega.finish_presentation import render_finish_report
@@ -37,7 +35,6 @@ from vega.recovery_runtime import RecoveryRuntime
 from vega.reflect_runtime import ReflectRuntime
 from vega.review_runtime import ReviewPackRuntime, ReviewRuntime, parse_review_verdict
 from vega.risk_review_reporting import build_finish_review_section
-from vega.run_lock import RunMutationLock
 from vega.run_status import run_status_payload
 from vega.run_utils import create_run_dir
 from vega.runner import CodexExecRunner, RunnerResult
@@ -307,169 +304,6 @@ def _write_isolated_verification_config(repo_dir: Path) -> None:
     )
 
 
-def test_brief_feature_supports_input_file_and_generates_feature_artifacts(tmp_path, monkeypatch) -> None:
-    _clear_vega_env(monkeypatch)
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    repo_dir.joinpath("AGENTS.md").write_text("# AGENTS.md\n\n- API 保持向后兼容。\n", encoding="utf-8")
-    _commit_repo_paths(repo_dir, "AGENTS.md", message="update project rules")
-    feature_file = tmp_path / "feature.md"
-    feature_file.write_text("# 批量导入用户\n\n需要支持 CSV 批量导入。\n", encoding="utf-8")
-
-    monkeypatch.chdir(tmp_path)
-    result = CliRunner().invoke(
-        app,
-        ["brief", "feature", "--repo", str(repo_dir), "--input", str(feature_file)],
-    )
-
-    assert result.exit_code == 0, result.output
-    run_dir = next(tmp_path.joinpath("runs").iterdir())
-    for artifact in [
-        "feature-spec.md",
-        "implementation-plan.md",
-        "acceptance-criteria.md",
-        "risk.md",
-    ]:
-        assert run_dir.joinpath(artifact).exists(), artifact
-    assert "批量导入用户" in run_dir.joinpath("agent-brief.md").read_text(encoding="utf-8")
-    assert "API 保持向后兼容" in run_dir.joinpath("knowledge-context.md").read_text(encoding="utf-8")
-
-
-def test_brief_cli_requires_exactly_one_input_source(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    input_file = tmp_path / "bug.md"
-    input_file.write_text("bug", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-
-    both = CliRunner().invoke(
-        app,
-        [
-            "brief",
-            "bug",
-            "--repo",
-            str(repo_dir),
-            "--input",
-            str(input_file),
-            "--text",
-            "bug",
-        ],
-    )
-    assert both.exit_code != 0
-    assert "只能二选一" in _strip_ansi(both.output)
-
-    none = CliRunner().invoke(app, ["brief", "bug", "--repo", str(repo_dir)])
-    assert none.exit_code != 0
-    assert "必须提供 --input 或 --text" in _strip_ansi(none.output)
-
-
-def test_project_profile_cli_detects_python_project(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "python-repo"
-    repo_dir.mkdir()
-    repo_dir.joinpath("pyproject.toml").write_text("[project]\nname='demo'\n", encoding="utf-8")
-    repo_dir.joinpath("AGENTS.md").write_text("# AGENTS.md\n\n- 运行 pytest。\n", encoding="utf-8")
-    repo_dir.joinpath("src").mkdir()
-    repo_dir.joinpath("tests").mkdir()
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(app, ["profile", "--repo", str(repo_dir)])
-
-    assert result.exit_code == 0, result.output
-    run_dir = next(tmp_path.joinpath("runs").iterdir())
-    profile = json.loads(run_dir.joinpath("project-profile.json").read_text(encoding="utf-8"))
-    assert "Python" in profile["tech_stack"]
-    assert "python -m pytest -q" in profile["test_commands"]
-    assert "AGENTS.md" in profile["agents_files"]
-    assert "PASS:" in run_dir.joinpath("eval.md").read_text(encoding="utf-8")
-
-
-def test_reflect_cli_generates_post_run_artifacts(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    subprocess_run = __import__("subprocess").run
-    subprocess_run(["git", "init"], cwd=repo_dir, check=True, capture_output=True, text=True)
-    subprocess_run(["git", "config", "core.autocrlf", "false"], cwd=repo_dir, check=True, capture_output=True, text=True)
-    repo_dir.joinpath("README.md").write_bytes(b"# Demo\n")
-    subprocess_run(["git", "add", "README.md"], cwd=repo_dir, check=True, capture_output=True, text=True)
-    subprocess_run(
-        ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init"],
-        cwd=repo_dir,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    repo_dir.joinpath("README.md").write_bytes(b"# Demo\nchanged\n")
-    test_log = tmp_path / "test.log"
-    test_log.write_text("pytest passed\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        ["reflect", "--repo", str(repo_dir), "--test-log", str(test_log), "--note", "修复后复盘"],
-    )
-
-    assert result.exit_code == 0, result.output
-    run_dir = next(tmp_path.joinpath("runs").iterdir())
-    for artifact in [
-        "state.json",
-        "trace.jsonl",
-        "diff-summary.md",
-        "test-summary.md",
-        "reflection.md",
-        "agents-md-proposals.md",
-        "eval.md",
-    ]:
-        assert run_dir.joinpath(artifact).exists(), artifact
-    assert not run_dir.joinpath("memory-proposals.jsonl").exists()
-    assert "README.md" in run_dir.joinpath("diff-summary.md").read_text(encoding="utf-8")
-    assert "pytest passed" in run_dir.joinpath("test-summary.md").read_text(encoding="utf-8")
-    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
-    assert state["status"] == "success"
-    assert state["changed_files"] == ["README.md"]
-    assert len(state["workspace_fingerprint"]) == 64
-
-
-def test_reflect_lesson_generates_optional_proposal_without_writing_ledger(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    repo_dir.joinpath(".vega.yaml").write_text(
-        "version: 1\nmemory:\n  default_tags:\n    - export-module\n",
-        encoding="utf-8",
-    )
-    repo_dir.joinpath("README.md").write_text("# Demo\nchanged\n", encoding="utf-8")
-    lesson = "导出模块修改空状态分支后必须执行 tests/export 下的回归测试。"
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "reflect",
-            "--repo",
-            str(repo_dir),
-            "--note",
-            "修复完成",
-            "--lesson",
-            lesson,
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    run_dir = next(tmp_path.joinpath("runs").iterdir())
-    proposals = [
-        json.loads(line)
-        for line in run_dir.joinpath("memory-proposals.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert len(proposals) == 1
-    assert proposals[0]["type"] == "lesson_candidate"
-    assert proposals[0]["content"] == lesson
-    assert "export-module" in proposals[0]["tags"]
-    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
-    assert state["memory_proposals"][0]["id"] == proposals[0]["id"]
-    assert "memory-proposals.jsonl" in state["artifacts"]
-    assert "memory_proposal_written" in run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8")
-    assert not tmp_path.joinpath("memory", "ledger.jsonl").exists()
-
 
 def test_review_pack_generates_isolated_context_from_reflect_run(tmp_path) -> None:
     repo_dir = tmp_path / "repo"
@@ -573,24 +407,6 @@ def test_project_profile_excludes_untracked_agents_when_requested(tmp_path) -> N
     assert tracked_profile.agents_files == ["AGENTS.md"]
     assert "nested/AGENTS.md" in full_profile.agents_files
 
-
-def test_review_pack_cli_resolves_reflect_run(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    reflect_run = ReflectRuntime(tmp_path).run(repo_dir)
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(app, ["review-pack", "--repo", str(repo_dir), "--run", reflect_run.name])
-
-    assert result.exit_code == 0, result.output
-    review_runs = [path for path in tmp_path.joinpath("runs").iterdir() if path.name.endswith("-review-pack")]
-    assert len(review_runs) == 1
-    assert review_runs[0].joinpath("review-prompt.md").exists()
-    assert "下一步" in result.output
-
-    status_result = CliRunner().invoke(app, ["status", "--run", review_runs[0].name])
-    assert status_result.exit_code == 0, status_result.output
-    assert "类型：`review-pack`" in status_result.output
 
 
 def test_review_runtime_uses_read_only_runner_and_writes_verdict(tmp_path) -> None:
@@ -1930,197 +1746,6 @@ def test_loop_auto_stops_on_workspace_pollution_before_review(tmp_path) -> None:
     assert any("ignored 路径、Git 控制状态和启动基线变化" in item for item in next_steps)
 
 
-def test_latest_and_status_cli_show_next_steps_for_loop(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_clean_git_repo(repo_dir)
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        ["loop", "bug", "--repo", str(repo_dir), "--text", "修复 README 展示问题", "--mode", "assist"],
-    )
-    assert result.exit_code == 0, result.output
-    assert "下一步" in result.output
-    assert "worker-prompt.md" in result.output
-    run_dir = next(path for path in tmp_path.joinpath("runs").iterdir() if path.name.endswith("-bug-loop"))
-
-    status_result = CliRunner().invoke(app, ["status", "--run", run_dir.name])
-    assert status_result.exit_code == 0, status_result.output
-    assert "Run Status" in status_result.output
-    assert "loop continue" in status_result.output
-
-    latest_result = CliRunner().invoke(app, ["latest", "--kind", "loop"])
-    assert latest_result.exit_code == 0, latest_result.output
-    assert run_dir.name in latest_result.output
-
-    json_result = CliRunner().invoke(app, ["status", "--run", run_dir.name, "--json"])
-    assert json_result.exit_code == 0, json_result.output
-    payload = json.loads(json_result.output)
-    assert payload["kind"] == "loop"
-    assert payload["next_steps"]
-
-
-def test_do_cli_runs_assist_loop_as_daily_entry(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_clean_git_repo(repo_dir)
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        ["do", "feature", "--repo", str(repo_dir), "--text", "新增 README 使用说明", "--mode", "assist"],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "loop 运行完成" in result.output
-    run_dir = next(path for path in tmp_path.joinpath("runs").iterdir() if path.name.endswith("-feature-loop"))
-    assert run_dir.joinpath("project-context.md").exists()
-
-
-def test_gate_cli_flags_high_risk_paths_and_missing_tests(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    auth_dir = repo_dir / "src" / "auth"
-    auth_dir.mkdir(parents=True)
-    auth_dir.joinpath("token.py").write_text("TOKEN_TTL = 60\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    reflect_run = ReflectRuntime(tmp_path).run(repo_dir, note="修改鉴权 token 逻辑")
-
-    result = CliRunner().invoke(app, ["gate", "--repo", str(repo_dir), "--run", reflect_run.name])
-
-    assert result.exit_code == 0, result.output
-    assert "human-review" in result.output
-    gate_runs = [path for path in tmp_path.joinpath("runs").iterdir() if path.name.endswith("-gate")]
-    assert len(gate_runs) == 1
-    gate_result = json.loads(gate_runs[0].joinpath("gate-result.json").read_text(encoding="utf-8"))
-    assert gate_result["risk"] == "high"
-    assert gate_result["recommendation"] == "human-review"
-    assert {reason["code"] for reason in gate_result["reasons"]} >= {"high_risk_paths", "missing_tests"}
-
-    json_result = CliRunner().invoke(
-        app,
-        ["gate", "--repo", str(repo_dir), "--run", reflect_run.name, "--json"],
-    )
-    assert json_result.exit_code == 0, json_result.output
-    assert json.loads(json_result.output)["recommendation"] == "human-review"
-
-
-def test_gate_uses_vega_yaml_high_risk_paths(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    repo_dir.joinpath(".vega.yaml").write_text(
-        "version: 1\nrisk:\n  high_paths:\n    - README.md\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    reflect_run = ReflectRuntime(tmp_path).run(repo_dir, note="修改 README")
-
-    result = CliRunner().invoke(app, ["gate", "--repo", str(repo_dir), "--run", reflect_run.name, "--json"])
-
-    assert result.exit_code == 0, result.output
-    gate_result = json.loads(result.output)
-    assert gate_result["risk"] == "high"
-    assert any(reason["code"] == "high_risk_paths" for reason in gate_result["reasons"])
-
-
-def test_gate_uses_vega_yaml_change_budget(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    repo_dir.joinpath(".vega.yaml").write_text(
-        "\n".join(
-            [
-                "version: 1",
-                "budget:",
-                "  max_changed_files: 1",
-                "  max_diff_lines: 0",
-                "  max_new_files: 0",
-                "  forbid_new_dependencies: true",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    repo_dir.joinpath("pyproject.toml").write_text("[project]\nname = \"demo\"\n", encoding="utf-8")
-    docs_dir = repo_dir / "docs"
-    docs_dir.mkdir()
-    docs_dir.joinpath("new.md").write_text("# 新文件\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    reflect_run = ReflectRuntime(tmp_path).run(repo_dir, note="触发变更预算")
-
-    result = CliRunner().invoke(app, ["gate", "--repo", str(repo_dir), "--run", reflect_run.name, "--json"])
-
-    assert result.exit_code == 0, result.output
-    gate_result = json.loads(result.output)
-    reason_codes = {reason["code"] for reason in gate_result["reasons"]}
-    assert gate_result["risk"] == "high"
-    assert {
-        "budget_changed_files",
-        "budget_diff_lines",
-        "budget_new_files",
-        "new_dependencies",
-    }.issubset(reason_codes)
-
-
-def test_gate_scope_profile_relaxes_change_budget(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    repo_dir.joinpath(".vega.yaml").write_text(
-        "\n".join(
-            [
-                "version: 1",
-                "budget:",
-                "  max_changed_files: 1",
-                "budget_profiles:",
-                "  refactor:",
-                "    max_changed_files: 10",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (repo_dir / "a.txt").write_text("a\n", encoding="utf-8")
-    (repo_dir / "b.txt").write_text("b\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    reflect_run = ReflectRuntime(tmp_path).run(repo_dir, note="refactor scope")
-
-    default_result = CliRunner().invoke(app, ["gate", "--repo", str(repo_dir), "--run", reflect_run.name, "--json"])
-    scoped_result = CliRunner().invoke(
-        app,
-        ["gate", "--repo", str(repo_dir), "--run", reflect_run.name, "--scope", "refactor", "--json"],
-    )
-
-    assert default_result.exit_code == 0, default_result.output
-    assert scoped_result.exit_code == 0, scoped_result.output
-    default_codes = {reason["code"] for reason in json.loads(default_result.output)["reasons"]}
-    scoped_payload = json.loads(scoped_result.output)
-    scoped_codes = {reason["code"] for reason in scoped_payload["reasons"]}
-    assert "budget_changed_files" in default_codes
-    assert "budget_changed_files" not in scoped_codes
-    assert scoped_payload["scope_profile"] == "refactor"
-
-
-def test_plan_cli_writes_change_plan_with_scope_profile(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_changed_git_repo(repo_dir)
-    repo_dir.joinpath(".vega.yaml").write_text(
-        "version: 1\nbudget_profiles:\n  refactor:\n    max_changed_files: 20\n    max_diff_lines: 1200\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(
-        app,
-        ["plan", "--repo", str(repo_dir), "--text", "重构 loop 状态机", "--scope", "refactor"],
-    )
-
-    assert result.exit_code == 0, result.output
-    run_dir = next(path for path in tmp_path.joinpath("runs").iterdir() if path.name.endswith("-change-plan"))
-    assert run_dir.joinpath("change-plan.md").exists()
-    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
-    assert state["status"] == "success"
-    scope_text = run_dir.joinpath("scope-profile.md").read_text(encoding="utf-8")
-    assert "refactor" in scope_text
-    assert "1200" in scope_text
-
 
 def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     repo_dir = tmp_path / "repo"
@@ -2133,142 +1758,34 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     result = CliRunner().invoke(app, ["adapters", "init", "codex", "--repo", str(repo_dir)])
 
     assert result.exit_code == 0, result.output
-    loop_skill = repo_dir / ".agents" / "skills" / "vega-loop" / "SKILL.md"
-    review_skill = repo_dir / ".agents" / "skills" / "vega-review" / "SKILL.md"
     agent_skill = repo_dir / ".agents" / "skills" / "vega-agent" / "SKILL.md"
-    assert loop_skill.exists()
-    assert review_skill.exists()
     assert agent_skill.exists()
+    assert not (repo_dir / ".agents" / "skills" / "vega-loop").exists()
+    assert not (repo_dir / ".agents" / "skills" / "vega-review").exists()
     assert legacy_skill.read_text(encoding="utf-8") == "legacy skill\n"
     assert ".agents" in result.output
     assert ".codex" not in result.output
-    loop_skill_text = loop_skill.read_text(encoding="utf-8")
-    assert "vega loop bug" in loop_skill_text
-    assert "workspace-baseline.json" in loop_skill_text
-    assert "不要执行 Worker，也不要 `loop continue`" in loop_skill_text
-    assert "宿主原生子代理" in loop_skill_text
-    assert "不把子代理完整聊天传给 Reviewer" in loop_skill_text
-    assert "vega finish --run <loop_run_id> --json" in loop_skill_text
-    assert "git diff --cached --no-ext-diff --unified=3" in loop_skill_text
-    assert "git diff --no-ext-diff --unified=3" in loop_skill_text
-    assert "不得静默省略" in loop_skill_text
-    assert "未被 Reviewer 标记为重点" in loop_skill_text
-    required_plan_sections = [
-        "## User Goal",
-        "## Non-goals",
-        "## Observed Facts",
-        "## Hypotheses",
-        "## Proposed Scope",
-        "## Verification",
-        "## Risk Areas",
-        "## Unresolved Decisions",
-    ]
-    protocol_text = PROJECT_ROOT.joinpath("docs", "PLAN-FIRST-PROTOCOL.md").read_text(
-        encoding="utf-8"
-    )
-    for section in required_plan_sections:
-        assert section in loop_skill_text
-        assert section in protocol_text
-    assert loop_skill_text.index("其余任务先只读调查") < loop_skill_text.index(
-        "用户明确批准"
-    )
-    assert loop_skill_text.index("用户明确批准") < loop_skill_text.index(
-        "vega loop bug"
-    )
-    assert "同一会话不能同时充当独立 Reviewer" in protocol_text
-    assert "本阶段不增加 `vega adapters init claude`" in protocol_text
-    assert "vega gate" in review_skill.read_text(encoding="utf-8")
     agent_skill_text = agent_skill.read_text(encoding="utf-8")
-    assert "vega agent capabilities" in agent_skill_text
-    assert "一个 ChangeRun 只允许一个 active Writer" in agent_skill_text
+    assert "vega capabilities" in agent_skill_text
+    assert "一个 ChangeRun 同时只有一个可写 Worker" in agent_skill_text
     assert "--contract <change-contract.json>" in agent_skill_text
     assert "--execution-plan <execution-plan.json>" in agent_skill_text
-    assert "vega agent approve --run <agent_run> --actor human" in agent_skill_text
-    assert "vega agent run --run <agent_run> --timeout 900" in agent_skill_text
-    assert "vega agent replan --run <agent_run>" in agent_skill_text
-    assert "vega watch --run <agent_run> --follow" in agent_skill_text
-    assert "vega agent finalize --run <agent_run>" in agent_skill_text
-    assert "stopped`：当前本机 run 已终止" in agent_skill_text
-    assert "不要运行 `resume-local`" in agent_skill_text
-    assert "不执行 Git 操作" in agent_skill_text
-    assert "只有可信 Core Finish 为 `ready_to_commit`" in agent_skill_text
+    assert "vega approve --run <run_id> --actor human" in agent_skill_text
+    assert "vega run --run <run_id> --timeout 900" in agent_skill_text
+    assert "vega watch --run <run_id> --follow" in agent_skill_text
+    assert "vega steer --run <run_id>" in agent_skill_text
+    assert "vega handoff --run <run_id>" in agent_skill_text
+    assert "vega resume --repo ." in agent_skill_text
+    assert "Reviewer 使用独立只读 Thread" in agent_skill_text
+    assert "Git 自动化只限于受管 Worktree" in agent_skill_text
+    assert "vega agent " not in agent_skill_text
+    assert "vega loop " not in agent_skill_text
+    assert "vega do " not in agent_skill_text
 
     second = CliRunner().invoke(app, ["adapters", "init", "codex", "--repo", str(repo_dir)])
     assert second.exit_code == 0, second.output
     assert "未覆盖" in second.output
 
-
-def test_finish_cli_summarizes_successful_loop(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_clean_git_repo(repo_dir)
-    _write_isolated_verification_config(repo_dir)
-    worker = TrackedChangeRunner(["worker done"])
-    reviewer = StaticRunner([_review_json("approve")])
-    runtime = LoopAutomationRuntime(tmp_path, worker_runner=worker, reviewer_runner=reviewer)
-    brief_input = BriefInput(
-        mode="bug",
-        text="修复 README 展示问题",
-        source="inline-text",
-        repo_path=str(repo_dir),
-    )
-    run_dir = runtime.start(brief_input, "auto", max_iterations=1)
-    monkeypatch.chdir(tmp_path)
-
-    result = CliRunner().invoke(app, ["finish", "--run", run_dir.name])
-
-    assert result.exit_code == 0, result.output
-    assert run_dir.joinpath("finish-report.md").exists()
-    summary = json.loads(run_dir.joinpath("finish-summary.json").read_text(encoding="utf-8"))
-    assert summary["finish_status"] == "ready_to_commit"
-    assert summary["latest_verdict"]["verdict"] == "approve"
-    first_screen = summary["first_screen"]
-    assert first_screen["decision"]["status"] == "ready_to_commit"
-    assert first_screen["decision"]["run_id"] == run_dir.name
-    assert Path(first_screen["decision"]["repo_path"]) == repo_dir.resolve()
-    assert first_screen["decision"]["task_mode"] == "bug"
-    assert first_screen["decision"]["automation_mode"] == "auto"
-    assert first_screen["actual_changes"]["changed_files"] == ["README.md"]
-    assert first_screen["actual_changes"]["changed_files_source"] == "trusted_risk_gate"
-    assert first_screen["gates"]["workspace"] == "skipped"
-    assert first_screen["gates"]["scope"] == {
-        "pre_verification": "skipped",
-        "post_verification": "skipped",
-        "pre_review": "skipped",
-    }
-    assert first_screen["gates"]["artifact_integrity"]["status"] == "valid"
-    assert first_screen["gates"]["evidence_freshness"]["status"] == "fresh"
-    assert first_screen["verification"]["checks"]
-    assert {
-        item["status"] for item in first_screen["verification"]["checks"]
-    } == {"passed"}
-    assert first_screen["review"]["verdict"] == "approve"
-    assert first_screen["review"]["coverage"]["complete"] is True
-    assert first_screen["review"]["coverage"]["reviewed_files"] == ["README.md"]
-    assert first_screen["review"]["priority_files"] == []
-    assert first_screen["review"]["other_changed_files"] == ["README.md"]
-
-    report_text = run_dir.joinpath("finish-report.md").read_text(encoding="utf-8")
-    expected_sections = [
-        "## 当前裁决",
-        "## 实际变更",
-        "## 确定性 Gate",
-        "## 验证结果",
-        "## Reviewer 意见",
-        "## 证据上限",
-        "## 下一步",
-    ]
-    assert [report_text.index(section) for section in expected_sections] == sorted(
-        report_text.index(section) for section in expected_sections
-    )
-    assert "ready_to_commit 只表示满足人工提交前检查" in report_text
-    assert "Reviewer 文件覆盖：`1/1`，状态=`complete`" in report_text
-    assert "其他已变更项：`README.md`" in report_text
-    assert "不代表这些文件不重要" in report_text
-    assert "commit 前 checklist" in report_text.lower()
-
-    json_result = CliRunner().invoke(app, ["finish", "--run", run_dir.name, "--json"])
-    assert json_result.exit_code == 0, json_result.output
-    assert json.loads(json_result.output)["finish_status"] == "ready_to_commit"
 
 
 def test_finish_report_preserves_missing_reviewer_line_and_verification_statuses() -> None:
@@ -2387,60 +1904,6 @@ def test_finish_review_keeps_priority_and_other_changed_files() -> None:
     assert review["priority_files"] == ["src/main.py"]
     assert review["other_changed_files"] == ["src/glue.py"]
 
-
-def test_decision_cli_records_run_decisions_and_status_shows_them(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_clean_git_repo(repo_dir)
-    runtime = LoopAutomationRuntime(
-        tmp_path,
-        worker_runner=TrackedChangeRunner(["worker done"]),
-        reviewer_runner=StaticRunner([_review_json("approve")]),
-    )
-    run_dir = runtime.start(
-        BriefInput(
-            mode="bug",
-            text="修复 README 展示问题",
-            source="inline-text",
-            repo_path=str(repo_dir),
-        ),
-        "auto",
-        max_iterations=1,
-    )
-    monkeypatch.chdir(tmp_path)
-
-    approve = CliRunner().invoke(
-        app,
-        [
-            "decision",
-            "approve",
-            "--run",
-            run_dir.name,
-            "--type",
-            "finish",
-            "--reason",
-            "已人工检查 diff 和测试结果",
-            "--ref",
-            "finish-report.md",
-        ],
-    )
-    assert approve.exit_code == 0, approve.output
-    assert run_dir.joinpath("decisions.jsonl").exists()
-
-    listed = CliRunner().invoke(app, ["decision", "list", "--run", run_dir.name, "--json"])
-    assert listed.exit_code == 0, listed.output
-    decisions = json.loads(listed.output)
-    assert decisions[0]["type"] == "finish"
-    assert decisions[0]["decision"] == "approved"
-
-    status_result = CliRunner().invoke(app, ["status", "--run", run_dir.name, "--json"])
-    assert status_result.exit_code == 0, status_result.output
-    payload = json.loads(status_result.output)
-    assert payload["decision_count"] == 1
-    assert payload["latest_decisions"][0]["reason"] == "已人工检查 diff 和测试结果"
-
-    finish = CliRunner().invoke(app, ["finish", "--run", run_dir.name])
-    assert finish.exit_code == 0, finish.output
-    assert "已人工检查 diff 和测试结果" in run_dir.joinpath("finish-report.md").read_text(encoding="utf-8")
 
 
 def test_loop_auto_stops_after_max_iterations(tmp_path) -> None:
@@ -2734,40 +2197,6 @@ def test_loop_continue_can_resume_auto_loop_after_manual_fix(tmp_path) -> None:
     assert "iterations\\02\\review-findings.md" in artifacts or "iterations/02/review-findings.md" in artifacts
 
 
-def test_recover_marks_running_loop_as_needs_human(tmp_path, monkeypatch) -> None:
-    repo_dir = tmp_path / "repo"
-    _init_clean_git_repo(repo_dir)
-    runtime = LoopAutomationRuntime(tmp_path)
-    run_dir = runtime.start(
-        BriefInput(
-            mode="bug",
-            text="修复 README 展示问题",
-            source="inline-text",
-            repo_path=str(repo_dir),
-        ),
-        "assist",
-    )
-    state_path = run_dir / "state.json"
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    state["status"] = "running"
-    state["current_step"] = "worker"
-    state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-
-    recovered = RecoveryRuntime(tmp_path).recover_loop(run_dir.name, "测试模拟 worker 中断")
-
-    recovered_state = json.loads(recovered.joinpath("state.json").read_text(encoding="utf-8"))
-    assert recovered_state["status"] == "needs_human"
-    assert recovered_state["current_step"] == "recovered"
-    assert recovered.joinpath("recovery-report.md").exists()
-
-    monkeypatch.chdir(tmp_path)
-    cli_result = CliRunner().invoke(
-        app,
-        ["recover", "--run", run_dir.name, "--reason", "再次 recover 应失败"],
-    )
-    assert cli_result.exit_code != 0
-    assert "只能 recover status=running" in cli_result.output
-
 
 def test_owned_process_updates_heartbeat_and_times_out(tmp_path) -> None:
     run_dir = tmp_path / "runs" / "timeout-loop"
@@ -2827,75 +2256,6 @@ def test_owned_process_success_persists_output_and_completed_lease(tmp_path) -> 
     assert lease.status == "completed"
     assert lease.returncode == 0
 
-
-def test_stop_cli_only_stops_recorded_owned_process(tmp_path, monkeypatch) -> None:
-    run_dir = tmp_path / "runs" / "stop-loop"
-    run_dir.mkdir(parents=True)
-    run_dir.joinpath("trace.jsonl").touch()
-    context = RunnerExecutionContext(
-        execution_root=run_dir,
-        execution_dir=run_dir / "executions" / "worker",
-        run_id=run_dir.name,
-        step="worker",
-        iteration=1,
-        heartbeat_interval_seconds=0.05,
-        lease_timeout_seconds=0.5,
-        terminate_grace_seconds=0.2,
-    )
-    holder: dict[str, object] = {}
-    unrelated = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(30)"],
-        cwd=tmp_path,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    def run_controlled_process() -> None:
-        holder["result"] = run_owned_process(
-            [sys.executable, "-c", "import time; time.sleep(30)"],
-            "",
-            tmp_path,
-            20,
-            context,
-        )
-
-    thread = threading.Thread(target=run_controlled_process)
-    try:
-        with RunMutationLock.acquire(run_dir, "loop.start"):
-            thread.start()
-            _wait_for_execution_child(context.execution_dir / "execution.json")
-            active_payload = run_status_payload(tmp_path, run_dir.name)
-            assert active_payload["execution"]["status"] == "running"
-            assert active_payload["execution"]["child_pid"] != unrelated.pid
-            monkeypatch.chdir(tmp_path)
-            cli_result = CliRunner().invoke(
-                app,
-                ["stop", "--run", run_dir.name, "--reason", "测试请求停止"],
-            )
-            thread.join(timeout=10)
-
-            assert cli_result.exit_code == 0, cli_result.output
-            assert not thread.is_alive()
-            result = holder["result"]
-            assert getattr(result, "status") == "stopped"
-            assert unrelated.poll() is None
-            lease = ExecutionLease.model_validate_json(
-                context.execution_dir.joinpath("execution.json").read_text(
-                    encoding="utf-8"
-                )
-            )
-            assert lease.status == "stopped"
-            stopped_payload = run_status_payload(tmp_path, run_dir.name)
-            assert stopped_payload["execution"]["status"] == "stopped"
-            assert context.execution_dir.joinpath("stop-request.json").exists()
-            assert run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8") == ""
-    finally:
-        if unrelated.poll() is None:
-            unrelated.terminate()
-            unrelated.wait(timeout=5)
-        if thread.is_alive():
-            request_stop_for_run(run_dir, "测试清理")
-            thread.join(timeout=5)
 
 
 def test_recover_rejects_live_execution_even_when_lease_expires(tmp_path) -> None:

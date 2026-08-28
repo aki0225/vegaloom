@@ -4,37 +4,36 @@
 
 # Vega
 
-<h3>AI 编码 Supervisor Agent 与验证 Harness</h3>
+<h3>软件工程 Agent：计划、实现、验证、独立审查</h3>
 
 <p><strong>One writes, one reviews.</strong></p>
 
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Stable-v0.2.1-4fb8d8?style=for-the-badge" alt="当前稳定版本 v0.2.1">
+  <img src="https://img.shields.io/badge/Candidate-v0.3.0-4fb8d8?style=for-the-badge" alt="v0.3.0 发布候选">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
 **[在线展示](https://aki0225.github.io/vegaloom/)** ·
 **[快速开始](#快速开始)** ·
-**[适用场景](#什么时候用-vega)** ·
-**[核心设计](#核心设计)** ·
-**[Supervisor Agent](#supervisor-agent)** ·
+**[运行方式](#运行方式)** ·
+**[设计](#设计)** ·
 **[文档](#文档)**
 
 </div>
 
-Vega 接在编码 Agent 和代码仓库之间：记录真实 Diff，运行项目验证，并在前置门禁通过且配置
-启用时启动独立 Reviewer，再根据证据给出交付状态。Supervisor Agent 为长任务增加人工批准
-的变更合同、单 Writer、Git Checkpoint 和恢复控制。
+Vega 管一次代码变更的外层流程。主会话先调查并提交 Change Contract；人工批准后，Vega
+在隔离 Worktree 中复用一个 Coding Agent 会话完成实现，把 Git Candidate 交给项目验证、
+风险门禁和独立 Reviewer。普通问题自动回到 Worker，越出批准边界才停下来问人。
 
 <p align="center">
-  <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega 任务流水线：task 到 report，worker 与 reviewer 使用独立会话，失败 fail-closed 交还人工">
+  <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega ChangeRun：计划批准、Worker、验证、独立 Reviewer 和最终报告">
 </p>
 
 ## 快速开始
 
-要求 Python `>=3.11` 和 Git。自动 Worker 或独立 Reviewer 还需要已经安装并登录 Codex CLI。
+要求 Python `>=3.11`、Git，以及已经安装并登录的 Codex CLI。
 
 ```powershell
 git clone https://github.com/aki0225/vegaloom.git
@@ -42,229 +41,165 @@ cd vegaloom
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e .
-```
 
-任务边界不清楚时，先做只读调查并让人工确认 Plan；边界和验收已经明确时再直接执行。
-完整约定见 [Plan-first 与修改前确认协议](docs/PLAN-FIRST-PROTOCOL.md)。
-
-```powershell
+vega capabilities
 vega config check --repo .
-vega loop bug --repo . --text "修复导出按钮无响应" --mode assist
-vega latest --kind loop
-vega loop continue --repo . --run <run_id>
-vega finish --run <run_id>
+vega adapters init codex --repo .
 ```
 
-`config check` 只检查配置和仓库准备状态，不运行测试。常见 warning 包括项目策略未纳入 Git、
-`runs/` 未忽略、Python `src` layout 的导入路径不明确，以及 Windows 行尾策略未固定。
+最后一条命令写入仓库级 `$vega-agent` Skill。它不会安装 Hook，也不会修改 Codex 全局配置。
 
-`assist` 要求启动时没有 staged 或 unstaged tracked diff。Vega 先生成并校验
-`workspace-baseline.json`，再写出 `worker-prompt.md`。主会话或子代理完成修改后运行
-`loop continue`；后续判断以当前工作区和验证证据为准。
+在 Codex 主会话中描述 Bug 或功能。Skill 会先读项目规则、代码和测试，再生成两份文件：
 
-| Finish 状态 | 含义 |
-|---|---|
-| `ready_to_commit` | 验证和审查证据完整，可以开始人工 Diff 检查 |
-| `needs_fix` | 验证失败，或 Reviewer 返回 `request_changes`，需要继续修改 |
-| `needs_human` | 验证、风险、现场或证据需要人工处理 |
-| `incomplete` | 当前运行还没有形成完整的交付结论 |
+- **Change Contract**：目标、验收、不变量、非目标、风险、验证和允许范围；
+- **Execution Plan**：已确认事实、假设和有限 Work Item。
 
-`request_changes` 是 Reviewer 结论，不是 Finish 状态。
-
-边界清晰的一次性任务可以直接使用自动入口：
+确认内容后启动 ChangeRun：
 
 ```powershell
-vega do feature --repo . --text "新增批量导入用户功能"
-```
-
-## 什么时候用 Vega
-
-- 希望 AI 修改代码，但交付结果必须由项目测试和实际 Diff 证明。
-- 希望 Worker 与 Reviewer 分开，避免同一会话直接给自己的改动背书。
-- 只想优先查看高风险文件、Reviewer finding 和验证结果，不想从头阅读整份 Diff。
-- 任务会持续较长时间，需要人工批准、状态查看、暂停和 Git-only 恢复。
-
-## Vega 不解决什么
-
-- Vega 不替代 Codex、Claude Code、Cursor 等编码工具。
-- 会话隔离不是容器或操作系统级安全沙箱。
-- 没有可靠验证命令的项目，Vega 也无法凭空生成可信测试证据。
-- 数据库迁移、支付、部署等变更仍需要人工风险判断和真实环境验证。
-- Vega 不操作用户当前分支，也不自动 push、merge、release、删除用户文件或接受长期
-  Memory。显式 ChangeRun 只在独立 Worktree 中创建本地 Candidate/Checkpoint Commit。
-
-## 核心设计
-
-Vega 将 Worker Claim、机器 Observation 和最终 Decision 分开记录，交付结论以当前 Git
-工作区和运行证据为准。
-
-- **工作区证据。** `assist` 在修改前记录 HEAD 和基线，修改后重新采集 staged、unstaged
-  与未跟踪文件，确定本轮实际 Diff。
-- **独立审查。** Worker 与 Reviewer 使用独立会话。Reviewer 接收任务、规则、批准范围、
-  Diff、验证和风险证据。这层隔离作用于会话上下文。
-- **交付判断。** 验证命令来自 `.vega.yaml` 或项目画像。Finish 综合验证、证据时效、
-  Risk Gate 和 Reviewer verdict，生成最终状态。
-- **长任务控制。** Supervisor 在隔离 Worktree 中顺序执行有限 Work Item，每项绑定独立
-  Candidate SHA。现场或证据漂移时转入 `needs_human`，保留 Git 状态、state、trace 和报告。
-
-## 入口怎么选
-
-| 场景 | 入口 |
-|---|---|
-| 根因、范围或验收还不明确 | Plan-first + `vega loop ... --mode assist` |
-| 边界清晰的一次性任务 | `vega do bug` 或 `vega do feature` |
-| 需要 Plan 批准、暂停或恢复的长任务 | `$vega-agent` 或 `vega agent` |
-| 只读检查现有仓库 | `vega run engineering-change` |
-
-`loop` 默认使用 `assist`；`do` 显式启动自动 Worker。两条路径最终都进入相同的 Workspace、
-Verification、Risk、Reviewer 和 Finish 判断链。
-
-## Supervisor Agent
-
-Supervisor Agent 是可选入口，不替换日常 `do / loop`。它接受调查后形成的 Change Contract
-和 Execution Plan，等待人工批准后在独立 Worktree 中顺序执行有限 Work Item。
-
-Agent 控制面只使用基础安装：
-
-```powershell
-python -m pip install -e .
-vega agent capabilities
-```
-
-先按 [Supervisor Agent 使用说明](docs/USAGE-WALKTHROUGH.md#bounded-change-run)准备
-`change-contract.json` 和 `execution-plan.json`。Contract 冻结目标、验收、风险、副作用和
-授权范围；Execution Plan 保存 Agent 可以调整的实现步骤。
-
-创建、批准并运行：
-
-```powershell
-vega agent start --repo . `
+vega start --repo . `
   --contract <change-contract.json> `
   --execution-plan <execution-plan.json>
-vega status --run <agent_run>
-vega agent approve --run <agent_run> --actor human
-vega agent run --run <agent_run> --timeout 900
-vega agent status --run <agent_run>
+vega approve --run <run_id> --actor human
+vega run --run <run_id> --timeout 900
 ```
 
-Vega 为这次任务创建本地 `vega/<run-id>` 分支和仓库外的隔离 Worktree。每个 Work Item
-产生一个 Candidate Commit，通过现有 Verification、Risk、Reviewer 和 Finish 后才成为
-Accepted Checkpoint。用户当前分支保持不动；最终是否 push、创建 PR 或合并仍由人工决定。
+默认执行器是 Codex App Server。一个 ChangeRun 复用同一个 Worker Thread；Reviewer 使用
+独立只读 Thread。只有明确需要一次性短会话时才传 `--fresh-session`。
 
-Reviewer 返回普通 `request_changes` 时，Vega 会从绑定的 Finish 生成 Fix Packet，把失败
-Candidate 还原为 WIP，再启动新的单 Writer attempt。Repair、Review、Replan 和验证重试
-都受 Contract 中的预算限制；预算耗尽后进入 `needs_human`。
+## 运行方式
 
-执行方向需要调整时，由宿主主会话或人工提交新的 Contract 与 Execution Plan：
+### 看进度
 
 ```powershell
-vega agent replan --run <agent_run> `
-  --contract <change-contract.json> `
-  --execution-plan <execution-plan.json>
+vega status --run <run_id>
+vega watch --run <run_id> --follow
+vega latest
 ```
 
-只改 Execution Plan 且仍在已批准合同内时直接采用；Contract 字段变化则等待重新批准。
-Vega 同时检查当前 Git Diff、授权路径和 `.vega.yaml` 的必审风险路径，不能靠改计划文本
-解释已经越界的代码。Contract 中的风险授权只说明允许继续规划，不会跳过 Risk Gate 或人工
-高风险检查。
+状态卡显示当前 Work Item、Provider Session、变更文件、验证、风险、Reviewer、待处理请求和
+下一步。`watch` 只输出低频安全事件，不转发模型推理、完整正文、命令参数或凭据。
 
-新任务只使用 Change Contract 与 Execution Plan。`v0.2.1` 已生成的 Task Card 仍可通过
-`vega agent resume` 接手；其中的旧 Plan 只作为恢复材料，不会扩大当前合同授权。
-
-如果代码和 Reviewer finding 都不需要修改，只是验证命令或本地依赖环境有误，可以只修订
-Execution Plan 中当前 Work Item 的 `verification`。合同不变时该 revision 可直接采用，然后
-复用原 child：
+### 中途调整
 
 ```powershell
-vega agent retry-verification --run <agent_run>
+vega steer --run <run_id> --role worker --text "补充检查导入失败后的回滚路径"
+vega respond --run <run_id> --interaction <request_id> --decision accept
+vega pause --run <run_id> --reason "等待需求确认"
+vega stop --run <run_id> --reason "方向变化"
 ```
 
-这条命令不会启动第二个 Coding Worker。Vega 会重新核对原 Worker execution、原审查快照、
-HEAD 和 tracked Diff；本地 `.venv`、`node_modules` 等 ignored 环境可以补齐，源码、未跟踪
-文件或 Git 控制状态发生变化则拒绝恢复。旧的失败 iteration 和失败 Finish 摘要会保留。
-
-`vega agent status` 会重新采集当前 Workspace，并核对 Supervisor、child 和 Core Finish 证据。
-只有实时状态同时满足 `evidence_health=passed`、`workspace_current=true` 和
-`commit_recommended=true`，才会建议人工检查并提交。
-
-Review 输入超出软预算时，Vega 按文件组顺序拆成最多 8 个只读任务；`status` 显示队列进度，
-未覆盖文件保留在 `remaining`，不会进入成功状态。
-
-每个 Work Item 都要声明仓库外副作用为 `none`、`known` 或 `unknown`。数据库写入、支付、
-部署和外部 API 等动作不会因为命令退出码为 0 就自动视为安全；`known` 或 `unknown` 会停在
-人工处理。
-
-暂停、恢复、Task Card 和 fresh-clone 接手方式见
-[Supervisor Agent 使用说明](docs/USAGE-WALKTHROUGH.md#supervisor-agent-v1)。
-
-## Codex 接入
-
-为目标仓库生成 Vega Skill：
+`steer` 只能补充当前执行，不能改写批准合同。范围、验收或风险边界变化时，提交新的 Contract
+和 Execution Plan：
 
 ```powershell
-$targetRepo = "<target-repo>"
-vega adapters init codex --repo $targetRepo
-Set-Location $targetRepo
-vega agent capabilities
+vega revise --run <run_id> `
+  --contract <change-contract-v2.json> `
+  --execution-plan <execution-plan-v2.json>
 ```
 
-初始化会写入 `$vega-loop`、`$vega-review` 和 `$vega-agent` 三个仓库级 Skill。它不安装 hook，
-不修改 Codex 全局配置，也不会在初始化时启动 Worker。
+只调整合同内的实现安排可以继续执行；合同字段变化会重新进入人工批准。
 
-Claude Code 可以按同一份 Plan-first 协议使用 `assist`。当前版本没有 Claude Code 原生
-Adapter；同一 Claude Code 会话也不能替代独立 Reviewer。
+### 失败和恢复
 
-## 结果和证据
+- 代码没变，只是验证环境或命令需要重跑：`vega retry --run <run_id>`。
+- Worker 失去可信终态：准备 Recovery Request，再运行
+  `vega recover --run <run_id> --input <recovery.json>`。
+- 原生会话必须由人处理：`vega takeover --run <run_id> --role worker`。
+- 空闲会话接管后且 Workspace 未变化时，可用
+  `vega reclaim --run <run_id> --role worker` 交还控制权；活动 attempt 被中断后先做
+  `recover` 或 Handoff。
 
-Vega 分开记录 Worker Claim、机器 Observation 和最终 Decision。Worker 声称“已经完成”只是
-输入，不是成功证据。
+Vega 不把超时、Provider 异常或 Reviewer 未完成包装成成功。现场无法解释时，状态进入
+`needs_human`，并保留 Worktree、Checkpoint、Trace 和报告。
 
-`finish-summary.json` 第一屏集中展示实际变更、验证结果、风险、Reviewer finding、未证明事项
-和人工下一步。`actual_changes.changed_files` 是完整变更文件清单；`priority_files` 只帮助定位
-重点，不会过滤其他实际变更。
-
-证据缺失、过期或与当前 Workspace 不一致时，已有的 `ready_to_commit` 也会被撤销并转入
-人工处理。
-
-## 其他入口
-
-- 实验性 Goal/checkpoint CLI 用于有界长任务控制，见
-  [LONG-RUNNING-GOALS](docs/LONG-RUNNING-GOALS.md)。
-- YAML 驱动的只读 Inspection Runtime 仍可用于兼容检查：
+### 换机器继续
 
 ```powershell
-vega run engineering-change --task examples/tasks/check-vega-runtime-docs.md --repo .
+vega handoff --run <run_id> --reason "换机器继续"
 ```
+
+Handoff 生成 Git 可跟踪的 Task Card 和本机 Resume Capsule。人工检查 WIP 与 Task Card 后，
+在任务分支完成 commit、push；新机器拉取同一分支，再运行：
+
+```powershell
+vega resume --repo .
+```
+
+Provider Thread ID 只用于本机续接。跨机器恢复依赖任务分支、Git Candidate、Change Contract、
+Execution Plan 和 Task Card。
+
+## 最终报告
+
+所有 Work Item 完成后，Vega 从现有 Git、Verification、Risk 和 Reviewer Artifact
+确定性生成：
+
+```text
+runs/<run_id>/agent-final-report.json
+runs/<run_id>/agent-final-report.md
+```
+
+报告列出完整变更文件、Reviewer 建议优先查看的位置、实际验证结果、风险命中和未证明事项。
+它不调用额外模型做总结。最终状态是 `completed / ready_to_commit` 时，仍由人决定是否 push、
+创建 PR 或合并。
+
+## 设计
+
+### 批准边界和执行计划分开
+
+人批准“做什么、验收是什么、哪里不能动”。Agent 可以在这个边界内调整实现方案、Work Item
+和测试；触及合同字段就重新请求批准。
+
+### Git 保存代码事实
+
+自主执行发生在 Vega 管理的 Worktree。每个 Candidate 绑定 Git SHA；SHA 变化后，旧验证和
+Reviewer 结论自动失效。Worker 的自述只算 Claim。
+
+### Worker 和 Reviewer 分开
+
+Worker Thread 可以在 Repair 和后续 Work Item 中复用。Reviewer 不继承 Worker Thread、
+完整聊天或写权限；同一 Work Item 的复查可以复用自己的只读 Thread。多 Work Item、Replan
+或高风险变更会触发最终集成审查。
+
+### 路由由代码决定
+
+LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`repair`、`replan`、`human`
+和 `finalize`，并限制 Repair、Review、Replan 与验证重试次数。
+
+## 边界
+
+- 当前自动 Provider Adapter 只支持 Codex；Provider Session 合同不依赖 Codex 专有成功语义。
+- Reviewer 会话隔离不是容器或操作系统级安全沙箱。
+- 项目没有可靠验证命令时，Vega 也无法凭空证明代码可交付。
+- 数据库迁移、支付、权限、部署和外部写入仍需要明确风险配置与人工判断。
+- 用户当前分支保持不动。Vega 只在受管 Worktree 中创建本地 Candidate/Checkpoint Commit；
+  push、merge、release、回滚、删除用户文件和接受长期 Memory 仍由人工控制。
 
 ## 文档
 
 | 内容 | 文档 |
 |---|---|
-| 当前事项和下一项 | [CURRENT](docs/CURRENT.md) |
+| 完整命令与恢复场景 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
+| 产品边界和成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
+| 当前架构 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
+| 修改前调查与计划 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
+| 当前事项 | [CURRENT](docs/CURRENT.md) |
 | 文档导航 | [docs/README](docs/README.md) |
-| 日常入口、Agent 与恢复操作 | [USAGE-WALKTHROUGH](docs/USAGE-WALKTHROUGH.md) |
-| 产品范围和成功语义 | [PRODUCT-CONTRACT](docs/PRODUCT-CONTRACT.md) |
-| Supervisor 状态权威 | [SUPERVISOR-AGENT-STATE-AUTHORITY](docs/SUPERVISOR-AGENT-STATE-AUTHORITY.md) |
-| Plan-first 协议 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
-| Runtime、证据链和风险门禁 | [ARCHITECTURE](docs/ARCHITECTURE.md) |
-| 演进计划 | [vega-agent-evolution](plans/vega-agent-evolution.json) |
-| 路线决策和历史 | [ROADMAP](docs/ROADMAP.md) |
-| v0.2.1 发布说明 | [RELEASE-NOTES-0.2.1](docs/RELEASE-NOTES-0.2.1.md) |
-| 真实任务运行记录 | [real-world-runs](eval/real-world-runs.md) |
+| v0.3.0 说明 | [RELEASE-NOTES-0.3.0](docs/RELEASE-NOTES-0.3.0.md) |
+| 真实运行记录 | [real-world-runs](eval/real-world-runs.md) |
 
 ## 开发
 
 `Vega` 是产品名，`vegaloom` 是仓库和 Python distribution，`vega` 是 CLI 与导入包。
-参与开发时安装 `dev` extra：
 
 ```powershell
 python -m pip install -e ".[dev]"
-python -m compileall -q src scripts
+python -m compileall src scripts/check_repository_hygiene.py
 python scripts/check_repository_hygiene.py --base-ref origin/main
 python scripts/plan_state.py check --base-ref origin/main
 python scripts/check_architecture_growth.py --base-ref origin/main
 python -m pytest
-ruff check src tests scripts
+ruff check src tests scripts/check_repository_hygiene.py
 git diff --check
 ```
 

@@ -40,6 +40,10 @@ def apply_agent_projection(
             "supervisor_evidence": projection["supervisor_evidence"],
             "integrity_warning": projection["integrity_warning"],
             "history_note": projection["history_note"],
+            "provider_sessions": projection["provider_sessions"],
+            "provider_session_warning": projection[
+                "provider_session_warning"
+            ],
         }
     )
     if projection["effective_phase"] != projection["recorded_phase"]:
@@ -85,6 +89,8 @@ def payload_fields(state: dict[str, Any]) -> dict[str, Any]:
         "supervisor_evidence": state.get("supervisor_evidence"),
         "integrity_warning": state.get("integrity_warning"),
         "history_note": state.get("history_note"),
+        "provider_sessions": state.get("provider_sessions"),
+        "provider_session_warning": state.get("provider_session_warning"),
     }
 
 

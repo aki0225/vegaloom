@@ -5,8 +5,8 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：14 / 14
-- 最近事件：`20260827T144503Z-SIMP-04-completed`
+- 已完成：18 / 18
+- 最近事件：`20260828T134934Z-SESSION-04-completed`
 
 ## 当前事项
 
@@ -30,6 +30,10 @@
 | 已完成 | `SIMP-02` | 抽离 Provider 无关 Candidate 流程 | `SIMP-01` |
 | 已完成 | `SIMP-03` | 收窄 legacy Plan 兼容面 | `SIMP-02` |
 | 已完成 | `SIMP-04` | 收敛 Agent 状态解释 | `SIMP-03` |
+| 已完成 | `SESSION-01` | 接入持久 Provider Session | `SIMP-04` |
+| 已完成 | `SESSION-02` | 完成持久 Worker 与独立 Reviewer | `SESSION-01` |
+| 已完成 | `SESSION-03` | 统一 Agent 入口与交付报告 | `SESSION-02` |
+| 已完成 | `SESSION-04` | 完成真实 Agent 验收与 v0.3.0 准备 | `SESSION-03` |
 
 ## 状态规则
 

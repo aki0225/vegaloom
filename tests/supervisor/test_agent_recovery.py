@@ -804,8 +804,7 @@ def test_unknown_side_effect_adjudication_appends_evidence_and_allows_handoff(
     invalid = CliRunner().invoke(
         app,
         [
-            "agent",
-            "adjudicate-side-effects",
+            "adjudicate",
             "--run",
             run_id,
             "--input",
@@ -818,8 +817,7 @@ def test_unknown_side_effect_adjudication_appends_evidence_and_allows_handoff(
     result = CliRunner().invoke(
         app,
         [
-            "agent",
-            "adjudicate-side-effects",
+            "adjudicate",
             "--run",
             run_id,
             "--input",

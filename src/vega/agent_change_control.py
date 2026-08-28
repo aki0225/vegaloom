@@ -18,6 +18,7 @@ from .agent_contract import (
 )
 from .agent_persistence import read_agent_trace
 from .redaction import write_redacted_json_once
+from .review_contract import ReviewVerdict
 
 
 class ChangeBudgetSnapshot(StrictAgentModel):
@@ -45,6 +46,46 @@ class PreparedChangeDecision:
     @property
     def task_brief_refs(self) -> list[str] | None:
         return [self.fix_packet_ref] if self.fix_packet_ref is not None else None
+
+
+def requires_final_integration_review(
+    context: object,
+    *,
+    attempt_number: int,
+) -> bool:
+    """只在累计风险明显高于单 Work Item 审查时追加集成审查。"""
+
+    contract = context.contract
+    execution_plan = context.execution_plan
+    side_effects = contract.side_effect_policy.model_dump(
+        mode="json",
+        exclude={"schema_version"},
+    )
+    return bool(
+        len(execution_plan.work_items) > 1
+        or contract.contract_revision > 1
+        or execution_plan.plan_revision > 1
+        or contract.authorized_risk_reviews
+        or any(side_effects.values())
+        or attempt_number > 1
+    )
+
+
+def aggregate_final_review_verdict(
+    verdicts: list[ReviewVerdict],
+    *,
+    required_risks: list[str],
+) -> str:
+    if not verdicts or any(item.verdict == "needs_human" for item in verdicts):
+        return "needs_human"
+    if any(item.verdict == "request_changes" for item in verdicts):
+        return "request_changes"
+    disclosed = {
+        disclosure.risk_id
+        for verdict in verdicts
+        for disclosure in verdict.risk_disclosures
+    }
+    return "approve" if set(required_risks).issubset(disclosed) else "needs_human"
 
 
 def prepare_change_decision(

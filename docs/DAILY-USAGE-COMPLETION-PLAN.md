@@ -1,5 +1,9 @@
 # Vega 日常可信使用完成计划
 
+> 历史说明：本文记录 `v0.1.4` 阶段的完成计划，所列 `vega do`、`vega loop` 等命令已经
+> 退出公开 CLI。当前流程见 [`../README.md`](../README.md) 与
+> [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md)。
+>
 > 日期：2026-08-05
 > 状态：Phase 0 至 Phase 4 已完成；进入真实日常使用观察
 > 范围：`v0.1.4` 发布、CRWP-V1、调查与计划协议、Finish 报告、真实使用验收

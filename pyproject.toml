@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vegaloom"
-version = "0.2.1"
-description = "带监督执行、确定性验证和独立评审的 AI 编码 Harness"
+version = "0.3.0"
+description = "带持久 Coding Agent 会话、确定性验证和独立评审的软件工程 Agent"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,215 +1,147 @@
-# Vega 发布前检查清单
+# 发布检查
 
-这份清单用于正式打标签、公开演示或在 fresh clone 中复核 Vega 是否可用。它不新增产品能力，
-只把安装、验证、证据和边界检查整理成可重复步骤。
+当前候选：`v0.3.0`。
 
-## 一、适用范围
+## 1. 版本和工作区
 
-本清单适用于当前稳定主线：
+- `pyproject.toml`、`vega.__version__`、README badge 和 CI package smoke 都是 `0.3.0`；
+- `git status --short` 只包含本次发布候选变更；
+- 没有本机绝对路径、凭据、`.env`、数据库、Office 文件或运行缓存；
+- `eval/` 历史记录没有被改写。
 
-- Python distribution：`vegaloom`
-- CLI：`vega`
-- 稳定公共 Python API：仅 `vega.__version__`
-- 日常入口：`vega do`、`vega loop`、`vega status`、`vega finish`
-- opt-in Agent 入口：`vega agent`、`vega adapters init codex`
-- 只读 inspection 入口：`vega run engineering-change`
+## 2. 公共 CLI
 
-不在本清单中验证：
-
-- 自动 commit、push、release 或部署。
-- 生产数据库迁移或生产 backfill。
-- 多 Work Item 自动派发、长期 Memory、Provider 平台或多 Reviewer 默认集成。
-- 操作系统级 sandbox 或容器隔离。
-
-## 二、干净工作区检查
-
-发布前先确认工作区没有混入本地生成物：
+基础检查：
 
 ```powershell
-git status --short --branch
-git diff --check
-git check-ignore -v .env .tmp .local-validation runs memory .agents .claude .codex .trellis
+vega --version
+vega --help
+vega capabilities
+vega config check --repo .
 ```
 
-期望：
+帮助中只出现当前顶层 ChangeRun 命令。以下旧入口不得注册：
 
-- `git status` 只显示预期变更，发布前应干净。
-- `.env`、`.tmp/`、`.local-validation/`、`runs/`、`memory/` 和本地 AI 工具目录被忽略。
-- 不提交凭证、运行产物、本地验证日志或构建产物。
+```text
+vega do
+vega loop
+vega agent
+vega goal
+vega run engineering-change
+```
 
-## 三、本地开发验证
-
-常规验证：
+## 3. 本地验证
 
 ```powershell
 python -m compileall src scripts/check_repository_hygiene.py
 python scripts/check_repository_hygiene.py --base-ref origin/main
+python scripts/plan_state.py check --base-ref origin/main
+python scripts/check_architecture_growth.py --base-ref origin/main
+python -m pytest
 ruff check src tests scripts/check_repository_hygiene.py
-python -m pytest --collect-only -q
 git diff --check
 ```
 
-如果要做完整本地测试，优先让 pytest 使用项目内临时目录：
+报告精确通过数、跳过数、退出码和提交。超时不是通过。
+
+## 4. Package smoke
 
 ```powershell
-python -m pytest --basetemp .tmp\pytest\runs\full-local
+python -m build
 ```
 
-注意：
-
-- 超时不是通过。必须看到明确的 passed、failed、skipped 计数。
-- 长测试可按文件或 CI 分片拆开运行，但要记录覆盖范围。
-- 本地 Windows 结果不能替代 GitHub Actions 的 Python 3.11、Python 3.12、POSIX、Windows
-  和 package smoke。
-
-## 四、干净安装 smoke
-
-从源码树外创建临时目录安装 wheel，验证 CLI 可用。不要依赖当前 Python 已经全局安装
-`build`；发布验证应使用项目内临时 venv：
+在全新虚拟环境分别安装 wheel 与 sdist，检查：
 
 ```powershell
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$root = Join-Path ".tmp\release-readiness" $stamp
-$buildVenv = Join-Path $root "build-venv"
-$outDir = Join-Path $root "dist"
-$smokeDir = Join-Path $root "package-smoke"
-
-New-Item -ItemType Directory -Force $outDir | Out-Null
-
-python -m venv $buildVenv
-$buildPython = Join-Path $buildVenv "Scripts\python.exe"
-& $buildPython -m pip install --upgrade pip build
-& $buildPython -m build --outdir $outDir
-
-python -m venv (Join-Path $smokeDir ".venv")
-$smokePython = Join-Path $smokeDir ".venv\Scripts\python.exe"
-& $smokePython -m pip install --upgrade pip
-$wheel = Get-ChildItem $outDir -Filter "vegaloom-*.whl" |
-  Sort-Object LastWriteTime -Descending |
-  Select-Object -First 1
-& $smokePython -m pip install $wheel.FullName
-
-Push-Location $smokeDir
-& ".\.venv\Scripts\vega.exe" --version
-& ".\.venv\Scripts\vega.exe" list-loops
-& ".\.venv\Scripts\vega.exe" agent capabilities
-Pop-Location
+vega --version
+vega --help
+vega capabilities
 ```
 
-期望：
+还要确认：
 
-- `vega --version` 输出当前版本。
-- `vega list-loops` 在源码树外仍能看到包内 baseline loop。
-- 基础 Wheel 安装后，`vega agent capabilities` 中的 `supervisor_runtime` 为 `true`，
-  `control_plane` 为 `deterministic-state-machine`。
-- 生成的 `.tmp/release-readiness/`、`build/` 和 egg-info 中间产物不提交。
-- 如果系统 PATH 上已有旧版 `vega`，以当前 venv 或 smoke venv 中的 `vega.exe` 为准。
+- 包含 `.agents` Skill 生成资源；
+- 不依赖源码目录；
+- `vega capabilities` 显示 Codex App Server、持久 Worker、Reviewer isolation 和显式
+  fresh-session；
+- 基础安装不需要 LangGraph。
 
-## 五、日常使用 smoke
+## 5. 真实 ChangeRun
 
-在一个小型目标仓库上跑 assist 路径，避免无意启动外部 worker：
+使用干净目标仓库和真实 Codex 登录态。任务必须足够触发至少一次连续 Turn，优先覆盖 Repair
+或两个 Work Item。
+
+检查：
+
+- Worker Thread ID 在允许复用的 Turn 间保持一致；
+- Reviewer Thread 与 Worker 不同；
+- Reviewer 为只读；
+- `watch` 能看到安全事件；
+- 至少发送一次 `steer`；
+- Verification、Risk、Reviewer 和 Finish 绑定当前 Candidate；
+- `agent-final-report.md` 来自确定性 Artifact；
+- 过程中不需要人工转贴 Worker / Reviewer 正文；
+- 失败或中断原样保留，不补写成功。
+
+真实结果只以追加条目写入 `eval/real-world-runs.md`。
+
+## 6. 文档
+
+核对：
+
+- README；
+- PRODUCT-CONTRACT；
+- ARCHITECTURE；
+- USAGE-WALKTHROUGH；
+- PLAN-FIRST-PROTOCOL；
+- MVP-SCOPE；
+- ROADMAP；
+- RELEASE-NOTES / RELEASE-SUMMARY；
+- CURRENT。
+
+当前文档不得推荐已删除命令。历史 Release、Gate、预注册和 `eval/` 文档保持当时事实。
+
+## 7. 计划事件
+
+实现 PR 同时追加：
+
+```text
+SESSION-01 completed
+SESSION-02 completed
+SESSION-03 completed
+SESSION-04 completed
+```
+
+每个事件只能在对应检查完成后写入。运行：
 
 ```powershell
-vega loop feature --repo <target-repo> --text "补充 README 使用说明" --mode assist
-vega latest --kind loop
-vega status --run <run_id>
-vega finish --run <run_id>
+python scripts/plan_state.py render
+python scripts/plan_state.py check --base-ref origin/main
 ```
 
-如需验证自动 worker，必须显式确认目标仓库可被修改，并确保目标仓库有可运行验证命令：
+`docs/CURRENT.md` 由脚本生成，不手工修改。
 
-```powershell
-vega do feature --repo <target-repo> --text "补充 README 使用说明" --mode auto
-```
+`pr-ci` 由包含这些事件的同一个 PR 追认：CI 完成前，事件只是候选分支上的完成声明，
+不能作为合并依据；required checks 全绿后才成立。
 
-期望：
+## 8. PR CI
 
-- run 产物只写入当前 Vega workspace 的 `runs/`。
-- 目标仓库只出现任务相关 diff。
-- 验证失败、证据不足或 reviewer 打回时进入人工处理状态。
-- Vega 不自动 commit、push、release 或写长期 memory。
+- 当前分支推送到远端；
+- PR 只包含 v0.3.0 Agent 变更；
+- 所有 required checks 完成，不把 skipped 或 pending 当成通过；
+- 失败时读取具体 job 日志；
+- 修复提交重新跑同一套门禁；
+- 合并前确认远端 HEAD 与本地验收提交一致。
 
-`vega finish --run <loop_run>` 面向普通 Core run；`vega agent finalize --run <agent_run>` 只在
-父 Agent 已处于 `finalizing` 时采用已绑定的可信 Core Finish。后者不重新运行验证或 Reviewer，
-不能替代前者生成 Core 交付证据。
+## 9. 发布
 
-### Codex JSONL 与显式 Worker 重跑验收
+只有 PR 合入 `main` 且发布提交通过完整门禁后：
 
-涉及 Codex 实时进度和终态解析的发布候选，还必须在最终候选提交上使用 fresh 小型目标仓库
-完成一次真实 auto loop。不得复用较早提交、超时 run 或人工清理后的现场作为通过证据。
+1. 从精确 `main` 提交创建 annotated Tag `v0.3.0`；
+2. 推送 Tag；
+3. 创建 GitHub Release；
+4. 使用 `RELEASE-NOTES-0.3.0.md`；
+5. 核对 Release 绑定 commit、Tag、制品和 CI；
+6. 再把文档中的“发布候选”更新为“已发布”。
 
-通过条件：
-
-- Worker 和 Reviewer execution 都在各自 timeout 内正常退出，`execution.json`、根 state 和
-  Finish 对终态的记录一致，且没有 owned process 残留。
-- 两个 `process-output.txt` 都非空；输出可按行解析为 JSONL，并存在非空的最终
-  `item.completed / agent_message`。
-- Codex 的 `process-stderr.txt` 与 CLI stderr 只包含脱敏诊断或固定安全进度，不得混入
-  JSONL stdout，也不得包含原始命令、文件路径、命令输出、模型正文、推理、工具参数或凭据。
-- 终态前至少观察到一个固定安全进度事件。
-- 目标仓库只保留任务允许的变更，Workspace、Scope、Verification、Risk、Reviewer 和 Finish
-  均通过，最终 `Finish=ready_to_commit`。
-- run artifacts 的高置信凭据扫描无匹配。
-
-发布候选包含 `--rerun-worker` 变更时，还要在受控仓库中验证：
-
-- 普通 continue 在无新成果的 Worker 中断后无副作用拒绝，不创建下一 iteration。
-- 只有人工显式传入 `--rerun-worker` 才进入同一 child 的下一 iteration。
-- baseline、授权、trace、重跑事务与 `worker_started` 能唯一绑定；证据缺失、冲突或事务文件
-  无法删除时不调用可写 runner。
-- 最新真实 Codex dogfood 与候选提交之间若只有版本和发布文档差异，可以复用该运行解释模型
-  边界，但仍须在候选提交上执行确定性的重跑事务与 package smoke。
-
-如果 Codex CLI 没有及时输出 JSONL、进程超时、终态消息缺失或证据不一致，本次 smoke 必须
-记为未通过并保留现场；不得仅凭单元测试、CI 或安全终止行为创建 Tag。
-
-### Supervisor Agent V1 发布验收
-
-包含 `vega agent` 产品变更的发布候选还必须完成一个真实单 Work Item 案例。通过条件：
-
-- 可以从任意目录运行 `vega adapters init codex --repo <target-repo>`，但随后必须进入
-  `<target-repo>` 再执行 Agent CLI；初始化命令不会改变 shell 工作目录。
-
-- Plan、Non-goals、成功条件、允许路径、验证命令和风险说明由人工显式批准。
-- Writer 只有一个绑定的 child/operation；Provider 失败、进程消失或 unknown 副作用不会
-  自动重试。
-- Handoff 只提交 WIP 与 Task Card；新的隔离 clone 不复制旧 `runs/`、Trace、SQLite、
-  虚拟环境、临时目录或聊天。
-- 恢复侧重新生成 Workspace、Scope、Verification、Risk、独立 Reviewer 和 Finish。
-- Reviewer 可以打回 Worker 的完成 Claim；人工修订 Plan 后使用新的 attempt，不覆盖旧证据。
-- 最终 `Agent phase=completed` 且 `terminal_status=ready_to_commit`，目标变更再由人工 PR 处理。
-
-如果最新真实验收使用的 Runtime commit 与发布候选之间只有版本号、CI 版本断言、发布文档和
-对应版本测试差异，可以复用该真实运行解释模型边界；候选提交仍必须通过完整 CI、wheel/sdist
-安装和 `vega agent capabilities` package smoke。
-
-## 六、CI 与标签门禁
-
-正式标签前必须确认 GitHub Actions 主线同一 commit 的任务全部成功：
-
-- 静态检查与分片文件覆盖。
-- Python 3.11 全量测试（main、release 或手工触发工作流）。
-- Python 3.12 四个完整测试分片。
-- Windows 专项与 wheel smoke。
-- POSIX 临时目录专项。
-- wheel/sdist 构建、安装和 package smoke。
-
-通过后再人工决定是否创建 tag 或 GitHub Release。Vega 自身不会执行这些发布动作。
-
-## 七、对外表述边界
-
-可以说：
-
-- Vega 是 AI 编码 Supervisor Agent 与验证 Harness。
-- Vega 提供 opt-in、单 Work Item 的 Supervisor Agent 控制层。
-- worker 与 reviewer 使用独立会话边界，reviewer 在只读视图中结合证据审查。
-- 结构化验证、workspace snapshot、risk gate 和 finish evidence 共同决定是否可交付。
-- Assurance Stage 1/2/3 是公开可复核的实验与证据，不等于默认 Runtime 能力。
-
-不要说：
-
-- Vega 是通用 Agent 框架或多 Agent 平台。
-- Vega 已支持多 Worker 自治、完整 Provider 平台或无人值守长期运行。
-- Vega 提供操作系统级 sandbox。
-- Vega 自动提交、部署、发布或修改生产数据库。
-- Stage 3 已经证明通用生产 backfill 安全。
+Vega 本身不执行 commit、push、merge、Tag 或 Release；这些动作由人或当前仓库维护流程完成。

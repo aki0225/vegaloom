@@ -31,8 +31,18 @@ def test_task_brief_preserves_all_required_facts() -> None:
     )
 
     assert "已确认事实 13" in brief.content
+    assert "## 批准时观察事实（可能已被前序修改改变）" in brief.content
     assert "其余" not in brief.content
     assert "外部副作用声明：none" in brief.content
+
+    current = compile_task_brief(
+        plan=plan,
+        work_item_id="W1",
+        confirmed_facts=["当前代码已完成前序修改"],
+    )
+    assert "## 当前已确认事实" in current.content
+    assert "当前代码已完成前序修改" in current.content
+    assert "## 批准时观察事实" not in current.content
 
 
 def test_task_brief_separates_current_and_later_work_items() -> None:

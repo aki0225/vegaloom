@@ -222,11 +222,11 @@ def create_handoff(
             "先人工核对 Task Card、WIP、进程和外部副作用；当前 Handoff blocked，不能自动启动 Worker"
             if handoff_status == "handoff_blocked"
             else (
-                "新机器拉取包含 Task Card 的任务分支后，运行 vega agent resume --repo .，"
+                "新机器拉取包含 Task Card 的任务分支后，运行 vega resume --repo .，"
                 "重新对账后再人工确认当前 Work Item"
             )
         ),
-        recommended_command="vega agent resume --repo .",
+        recommended_command="vega resume --repo .",
     )
     card = AgentTaskCard(
         task_id=state.task_id,

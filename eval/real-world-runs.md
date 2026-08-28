@@ -1197,3 +1197,50 @@ finish_sha256 = 6e96dfd12c135460db876ca1f98eda508eaaccae2ef4410e58af19c4a569b6f8
 写入两类不可变 operation Artifact、复用原 Worker 完成验证恢复，并在全部命令通过后继续接受
 Reviewer 的具体打回，而不是把验证通过等同于代码正确。目标仓库仍保留未提交 Diff；Vega
 没有执行 commit、push、PR 或 merge。
+
+## 2026-08-28 v0.3.0 持久交互式 Agent Dogfood
+
+本条使用一个可丢弃的两 Work Item Python 仓库验证 v0.3.0 候选。任务是让标签解析按首次
+出现顺序去重，再增加复用解析器的摘要格式化函数。批准合同允许修改 `tag_tools/**`、
+`tests/**` 和 `README.md`，禁止修改项目策略与 Agent 规则；人工只执行 `start`、`approve`、
+`run`，并在首个 Worker Turn 运行期间发送一次 Steer，没有在 Worker 与 Reviewer 之间转贴
+消息。
+
+正式成功前保留了三次失败现场：
+
+1. run `20260828-193143-agent` 暴露 Windows 子进程可能把 MCP 启动参数写入终端标题。
+   人工立即中断；Vega 转为 `needs_human`，没有形成 Diff。
+2. run `20260828-193700-agent` 证明 App Server Turn 完成后，长期 MCP 子进程仍可能占用
+   owned process tree，导致外层 Worker 无法及时收尾。人工中断后保留两文件 WIP。
+3. run `20260828-194712-agent` 发现 Contract 的最终验证被过早下发到 WI-01，引用了
+   WI-02 才会创建的测试文件。确定性 Verification 拒绝通过；Repair Worker 没有产生新 Diff，
+   Supervisor 因无法归因新的修复证据转 `needs_human`。
+
+对应修复没有放宽门禁：Windows App Server 改为隐藏子窗口、丢弃可能包含敏感参数的原始
+stderr，并在 Turn 结束后终止 App Server 进程树；Work Item 只运行当前项已经可执行的局部
+验证，Contract 的 `required_verification` 与 Plan 的 `additional_checks` 延后到最后一项。
+中间项没有局部验证时仍保守回退到合同验证。
+
+修复后的 run `20260828-195732-agent` 首次完成整条链路。随后使用最终待提交源码重新执行
+run `20260828-214004-agent`，得到相同终态，并作为本条最终验收依据：
+
+- Worker 在 WI-01 与 WI-02 复用同一个 Provider Thread，共两个 Turn；
+- Steer 在安全事件边界送达，状态记录为 `delivered`；
+- WI-01、WI-02 各使用独立只读 Reviewer，累计 Candidate 另有一次独立集成审查；
+- WI-01 的局部 pytest 与 `git diff --check` 通过；
+- WI-02 的两组定向 pytest、完整 pytest 和 `git diff --check` 全部通过；
+- 最终 Candidate 修改 5 个文件，`33 insertions(+), 2 deletions(-)`；
+- Verification、Risk、Work Item Reviewer 与集成 Reviewer 均通过；
+- `agent-final-report.json` 由已有 Git、Gate 和 Reviewer Artifact 确定性生成；
+- 父状态为 `completed / ready_to_commit`，Vega 没有执行 commit、push、PR 或 merge。
+
+本 Case 判定为：
+
+`terminal-leak-found-and-fixed / process-tree-cleanup-pass /
+work-item-verification-boundary-pass / persistent-worker-thread-pass /
+isolated-reviewers-pass / interactive-steer-pass / multi-item-agent-pass /
+deterministic-final-report-pass`。
+
+它证明当前 Codex App Server 路径可以完成两个顺序 Work Item、持久 Worker、隔离审查和主会话
+干预。它不证明长时间压缩后的语义保持、Claude Code Provider、未知外部副作用重放、高风险
+生产变更或无人值守跨天运行。

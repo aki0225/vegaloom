@@ -2,10 +2,11 @@
 
 ## 产品主线
 
-- Vega 只有一条可信完成链：Workspace、Verification、Risk、Reviewer 和 Finish 由 Core
-  Harness 拥有；`vega agent` 是复用该链的可选 Supervisor 控制层，不得形成第二套成功语义。
-- `vega do / loop` 是 Core 执行入口，`vega agent` 负责 Plan、批准、单 Writer、Checkpoint、
-  恢复和交接。Goal、Memory、Assurance 与 Inspection 属于实验或兼容能力。
+- Vega 只有一条公开 ChangeRun：Change Contract、持久 Worker、Git Candidate、Verification、
+  Risk、独立 Reviewer 和 Final Report。Core Harness 继续拥有可信完成语义。
+- `start / approve / run / status` 是当前入口。旧 `do / loop / agent / goal / inspection`
+  命令不再注册；仍被 ChangeRun 调用的 Core Runtime 是内部实现。
+- Goal、Memory、Assurance 与 Inspection 属于实验、历史或兼容实现，不得形成第二套公共成功语义。
 - 保持本地文件优先和 fail-closed。自主 ChangeRun 只允许在 Vega 管理的隔离 Worktree 中由
   控制器创建本地 Candidate/Checkpoint Commit；用户分支、push、merge、rebase、release 和
   长期 Memory 继续由人工控制。
@@ -20,7 +21,7 @@
   的实现安排。Git Candidate SHA 拥有代码快照事实；Task Card 只保存跨会话恢复所需的目标、
   当前步骤和下一动作。
 - Agent State 只拥有本机控制状态。Diff、Verification、Risk、Reviewer 和 Finish 事实继续由
-  Core Artifact 拥有；Trace 是追加式审计线索，Graph checkpoint 只拥有图游标。
+  Core Artifact 拥有；Trace 是追加式审计线索，Provider Session 只拥有会话协调状态。
 - 文本状态和 JSON 状态必须使用同一实时证据投影。证据缺失、损坏、过期或 Workspace 漂移时，
   展示层降级为 `needs_human`；执行层仍必须严格拒绝不可信证据。
 
@@ -35,7 +36,8 @@
 - Provider 无关执行后置流程：`agent_candidate_pipeline`、`agent_worker_evidence`、
   `agent_plan_scope`、`agent_core_observation`。
 - Codex 会话接入：`agent_codex_adapter`、`agent_codex_preparation`；
-  process stop/recover 复用 `agent_execution_bridge`。
+  `codex_app_server`、`codex_app_server_runner`、`provider_session`；
+  进程所有权与停止复用 `execution_control`、`execution_process`。
 - 仓库与上下文：`agent_context`、`agent_repository_*`、`agent_git_worktree`、
   `agent_git_candidate`、`agent_runtime_support`。
 - 恢复与交接：`agent_recovery*`、`agent_handoff*`、`agent_resume_validation`、
@@ -61,8 +63,7 @@
 
 ## 改动与验证矩阵
 
-- CLI 注册、参数或帮助：运行相关 Core CLI 测试；涉及 `vega agent` 时同时运行 Supervisor CLI
-  测试。
+- CLI 注册、参数或帮助：运行顶层 CLI 和对应 Supervisor 测试。
 - Loop、Verification、Risk、Reviewer、Finish 或恢复：运行对应 Core 文件和相关 Security
   负向合同。
 - `agent_*`：运行所属 Supervisor 文件；涉及身份、路径、Artifact 或恢复时追加相关 Security

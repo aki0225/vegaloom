@@ -387,8 +387,8 @@ def render_recovery_report(
     else:
         lines.extend(
             [
-                "- 如果工作区已有合理修复：运行 `vega loop continue --repo <repo> --run <run>`。",
-                "- 如果工作区被污染：人工清理后再继续，或放弃该 run 重新开始。",
+                "- 如果工作区已有合理修复：回到所属 ChangeRun 继续对账。",
+                "- 如果工作区被污染：人工清理后创建新的 ChangeRun。",
             ]
         )
     return redact_text("\n".join(lines).rstrip() + "\n")

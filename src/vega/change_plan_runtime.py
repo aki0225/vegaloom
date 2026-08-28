@@ -91,7 +91,7 @@ def render_change_plan(inputs: dict) -> str:
             "",
             "- 本计划用于把大目标先变成可审查范围，不直接修改目标仓库。",
             "- 进入实现前，建议人工确认 scope、阶段和预算是否符合预期。",
-            "- 批准后再按 phase 拆成多个 `vega do` / `vega loop` 任务。",
+            "- 批准后把 phase 转成 ChangeRun 的有限 Work Item。",
             "",
             "## 建议审批命令",
             "",

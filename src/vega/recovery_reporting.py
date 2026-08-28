@@ -92,7 +92,7 @@ def render_iteration_interruption_report(
                 "",
                 "- 本轮 orchestration 未形成可信终态，不能作为 success、verification 或 reviewer 依据。",
                 "- 已保留本轮现有 execution、输出和工作区 diff，不自动覆盖、回滚或清理。",
-                "- 后续人工确认现场后，`loop continue` 必须使用新的 iteration 编号。",
+                "- 后续人工确认现场后，所属 ChangeRun 必须使用新的 iteration 编号。",
             ]
         ).rstrip()
         + "\n"

@@ -16,7 +16,7 @@ def git_checklist(
         f"只暂存 WIP 与 Task Card：{add_paths}",
         "执行 `git diff --cached --check`，人工检查完整 staged diff",
         f"人工决定是否在任务分支 `{branch}` commit 和 push",
-        "新机器使用 `git pull --ff-only` 后运行 `vega agent resume --repo .`",
+        "新机器使用 `git pull --ff-only` 后运行 `vega resume --repo .`",
     ]
 
 

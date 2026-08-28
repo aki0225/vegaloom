@@ -250,10 +250,10 @@ def _next_steps(
     if finish_status == "needs_fix":
         return [
             "按 Reviewer findings 或最新 `fix-prompt.md` 完成最小修复。",
-            "重新运行 `vega loop continue` 和 `vega finish`，不要直接提交。",
+            "回到所属 ChangeRun 继续 Repair 和门禁，不要直接提交。",
         ]
     if finish_status != "needs_human":
-        return ["继续当前 loop；终态证据完整后重新运行 `vega finish`。"]
+        return ["继续所属 ChangeRun；终态证据完整后再读取最终报告。"]
     steps: list[str] = []
     if not integrity.valid:
         steps.append("检查完整性 issues，重新生成缺失或失效的证据链。")
@@ -268,7 +268,7 @@ def _next_steps(
         steps.append("人工逐项检查高风险命中、Reviewer 关键位置和剩余风险。")
     if not steps:
         steps.append("阅读 handoff 原因和关键产物，人工决定继续修复、重跑或停止。")
-    steps.append("人工处理完成后重新运行 `vega finish` 获取新的裁决。")
+    steps.append("人工处理完成后回到所属 ChangeRun 获取新的裁决。")
     return steps
 
 

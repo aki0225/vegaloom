@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "20260828T134931Z-SESSION-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "SESSION-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-28T13:49:31Z",
+  "summary": "Provider Session 已成为仅负责会话协调的本机状态；Codex App Server 支持持久 Thread、异常处理和进程树清理，Core 裁决保持不变。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "app-server-protocol-tests",
+      "execution-control-tests",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/provider_session.py",
+      "src/vega/codex_app_server.py",
+      "src/vega/codex_app_server_runner.py",
+      "src/vega/codex_app_server_process.py",
+      "tests/supervisor/test_codex_app_server.py"
+    ]
+  }
+}

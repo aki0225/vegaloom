@@ -1,201 +1,197 @@
-# Vega Plan-first 与修改前确认协议
+# 修改前调查与计划
 
-> 状态：当前协议，适用于 `v0.2.x`
->
-> 适用入口：Codex、Claude Code 等宿主会话、`vega agent`，以及边界明确时的 `vega do`
+## 默认规则
 
-## 1. 目标
-
-当用户只描述 bug 现象或模糊需求时，宿主会话不能直接把猜测交给 Worker。默认顺序为：
+用户通常只知道现象，不知道根因和文件位置。除非范围、验收和验证已经明确，Vega 任务都先做
+只读调查，再让人工批准 Change Contract。
 
 ```text
-只读调查 -> 固定 Plan -> 人工确认
-  -> assist / do -> Vega 判断链 -> Finish
-  -> Supervisor Agent -> Checkpoint / Vega 判断链 -> Finish
+用户描述
+  -> 只读调查
+  -> Change Contract + Execution Plan
+  -> 人工批准
+  -> Worker
 ```
 
-调查与 Plan 仍由宿主主会话负责，不增加 Planner Agent，也不在 `do / loop` Runtime 中使用
-模型判断任务是否模糊。`vega agent` 会持久化 Plan revision 和人工批准，但不会替主会话调查
-根因，也不会自行批准 Plan。
+“任务很小”不是跳过调查的理由。只有调用者已经给出精确范围、成功条件和验证方式，并明确要求
+直接执行时，主会话才可以把调查缩成快速核实。
 
-## 2. 什么时候可以直接执行
+## 调查内容
 
-只有以下条件同时成立，才可以省略重复调查并直接使用 `vega do` 或启动普通 assist：
+主会话至少检查：
 
-1. 用户已经描述明确的目标行为或缺陷；
-2. 允许修改的文件或模块范围明确；
-3. 验收标准和验证方式明确；
-4. 高风险与非目标没有未决冲突；
-5. 用户明确要求直接执行。
+1. 仓库根和相关目录的 `AGENTS.md`；
+2. `.vega.yaml`；
+3. Git 状态和当前 revision；
+4. 入口、调用链和失败路径；
+5. 相关测试、复现命令和既有行为；
+6. 数据库、支付、并发、权限、数据删除、部署和外部写入风险。
 
-缺少任一项时，先执行只读调查。不要用“任务看起来很小”代替这些条件。
+调查阶段只读。不要先改代码，再用修改后的结果倒推计划。
 
-`vega agent` 无论任务大小都必须有结构化 Plan 和人工批准。任务已经明确时可以只做快速核实，
-但不能跳过 Plan revision 与批准记录。
+## 事实与假设
 
-## 3. 只读调查边界
+计划必须把以下内容分开：
 
-修改前允许：
+### Observed Facts
 
-- 读取用户任务、`AGENTS.md`、`.vega.yaml`、源码、测试和相关历史；
-- 运行 `git status`、`git diff`、搜索、配置检查和其他不会修改工作区的查询；
-- 记录已经确认的事实、仍待验证的假设和需要用户决定的问题。
+已经从代码、命令、测试或运行证据确认的内容。每条写清来源。
 
-修改前禁止：
+### Hypotheses
 
-- 修改、创建、删除或格式化目标仓库文件；
-- 启动 Worker 或提前运行 `vega loop`；
-- 把推测写成事实；
-- 扩大用户授权的读取、修改或验证范围；
-- 因为生成了 Plan 就视为已经得到批准。
+仍需 Worker 验证的根因或实现判断。假设不能写成合同事实。
 
-## 4. 固定 Plan 模板
+### Unresolved Decisions
 
-宿主会话必须使用以下标题，并保持事实和假设分离：
+需要用户决定的问题，例如是否允许 Schema 变化、公共 API 变化或新增依赖。
 
-```markdown
-## User Goal
-
-用户希望最终得到什么结果。
-
-## Non-goals
-
-本轮明确不做什么。
-
-## Observed Facts
-
-- 已由文件、代码或命令确认的事实，并注明来源。
-
-## Hypotheses
-
-- 尚未确认的根因或实现判断，以及如何验证。
-
-## Proposed Scope
-
-- 允许读取的范围。
-- 允许修改的范围。
-- 明确禁止触碰的范围。
-
-## Verification
-
-- 必须运行的测试、静态检查和人工检查。
-
-## Risk Areas
-
-- 支付、数据库、并发、权限、敏感数据及其他命中风险。
-
-## Unresolved Decisions
-
-- 进入修改前仍需要用户决定的问题；没有则写“无”。
-```
-
-权威顺序固定为：
+权威顺序：
 
 ```text
-用户任务、AGENTS.md、.vega.yaml
-  > 已观察到的代码与运行事实
-  > 根因假设和修改建议
+用户要求 / 项目规则 / .vega.yaml
+  > Change Contract
+  > 已观察事实
+  > 假设和实现建议
 ```
 
-## 5. 人工确认
+## Change Contract
 
-Plan 完成后先交给用户。只有以下任一条件成立才进入修改：
+Contract 回答“Agent 被授权做什么”：
 
-- 用户明确批准 Plan；
-- 用户一开始已经提供精确范围、验收标准，并明确要求直接执行。
-
-批准只覆盖 Plan 中写明的范围。调查后出现新的高风险、依赖、跨层修改或范围扩大时，先更新
-Plan 并再次确认。
-
-## 6. Supervisor Agent 使用方式
-
-需要暂停恢复、主会话控制或 Git-only 接手时，调查后生成两份结构化文件：
-
-- Change Contract：目标、验收、不变量、非目标、风险授权、验证和可修改范围；
-- Execution Plan：事实、假设、Work Item、候选文件和实现方式。
-
-```powershell
-vega agent capabilities
-vega agent start --repo . `
-  --contract <change-contract.json> `
-  --execution-plan <execution-plan.json>
-vega status --run <agent_run>
+```json
+{
+  "task_id": "export-button-fix",
+  "contract_revision": 1,
+  "goal": "修复导出按钮点击后无响应",
+  "acceptance": [
+    "合法筛选条件下会启动一次导出",
+    "接口失败时页面显示错误并允许重试"
+  ],
+  "invariants": [
+    "同一次点击不能创建重复导出任务"
+  ],
+  "non_goals": [
+    "不重写整个导出模块"
+  ],
+  "authorized_risk_reviews": [],
+  "required_verification": [
+    "导出按钮定向测试",
+    "导出 API 回归测试"
+  ],
+  "authority_envelope": {
+    "allowed_paths": [
+      "src/export/**",
+      "tests/export/**"
+    ],
+    "forbidden_paths": [],
+    "max_changed_files": 8,
+    "max_repair_rounds": 3,
+    "max_auto_replans": 1,
+    "max_review_rounds": 4,
+    "max_verification_retries": 1
+  }
+}
 ```
 
-主会话先展示事实、假设、范围、验证和风险。只有用户明确批准后才执行：
+未列出的副作用默认不授权。需要数据库、公共 API、依赖、部署、支付、权限、数据删除或验证期间
+外部写入时，必须显式写入 `side_effect_policy`。
 
-```powershell
-vega agent approve --run <agent_run> --actor human
-vega agent run --run <agent_run> --timeout 900
+## Execution Plan
+
+Plan 回答“当前准备怎么做”：
+
+```json
+{
+  "task_id": "export-button-fix",
+  "contract_revision": 1,
+  "plan_revision": 1,
+  "observed_facts": [
+    "按钮事件已绑定，失败发生在请求状态没有恢复"
+  ],
+  "hypotheses": [
+    "异常分支没有清理 pending 状态"
+  ],
+  "work_items": [
+    {
+      "work_item_id": "WI-01",
+      "objective": "修复导出请求状态并补回归测试",
+      "depends_on": [],
+      "likely_files": [
+        "src/export/**",
+        "tests/export/**"
+      ],
+      "verification": [
+        "python -m pytest tests/export -q"
+      ],
+      "risk_notes": [
+        "检查重复点击和失败重试"
+      ]
+    }
+  ],
+  "implementation_strategy": [
+    "先复现，再做最小修复"
+  ],
+  "additional_checks": [
+    "git diff --check"
+  ],
+  "unresolved_decisions": []
+}
 ```
 
-新事实需要调整实施方式时，提交新的 Execution Plan。目标、范围、风险、验证或成功条件变化
-时，同时提交新的 Change Contract：
+Work Item 使用粗粒度边界。通常 1～4 项，最多 8 项。不要把每个函数或测试命令拆成一个
+Work Item。每项的 `verification` 必须在该项完成时即可运行，不能引用后续 Work Item 才会
+出现的文件或命令。Contract 的 `required_verification` 在最后一项执行，作为整次变更的最终
+验收；`additional_checks` 也在此时补跑。中间项没有声明局部验证时，Vega 会保守回退到合同
+验证，无法运行就停止，不会无验证推进。
 
-```powershell
-vega agent replan --run <agent_run> `
-  --contract <change-contract.json> `
-  --execution-plan <execution-plan.json>
-```
+## 人工批准
 
-只有 Execution Plan 变化且仍在已批准合同内时可以自动采用；合同字段变化会再次等待批准。
-完整状态与 Handoff 流程见
-[`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md#bounded-change-run)。
+主会话展示：
 
-## 7. Codex 使用方式
+- 目标和验收；
+- 事实与假设；
+- 允许和禁止范围；
+- 高风险与副作用；
+- Work Item；
+- 必跑验证；
+- 未决问题。
 
-仓库运行：
+用户可以批准、修改、缩小或拒绝。批准后 Contract revision 冻结。范围、验收、风险或副作用
+变化时，旧批准失效。
 
-```powershell
-vega adapters init codex --repo .
-```
+## 执行中的变化
 
-生成的 `$vega-loop` Skill 会执行本协议。批准后：
+### 合同内变化
 
-```powershell
-vega loop bug --repo . --text "<用户需求>" --mode assist
-vega status --run <loop_run_id>
-```
+以下变化可以由 Agent 通过 Execution Plan revision 处理：
 
-当前 Codex 主会话或宿主原生子代理按 `worker-prompt.md` 完成最小修改，然后：
+- 调整实现算法；
+- 调整 Work Item 顺序；
+- 在已批准范围内更换候选文件；
+- 增加测试或静态检查；
+- 缩小范围；
+- 修正已证伪的根因假设。
 
-```powershell
-vega loop continue --repo . --run <loop_run_id>
-vega finish --run <loop_run_id>
-```
+### 需要重新批准
 
-边界已经明确且用户要求直接执行的小任务，可以使用：
+- 用户可见行为或验收变化；
+- 必跑验证被删除或弱化；
+- 越出允许路径；
+- 公共 API、数据库 Schema、新依赖或部署动作；
+- 新出现的支付、权限、数据删除或外部写入；
+- 自动预算需要扩大；
+- fail-closed 边界需要改变。
 
-```powershell
-vega do feature --repo . --text "<用户需求>"
-```
+Vega 按结构化字段和真实 Diff 判断，不让另一个模型决定“这次变化算不算重大”。
 
-## 8. Claude Code 使用方式
+## Reviewer 的职责
 
-Claude Code 不需要新的 Vega Runtime 或原生 Runner。普通 Claude Code 主会话按本协议：
+Reviewer 判断 Candidate 是否满足当前 Contract 和 Work Item。它可以返回：
 
-1. 先只读调查并输出同一份固定 Plan；
-2. 等待用户明确批准；
-3. 运行 `vega loop ... --mode assist`；
-4. 按 `worker-prompt.md` 修改工作区；
-5. 运行 `vega loop continue` 和 `vega finish`。
+- `approve`；
+- `repair`；
+- `replan`；
+- `needs_human`。
 
-Claude Code 可以作为外部 Worker，但同一会话不能同时充当独立 Reviewer。Reviewer 必须使用
-项目配置的独立只读 runner，或读取 `review-pack` 的全新只读会话；不能接收 Worker 的完整
-聊天记录或中间推理。
-
-本阶段不增加 `vega adapters init claude`，也不实现 Claude Code 原生自动 Runner。
-
-## 9. `vega plan` 的边界
-
-`vega plan` 用于大目标的 scope、预算和 phase 规划。它不调查根因，也不自动批准实现，因此
-不能替代本协议的 `Observed Facts`、`Hypotheses` 和修改前人工确认。
-
-## 10. 当前边界
-
-- 不新增 Planner Agent；
-- 普通 Plan-first 不新增 `do / loop` Runtime 路由；
-- Supervisor Agent 只持久化已经调查得到的 Plan，不负责猜测根因；
-- 不修改 Verification、Risk、Reviewer、Finish 或成功语义；
-- 不增加 Claude Code 原生 Runner；
-- 不把 Plan 当成自动审批。
+Reviewer 不直接改 Contract，也不批准自己的新方案。普通问题转成 Fix Packet 自动回给 Worker；
+合同变化才回到人工。

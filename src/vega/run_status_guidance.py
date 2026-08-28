@@ -84,8 +84,7 @@ def initialization_next_steps(
     if current_step == "waiting_for_worker":
         return [
             f"读取 `{run_dir / 'worker-prompt.md'}`，让主会话/人工完成实现。",
-            f"实现后运行：`vega loop continue --repo <repo> --run {run_dir.name}`；"
-            "如已有外部日志再加 `--test-log <log>`。",
+            "实现后回到所属 ChangeRun 重新对账并执行门禁。",
         ]
     return None
 
@@ -127,26 +126,20 @@ def recovery_next_steps(
             steps.extend(
                 [
                     "当前已达到自动 Worker 迭代上限，不能再使用 `--rerun-worker`。",
-                    "如需继续，请人工完成并验证现场修改，再运行："
-                    f"`vega loop continue --repo <repo> --run {run_dir.name}`。",
+                    "如需继续，请人工完成并验证现场修改，再回到所属 ChangeRun。",
                 ]
             )
             return steps
         steps.extend(
             [
                 "如果没有新的 tracked 或非 ignored untracked diff，"
-                "可显式重跑同一 child 的下一轮 Worker："
-                f"`vega loop continue --repo <repo> --run {run_dir.name} --rerun-worker`。",
-                "如果已有 partial work，不要使用 `--rerun-worker` 覆盖现场；"
-                f"人工完成并验证后再运行："
-                f"`vega loop continue --repo <repo> --run {run_dir.name}`。",
+                "由所属 ChangeRun 决定是否建立新的 Worker attempt。",
+                "如果已有 partial work，不要启动第二个 Writer 覆盖现场；"
+                "人工完成并验证后再回到所属 ChangeRun。",
             ]
         )
         return steps
-    steps.append(
-        f"如果工作区已有合理修复，再运行："
-        f"`vega loop continue --repo <repo> --run {run_dir.name}`。"
-    )
+    steps.append("如果工作区已有合理修复，回到所属 ChangeRun 继续对账。")
     return steps
 
 
@@ -211,8 +204,7 @@ def verification_failure_next_steps(
     fix_prompt = latest_iteration_file(run_dir, "fix-prompt.md")
     return [
         f"自动验证失败，先读取 `{verification}`。",
-        f"按 `{fix_prompt}` 修复后重新运行："
-        f"`vega loop continue --repo <repo> --run {run_dir.name}`。",
+        f"按 `{fix_prompt}` 修复后回到所属 ChangeRun 重新执行门禁。",
     ]
 
 

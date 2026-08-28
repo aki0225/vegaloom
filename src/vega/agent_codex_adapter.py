@@ -37,9 +37,11 @@ from .agent_codex_preparation import (
     next_attempt_context as _next_attempt_context,
     prepare_dispatch_binding,
     read_task_brief as _read_task_brief,
+    review_final_candidate,
     validate_prepared_workspace,
 )
-from .agent_contract import AgentObservation
+from .agent_contract import AgentObservation, AgentState
+from .codex_app_server_runner import CodexAppServerRunner
 from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import (
@@ -74,6 +76,7 @@ class SupervisorAgentCodexAdapter:
         finish_runtime: FinishRuntime | None = None,
         progress_reporter: Callable[[str, int], None] | None = None,
         event_reporter: Callable[[str], None] | None = None,
+        persistent_sessions: bool = True,
     ) -> None:
         self.workspace = workspace.resolve()
         self.worker_runner = worker_runner
@@ -84,6 +87,7 @@ class SupervisorAgentCodexAdapter:
         self.finish_runtime = finish_runtime or FinishRuntime(self.workspace)
         self.progress_reporter = progress_reporter
         self.event_reporter = event_reporter
+        self.persistent_sessions = persistent_sessions
         self.runtime = SupervisorAgentRuntime(self.workspace)
         self.worker = SupervisorAgentWorker(self.workspace)
 
@@ -211,11 +215,23 @@ class SupervisorAgentCodexAdapter:
         )
         task_brief = _read_task_brief(run_dir)
         config = load_project_config(repo)
-        self._ensure_isolated_reviewer(config)
-        runner = self.worker_runner or CodexExecRunner(
-            options=config.runner.codex_exec.worker,
-            output_schema=WorkerClaim.model_json_schema(),
-            single_writer=True,
+        self._ensure_reviewer_for_attempt(run_dir, state, config)
+        runner = self.worker_runner or (
+            CodexAppServerRunner(
+                run_dir,
+                "worker",
+                work_item_id=state.current_work_item,
+                contract_revision=state.contract_revision,
+                plan_revision=state.execution_plan_revision,
+                output_schema=WorkerClaim.model_json_schema(),
+                options=config.runner.codex_exec.worker,
+            )
+            if self.persistent_sessions
+            else CodexExecRunner(
+                options=config.runner.codex_exec.worker,
+                output_schema=WorkerClaim.model_json_schema(),
+                single_writer=True,
+            )
         )
         return PreparedWorkerAttempt(
             run_dir=run_dir,
@@ -229,15 +245,40 @@ class SupervisorAgentCodexAdapter:
             verification_commands=tuple(work_item.verification),
             external_side_effects=work_item.external_side_effects,
             plan_scope_baseline=plan_scope_baseline,
-            worker_name="codex-exec",
-            reviewer_name="codex-exec",
+            worker_name=(
+                "codex-app-server"
+                if self.persistent_sessions
+                else "codex-exec"
+            ),
+            reviewer_name=(
+                "codex-app-server"
+                if self.persistent_sessions
+                else "codex-exec"
+            ),
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
             change_context=change_context,
+            timeout_seconds=timeout_seconds,
         )
 
     def _ensure_isolated_reviewer(self, config: ProjectConfig) -> None:
+        """保留 fresh-session 路径的 Reviewer 隔离注入。"""
+
         ensure_isolated_reviewer(self.loop_runtime, config)
+
+    def _ensure_reviewer_for_attempt(
+        self,
+        run_dir: Path,
+        state: AgentState,
+        config: ProjectConfig,
+    ) -> None:
+        ensure_isolated_reviewer(
+            self.loop_runtime,
+            config,
+            agent_run_dir=run_dir,
+            state=state,
+            persistent_session=self.persistent_sessions,
+        )
 
     def _prepare_child(
         self,
@@ -343,14 +384,31 @@ class SupervisorAgentCodexAdapter:
         )
 
     def _reconcile_attempt(self, executed: ExecutedWorkerAttempt) -> AgentRun:
-        return CandidatePipeline(
+        result = CandidatePipeline(
             runtime=self.runtime,
             loop_runtime=self.loop_runtime,
             finish_runtime=self.finish_runtime,
             initialize_core=self._initialize_change_core,
             observe_failure=self._observe_failure,
             event_reporter=self._event,
+            final_observation_reviewer=lambda observation: review_final_candidate(
+                self.workspace,
+                executed.prepared.run_dir,
+                observation,
+                load_project_config(executed.prepared.repo),
+                persistent_session=self.persistent_sessions,
+                attempt_number=executed.prepared.attempt_number,
+                timeout_seconds=executed.prepared.timeout_seconds,
+                progress_reporter=self.progress_reporter,
+                event_reporter=self._event,
+                reviewer_runner=getattr(
+                    self.loop_runtime,
+                    "reviewer_runner",
+                    None,
+                ),
+            ),
         ).reconcile(executed)
+        return result
 
     def _initialize_change_core(
         self,

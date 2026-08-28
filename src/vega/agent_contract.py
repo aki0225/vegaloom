@@ -356,6 +356,25 @@ class AgentCheckpoint(StrictAgentModel):
         return self
 
 
+class ProviderSessionStatus(StrictAgentModel):
+    """主会话可见的本地 Provider Session 摘要。"""
+
+    role: NonEmptyText
+    provider: NonEmptyText
+    owner: Literal["vega", "human"]
+    lifecycle: Literal["new", "idle", "active", "waiting_user", "unavailable"]
+    thread_id: NonEmptyText | None = None
+    work_item_id: NonEmptyText | None = None
+    turn_count: int = Field(default=0, ge=0)
+    compaction_count: int = Field(default=0, ge=0)
+    last_event: NonEmptyText | None = None
+    total_tokens: int | None = Field(default=None, ge=0)
+    cached_input_tokens: int | None = Field(default=None, ge=0)
+    context_window: int | None = Field(default=None, ge=0)
+    queued_steers: int = Field(default=0, ge=0)
+    pending_interactions: int = Field(default=0, ge=0)
+
+
 class AgentStatusCard(StrictAgentModel):
     run_id: NonEmptyText
     task_id: NonEmptyText
@@ -388,6 +407,8 @@ class AgentStatusCard(StrictAgentModel):
     history_note: NonEmptyText | None = None
     plan_risk_notes: list[NonEmptyText] = Field(default_factory=list)
     supervisor_evidence: list[SupervisorEvidenceItem] = Field(default_factory=list)
+    provider_sessions: list[ProviderSessionStatus] = Field(default_factory=list)
+    provider_session_warning: NonEmptyText | None = None
 
     @field_validator("changed_files")
     @classmethod

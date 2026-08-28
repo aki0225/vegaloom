@@ -13,6 +13,7 @@ from vega import agent_runtime as agent_runtime_module
 from vega import agent_repository_guard as agent_repository_guard_module
 from vega import agent_runtime_support as agent_runtime_support_module
 from vega import agent_status_card as agent_status_card_module
+from vega.agent_cli import _interaction_response
 from vega.agent_contract import (
     AgentObservation,
     AgentPlan,
@@ -317,22 +318,16 @@ def test_generic_status_latest_and_watch_recognize_agent_parent_run(
         app,
         ["status", "--run", run.run_dir.name, "--json"],
     )
-    agent_status = CliRunner().invoke(
-        app,
-        ["agent", "status", "--run", run.run_dir.name, "--json"],
-    )
-    latest = CliRunner().invoke(app, ["latest", "--kind", "agent", "--json"])
+    latest = CliRunner().invoke(app, ["latest", "--json"])
     watch = CliRunner().invoke(
         app,
         ["watch", "--run", run.run_dir.name, "--no-follow"],
     )
 
     assert status.exit_code == 0, status.output
-    assert agent_status.exit_code == 0, agent_status.output
     assert latest.exit_code == 0, latest.output
     assert watch.exit_code == 0, watch.output
     status_payload = json.loads(status.output)
-    agent_status_payload = json.loads(agent_status.output)
     latest_payload = json.loads(latest.output)
     assert status_payload["kind"] == "agent"
     assert status_payload["status"] == "paused"
@@ -340,7 +335,6 @@ def test_generic_status_latest_and_watch_recognize_agent_parent_run(
     assert status_payload["agent_phase"] == "awaiting_approval"
     assert status_payload["active_child_run"] is None
     assert status_payload["last_child_run"] is None
-    assert agent_status_payload == status_payload
     assert status_payload["persisted_agent_state"]["run_id"] == run.run_dir.name
     assert status_payload["persisted_agent_state"]["phase"] == "awaiting_approval"
     assert latest_payload["run_id"] == run.run_dir.name
@@ -418,7 +412,7 @@ def test_agent_status_degrades_invalid_evidence_or_workspace_to_needs_human(
     )
     text_status = CliRunner().invoke(
         app,
-        ["agent", "status", "--run", observed.run_dir.name],
+        ["status", "--run", observed.run_dir.name],
     )
 
     assert status.exit_code == 0, status.output
@@ -516,7 +510,7 @@ def test_generic_status_retains_latest_child_after_binding_is_cleared(
         app,
         ["status", "--run", result.run_dir.name, "--json"],
     )
-    latest = CliRunner().invoke(app, ["latest", "--kind", "agent", "--json"])
+    latest = CliRunner().invoke(app, ["latest", "--json"])
     watch = CliRunner().invoke(
         app,
         ["watch", "--run", result.run_dir.name, "--no-follow"],
@@ -1581,23 +1575,79 @@ def test_agent_cli_status_card_and_capabilities(
     started = CliRunner().invoke(
         app,
         [
-            "agent",
             "status",
             "--run",
             run.run_dir.name,
         ],
     )
-    capabilities = CliRunner().invoke(app, ["agent", "capabilities"])
+    capabilities = CliRunner().invoke(app, ["capabilities"])
 
     assert started.exit_code == 0, started.output
     assert "阶段：等待批准" in started.output
     assert capabilities.exit_code == 0
     capability_payload = json.loads(capabilities.output)
     assert capability_payload["control_plane"] == "deterministic-state-machine"
-    assert capability_payload["worker"] == "codex-exec"
-    assert capability_payload["change_run"] is True
-    assert capability_payload["multi_work_item"] is True
-    assert capability_payload["local_candidate_commits"] is True
+    assert capability_payload["provider"] == "codex-app-server"
+    assert capability_payload["persistent_worker_thread"] is True
+    assert capability_payload["reviewer_isolation"] == "per-work-item"
+    assert capability_payload["automatic_commit_push_release"] is False
+
+
+def test_agent_reclaim_rejects_interrupted_active_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    run = runtime.approve(run.run_dir.name)
+    SupervisorAgentWorker(workspace).bind(
+        run.run_dir.name,
+        child_run="attempt-interrupted",
+        operation_id="operation-interrupted",
+    )
+    monkeypatch.chdir(workspace)
+
+    result = CliRunner().invoke(
+        app,
+        ["reclaim", "--run", run.run_dir.name, "--role", "worker"],
+    )
+
+    assert result.exit_code != 0
+    assert "先执行 recover" in result.output
+    assert "完成现场对账" in result.output
+
+
+def test_interaction_response_matches_app_server_contract(tmp_path: Path) -> None:
+    permissions = tmp_path / "permissions.json"
+    permissions.write_text(
+        json.dumps({"permissions": {"network": {"enabled": True}}}),
+        encoding="utf-8",
+    )
+    sensitive = tmp_path / "sensitive.json"
+    sensitive.write_text(
+        json.dumps({"action": "accept", "content": {"password": "secret"}}),
+        encoding="utf-8",
+    )
+
+    assert _interaction_response(
+        "item/commandExecution/requestApproval",
+        decision="accept-session",
+        input_path=None,
+    ) == {"decision": "acceptForSession"}
+    assert _interaction_response(
+        "item/permissions/requestApproval",
+        decision=None,
+        input_path=permissions,
+    ) == {"permissions": {"network": {"enabled": True}}}
+    with pytest.raises(ValueError, match="敏感信息"):
+        _interaction_response(
+            "mcpServer/elicitation/request",
+            decision=None,
+            input_path=sensitive,
+        )
 
 
 def test_packaged_cli_help_prioritizes_product_commands() -> None:
@@ -1605,25 +1655,38 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
 
     assert result.exit_code == 0, result.output
     for command in (
-        "do",
-        "loop",
-        "agent",
+        "start",
+        "approve",
+        "run",
+        "revise",
         "status",
         "watch",
         "latest",
-        "finish",
-        "stop",
+        "steer",
+        "respond",
+        "resume",
+        "handoff",
         "recover",
+        "retry",
+        "adjudicate",
+        "pause",
+        "stop",
+        "takeover",
+        "reclaim",
+        "capabilities",
         "config",
         "adapters",
     ):
         assert _help_lists_command(result.output, command)
     for command in (
+        "agent",
+        "do",
+        "loop",
+        "goal",
+        "finish",
         "memory",
         "brief",
         "decision",
-        "goal",
-        "run",
         "profile",
         "reflect",
         "plan",
@@ -1636,40 +1699,9 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
 
     hidden_help = CliRunner().invoke(app, ["run", "--help"])
     assert hidden_help.exit_code == 0, hidden_help.output
-
-
-def test_agent_cli_help_prioritizes_supervisor_commands() -> None:
-    result = CliRunner().invoke(app, ["agent", "--help"])
-
-    assert result.exit_code == 0, result.output
-    for command in (
-        "start",
-        "approve",
-        "run",
-        "finalize",
-        "replan",
-        "retry-verification",
-        "recover",
-        "pause",
-        "stop",
-        "checkpoint",
-        "status",
-        "resume",
-        "capabilities",
-    ):
-        assert _help_lists_command(result.output, command)
-    for command in (
-        "dispatch",
-        "observe",
-        "plan",
-        "steer",
-        "resume-local",
-        "adjudicate-side-effects",
-    ):
-        assert not _help_lists_command(result.output, command)
-
-    hidden_help = CliRunner().invoke(app, ["agent", "dispatch", "--help"])
-    assert hidden_help.exit_code == 0, hidden_help.output
+    clean_help = _ANSI_ESCAPE_PATTERN.sub("", hidden_help.output)
+    assert "--run" in clean_help
+    assert "--fresh-session" in clean_help
 
 
 def _help_lists_command(output: str, command: str) -> bool:

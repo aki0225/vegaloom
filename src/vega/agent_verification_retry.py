@@ -12,19 +12,15 @@ from .agent_worker_evidence import (
     require_child_quiescent,
     require_single_executable_work_item,
 )
-from .agent_codex_preparation import (
-    comparison_binding_from_metadata,
-    ensure_isolated_reviewer,
-)
+from .agent_codex_preparation import comparison_binding_from_metadata
+from .agent_codex_preparation import ensure_isolated_reviewer, review_final_candidate
 from .agent_plan_scope import (
     capture_plan_scope_baseline,
     evaluate_plan_scope,
     plan_scope_failure,
     write_plan_scope_evidence,
 )
-from .agent_contract import (
-    AgentObservation,
-)
+from .agent_contract import AgentObservation
 from .agent_change_control import require_change_verification_retry_budget
 from .agent_operation import operation_ref, reserve_operation_identity
 from .agent_persistence import (
@@ -67,10 +63,8 @@ from .run_utils import resolve_run_dir
 from .scope_gate import ScopeGateResult
 from .verification_command_preflight import require_verification_commands_preflight
 
-
 class SupervisorAgentVerificationRetry:
     """在同一 Diff 上重跑 Core 门禁，不再次启动 Coding Worker。"""
-
     def __init__(
         self,
         workspace: Path,
@@ -79,6 +73,7 @@ class SupervisorAgentVerificationRetry:
         finish_runtime: FinishRuntime | None = None,
         progress_reporter=None,
         event_reporter=None,
+        persistent_sessions: bool = True,
     ) -> None:
         self.workspace = workspace.resolve()
         self.loop_runtime = loop_runtime or LoopAutomationRuntime(
@@ -86,13 +81,13 @@ class SupervisorAgentVerificationRetry:
             progress_reporter=progress_reporter,
         )
         self.finish_runtime = finish_runtime or FinishRuntime(self.workspace)
+        self.progress_reporter = progress_reporter
         self.event_reporter = event_reporter
+        self.persistent_sessions = persistent_sessions
         self.runtime = SupervisorAgentRuntime(self.workspace)
-
     def run(self, run: str) -> AgentRun:
         prepared, operation_id, bound = self._prepare_and_bind(run)
         return self._run_core(prepared, operation_id, bound)
-
     def _prepare_and_bind(
         self,
         run: str,
@@ -103,7 +98,6 @@ class SupervisorAgentVerificationRetry:
             operation_id = uuid4().hex
             bound = self._bind(prepared, operation_id)
         return prepared, operation_id, bound
-
     def _prepare(self, run: str) -> PreparedVerificationRetry:
         run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
         if state.phase != "ready" or state.active_child_run or state.active_operation_id:
@@ -123,7 +117,6 @@ class SupervisorAgentVerificationRetry:
         before = capture_bound_workspace(run_dir)
         if before.fingerprint != state.workspace_fingerprint:
             raise ValueError("验证恢复前 Workspace 已漂移，必须先重新对账")
-
         checkpoint = load_agent_checkpoint(
             run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
         )
@@ -138,7 +131,6 @@ class SupervisorAgentVerificationRetry:
             or child_state.current_iteration >= child_state.max_iterations
         ):
             raise ValueError("失败 child 没有可追加的 Core iteration")
-
         worker_binding = latest_worker_dispatch_binding(run_dir, state)
         if worker_binding is None or worker_binding[0] != child_dir.name:
             raise ValueError("无法把失败 child 绑定到原始真实 Worker")
@@ -168,7 +160,6 @@ class SupervisorAgentVerificationRetry:
             repo,
             before,
         )
-
         comparison_base_sha, comparison_paths = comparison_binding_from_metadata(
             metadata
         )
@@ -195,6 +186,9 @@ class SupervisorAgentVerificationRetry:
         ensure_isolated_reviewer(
             self.loop_runtime,
             load_project_config(repo),
+            agent_run_dir=run_dir,
+            state=state,
+            persistent_session=self.persistent_sessions,
         )
         return PreparedVerificationRetry(
             run_dir=run_dir,
@@ -217,7 +211,6 @@ class SupervisorAgentVerificationRetry:
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
         )
-
     def _bind(
         self,
         prepared: PreparedVerificationRetry,
@@ -296,7 +289,6 @@ class SupervisorAgentVerificationRetry:
                     operation_id=operation_id,
                 )
             raise
-
     def _run_core(
         self,
         prepared: PreparedVerificationRetry,
@@ -308,8 +300,8 @@ class SupervisorAgentVerificationRetry:
             self.loop_runtime.continue_assist(
                 child_run,
                 prepared.repo,
-                worker_name="codex-exec",
-                reviewer_name="codex-exec",
+                worker_name="codex-app-server" if self.persistent_sessions else "codex-exec",
+                reviewer_name="codex-app-server" if self.persistent_sessions else "codex-exec",
                 verify=True,
                 verification_commands=list(prepared.work_item.verification),
                 verification_retry_baseline=prepared.core_workspace_baseline,
@@ -395,6 +387,19 @@ class SupervisorAgentVerificationRetry:
             evidence_refs=evidence_refs,
             external_side_effects="none",
         )
+        if observation.all_work_items_completed:
+            observation = review_final_candidate(
+                self.workspace,
+                prepared.run_dir,
+                observation,
+                load_project_config(prepared.repo),
+                persistent_session=self.persistent_sessions,
+                attempt_number=2,
+                timeout_seconds=900,
+                progress_reporter=self.progress_reporter,
+                event_reporter=self._event,
+                reviewer_runner=getattr(self.loop_runtime, "reviewer_runner", None),
+            )
         self._event("验证恢复后的 Workspace 与 Core Artifact 已完成对账")
         routed = self.runtime.observe_machine(prepared.run_dir.name, observation)
         self._event(f"Supervisor 选择：{decision_label(routed, observation)}")
@@ -402,7 +407,6 @@ class SupervisorAgentVerificationRetry:
             routed = self.runtime.finalize(routed.run_dir.name)
             self._event("Supervisor 已完成：ready_to_commit")
         return routed
-
     def _observe_failure(
         self,
         prepared: PreparedVerificationRetry,
@@ -491,7 +495,6 @@ class SupervisorAgentVerificationRetry:
         routed = self.runtime.observe_machine(prepared.run_dir.name, observation)
         self._event(f"验证专用恢复已停止：{reason}")
         return routed
-
     def _event(self, message: str) -> None:
         if self.event_reporter is not None:
             self.event_reporter(message)

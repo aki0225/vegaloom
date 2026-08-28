@@ -14,7 +14,7 @@ from typing import Any
 from .redaction import redact_text, redact_value
 
 PROGRESS_ARTIFACT = "progress.jsonl"
-PROGRESS_VERSION = 1
+PROGRESS_VERSION = 2
 
 _EVENT_LABELS = {
     "started": "已启动",
@@ -30,12 +30,19 @@ _EVENT_LABELS = {
     "turn_started": "开始模型回合",
     "turn_completed": "完成模型回合",
     "turn_failed": "模型回合失败",
+    "thread_ready": "Provider Thread 已就绪",
+    "waiting_user": "等待人工响应",
+    "user_response_sent": "已发送人工响应",
+    "context_compacted": "Provider 已压缩上下文",
     "command_started": "开始执行命令",
     "command_completed": "命令执行完成",
     "command_failed": "命令执行失败",
+    "file_change_started": "开始修改文件",
     "file_changed": "完成文件修改",
     "file_change_failed": "文件修改失败",
     "plan_updated": "更新执行计划",
+    "subagent_started": "子会话已启动",
+    "subagent_updated": "子会话已更新",
     "supervisor_next": "Supervisor 选择 next",
     "supervisor_repair": "Supervisor 选择 repair",
     "supervisor_replan": "Supervisor 选择 replan",
