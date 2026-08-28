@@ -1,7 +1,6 @@
 # Vega 后续演进路线
 
-> 当前稳定版本：`v0.2.1`
-> 当前源码候选：`v0.3.0`，Tag 与 GitHub Release 尚未创建
+> 当前稳定版本：`v0.3.0`
 > 本文件保存路线决策和历史背景，不维护实时进度。
 > 当前事项与下一项：[`CURRENT.md`](CURRENT.md)
 > 机器可读计划：[`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json)
@@ -17,8 +16,8 @@
    Reviewer 和 Core Finish 决定；
 5. 公共 CLI 统一为顶层 ChangeRun 命令，删除 `do / loop / agent / goal / inspection` 包装；
 6. 旧 Core Runtime 继续作为内部实现，历史实验和 Release 文档保持原样；
-7. 真实 App Server Dogfood 与 package smoke 已完成；v0.3.0 发布前还需完成最终全量测试和
-   同提交 PR CI。
+7. 真实 App Server Dogfood、package smoke、最终全量测试和同提交 PR CI 已完成；
+   `v0.3.0` 已发布。
 
 这轮不引入多 Worker、Planner Runtime、Memory Engine、Web UI、daemon 或自动 Git 交付。
 目标是减少人工中转和重复入口，不是扩建通用 Agent 平台。
@@ -103,7 +102,6 @@ Verification/Risk/Reviewer/Finish 和确定性状态机推进有限 Work Item。
 [`ASSURANCE-CONTRACT-CANDIDATE.md`](ASSURANCE-CONTRACT-CANDIDATE.md) 为准，历史验证证据
 以 [`../eval/assurance-validation.md`](../eval/assurance-validation.md) 为准。本文不复制这些
 文档的完整内容。当前稳定版本见
-[`RELEASE-NOTES-0.2.1.md`](RELEASE-NOTES-0.2.1.md)，v0.3.0 候选见
 [`RELEASE-NOTES-0.3.0.md`](RELEASE-NOTES-0.3.0.md) 与
 [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)；V1 的历史实施计划见
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)，文档状态见

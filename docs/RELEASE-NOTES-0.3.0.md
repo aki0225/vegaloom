@@ -1,6 +1,7 @@
 # Vega v0.3.0 发布说明
 
-> 状态：发布候选。正式 Tag 与 GitHub Release 创建前，不视为已发布。
+> 状态：已发布。注解 Tag `v0.3.0` 绑定提交
+> `167567982cb9e72cf2e1ed01eee1d0f09d6e03d3`。
 
 v0.3.0 把 Bounded Change Loop 变成 Vega 的唯一公共 Agent 流程，并接入 Codex App Server
 持久会话。目标是减少长任务中的人工转贴和重复入口，不改变 Verification、Risk、Reviewer 和
@@ -73,14 +74,10 @@ App Server 子树改为隐藏并按进程树终止；原始 stderr 不进入用�
 
 内部 Python 模块不是稳定 SDK；稳定程序化导出仍只有 `vega.__version__`。
 
-## 发布门禁
+## 发布结果
 
-正式发布前必须在同一提交完成：
-
-- 全量测试与静态检查；
-- architecture growth 与 repository hygiene；
-- wheel / sdist 安装 smoke；
-- 真实 Codex App Server ChangeRun；
-- Worker Thread 复用、独立 Reviewer、Steer 和最终报告核对；
-- PR CI；
-- 人工发布复核。
+- PR `#93` 和合并后的 `main` 均通过 10 项 GitHub Actions；
+- 全量测试、静态检查、architecture growth、repository hygiene、wheel / sdist 安装 smoke
+  和真实 Codex App Server ChangeRun 已完成；
+- 注解 Tag [`v0.3.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.3.0)
+  已发布，GitHub 自动生成源码归档。

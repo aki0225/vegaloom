@@ -117,7 +117,7 @@ resume
 
 ## 发布判定
 
-v0.3.0 发布候选必须完成：
+v0.3.0 已完成以下发布门禁：
 
 - App Server 协议和持久会话测试；
 - Supervisor、Core、Security 和 Experimental 全量测试；
@@ -125,3 +125,6 @@ v0.3.0 发布候选必须完成：
 - wheel 与 sdist 安装 smoke；
 - 至少一个真实 Codex ChangeRun，覆盖 Thread 复用、独立 Reviewer、主会话可见进度和最终报告；
 - 同一提交的 PR CI。
+
+发布事实以注解 Tag [`v0.3.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.3.0)
+和对应 GitHub Release 为准。

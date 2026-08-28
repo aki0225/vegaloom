@@ -22,7 +22,7 @@
 
 ## 发布
 
-当前发布候选为 `v0.3.0`；正式 Tag 与 GitHub Release 创建前，不把它表述为已发布：
+当前稳定版本为 [`v0.3.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.3.0)：
 
 - [`RELEASE-NOTES-0.3.0.md`](RELEASE-NOTES-0.3.0.md)
 - [`RELEASE-SUMMARY-0.3.0.md`](RELEASE-SUMMARY-0.3.0.md)
