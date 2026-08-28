@@ -11,7 +11,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Candidate-v0.3.0-4fb8d8?style=for-the-badge" alt="v0.3.0 发布候选">
+  <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.3.0"><img src="https://img.shields.io/badge/Release-v0.3.0-4fb8d8?style=for-the-badge" alt="Vega v0.3.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 

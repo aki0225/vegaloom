@@ -29,4 +29,5 @@ Reviewer、累计集成审查和确定性最终报告。Dogfood 暴露的 Window
 Vega 仍把测试、风险规则和真实 Git Candidate 放在模型结论之前。它不会自动 push、merge、
 release 或执行生产动作。
 
-> 当前文件描述发布候选；正式版本以 Git Tag 和 GitHub Release 为准。
+> `v0.3.0` 已发布；版本事实以注解 Tag 和
+> [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.3.0) 为准。

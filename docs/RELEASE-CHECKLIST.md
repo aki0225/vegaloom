@@ -1,6 +1,6 @@
 # 发布检查
 
-当前候选：`v0.3.0`。
+已发布版本：`v0.3.0`。
 
 ## 1. 版本和工作区
 
@@ -145,3 +145,11 @@ python scripts/plan_state.py check --base-ref origin/main
 6. 再把文档中的“发布候选”更新为“已发布”。
 
 Vega 本身不执行 commit、push、merge、Tag 或 Release；这些动作由人或当前仓库维护流程完成。
+
+## 10. 本次结果
+
+- 发布提交：`167567982cb9e72cf2e1ed01eee1d0f09d6e03d3`；
+- `main` 的 10 项 GitHub Actions 全部通过；
+- 注解 Tag `v0.3.0` 已推送；
+- GitHub Release `Vega v0.3.0` 已发布；
+- GitHub 自动生成的源码 ZIP 与 tar.gz 可用。
