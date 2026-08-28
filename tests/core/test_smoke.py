@@ -1777,7 +1777,7 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert "vega handoff --run <run_id>" in agent_skill_text
     assert "vega resume --repo ." in agent_skill_text
     assert "Reviewer 使用独立只读 Thread" in agent_skill_text
-    assert "Vega 不自动 commit、push、merge、release" in agent_skill_text
+    assert "Git 自动化只限于受管 Worktree" in agent_skill_text
     assert "vega agent " not in agent_skill_text
     assert "vega loop " not in agent_skill_text
     assert "vega do " not in agent_skill_text

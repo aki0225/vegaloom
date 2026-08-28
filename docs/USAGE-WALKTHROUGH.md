@@ -250,7 +250,7 @@ vega stop --run <run_id> --reason "任务取消"
 vega handoff --run <run_id> --reason "换机器继续"
 ```
 
-Vega 生成 Task Card 和本机 Resume Capsule，但不执行 Git 操作。人工：
+`handoff` 生成 Task Card 和本机 Resume Capsule，不替用户提交或推送任务分支。人工：
 
 1. 检查任务分支上的 WIP 和 Task Card；
 2. commit；

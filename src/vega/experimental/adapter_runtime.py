@@ -74,7 +74,7 @@ vega pause --run <run_id> --reason "暂时离开"
 vega handoff --run <run_id> --reason "换机器继续"
 ```
 
-Vega 只生成 Task Card 和本机恢复材料，不执行 Git 操作。人工检查 WIP 与 Task Card 后，在任务分支 commit、push；新机器拉取该分支，再运行：
+`handoff` 只生成 Task Card 和本机恢复材料，不替用户提交或推送任务分支。人工检查 WIP 与 Task Card 后，在任务分支 commit、push；新机器拉取该分支，再运行：
 
 ```powershell
 vega resume --repo .
@@ -87,7 +87,7 @@ Provider Thread ID 只用于本机续接。换机器时以任务分支、Candida
 - 一个 ChangeRun 同时只有一个可写 Worker。
 - Reviewer 只读，不继承 Worker Thread。
 - Verification、Risk 和 Reviewer 证据不足时 fail-closed。
-- Vega 不自动 commit、push、merge、release、部署、回滚、删除文件或接受长期 Memory。
+- Git 自动化只限于受管 Worktree 中的本地 Candidate/Checkpoint Commit；用户分支、push、merge、release、部署、回滚、删除文件和长期 Memory 仍由人工控制。
 """,
 }
 

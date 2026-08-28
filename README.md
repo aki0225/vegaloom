@@ -172,8 +172,8 @@ LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`re
 - Reviewer 会话隔离不是容器或操作系统级安全沙箱。
 - 项目没有可靠验证命令时，Vega 也无法凭空证明代码可交付。
 - 数据库迁移、支付、权限、部署和外部写入仍需要明确风险配置与人工判断。
-- Vega 不操作用户当前分支，也不自动 commit、push、merge、release、回滚、删除文件或接受
-  长期 Memory。
+- 用户当前分支保持不动。Vega 只在受管 Worktree 中创建本地 Candidate/Checkpoint Commit；
+  push、merge、release、回滚、删除用户文件和接受长期 Memory 仍由人工控制。
 
 ## 文档
 

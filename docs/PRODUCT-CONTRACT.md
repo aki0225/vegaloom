@@ -198,8 +198,8 @@ vega resume
 
 - Reviewer 会话隔离不是容器或操作系统级安全沙箱。
 - Vega 不扫描或终止不属于当前 run 的 Codex、Node 或 Shell 进程。
-- Vega 不自动 commit、push、merge、rebase、release、部署、回滚、删除文件或接受长期
-  Memory。
+- 自动 Git 操作只限于受管 Worktree 中的本地 Candidate/Checkpoint Commit。用户分支、
+  push、merge、rebase、release、部署、回滚、删除文件和长期 Memory 仍由人工控制。
 - 数据库迁移、支付、权限、数据删除、部署和外部写入必须显式声明；未知副作用不能自动重放。
 - 没有真实验证命令的项目不能获得自动完成资格。
 
