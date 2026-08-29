@@ -106,3 +106,23 @@ git diff --check
 
 最终命令以 Change Contract 中冻结的仓库相对形式为准。探针只用于基线和最终独立复核，不向
 Worker 提供实现答案。
+
+## 预运行勘误：高风险终态
+
+本节追加于 Worker 启动前。
+
+前述“最终状态为 `completed / ready_to_commit`”与本案例的必审风险设置冲突。额度、并发和
+数据库记录命中 `risk.required_reviews` 后，Risk Gate 必须要求人工处理；Reviewer 的完整披露
+只能提供人工检查材料，不能把高风险自动升级为安全。
+
+因此本案例的正确通过条件调整为：
+
+- Verification 通过；
+- Reviewer 完成必审风险披露；
+- Risk Gate 保持 `human-review`；
+- Supervisor 最终进入 `needs_human`，明确列出人工必须检查的位置；
+- Handoff 和恢复保留这一状态，不把它改写为 `ready_to_commit`。
+
+本案例也不人为拆分无业务价值的 Work Item。Worker Thread、Reviewer 隔离和实际 Turn 数均按
+真实运行记录；持久 Worker 的两 Turn 复用已由前一项 v0.3.0 Dogfood 单独验证，本案例主要检查
+真实项目语义、高风险披露和人工接管。
