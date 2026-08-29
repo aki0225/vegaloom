@@ -8,9 +8,9 @@ from .agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
     compute_handoff_workspace_digest,
-    load_task_card,
     task_card_content_digest,
 )
+from .agent_task_card_discovery import task_card_chain_paths
 from .tracked_workspace import collect_comparison_changed_paths
 from .workspace_check import ReviewWorkspaceSnapshot, capture_review_workspace
 
@@ -40,6 +40,7 @@ def validate_resume_workspace(
     expected_branch = current_branch(repo)
     capsule = _require_resume_capsule(card, expected_branch)
     handoff_head_sha = validate_handoff_history(repo, card, relative_task)
+    _validate_change_run_history(repo, card, handoff_head_sha)
     _validate_task_card_binding(
         repo,
         relative_task,
@@ -233,10 +234,13 @@ def _validate_committed_paths(
             comparison_head_sha=handoff_head_sha,
         )
     )
+    chain_paths = task_card_chain_paths(repo, card, relative_task)
     expected_paths = {
         *card.resume_capsule.changed_files,
-        *_task_card_chain_paths(repo, card, relative_task),
+        relative_task,
     }
+    if card.change_run is None:
+        expected_paths.update(chain_paths & committed_paths)
     if committed_paths == expected_paths:
         return
     details = []
@@ -252,29 +256,26 @@ def _validate_committed_paths(
     )
 
 
-def _task_card_chain_paths(
+def _validate_change_run_history(
     repo: Path,
     card: AgentTaskCard,
-    relative_task: str,
-) -> set[str]:
-    paths = {relative_task}
-    seen = {relative_task}
-    current = card
-    while current.previous_task_card is not None:
-        previous = current.previous_task_card
-        if previous in seen:
-            raise ValueError("Task Card 交接链存在循环引用")
-        seen.add(previous)
-        try:
-            previous_card = load_task_card(repo / previous)
-        except (OSError, ValueError) as exc:
-            raise ValueError("Task Card 交接链中的旧卡无法验证") from exc
-        if (
-            previous_card.task_id != card.task_id
-            or previous_card.branch != card.branch
-            or previous_card.handoff_sequence >= current.handoff_sequence
-        ):
-            raise ValueError("Task Card 交接链身份或 sequence 不一致")
-        paths.add(previous)
-        current = previous_card
-    return paths
+    handoff_head_sha: str,
+) -> None:
+    if card.change_run is None:
+        return
+    revisions = [
+        ("Accepted Checkpoint", card.change_run.accepted_checkpoint_sha),
+    ]
+    if card.change_run.historical_candidate_sha is not None:
+        revisions.append(
+            ("历史 Candidate", card.change_run.historical_candidate_sha)
+        )
+    for label, revision in revisions:
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", revision, handoff_head_sha],
+            cwd=repo,
+            check=False,
+            capture_output=True,
+        )
+        if ancestor.returncode != 0:
+            raise ValueError(f"{label} 不属于当前仓库的 Handoff 历史")

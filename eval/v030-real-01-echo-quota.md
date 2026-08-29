@@ -269,3 +269,108 @@ changed_files = [
    - Vega 可以明确区分 Worker 自测和后续确定性 Gate，避免 Worker 重复运行完整门禁。
 
 本案例没有修改、push 或合并真实 Echo Vault 仓库，也没有把 Candidate 认定为可提交。
+
+## 修复后复验：2026-08-29
+
+本节只追加复验结果，不改写前述首次运行。
+
+- Agent run：`20260829-124316-agent`
+- child：`20260829-124358-435038-bug-loop`
+- Candidate：`59659573e4739c76650347c21f33103ba0ca44f8`
+- Reviewer run：`20260829-125721-853648-review`
+- 目标准备提交仍为：`94fd59f84380e726a7b5fe5709c31032cf00b945`
+
+### P0 修复结果
+
+Risk Gate 再次同时产生：
+
+- `required_risk_review`
+- `project_requires_human_review`
+- `recommendation=human-review`
+
+这次 Core 没有在 Risk Gate 后跳过审查。独立 Reviewer 正常运行，`reviewer_status=success`，
+并对 `quota-concurrency-db` 生成了完整风险披露。最终状态仍为 `needs_human`，没有把高风险
+变更自动升级为可提交。
+
+Handoff 随后生成 Task Card、Manifest、摘要和 Checkpoint，命令退出 `0`；同一源 run 的
+`vega status` 也退出 `0`。`agent-run.json` 继续保留 `change_run`，不再出现
+`ChangeRun metadata 缺失或版本不受支持`。
+
+由于源 run 本来就是 `needs_human`，且最近 Checkpoint 仍记录未完成的人工处置，Handoff
+按设计保持 `handoff_blocked`。本轮只验证源 ChangeRun 仍可读取，没有把“跨机器恢复不再降级”
+计作已解决。
+
+### 确定性验证
+
+Candidate 的五条项目命令全部退出 `0`：
+
+| 验证 | 结果 | 耗时 |
+| --- | --- | ---: |
+| 额度定向测试 | 通过 | 14.0 秒 |
+| `git diff --check` | 通过 | 0.3 秒 |
+| 后端完整测试 | 通过 | 74.8 秒 |
+| 前端测试，175 项 | 通过 | 19.7 秒 |
+| 前端构建 | 通过 | 14.6 秒 |
+
+Vega 自身受影响文件验证为 `57 passed`；Compileall、Ruff、仓库卫生和
+`git diff --check` 均通过。完整 pytest 在约 20 分钟时运行到 19%，期间未出现失败，随后为
+保留真实案例复验时间而人工中止，因此不记录为全量通过。
+
+### Reviewer 新发现
+
+Reviewer 披露了一个 `major` 问题：额度检查与预占写入不是同一数据库原子操作。两个独立
+Session 可能同时读取相同剩余额度，再分别写入预占；新增测试使用同一 Session 顺序调用，
+没有覆盖这个竞争窗口。
+
+这意味着 Candidate 虽然通过全部现有测试，仍不能直接提交。下一步应先决定是否允许使用
+数据库锁或等价原子化方案，再增加两个独立 Session 的并发回归测试。该结果同时证明修复后的
+高风险 Reviewer 不只是补齐流程，而是发现了现有确定性测试没有覆盖的生产风险。
+
+## 控制面改进验证：2026-08-29
+
+复验暴露的三个控制面问题随后完成定向修复：
+
+1. Git Task Card 现在携带已批准的 Change Contract、Execution Plan、Accepted Checkpoint
+   和历史 Candidate 身份。新环境恢复时创建新的隔离 Worktree，把 Task Card 链写入本地
+   Checkpoint，再把交接提交中的代码变化恢复为未暂存 WIP。旧 Candidate 和旧门禁不继承
+   当前通过资格。
+2. Handoff 后的状态卡继续把当前 Verification、Risk、Reviewer 显示为未运行，同时单列旧
+   门禁状态并标注 historical，避免“不可复用”被误读成“从未执行”。
+3. ChangeRun Task Brief 区分 Worker 最小自检与 Candidate 冻结后的 Vega 确定性 Gate。
+   Worker 不再被要求为了完成自述重复运行完整门禁，Core 的实际验证命令和成功语义没有减少。
+
+自动化测试使用两个独立 Git clone 连续完成两次 Handoff 和 Resume。每次恢复后均保持
+`run_kind=change`、批准合同 revision、Execution Plan revision 和可验证 Task Brief；第二次
+恢复后的 run 仍能通过 dispatch 前置校验。该测试覆盖跨仓库副本恢复，不把它表述为两台物理
+机器的真实运行。
+
+`accept-session` 也按当前 Codex App Server schema 和本次真实交互记录完成核对。Vega 已正确
+发送 `acceptForSession`；本次五个请求分别属于额度定向测试、后端完整测试、前端测试、依赖
+安装和前端构建，Codex 的会话级缓存不保证跨这些不同请求复用。Vega 只补充使用说明，没有在
+本地扩大 Provider 授权。
+
+本轮最终验证：
+
+- 完整 pytest：`1453 passed, 2 skipped`，耗时 `5000.66s`；
+- 受影响的 Handoff、Task Card、Task Brief 和 ChangeRun 回归：`73 passed`；
+- Risk Reviewer 与审批响应定向回归：`5 passed`；
+- Recovery 历史状态定向回归：`2 passed`；
+- Compileall、Ruff、架构增长、仓库卫生和 `git diff --check`：通过。
+
+本轮没有修改真实 Echo Vault Candidate，也没有 push、合并或发布。
+
+## 提交前审查追加：2026-08-29
+
+前述 `1453 passed, 2 skipped` 对应控制面首轮实现。提交前审查又发现两项 Handoff 实际问题：
+
+- Task Card 目录原先在现场核对前创建；目标项目忽略 `.vega/` 时，这个目录会改变 Workspace
+  fingerprint，把干净的 ChangeRun 误判为 `handoff_blocked`。
+- Accepted Checkpoint 之后没有新 WIP 时，manifest 和允许动作仍可能沿用累计 Diff，把已接受
+  修改再次列为待交接内容。
+
+修复后，Task Card 路径先只读校验，目录在发布阶段才创建；ChangeRun 的 Task Card、manifest
+和人工 Git 清单统一使用 Accepted Checkpoint 之后的 WIP。若 `.vega/` 被忽略，清单明确只对
+Task Card 由人工使用 `git add -f`，没有扩大 Vega 的 Git 写入权限。
+
+最终完整 pytest 为 `1454 passed, 2 skipped`，耗时 `5022.35s`。Compileall、Ruff、架构增长、
+仓库卫生和 `git diff --check` 继续通过。

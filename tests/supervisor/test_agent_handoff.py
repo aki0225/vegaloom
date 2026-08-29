@@ -13,7 +13,13 @@ import vega.agent_handoff as agent_handoff_module
 import vega.agent_resume_validation as agent_resume_validation_module
 import vega.agent_runtime_support as agent_runtime_support_module
 import vega.workspace_check as workspace_check_module
-from vega.agent_contract import AgentPlan, AgentWorkItem
+from vega.agent_change_contract import (
+    ChangeAuthorityEnvelope,
+    ChangeContract,
+    ExecutionPlan,
+    ExecutionWorkItem,
+)
+from vega.agent_contract import AgentObservation, AgentPlan, AgentWorkItem
 from vega.agent_persistence import (
     load_agent_checkpoint,
     load_agent_state,
@@ -23,6 +29,7 @@ from vega.agent_persistence import (
 from vega.agent_handoff_safety import assert_portable_task_card_payload
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_recovery_request import AgentRecoveryRequest
+from vega.agent_run import AgentRun
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_side_effect_adjudication import (
     SupervisorAgentSideEffectAdjudicator,
@@ -69,6 +76,228 @@ def test_cli_handoff_writes_card_checkpoint_and_manifest(
     assert "git diff --cached --check" in summary
     assert str(tmp_path) not in summary
     assert str(tmp_path) not in card_path.read_text(encoding="utf-8")
+
+
+def test_change_run_handoff_preserves_metadata_and_status(tmp_path: Path) -> None:
+    repo, workspace, runtime, approved, managed_repo = _approved_change_run(
+        tmp_path,
+        task_id="task-change-handoff",
+    )
+    original_accepted = approved.state.accepted_checkpoint_sha
+    original_metadata = json.loads(
+        (approved.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    (managed_repo / "README.md").write_text(
+        "fixture\nchange run handoff wip\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    stopped = SupervisorAgentRecovery(workspace).stop(
+        approved.run_dir.name,
+        reason="准备验证 ChangeRun Handoff",
+    )
+    metadata_path = stopped.run_dir / "agent-run.json"
+
+    handoff = runtime.handoff(
+        stopped.run_dir.name,
+        reason="验证交接保留 ChangeRun metadata",
+    )
+
+    published_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert published_metadata["change_run"] == original_metadata["change_run"]
+    assert runtime.status(handoff.run.run_dir.name)
+    card = load_task_card(handoff.task_card_path)
+    assert card.change_run is not None
+    assert card.change_run.accepted_checkpoint_sha == original_accepted
+    assert card.resume_capsule is not None
+    assert card.resume_capsule.comparison_base_revision == original_accepted
+    task_card = handoff.task_card_path.relative_to(managed_repo).as_posix()
+    _git(managed_repo, "add", "README.md", task_card)
+    _git(managed_repo, "commit", "-m", "测试：提交 ChangeRun Handoff")
+
+    clone = tmp_path / "clone"
+    _git(
+        tmp_path,
+        "-c",
+        "core.autocrlf=false",
+        "clone",
+        "--branch",
+        card.branch,
+        str(repo),
+        str(clone),
+    )
+    _git(clone, "config", "core.autocrlf", "false")
+    next_workspace = tmp_path / "next-workspace"
+    next_workspace.mkdir()
+
+    restored = SupervisorAgentRuntime(next_workspace).resume_task_card(clone)
+    restored_metadata = json.loads(
+        (restored.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    restored_repo = Path(restored_metadata["repo_path"])
+
+    assert restored.state.run_kind == "change"
+    assert restored.state.contract_revision == 1
+    assert restored.state.execution_plan_revision == 1
+    assert restored.state.approved_contract_digest == card.change_run.contract.approved_digest
+    assert restored.state.active_candidate_sha is None
+    assert restored.state.accepted_checkpoint_sha != original_accepted
+    assert _head(restored_repo) == restored.state.accepted_checkpoint_sha
+    assert (restored_repo / "README.md").read_text(encoding="utf-8") == (
+        "fixture\nchange run handoff wip\n"
+    )
+    assert _git_output(
+        restored_repo,
+        "show",
+        f"{restored.state.accepted_checkpoint_sha}:README.md",
+    ) == "fixture"
+    assert _git_output(
+        restored_repo,
+        "ls-files",
+        "--error-unmatch",
+        task_card,
+    ) == task_card
+    assert restored_metadata["change_run"]["run_id"] == restored.run_dir.name
+    assert Path(restored_metadata["change_run"]["worktree_path"]) == restored_repo
+    assert (
+        json.loads(
+            (restored.run_dir / "change-contract.json").read_text(encoding="utf-8")
+        )["approved_digest"]
+        == card.change_run.contract.approved_digest
+    )
+    assert runtime.status(handoff.run.run_dir.name)
+    assert SupervisorAgentRuntime(next_workspace).status(restored.run_dir.name)
+
+
+def test_handoff_status_keeps_old_gates_visible_as_historical(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _stopped_run(tmp_path)
+    run_dir = workspace / "runs" / run_id
+    snapshot = agent_runtime_support_module.capture_bound_workspace(run_dir)
+    observation = AgentObservation(
+        observation_id="observation-handoff-history",
+        machine_summary="旧门禁已经完成",
+        workspace_fingerprint=snapshot.fingerprint,
+        changed_files=list(snapshot.changed_files),
+        verification="passed",
+        risk="blocked",
+        review="passed",
+    )
+    monkeypatch.setattr(
+        agent_handoff_module,
+        "_latest_observation",
+        lambda _: (observation, "2026-08-29T00:00:00+00:00"),
+    )
+
+    result = SupervisorAgentRuntime(workspace).handoff(
+        run_id,
+        reason="验证旧门禁仍可见",
+    )
+    status = SupervisorAgentRuntime(workspace).status(result.run.run_dir.name)
+
+    assert "Verification：尚未运行" in status
+    assert "Risk：尚未运行" in status
+    assert "Reviewer：尚未运行" in status
+    assert "历史门禁：Verification=通过、Risk=阻断、Reviewer=通过" in status
+    assert "不能作为当前门禁的通过证据" in status
+
+
+def test_clean_change_run_can_resume_and_handoff_again(tmp_path: Path) -> None:
+    repo, workspace, runtime, approved, first_source = _approved_change_run(
+        tmp_path,
+        task_id="task-change-two-hops",
+    )
+    first_stopped = SupervisorAgentRecovery(workspace).stop(
+        approved.run_dir.name,
+        reason="准备第一次跨机器恢复",
+    )
+    first_handoff = runtime.handoff(
+        first_stopped.run_dir.name,
+        reason="提交第一次 ChangeRun Handoff",
+    )
+    first_card = load_task_card(first_handoff.task_card_path)
+    first_relative = first_handoff.task_card_path.relative_to(
+        first_source
+    ).as_posix()
+    assert first_handoff.handoff_status == "handoff_ready"
+    _git(first_source, "add", first_relative)
+    _git(first_source, "commit", "-m", "测试：提交第一次 ChangeRun Handoff")
+
+    second_clone = tmp_path / "second-clone"
+    _git(
+        tmp_path,
+        "-c",
+        "core.autocrlf=false",
+        "clone",
+        "--branch",
+        first_card.branch,
+        str(repo),
+        str(second_clone),
+    )
+    _git(second_clone, "config", "core.autocrlf", "false")
+    second_workspace = tmp_path / "second-workspace"
+    second_workspace.mkdir()
+    second_runtime = SupervisorAgentRuntime(second_workspace)
+    second_run = second_runtime.resume_task_card(second_clone)
+
+    assert second_run.state.phase == "ready"
+    assert second_run.state.run_kind == "change"
+    agent_runtime_support_module.validate_dispatch_artifacts(
+        second_run.run_dir,
+        second_run.state,
+        second_run.plan,
+    )
+    second_stopped = SupervisorAgentRecovery(second_workspace).stop(
+        second_run.run_dir.name,
+        reason="准备第二次跨机器恢复",
+    )
+    second_handoff = second_runtime.handoff(
+        second_stopped.run_dir.name,
+        reason="提交第二次 ChangeRun Handoff",
+    )
+    second_card = load_task_card(second_handoff.task_card_path)
+    second_metadata = json.loads(
+        (second_run.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    second_source = Path(second_metadata["repo_path"])
+    second_relative = second_handoff.task_card_path.relative_to(
+        second_source
+    ).as_posix()
+
+    assert second_handoff.handoff_status == "handoff_ready"
+    assert second_card.handoff_sequence == 2
+    assert second_card.previous_task_card == first_relative
+    assert second_card.branch != first_card.branch
+    _git(second_source, "add", second_relative)
+    _git(second_source, "commit", "-m", "测试：提交第二次 ChangeRun Handoff")
+
+    third_clone = tmp_path / "third-clone"
+    _git(
+        tmp_path,
+        "-c",
+        "core.autocrlf=false",
+        "clone",
+        "--branch",
+        second_card.branch,
+        str(second_clone),
+        str(third_clone),
+    )
+    _git(third_clone, "config", "core.autocrlf", "false")
+    third_workspace = tmp_path / "third-workspace"
+    third_workspace.mkdir()
+    third_run = SupervisorAgentRuntime(third_workspace).resume_task_card(
+        third_clone
+    )
+
+    assert third_run.state.phase == "ready"
+    assert third_run.state.run_kind == "change"
+    agent_runtime_support_module.validate_dispatch_artifacts(
+        third_run.run_dir,
+        third_run.state,
+        third_run.plan,
+    )
 
 
 def test_handoff_rejects_active_writer(tmp_path: Path) -> None:
@@ -1014,6 +1243,53 @@ def _stopped_run(
     return repo, workspace, stopped.run_dir.name
 
 
+def _approved_change_run(
+    tmp_path: Path,
+    *,
+    task_id: str,
+) -> tuple[
+    Path,
+    Path,
+    SupervisorAgentRuntime,
+    AgentRun,
+    Path,
+]:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    started = runtime.start_change(
+        repo,
+        contract=ChangeContract(
+            task_id=task_id,
+            goal="验证 ChangeRun 跨机器恢复",
+            acceptance=["恢复后保留同一批准合同和执行计划"],
+            required_verification=["git diff --check"],
+            authority_envelope=ChangeAuthorityEnvelope(
+                allowed_paths=["README.md"],
+                max_changed_files=1,
+            ),
+        ),
+        execution_plan=ExecutionPlan(
+            task_id=task_id,
+            contract_revision=1,
+            work_items=[
+                ExecutionWorkItem(
+                    work_item_id="WI-01",
+                    objective="完成最小文档修改",
+                    likely_files=["README.md"],
+                    verification=["git diff --check"],
+                )
+            ],
+        ),
+    )
+    approved = runtime.approve(started.run_dir.name)
+    metadata = json.loads(
+        (approved.run_dir / "agent-run.json").read_text(encoding="utf-8")
+    )
+    return repo, workspace, runtime, approved, Path(metadata["repo_path"])
+
+
 def _approved_run(
     tmp_path: Path,
     *,
@@ -1074,6 +1350,19 @@ def _git(repo: Path, *args: str) -> None:
         encoding="utf-8",
     )
     assert process.returncode == 0, process.stderr
+
+
+def _git_output(repo: Path, *args: str) -> str:
+    process = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert process.returncode == 0, process.stderr
+    return process.stdout.strip()
 
 
 def _head(repo: Path) -> str:

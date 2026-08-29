@@ -253,7 +253,10 @@ def agent_respond(
     decision: str | None = typer.Option(
         None,
         "--decision",
-        help="accept、accept-session、decline 或 cancel。",
+        help=(
+            "accept、accept-session、decline 或 cancel。"
+            "accept-session 只复用 Provider 对匹配请求的会话级审批缓存。"
+        ),
     ),
     input_path: Path | None = typer.Option(
         None,

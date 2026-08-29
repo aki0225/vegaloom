@@ -20,6 +20,7 @@ from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
 from vega.execution_control import ExecutionController, RunnerExecutionContext
 from vega.models import LoopAutomationState, LoopIterationState
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_task_card import load_task_card
 from vega.cli_entrypoint import app
 from vega.review_evidence import make_review_evidence
 from vega.run_status import run_status_payload
@@ -74,6 +75,9 @@ def test_change_run_starts_in_isolated_worktree_and_approves_contract(
         "python -m pytest tests/test_two.py -q",
         "python -m compileall -q src",
     ]
+    task_brief = (approved.run_dir / "task-brief.md").read_text(encoding="utf-8")
+    assert "## Worker 最小自检" in task_brief
+    assert "## Vega 确定性 Gate（Candidate 冻结后执行）" in task_brief
 
 
 def test_agent_start_cli_requires_change_contract_and_execution_plan(
@@ -236,6 +240,47 @@ def test_change_run_accepts_candidate_and_advances_to_next_work_item(
     degraded_status = runtime.status(result.run_dir.name)
     assert "证据告警" in degraded_status
     assert "等待人工" in degraded_status
+
+
+def test_change_run_handoff_only_reports_changes_after_accepted_checkpoint(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    started = runtime.start_change(
+        repo,
+        contract=_contract(),
+        execution_plan=_execution_plan(),
+    )
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    reviewer = _ReviewerRunner()
+    loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
+    result = SupervisorAgentCodexAdapter(
+        workspace,
+        worker_runner=_WorkerRunner(["src/one.py"]),
+        loop_runtime=loop_runtime,
+        finish_runtime=_ChangeFinishRuntime(loop_runtime),
+    )._run_once(approved.run_dir.name, timeout_seconds=60)
+
+    handoff = runtime.handoff(
+        result.run_dir.name,
+        reason="换机前保存已完成 Work Item",
+    )
+    card = load_task_card(handoff.task_card_path)
+    manifest = json.loads(
+        (result.run_dir / "handoff-manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert card.resume_capsule is not None
+    assert card.resume_capsule.changed_files == []
+    assert card.resume_capsule.allowed_actions == ["next", "human"]
+    assert manifest["changed_files"] == []
+    assert any(
+        "git add -f" in action
+        for action in manifest["pending_git_actions"]
+    )
 
 
 def test_change_run_completes_final_work_item(tmp_path: Path) -> None:

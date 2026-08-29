@@ -11,7 +11,10 @@ from .agent_repository_binding import require_git_root
 from .git_read import git_read_environment, run_git_bytes, run_git_capture
 from .redaction import redact_text
 from .repository_identity import resolve_git_revision
-from .tracked_workspace import capture_tracked_scope_snapshot
+from .tracked_workspace import (
+    capture_tracked_scope_snapshot,
+    collect_comparison_changed_paths,
+)
 
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
@@ -118,6 +121,145 @@ def prepare_managed_worktree(
         expected_status=source_status,
     )
     return handle
+
+
+def create_resume_checkpoint(
+    handle: ManagedChangeWorktree,
+    *,
+    source_revision: str,
+    task_card_path: str,
+) -> str:
+    """只提交本次 Task Card；旧卡已属于前一个 Accepted Checkpoint。"""
+
+    handle.require_state(handle.base_sha)
+    changed_cards = _changed_literal_paths(
+        handle.source_repo,
+        handle.base_sha,
+        source_revision,
+        [task_card_path],
+    )
+    if changed_cards != [task_card_path]:
+        raise GitCandidateError("当前 Handoff 没有唯一新增的 Task Card")
+    handle.run_write(
+        [
+            "git",
+            "--literal-pathspecs",
+            "checkout",
+            source_revision,
+            "--",
+            *changed_cards,
+        ],
+        "恢复 Task Card 链",
+    )
+    staged = capture_tracked_scope_snapshot(
+        handle.worktree_path,
+        include_untracked=True,
+    )
+    if (
+        staged.head_sha != handle.base_sha
+        or set(staged.staged_files) != set(changed_cards)
+        or staged.unstaged_files
+        or staged.untracked_files
+        or staged.unsafe_index_paths
+    ):
+        raise GitCandidateError("Task Card 链无法安全写入恢复 Checkpoint")
+    handle.run_write(
+        [
+            "git",
+            "-c",
+            "user.name=Vega Checkpoint",
+            "-c",
+            "user.email=vega-checkpoint@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            f"core.hooksPath={handle.empty_hooks_dir()}",
+            "commit",
+            "--no-gpg-sign",
+            "--no-verify",
+            "-m",
+            "检查点：恢复跨机器 Task Card",
+        ],
+        "创建跨机器恢复 Checkpoint",
+    )
+    checkpoint_sha = handle.git_text(["git", "rev-parse", "--verify", "HEAD"])
+    actual_files = collect_comparison_changed_paths(
+        handle.worktree_path,
+        handle.base_sha,
+        comparison_head_sha=checkpoint_sha,
+    )
+    if set(actual_files) != set(changed_cards):
+        raise GitCandidateError("恢复 Checkpoint 包含 Task Card 之外的变化")
+    return checkpoint_sha
+
+
+def restore_handoff_wip(
+    handle: ManagedChangeWorktree,
+    *,
+    accepted_checkpoint_sha: str,
+    handoff_revision: str,
+    restored_checkpoint_sha: str,
+    changed_files: list[str],
+) -> None:
+    """把 Handoff 提交中的代码变化恢复为未暂存 WIP，旧门禁保持历史状态。"""
+
+    handle.require_state(restored_checkpoint_sha)
+    if not changed_files:
+        return
+    patch = run_git_bytes(
+        handle.source_repo,
+        [
+            "git",
+            "--literal-pathspecs",
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            accepted_checkpoint_sha,
+            handoff_revision,
+            "--",
+            *changed_files,
+        ],
+    )
+    if not patch:
+        raise GitCandidateError("Resume Capsule 声明了变更文件，但提交中没有对应 Diff")
+    _run_git_write_input(
+        handle.worktree_path,
+        ["git", "apply", "--whitespace=nowarn", "--"],
+        patch,
+        "恢复 Handoff WIP",
+    )
+    snapshot = capture_tracked_scope_snapshot(
+        handle.worktree_path,
+        include_untracked=True,
+    )
+    observed = {
+        *snapshot.staged_files,
+        *snapshot.unstaged_files,
+        *snapshot.untracked_files,
+    }
+    if (
+        snapshot.head_sha != restored_checkpoint_sha
+        or snapshot.staged_files
+        or snapshot.unsafe_index_paths
+        or observed != set(changed_files)
+    ):
+        raise GitCandidateError("Handoff WIP 恢复后的 Git 现场与 Resume Capsule 不一致")
+    matches_source = run_git_capture(
+        handle.worktree_path,
+        [
+            "git",
+            "--literal-pathspecs",
+            "diff",
+            "--quiet",
+            "--no-ext-diff",
+            handoff_revision,
+            "--",
+            *changed_files,
+        ],
+    )
+    if matches_source.returncode != 0:
+        raise GitCandidateError("恢复后的 WIP 内容与 Handoff 提交不一致")
 
 
 def validate_managed_branch_name(branch: str) -> None:
@@ -249,6 +391,59 @@ def _run_git_write(repo: Path, command: list[str], label: str) -> None:
         stderr = process.stderr.decode("utf-8", errors="replace").strip()
         detail = redact_text(stderr) if stderr else "Git 返回非零状态"
         raise GitCandidateError(f"{label}失败：{detail}")
+
+
+def _run_git_write_input(
+    repo: Path,
+    command: list[str],
+    content: bytes,
+    label: str,
+) -> None:
+    environment = git_read_environment()
+    try:
+        process = subprocess.run(
+            command,
+            cwd=repo,
+            input=content,
+            capture_output=True,
+            env=environment,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise GitCandidateError(f"{label}无法执行") from exc
+    if process.returncode != 0:
+        stderr = process.stderr.decode("utf-8", errors="replace").strip()
+        detail = redact_text(stderr) if stderr else "Git 返回非零状态"
+        raise GitCandidateError(f"{label}失败：{detail}")
+
+
+def _changed_literal_paths(
+    repo: Path,
+    base_revision: str,
+    head_revision: str,
+    paths: list[str],
+) -> list[str]:
+    raw = run_git_bytes(
+        repo,
+        [
+            "git",
+            "--literal-pathspecs",
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-ext-diff",
+            base_revision,
+            head_revision,
+            "--",
+            *paths,
+        ],
+    )
+    return [
+        value.decode("utf-8", errors="strict")
+        for value in raw.split(b"\0")
+        if value
+    ]
 
 
 def _read_git_text(repo: Path, command: list[str]) -> str:

@@ -163,6 +163,19 @@ def prepare_task_card_root(repo: Path, month: str) -> Path:
     return current
 
 
+def require_plain_task_card_root(repo: Path, month: str) -> Path:
+    """只读检查已经存在的 Task Card 目录前缀，不提前创建目录。"""
+
+    root = repo.resolve(strict=True)
+    current = root
+    for part in (".vega", "tasks", month):
+        current = current / part
+        if not os.path.lexists(current):
+            break
+        _require_plain_task_card_directory(root, current)
+    return root / ".vega" / "tasks" / month
+
+
 def require_plain_task_card_tree(repo: Path, directory: Path) -> None:
     root = repo.resolve(strict=True)
     current = root

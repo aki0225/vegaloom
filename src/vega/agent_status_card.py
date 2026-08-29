@@ -248,7 +248,12 @@ def _build_status_card(
         workspace_current=workspace_current,
         commit_recommended=commit_recommended,
         integrity_warning=integrity_warning,
-        history_note=status_history_note(state, checkpoint, observation),
+        history_note=status_history_note(
+            state,
+            checkpoint,
+            observation,
+            run_dir=run_dir,
+        ),
         plan_risk_notes=list(current_item.risk_notes) if current_item else [],
         supervisor_evidence=supervisor_evidence,
         provider_sessions=[

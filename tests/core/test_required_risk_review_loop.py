@@ -427,6 +427,8 @@ def _named_required_review_config() -> str:
                 '    - python -c "print(\'verification passed\')"',
                 "  max_commands: 1",
                 "risk:",
+                "  require_human_review:",
+                "    - charge.py",
                 "  required_reviews:",
                 "    - id: payment",
                 "      label: Payment",
