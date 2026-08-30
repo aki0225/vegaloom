@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 from typer.testing import CliRunner
 
+import vega.agent_change_runtime as agent_change_runtime_module
 from vega.agent_change_contract import (
     ChangeAuthorityEnvelope,
     ChangeContract,
@@ -78,6 +81,47 @@ def test_change_run_starts_in_isolated_worktree_and_approves_contract(
     task_brief = (approved.run_dir / "task-brief.md").read_text(encoding="utf-8")
     assert "## Worker 最小自检" in task_brief
     assert "## Vega 确定性 Gate（Candidate 冻结后执行）" in task_brief
+
+
+def test_change_run_ids_are_unique_across_workspaces_in_same_second(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FixedDatetime:
+        @staticmethod
+        def now() -> datetime:
+            return datetime(2026, 8, 30, 6, 16, 1)
+
+    run_ids = iter(
+        [
+            UUID("11111111-1111-1111-1111-111111111111"),
+            UUID("22222222-2222-2222-2222-222222222222"),
+        ]
+    )
+    monkeypatch.setattr(agent_change_runtime_module, "datetime", FixedDatetime)
+    monkeypatch.setattr(agent_change_runtime_module, "uuid4", lambda: next(run_ids))
+    repo = _repo(tmp_path / "repo")
+    first_workspace = tmp_path / "first-workspace"
+    second_workspace = tmp_path / "second-workspace"
+    first_workspace.mkdir()
+    second_workspace.mkdir()
+
+    first = SupervisorAgentRuntime(first_workspace).start_change(
+        repo,
+        contract=_contract().model_copy(update={"task_id": "task-first"}),
+        execution_plan=_execution_plan().model_copy(
+            update={"task_id": "task-first"}
+        ),
+    )
+    second = SupervisorAgentRuntime(second_workspace).start_change(
+        repo,
+        contract=_contract().model_copy(update={"task_id": "task-second"}),
+        execution_plan=_execution_plan().model_copy(
+            update={"task_id": "task-second"}
+        ),
+    )
+
+    assert first.run_dir.name != second.run_dir.name
 
 
 def test_agent_start_cli_requires_change_contract_and_execution_plan(

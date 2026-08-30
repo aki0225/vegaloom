@@ -16,6 +16,7 @@ Vega v0.3.1 收紧跨目录接手时的内容核对：Task Card 统一 LF 摘要
 
 - 统一 Task Card 文本摘要的换行语义，避免 LF/CRLF checkout 造成合法恢复误拒；
 - `git-blob-v1` 同时绑定文件类型、权限和内容；
+- ChangeRun 创建和恢复使用不易碰撞的任务身份，避免快速连续操作复用同一分支；
 - 重复 Resume Claim 不留下没有证据的空 run，已有失败现场仍保留；
 - Task Card 显示 Workspace 摘要类型，便于人工核对；
 - `VALID-02` 追加了真实验收和回归证据，覆盖跨 checkout 恢复、内容漂移、mode 变化和

@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 from .agent_contract import AgentState
 from .agent_handoff_safety import TaskCardError
@@ -28,7 +29,10 @@ def create_claimed_resume_run(
 
     run_id, run_dir = create_run_dir(
         workspace,
-        f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent-resume",
+        (
+            f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-"
+            f"{uuid4().hex[:12]}-agent-resume"
+        ),
     )
     try:
         acquire_task_card_resume_claim(

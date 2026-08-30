@@ -4,7 +4,9 @@ import json
 import os
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from typer.testing import CliRunner
@@ -12,6 +14,7 @@ from typer.testing import CliRunner
 import vega.agent_handoff as agent_handoff_module
 import vega.agent_resume_validation as agent_resume_validation_module
 import vega.agent_runtime_support as agent_runtime_support_module
+import vega.agent_task_card_resume as agent_task_card_resume_module
 import vega.workspace_check as workspace_check_module
 from vega.agent_change_contract import (
     ChangeAuthorityEnvelope,
@@ -225,7 +228,24 @@ def test_handoff_status_keeps_old_gates_visible_as_historical(
     assert "不能作为当前门禁的通过证据" in status
 
 
-def test_clean_change_run_can_resume_and_handoff_again(tmp_path: Path) -> None:
+def test_clean_change_run_can_resume_and_handoff_again(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FixedDatetime:
+        @staticmethod
+        def now() -> datetime:
+            return datetime(2026, 8, 30, 6, 16, 1)
+
+    resume_ids = iter(
+        [
+            UUID("11111111-1111-1111-1111-111111111111"),
+            UUID("22222222-2222-2222-2222-222222222222"),
+        ]
+    )
+    monkeypatch.setattr(agent_task_card_resume_module, "datetime", FixedDatetime)
+    monkeypatch.setattr(agent_task_card_resume_module, "uuid4", lambda: next(resume_ids))
+
     repo, workspace, runtime, approved, first_source = _approved_change_run(
         tmp_path,
         task_id="task-change-two-hops",
