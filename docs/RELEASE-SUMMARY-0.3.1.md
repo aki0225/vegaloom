@@ -19,7 +19,9 @@ Vega v0.3.1 收紧跨目录接手时的内容核对：Task Card 统一 LF 摘要
 - 重复 Resume Claim 不留下没有证据的空 run，已有失败现场仍保留；
 - Task Card 显示 Workspace 摘要类型，便于人工核对；
 - `VALID-02` 追加了真实验收和回归证据，覆盖跨 checkout 恢复、内容漂移、mode 变化和
-  必审风险的 fail-closed 行为。
+  必审风险的 fail-closed 行为；
+- wheel 与 sdist 已通过干净环境 smoke；从候选 wheel 启动的真实 Codex ChangeRun 完成
+  Worker、Candidate、Verification、独立 Reviewer 和 Finish，终态为 `ready_to_commit`。
 
 ## 不变边界
 

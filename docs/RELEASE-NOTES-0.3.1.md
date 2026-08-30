@@ -33,8 +33,13 @@ v0.3.1 是面向跨目录接手与恢复可靠性的维护版本。它不增加�
 - 内容漂移、路径越界和损坏现场的 fail-closed 行为；
 - 必审风险仍运行隔离 Reviewer，并保持 `needs_human`。
 
-提交前本机完整验证快照为 `1456 passed, 2 skipped`；发布候选仍需通过本次 PR
-的完整 CI、Package smoke 和授权的真实 Agent smoke，不能把候选分支证据写成已发布事实。
+提交前本机完整验证快照为 `1456 passed, 2 skipped`。提交
+`5ed4d2165a68023ee3ab8a4ee40a12c0731a2a6a` 构建出的 wheel 与 sdist 已在源码树外的
+全新环境完成安装、`pip check`、CLI、capabilities 和 `git-blob-v1` 导入检查；同一 wheel
+完成一次真实 Codex Worker → Reviewer → Finish smoke，终态为 `ready_to_commit`。完整记录
+见 [`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
+
+发布候选仍需通过本次 PR 和合并后 `main` 的完整 CI，不能把候选分支证据写成已发布事实。
 
 ## 不变边界
 

@@ -1244,3 +1244,31 @@ deterministic-final-report-pass`。
 它证明当前 Codex App Server 路径可以完成两个顺序 Work Item、持久 Worker、隔离审查和主会话
 干预。它不证明长时间压缩后的语义保持、Claude Code Provider、未知外部副作用重放、高风险
 生产变更或无人值守跨天运行。
+
+## 2026-08-30 v0.3.1 最终候选真实 Agent smoke
+
+本条使用提交 `5ed4d2165a68023ee3ab8a4ee40a12c0731a2a6a` 构建的 wheel，在一个无远端、
+可丢弃的 Python 仓库中运行真实 Codex App Server ChangeRun。基线包含两个失败测试：
+名称两端空格未清理，纯空白名称没有回退到 `world`。批准合同只允许修改
+`src/hello.py`，禁止修改测试和项目策略，自动 Repair、Replan 和验证重试预算均为 0。
+
+- Agent run：`20260830-135650-agent`；
+- child：`20260830-135801-892730-bug-loop`；
+- 基线：`5571bb107dc2847ea7b6b6881f33818dbc96166b`；
+- Accepted Candidate：`9e18943e2aab8b138742e676fe5919780be4bfaa`；
+- Worker 与 Reviewer 分别使用独立 Provider Thread，Thread ID 不同；
+- `watch --follow` 显示 Worker、Verification、Reviewer、Supervisor 和最终终态事件；
+- Worker 只修改 `src/hello.py`，共 `2 insertions(+), 1 deletion(-)`；
+- `python -m pytest -q` 为 `2 passed`，`git diff --check` 通过；
+- Scope Gate、Risk Gate、Reviewer 和 Artifact integrity 均通过；
+- Reviewer 完整覆盖唯一变更文件，返回 `approve`；
+- 父状态为 `completed / ready_to_commit`，owned process 没有残留。
+
+运行过程中没有在 Worker 与 Reviewer 之间转贴消息，也没有对目标仓库执行 push、PR、merge、
+部署或外部写入。源仓库仍停在原基线，候选只存在于 Vega 管理的本地任务分支。
+
+这项 smoke 只证明 v0.3.1 最终候选的真实
+Worker → Candidate → Verification → Reviewer → Finish 基础链路仍可用。多 Work Item、
+Steer 和 Worker Thread 复用由 2026-08-28 Dogfood 覆盖；LF/CRLF、Git mode、重复 Resume
+Claim 和内容漂移由 `VALID-02` 自动化回归覆盖。本条不证明通用成功率、生产安全、
+Claude Code Provider 或未知外部副作用可安全重放。
