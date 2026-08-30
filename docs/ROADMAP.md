@@ -1,6 +1,6 @@
 # Vega 后续演进路线
 
-> 当前稳定版本：`v0.3.0`
+> 当前稳定版本：`v0.3.1`
 > 本文件保存路线决策和历史背景，不维护实时进度。
 > 当前事项与下一项：[`CURRENT.md`](CURRENT.md)
 > 机器可读计划：[`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json)

@@ -11,7 +11,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.3.0"><img src="https://img.shields.io/badge/Release-v0.3.0-4fb8d8?style=for-the-badge" alt="Vega v0.3.0"></a>
+  <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.3.1"><img src="https://img.shields.io/badge/Release-v0.3.1-4fb8d8?style=for-the-badge" alt="Vega v0.3.1"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -27,7 +27,7 @@ Vega 管一次代码变更的外层流程。主会话先调查并提交 Change C
 在隔离 Worktree 中复用一个 Coding Agent 会话完成实现，把 Git Candidate 交给项目验证、
 风险门禁和独立 Reviewer。普通问题自动回到 Worker，越出批准边界才停下来问人。
 
-> 当前主线正在准备 `v0.3.1` 发布候选；Tag 和 GitHub Release 尚未创建。
+> 最新稳定版本：[v0.3.1](https://github.com/aki0225/vegaloom/releases/tag/v0.3.1)。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega ChangeRun：计划批准、Worker、验证、独立 Reviewer 和最终报告">
@@ -187,7 +187,7 @@ LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`re
 | 修改前调查与计划 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 当前事项 | [CURRENT](docs/CURRENT.md) |
 | 文档导航 | [docs/README](docs/README.md) |
-| v0.3.1 发布候选 | [RELEASE-NOTES-0.3.1](docs/RELEASE-NOTES-0.3.1.md) |
+| v0.3.1 发布说明 | [RELEASE-NOTES-0.3.1](docs/RELEASE-NOTES-0.3.1.md) |
 | v0.3.0 历史说明 | [RELEASE-NOTES-0.3.0](docs/RELEASE-NOTES-0.3.0.md) |
 | 真实运行记录 | [real-world-runs](eval/real-world-runs.md) |
 

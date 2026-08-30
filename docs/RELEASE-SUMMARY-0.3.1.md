@@ -1,8 +1,9 @@
 # Vega v0.3.1 发布摘要
 
-> 状态：发布候选，待合入 `main` 并创建 GitHub Release。
+> 状态：已发布。注解 Tag `v0.3.1` 绑定提交
+> `5ee8328fa6c670c7feb788b5daa62cfe5615bb0f`。
 
-这份摘要用于候选版本的 GitHub Release 正文。详细变更见
+详细变更见
 [`RELEASE-NOTES-0.3.1.md`](https://github.com/aki0225/vegaloom/blob/main/docs/RELEASE-NOTES-0.3.1.md)，
 发布步骤见
 [`RELEASE-CHECKLIST.md`](https://github.com/aki0225/vegaloom/blob/main/docs/RELEASE-CHECKLIST.md)。
@@ -30,5 +31,5 @@ Vega v0.3.1 收紧跨目录接手时的内容核对：Task Card 统一 LF 摘要
 - 现有 Verification、Risk、Reviewer 隔离和人工接管语义保持不变；
 - Vega 不自动 push、merge、release、删除用户文件或接受长期 Memory。
 
-> 本文件对应 `v0.3.1` 发布候选。Tag、制品和 GitHub Release 创建后，发布流程再把状态
-> 更新为“已发布”。
+> 发布事实以注解 Tag 和
+> [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.3.1) 为准。
