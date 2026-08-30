@@ -1,6 +1,7 @@
-# Vega v0.3.1 发布候选说明
+# Vega v0.3.1 发布说明
 
-> 状态：发布候选，待合入 `main`、创建注解 Tag 和 GitHub Release。
+> 状态：已发布。注解 Tag `v0.3.1` 绑定提交
+> `5ee8328fa6c670c7feb788b5daa62cfe5615bb0f`。
 
 v0.3.1 是面向跨目录接手与恢复可靠性的维护版本。它不增加新的公共 Agent
 入口或成功路径，重点修复真实验收暴露的 Task Card、Workspace 摘要和重复恢复边界。
@@ -40,7 +41,8 @@ v0.3.1 是面向跨目录接手与恢复可靠性的维护版本。它不增加�
 完成一次真实 Codex Worker → Reviewer → Finish smoke，终态为 `ready_to_commit`。完整记录
 见 [`../eval/real-world-runs.md`](../eval/real-world-runs.md)。
 
-发布候选仍需通过本次 PR 和合并后 `main` 的完整 CI，不能把候选分支证据写成已发布事实。
+PR CI `33296945545` 与合并提交的 main CI `33297134548` 均为 10/10 jobs 通过。后者在
+精确发布提交上重新构建并安装 wheel 与 sdist。
 
 ## 不变边界
 
