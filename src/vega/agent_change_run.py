@@ -152,6 +152,36 @@ def save_change_run_artifacts(
     )
 
 
+def task_brief_worker_verification(
+    run_dir: Path,
+    state: AgentState,
+) -> tuple[str, ...] | None:
+    """返回 Execution Plan 的局部自检；Core Gate 仍使用投影 Plan 的完整命令。"""
+
+    if state.run_kind != "change":
+        return None
+    try:
+        execution_plan = ExecutionPlan.model_validate_json(
+            (run_dir / EXECUTION_PLAN_ARTIFACT).read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError) as exc:
+        raise ValueError("ChangeRun Execution Plan 无法用于 Task Brief") from exc
+    if (
+        execution_plan.task_id != state.task_id
+        or execution_plan.plan_revision != state.execution_plan_revision
+        or state.current_work_item is None
+    ):
+        raise ValueError("Task Brief 与当前 Execution Plan revision 不一致")
+    matches = [
+        item
+        for item in execution_plan.work_items
+        if item.work_item_id == state.current_work_item
+    ]
+    if len(matches) != 1:
+        raise ValueError("Task Brief 当前 Work Item 不属于 Execution Plan")
+    return tuple(matches[0].verification)
+
+
 def write_candidate_artifact(
     run_dir: Path,
     candidate: CandidateCommit,

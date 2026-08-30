@@ -29,11 +29,11 @@ from vega.agent_persistence import (
 )
 from vega.agent_run_status import load_agent_status_state
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_handoff_digest import compute_handoff_workspace_digest
 from vega.agent_worker import SupervisorAgentWorker
 from vega.agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
-    compute_handoff_workspace_digest,
     save_task_card,
 )
 from vega.cli_entrypoint import app

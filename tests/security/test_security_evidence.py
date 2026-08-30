@@ -801,13 +801,18 @@ def test_explicit_matching_safe_directory_is_scoped_to_git_command(
     monkeypatch.setenv("VEGA_GIT_SAFE_DIRECTORY", str(repo))
     monkeypatch.setattr(git_read_module.subprocess, "run", fake_run)
 
-    git_read_module.run_git_capture(repo, ["git", "status", "--short"])
+    git_read_module.run_git_capture(
+        repo,
+        ["git", "hash-object", "--stdin"],
+        input_data=b"fixture\n",
+    )
 
     command, environment, config_text = calls[0][0], calls[0][1]["env"], calls[0][2]
     config_path = Path(environment["GIT_CONFIG_GLOBAL"])
     assert command == git_read_module.harden_git_read_command(
-        ["git", "status", "--short"]
+        ["git", "hash-object", "--stdin"]
     )
+    assert calls[0][1]["input"] == b"fixture\n"
     assert config_text == (
         f'[safe]\n\tdirectory = "{repo.resolve().as_posix()}"\n'
     )

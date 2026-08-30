@@ -86,3 +86,40 @@ def test_task_brief_separates_current_and_later_work_items() -> None:
     assert "- W2: 再调整 is_blank" in brief.content
     assert "## 最终合同条件（全部 Work Item 完成后判断）" in brief.content
     assert "即使后续事项位于相同文件，也不要提前实现" in brief.content
+
+
+def test_change_run_task_brief_separates_worker_self_check_from_gate() -> None:
+    plan = approve_plan(
+        AgentPlan(
+            task_id="task-context-verification-boundary",
+            user_goal="修复配额并完成完整回归",
+            work_items=[
+                AgentWorkItem(
+                    work_item_id="W1",
+                    objective="修复配额计算",
+                    allowed_paths=["src/quota.py", "tests/test_quota.py"],
+                    verification=[
+                        "python -m pytest tests/test_quota.py -q",
+                        "python -m pytest tests -q",
+                        "git diff --check",
+                    ],
+                    external_side_effects="none",
+                )
+            ],
+        ),
+        actor="human",
+        approved_at="2026-08-29T00:00:00+00:00",
+    )
+
+    brief = compile_task_brief(
+        plan=plan,
+        work_item_id="W1",
+        worker_verification=[
+            "python -m pytest tests/test_quota.py -q",
+            "git diff --check",
+        ],
+    )
+
+    assert "## Worker 最小自检" in brief.content
+    assert "## Vega 确定性 Gate（Candidate 冻结后执行）" in brief.content
+    assert "不要为了完成自述重复运行完整 Vega Gate" in brief.content

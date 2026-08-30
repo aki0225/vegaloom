@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "20260830T040822Z-VALID-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "VALID-02",
+  "transition": "completed",
+  "recorded_at": "2026-08-30T04:08:22Z",
+  "summary": "真实验收暴露的必审风险、ChangeRun 跨机器恢复和门禁上下文问题已经修复；LF、CRLF、重复恢复、Git mode 与损坏现场均保持 fail-closed。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "handoff-tests",
+      "risk-review-tests",
+      "supervisor-tests",
+      "full-test-shards",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_handoff_digest.py",
+      "src/vega/agent_git_worktree.py",
+      "src/vega/agent_resume_validation.py",
+      "src/vega/agent_runtime_support.py",
+      "src/vega/agent_task_card_resume.py",
+      "tests/supervisor/test_agent_handoff.py",
+      "eval/v030-real-01-echo-quota.md"
+    ]
+  }
+}

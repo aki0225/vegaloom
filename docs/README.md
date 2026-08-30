@@ -16,17 +16,23 @@
 | 调查和计划协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | 修改前调查、事实与假设、人工确认 |
 | Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | ChangeRun、Provider Session、Core 与数据流 |
 | Supervisor 状态合同 | [`SUPERVISOR-AGENT-STATE-AUTHORITY.md`](SUPERVISOR-AGENT-STATE-AUTHORITY.md) | 状态、恢复和事实权威 |
-| 当前版本能力 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | v0.3.0 已包含与明确不做的范围 |
+| 当前版本能力 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | v0.3.1 发布候选包含与明确不做的范围 |
 | 持久交互式 Agent 决策 | [`PERSISTENT-INTERACTIVE-AGENT-V1.md`](PERSISTENT-INTERACTIVE-AGENT-V1.md) | v0.3.0 实施边界 |
 | 工作区文件规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 临时文件、运行产物和清理边界 |
 
 ## 发布
 
-当前稳定版本为 [`v0.3.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.3.0)：
+当前稳定版本仍为 [`v0.3.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.3.0)。
+`v0.3.1` 发布候选正在准备，尚未创建 Tag 或 GitHub Release：
+
+- [`RELEASE-NOTES-0.3.1.md`](RELEASE-NOTES-0.3.1.md)
+- [`RELEASE-SUMMARY-0.3.1.md`](RELEASE-SUMMARY-0.3.1.md)
+- [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)
+
+已发布版本的历史材料：
 
 - [`RELEASE-NOTES-0.3.0.md`](RELEASE-NOTES-0.3.0.md)
 - [`RELEASE-SUMMARY-0.3.0.md`](RELEASE-SUMMARY-0.3.0.md)
-- [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)
 
 旧版本的 `RELEASE-NOTES-*` 与 `RELEASE-SUMMARY-*` 是不可变历史材料。远端 Tag 与 GitHub
 Release 是发布动作的事实来源。

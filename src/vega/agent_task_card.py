@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import time
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -13,15 +12,22 @@ from uuid import uuid4
 import yaml
 from pydantic import Field, field_validator, model_validator
 
+from .agent_change_contract import (
+    ChangeContract,
+    ExecutionPlan,
+    validate_execution_plan_against_contract,
+)
 from .agent_contract import (
     AgentAction,
     AgentPlan,
+    GitOidText,
     NonEmptyText,
     RelativePathText,
     Sha256Text,
     StrictAgentModel,
     canonical_digest,
 )
+from .agent_handoff_digest import WorkspaceDigestKind
 from .agent_handoff_safety import TaskCardError, assert_portable_task_card_payload
 from .redaction import redact_value
 
@@ -53,6 +59,27 @@ class HistoricalGateEvidence(StrictAgentModel):
         return value
 
 
+class ChangeRunResume(StrictAgentModel):
+    """跨机器恢复 ChangeRun 所需的最小批准合同，不携带本机路径。"""
+
+    contract: ChangeContract
+    execution_plan: ExecutionPlan
+    accepted_checkpoint_sha: GitOidText
+    historical_candidate_sha: GitOidText | None = None
+
+    @model_validator(mode="after")
+    def validate_change_run(self) -> ChangeRunResume:
+        validate_execution_plan_against_contract(
+            self.contract,
+            self.execution_plan,
+        )
+        if not self.contract.approval_is_current():
+            raise ValueError("ChangeRun Resume 必须携带当前已批准 Contract")
+        if self.historical_candidate_sha == self.accepted_checkpoint_sha:
+            raise ValueError("历史 Candidate 不能与 Accepted Checkpoint 相同")
+        return self
+
+
 class ResumeCapsule(StrictAgentModel):
     current_work_item: NonEmptyText
     stopped_at: NonEmptyText
@@ -64,6 +91,7 @@ class ResumeCapsule(StrictAgentModel):
     human_checks: list[NonEmptyText] = Field(default_factory=list)
     changed_files: list[RelativePathText] = Field(default_factory=list)
     comparison_base_revision: NonEmptyText | None = None
+    workspace_digest_kind: WorkspaceDigestKind = "workspace-bytes-v1"
     workspace_digest: Sha256Text
     gate_evidence: list[HistoricalGateEvidence] = Field(default_factory=list)
     external_side_effects: Literal["none", "known", "unknown"] = "none"
@@ -120,6 +148,7 @@ class AgentTaskCard(StrictAgentModel):
     risk_notes: list[NonEmptyText] = Field(default_factory=list)
     verification_notes: list[NonEmptyText] = Field(default_factory=list)
     resume_capsule: ResumeCapsule | None = None
+    change_run: ChangeRunResume | None = None
 
     @field_validator("branch")
     @classmethod
@@ -163,6 +192,8 @@ class AgentTaskCard(StrictAgentModel):
             item.work_item_id for item in self.plan.work_items
         }:
             raise ValueError("current_work_item 不属于当前 Plan")
+        if self.change_run is not None:
+            _validate_task_card_change_run(self)
 
         if self.handoff_status == "none":
             _validate_empty_handoff(self)
@@ -178,6 +209,7 @@ def _validate_empty_handoff(card: AgentTaskCard) -> None:
         card.handoff_workspace_digest,
         card.last_handoff_checkpoint,
         card.resume_capsule,
+        card.change_run,
     )
     if card.handoff_sequence != 0 or any(value is not None for value in handoff_values):
         raise ValueError("无交接状态不能包含 Resume Capsule 或交接绑定")
@@ -319,25 +351,9 @@ def load_task_card(path: Path) -> AgentTaskCard:
 
 
 def discover_handoff_task_cards(repo: Path, *, branch: str | None = None) -> list[Path]:
-    repo_root = repo.resolve()
-    current_branch = branch or _current_branch(repo_root)
-    process = subprocess.run(
-        ["git", "ls-files", "-z", "--", ":(glob).vega/tasks/**/*.md"],
-        cwd=repo_root,
-        check=False,
-        capture_output=True,
-    )
-    if process.returncode != 0:
-        raise TaskCardError("无法读取 Git 跟踪的 Task Card")
-    tracked_cards: dict[str, tuple[Path, AgentTaskCard]] = {}
-    for raw_path in process.stdout.split(b"\0"):
-        if not raw_path:
-            continue
-        relative = raw_path.decode("utf-8", errors="strict")
-        path = repo_root / PurePosixPath(relative)
-        card = load_task_card(path)
-        tracked_cards[relative] = (path, card)
-    return _active_handoff_paths(tracked_cards, current_branch)
+    from .agent_task_card_discovery import discover_handoff_task_cards as discover
+
+    return discover(repo, branch=branch)
 
 
 def discover_local_handoff_task_cards(
@@ -345,119 +361,35 @@ def discover_local_handoff_task_cards(
     *,
     branch: str,
 ) -> list[Path]:
-    """发现本地 Task Card 链的最新可恢复节点，包括尚未提交的新卡。"""
-
-    repo_root = repo.resolve()
-    task_root = repo_root / ".vega" / "tasks"
-    if not task_root.exists():
-        return []
-    cards: dict[str, tuple[Path, AgentTaskCard]] = {}
-    for path in sorted(task_root.rglob("*.md")):
-        if path.is_symlink():
-            raise TaskCardError("Task Card 目录中不能包含链接文件")
-        try:
-            card = load_task_card(path)
-        except (OSError, ValueError, TaskCardError) as exc:
-            raise TaskCardError(
-                f"本地 Task Card 无法验证：{path.relative_to(repo_root).as_posix()}"
-            ) from exc
-        cards[path.relative_to(repo_root).as_posix()] = (path, card)
-    return _active_handoff_paths(cards, branch)
-
-
-def _active_handoff_paths(
-    cards: dict[str, tuple[Path, AgentTaskCard]],
-    branch: str,
-) -> list[Path]:
-    branch_cards = {
-        relative: (path, card)
-        for relative, (path, card) in cards.items()
-        if card.branch == branch
-    }
-    superseded: set[str] = set()
-    for _, successor in branch_cards.values():
-        previous = successor.previous_task_card
-        if previous is None:
-            continue
-        predecessor_entry = branch_cards.get(previous)
-        if predecessor_entry is None:
-            raise TaskCardError(
-                "Task Card 交接链引用的上一张卡不存在或不属于当前分支"
-            )
-        _, predecessor = predecessor_entry
-        if (
-            predecessor.task_id != successor.task_id
-            or predecessor.handoff_sequence >= successor.handoff_sequence
-        ):
-            raise TaskCardError("Task Card 交接链的任务身份或 sequence 不一致")
-        superseded.add(previous)
-    return sorted(
-        path
-        for relative, (path, card) in branch_cards.items()
-        if (
-            relative not in superseded
-            and card.status not in _TERMINAL_TASK_STATUSES
-            and card.handoff_status != "none"
-        )
+    from .agent_task_card_discovery import (
+        discover_local_handoff_task_cards as discover,
     )
+
+    return discover(repo, branch=branch)
 
 
 def task_card_content_digest(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+    canonical_content = content.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
 
 
-def compute_handoff_workspace_digest(
-    repo: Path,
-    changed_files: list[str],
-) -> str:
-    """绑定准备交接的 WIP 文件内容；Task Card 自身不参与，避免自引用摘要。"""
+def _validate_task_card_change_run(card: AgentTaskCard) -> None:
+    from .agent_change_run import validate_change_projection
 
-    root = repo.resolve(strict=True)
-    entries: list[dict[str, object]] = []
-    for relative in _normalize_relative_paths(changed_files):
-        path = (root / PurePosixPath(relative)).resolve(strict=False)
-        if not path.is_relative_to(root):
-            raise TaskCardError(f"交接文件越过仓库边界：{relative}")
-        try:
-            metadata = path.lstat()
-        except FileNotFoundError:
-            entries.append({"path": relative, "kind": "missing"})
-            continue
-        if path.is_symlink():
-            entries.append(
-                {
-                    "path": relative,
-                    "kind": "symlink",
-                    "target": os.readlink(path),
-                }
-            )
-            continue
-        if not path.is_file():
-            raise TaskCardError(f"交接文件不是普通文件：{relative}")
-        entries.append(
-            {
-                "path": relative,
-                "kind": "file",
-                "size": metadata.st_size,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            }
-        )
-    return canonical_digest({"changed_files": entries})
-
-
-def _current_branch(repo: Path) -> str:
-    process = subprocess.run(
-        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
-        cwd=repo,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
+    assert card.change_run is not None
+    change_run = card.change_run
+    validate_change_projection(
+        change_run.contract,
+        change_run.execution_plan,
+        card.plan,
     )
-    branch = process.stdout.strip()
-    if process.returncode != 0 or not branch:
-        raise TaskCardError("当前 HEAD 不是可恢复任务分支")
-    return branch
+    comparison_base = (
+        card.resume_capsule.comparison_base_revision
+        if card.resume_capsule is not None
+        else None
+    )
+    if comparison_base != change_run.accepted_checkpoint_sha:
+        raise ValueError("ChangeRun Resume 的比较基线必须是 Accepted Checkpoint")
 
 
 def _parse_parts(content: str) -> tuple[dict[str, object], dict[str, object]]:

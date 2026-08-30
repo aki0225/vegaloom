@@ -92,6 +92,7 @@ def _handoff_lines(card: AgentTaskCard) -> list[str]:
     return [
         f"状态：{_HANDOFF_STATUS[card.handoff_status]}",
         f"停止位置：{capsule.stopped_at}",
+        f"Workspace 摘要类型：{capsule.workspace_digest_kind}",
         f"Workspace 摘要：{capsule.workspace_digest}",
         f"变更文件：{', '.join(capsule.changed_files) or '无'}",
         f"比较基线：{capsule.comparison_base_revision or '旧版交接基线'}",

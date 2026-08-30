@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "event_id": "20260829T152028Z-VALID-02-started",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "VALID-02",
+  "transition": "started",
+  "recorded_at": "2026-08-29T15:20:28Z",
+  "summary": "V030-REAL-01 的提交前审查继续修复跨机器恢复问题：Task Card 与 WIP 需要跨 LF、CRLF checkout 保持同一语义，恢复后的本机 run 也必须在返回成功前完成自校验。完成事件等待全量验证和 PR CI 后再追加。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "handoff-tests",
+      "risk-review-tests",
+      "supervisor-tests",
+      "repository-hygiene"
+    ],
+    "artifacts": [
+      "src/vega/agent_handoff_safety.py",
+      "src/vega/agent_git_worktree.py",
+      "src/vega/agent_repository_binding.py",
+      "src/vega/agent_runtime_support.py",
+      "tests/supervisor/test_agent_handoff.py",
+      "plans/vega-agent-evolution.json",
+      "plans/events/20260829T152028Z-VALID-02-started.json"
+    ]
+  }
+}

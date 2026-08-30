@@ -5,8 +5,8 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：18 / 18
-- 最近事件：`20260828T134934Z-SESSION-04-completed`
+- 已完成：19 / 19
+- 最近事件：`20260830T040822Z-VALID-02-completed`
 
 ## 当前事项
 
@@ -34,6 +34,7 @@
 | 已完成 | `SESSION-02` | 完成持久 Worker 与独立 Reviewer | `SESSION-01` |
 | 已完成 | `SESSION-03` | 统一 Agent 入口与交付报告 | `SESSION-02` |
 | 已完成 | `SESSION-04` | 完成真实 Agent 验收与 v0.3.0 准备 | `SESSION-03` |
+| 已完成 | `VALID-02` | 修复真实验收暴露的恢复与高风险审查问题 | `SESSION-04` |
 
 ## 状态规则
 

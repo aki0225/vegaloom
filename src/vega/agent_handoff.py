@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import agent_handoff_digest
 from .agent_contract import (
     AgentCheckpoint,
     AgentObservation,
@@ -14,10 +15,12 @@ from .agent_contract import (
     AgentState,
     utc_now,
 )
+from .agent_change_handoff import build_change_handoff_details
 from .comparison_binding import require_comparison_binding_from_mapping
 from .agent_handoff_safety import (
     collect_handoff_issues,
     prepare_task_card_root,
+    require_plain_task_card_root,
     require_plain_task_card_tree,
 )
 from .agent_handoff_rendering import git_checklist, render_handoff_summary
@@ -44,22 +47,21 @@ from .agent_runtime_support import (
 )
 from .agent_task_card import (
     AgentTaskCard,
-    HistoricalGateEvidence,
     ResumeCapsule,
     TaskCardError,
-    compute_handoff_workspace_digest,
     discover_local_handoff_task_cards,
     load_task_card,
     render_task_card,
     save_task_card,
     task_card_content_digest,
 )
+from .agent_task_card_discovery import next_handoff_sequence
+from .agent_status_history import historical_gate_evidence
 from .redaction import sensitive_path_reason, write_redacted_json, write_redacted_text
 
 
 _HANDOFF_PHASES = frozenset({"ready", "needs_human", "stopped"})
 _TASK_CARD_STATUS = frozenset({"ready", "needs_human"})
-_OBSERVATION_GATES = ("verification", "risk", "review")
 
 
 @dataclass(frozen=True)
@@ -111,13 +113,31 @@ def create_handoff(
     )
     card_path = _task_card_path(repo, state.task_id)
     snapshot = capture_bound_workspace(run_dir)
+    comparison_base_revision, comparison_paths = require_comparison_binding_from_mapping(
+        metadata,
+        base_key="comparison_base_revision",
+    )
+    change_handoff = build_change_handoff_details(
+        workspace,
+        run_dir,
+        repo,
+        state,
+        plan,
+        metadata,
+        snapshot,
+        legacy_comparison_base_revision=(
+            comparison_base_revision
+            or _metadata_revision(metadata, snapshot.head_sha)
+        ),
+    )
+    handoff_snapshot = change_handoff.snapshot
     latest = load_agent_checkpoint(
         run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
     )
     issues = collect_handoff_issues(state, latest, snapshot)
     sensitive_paths = [
         path
-        for path in snapshot.changed_files
+        for path in handoff_snapshot.changed_files
         if sensitive_path_reason(path) is not None
     ]
     if sensitive_paths:
@@ -150,22 +170,16 @@ def create_handoff(
     )
 
     observation, observation_time = _latest_observation(run_dir)
-    workspace_digest = compute_handoff_workspace_digest(
-        repo,
-        list(snapshot.changed_files),
+    workspace_digest = agent_handoff_digest.compute_handoff_workspace_digest(
+        repo, list(handoff_snapshot.changed_files),
+        digest_kind=agent_handoff_digest.PORTABLE_WORKSPACE_DIGEST_KIND,
     )
-    gate_evidence = _historical_gate_evidence(
+    gate_evidence = historical_gate_evidence(
         observation,
         source_revision=snapshot.head_sha,
         recorded_at=observation_time,
     )
-    comparison_base_revision, comparison_paths = require_comparison_binding_from_mapping(
-        metadata,
-        base_key="comparison_base_revision",
-    )
-    comparison_base_revision = comparison_base_revision or _metadata_revision(
-        metadata, snapshot.head_sha
-    )
+    comparison_base_revision = change_handoff.comparison_base_revision
     capsule = ResumeCapsule(
         current_work_item=state.current_work_item,
         stopped_at=f"{reason.strip()}；当前阶段：{state.phase}",
@@ -204,8 +218,9 @@ def create_handoff(
                 *work_item.verification,
             ]
         ),
-        changed_files=list(snapshot.changed_files),
+        changed_files=list(handoff_snapshot.changed_files),
         comparison_base_revision=comparison_base_revision,
+        workspace_digest_kind=agent_handoff_digest.PORTABLE_WORKSPACE_DIGEST_KIND,
         workspace_digest=workspace_digest,
         gate_evidence=gate_evidence,
         external_side_effects=latest.external_side_effects,
@@ -215,7 +230,7 @@ def create_handoff(
             ["human"]
             if handoff_status == "handoff_blocked"
             else ["repair", "human"]
-            if snapshot.changed_files
+            if handoff_snapshot.changed_files
             else ["next", "human"]
         ),
         next_step=(
@@ -236,7 +251,12 @@ def create_handoff(
         previous_task_card=previous_task_card,
         plan=plan,
         current_work_item=state.current_work_item,
-        handoff_sequence=_next_handoff_sequence(repo, state.task_id, branch),
+        handoff_sequence=next_handoff_sequence(
+            repo,
+            state.task_id,
+            branch,
+            previous_task_card=previous_task_card,
+        ),
         handoff_status=handoff_status,
         handoff_base_revision=snapshot.head_sha,
         handoff_workspace_digest=workspace_digest,
@@ -254,6 +274,7 @@ def create_handoff(
             for evidence in gate_evidence
         ],
         resume_capsule=capsule,
+        change_run=change_handoff.resume,
     )
 
     card_content = render_task_card(card)
@@ -289,6 +310,11 @@ def create_handoff(
             task_card_sha256=card_digest,
             comparison_base_revision=comparison_base_revision,
             comparison_paths=list(comparison_paths),
+            change_run=(
+                metadata["change_run"]
+                if isinstance(metadata.get("change_run"), dict)
+                else None
+            ),
         )
         write_redacted_json(
             manifest_path,
@@ -302,10 +328,10 @@ def create_handoff(
                 "checkpoint_id": checkpoint.checkpoint_id,
                 "handoff_base_revision": snapshot.head_sha,
                 "handoff_workspace_digest": workspace_digest,
-                "changed_files": list(snapshot.changed_files),
+                "changed_files": list(handoff_snapshot.changed_files),
                 "pending_git_actions": git_checklist(
                     relative_card,
-                    snapshot.changed_files,
+                    handoff_snapshot.changed_files,
                     branch,
                 ),
             },
@@ -317,10 +343,11 @@ def create_handoff(
                 card_path=relative_card,
                 card_digest=card_digest,
                 branch=branch,
-                changed_files=snapshot.changed_files,
+                changed_files=handoff_snapshot.changed_files,
                 issues=issues,
             ),
         )
+        _prepare_task_card_parent(repo, card_path)
         require_plain_task_card_tree(repo, card_path.parent)
         save_task_card(card_path, card)
         card_published = True
@@ -397,24 +424,6 @@ def _latest_observation(
     return None, utc_now()
 
 
-def _historical_gate_evidence(
-    observation: AgentObservation | None,
-    *,
-    source_revision: str,
-    recorded_at: str,
-) -> list[HistoricalGateEvidence]:
-    return [
-        HistoricalGateEvidence(
-            gate=gate,
-            status=getattr(observation, gate) if observation else "not_run",
-            source_revision=source_revision,
-            recorded_at=recorded_at,
-            artifact_refs=list(observation.evidence_refs) if observation else [],
-        )
-        for gate in _OBSERVATION_GATES
-    ]
-
-
 def _current_work_item(plan: AgentPlan, state: AgentState):
     try:
         return next(
@@ -442,7 +451,7 @@ def _metadata_revision(metadata: dict[str, object], fallback: str) -> str:
 def _task_card_path(repo: Path, task_id: str) -> Path:
     date = datetime.now(UTC)
     slug = re.sub(r"[^a-z0-9]+", "-", task_id.lower()).strip("-")[:48] or "task"
-    root = prepare_task_card_root(repo, date.strftime("%Y-%m"))
+    root = require_plain_task_card_root(repo, date.strftime("%Y-%m"))
     base = root / f"{date.strftime('%Y-%m-%d')}-{slug}-handoff.md"
     candidate = base
     suffix = 2
@@ -450,6 +459,12 @@ def _task_card_path(repo: Path, task_id: str) -> Path:
         candidate = root / f"{date.strftime('%Y-%m-%d')}-{slug}-handoff-{suffix:02d}.md"
         suffix += 1
     return candidate
+
+
+def _prepare_task_card_parent(repo: Path, card_path: Path) -> None:
+    prepared_root = prepare_task_card_root(repo, card_path.parent.name)
+    if prepared_root != card_path.parent:
+        raise TaskCardError("Task Card 目录与预期路径不一致")
 
 
 def _ensure_no_existing_handoff(
@@ -473,21 +488,6 @@ def _ensure_no_existing_handoff(
                 "当前任务和分支已存在未终止 Handoff Task Card；"
                 "请先人工处理旧卡，拒绝生成重复交接"
             )
-
-
-def _next_handoff_sequence(repo: Path, task_id: str, branch: str) -> int:
-    root = repo / ".vega" / "tasks"
-    if not root.exists():
-        return 1
-    highest = 0
-    for path in root.rglob("*.md"):
-        try:
-            card = load_task_card(path)
-        except (OSError, ValueError, TaskCardError):
-            continue
-        if card.task_id == task_id and card.branch == branch:
-            highest = max(highest, card.handoff_sequence)
-    return highest + 1
 
 
 def _compact(values: list[str]) -> list[str]:

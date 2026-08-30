@@ -38,6 +38,7 @@ def compile_task_brief(
     failed_attempts: Sequence[str] = (),
     gate_summary: Mapping[str, str] | None = None,
     artifact_refs: Sequence[str] = (),
+    worker_verification: Sequence[str] | None = None,
     max_bytes: int = DEFAULT_TASK_BRIEF_MAX_BYTES,
 ) -> TaskBrief:
     if max_bytes < 1:
@@ -95,7 +96,10 @@ def compile_task_brief(
             "最终合同条件（全部 Work Item 完成后判断）",
             plan.success_conditions or ["未声明"],
         ),
-        ("验证要求", work_item.verification or ["未声明"]),
+        *_verification_sections(
+            work_item.verification,
+            worker_verification,
+        ),
         (
             "风险提示",
             [
@@ -112,7 +116,15 @@ def compile_task_brief(
             "下一动作",
             [
                 "只处理当前 Work Item；即使后续事项位于相同文件，也不要提前实现。"
-                "遇到范围变化、未知副作用或证据冲突时停止并请求人工。"
+                "遇到范围变化、未知副作用或证据冲突时停止并请求人工。",
+                *(
+                    [
+                        "不要为了完成自述重复运行完整 Vega Gate；"
+                        "完成最小自检后交回 Candidate，Gate 会独立重跑。"
+                    ]
+                    if worker_verification is not None
+                    else []
+                ),
             ],
         ),
     ]
@@ -179,6 +191,21 @@ def _render_gate_summary(gate_summary: Mapping[str, str] | None) -> list[str]:
     if not gate_summary:
         return ["尚无当前门禁结果"]
     return [f"{key}: {value}" for key, value in sorted(gate_summary.items())]
+
+
+def _verification_sections(
+    gate_verification: Sequence[str],
+    worker_verification: Sequence[str] | None,
+) -> list[tuple[str, Sequence[str]]]:
+    if worker_verification is None:
+        return [("验证要求", gate_verification or ["未声明"])]
+    return [
+        ("Worker 最小自检", worker_verification or ["未声明"]),
+        (
+            "Vega 确定性 Gate（Candidate 冻结后执行）",
+            gate_verification or ["未声明"],
+        ),
+    ]
 
 
 def _render_checkpoint(checkpoint: AgentCheckpoint | None) -> list[str]:

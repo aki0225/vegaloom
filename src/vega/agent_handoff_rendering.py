@@ -8,12 +8,19 @@ def git_checklist(
     changed_files: tuple[str, ...],
     branch: str,
 ) -> list[str]:
-    paths = [*changed_files, card_path]
-    add_paths = " ".join(f"`{path}`" for path in paths) or "`<Task Card>`"
+    wip_paths = " ".join(f"`{path}`" for path in changed_files)
     return [
         "人工确认旧 Writer、进程和外部副作用已经停止或已明确标记 blocked",
         "执行 `git status --short` 和 `git diff --check`",
-        f"只暂存 WIP 与 Task Card：{add_paths}",
+        (
+            f"只暂存这些 WIP：{wip_paths}"
+            if wip_paths
+            else "本次没有待暂存 WIP"
+        ),
+        (
+            f"暂存 Task Card：`{card_path}`；若被 `.gitignore` 命中，"
+            f"由人工显式使用 `git add -f -- {card_path}`"
+        ),
         "执行 `git diff --cached --check`，人工检查完整 staged diff",
         f"人工决定是否在任务分支 `{branch}` commit 和 push",
         "新机器使用 `git pull --ff-only` 后运行 `vega resume --repo .`",

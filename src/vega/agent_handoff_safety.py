@@ -9,8 +9,6 @@ from urllib.parse import unquote, urlsplit
 
 from .agent_contract import AgentCheckpoint, AgentState
 from .git_read import run_git_capture
-
-
 _WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?i)(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/][^\\/\s]+)"
     r"[^\r\n\t\"'`<>]*"
@@ -161,6 +159,19 @@ def prepare_task_card_root(repo: Path, month: str) -> Path:
                 raise TaskCardError("无法创建 Task Card 目录") from exc
         _require_plain_task_card_directory(root, current)
     return current
+
+
+def require_plain_task_card_root(repo: Path, month: str) -> Path:
+    """只读检查已经存在的 Task Card 目录前缀，不提前创建目录。"""
+
+    root = repo.resolve(strict=True)
+    current = root
+    for part in (".vega", "tasks", month):
+        current = current / part
+        if not os.path.lexists(current):
+            break
+        _require_plain_task_card_directory(root, current)
+    return root / ".vega" / "tasks" / month
 
 
 def require_plain_task_card_tree(repo: Path, directory: Path) -> None:

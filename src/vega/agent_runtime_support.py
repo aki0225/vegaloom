@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -15,7 +13,13 @@ from .agent_context import (
     compile_task_brief,
     task_brief_manifest,
 )
-from .agent_change_run import load_change_run_context
+from .agent_change_handoff import prepare_resumed_change_workspace
+from .agent_change_run import (
+    change_run_metadata,
+    load_change_run_context,
+    save_change_run_artifacts,
+    task_brief_worker_verification,
+)
 from .agent_contract import (
     AgentCheckpoint,
     AgentDecision,
@@ -25,7 +29,6 @@ from .agent_contract import (
     ObservationAuthority,
     canonical_digest,
 )
-from .agent_handoff_safety import TaskCardError
 from .agent_persistence import (
     AgentArtifactError,
     append_agent_trace,
@@ -48,7 +51,6 @@ from .agent_repository_binding import (
     write_run_metadata,
 )
 from .agent_repository_guard import (
-    acquire_task_card_resume_claim,
     prepare_terminal_writer_claim_release,
     release_task_card_resume_claim,
     release_terminal_writer_claim,
@@ -56,50 +58,17 @@ from .agent_repository_guard import (
 from .agent_run import AgentRun
 from .agent_runtime_logic import update_state
 from .agent_status_card import write_status_card as _write_status_card
-from .agent_task_card import (
-    AgentTaskCard,
-    discover_handoff_task_cards,
-    parse_task_card,
-    task_card_content_digest,
+from .agent_task_card import task_card_content_digest
+from .agent_task_card_resume import (
+    create_claimed_resume_run,
+    load_task_card_with_content,
+    resolve_resume_task,
+    state_from_task_card,
 )
 from .redaction import write_redacted_json, write_redacted_text
-from .repository_identity import repository_scope
-from .run_utils import create_run_dir, resolve_run_dir
+from .run_utils import resolve_run_dir
 from .workspace_inventory import prepare_verification_temp_root
 from .workspace_snapshot import ReviewWorkspaceSnapshot
-
-
-def resolve_resume_task(repo: Path, task_path: Path | None) -> tuple[Path, str]:
-    if task_path is None:
-        matches = discover_handoff_task_cards(repo)
-        if not matches:
-            raise ValueError("当前分支没有可恢复的 Task Card")
-        if len(matches) > 1:
-            choices = ", ".join(path.relative_to(repo).as_posix() for path in matches)
-            raise ValueError(f"当前分支有多个可恢复 Task Card，请使用 --task 选择：{choices}")
-        task_path = matches[0]
-    resolved_task = task_path.resolve(strict=True)
-    try:
-        relative_task = resolved_task.relative_to(repo).as_posix()
-    except ValueError as exc:
-        raise ValueError("Task Card 必须位于目标仓库内") from exc
-    tracked = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "--", relative_task],
-        cwd=repo,
-        check=False,
-        capture_output=True,
-    )
-    if tracked.returncode != 0:
-        raise ValueError("跨机器恢复只接受 Git 已跟踪的 Task Card")
-    return resolved_task, relative_task
-
-
-def load_task_card_with_content(path: Path) -> tuple[AgentTaskCard, str]:
-    try:
-        content = path.read_text(encoding="utf-8")
-    except (FileNotFoundError, OSError, UnicodeError) as exc:
-        raise TaskCardError(f"无法读取 Task Card：{path.name}") from exc
-    return parse_task_card(content), content
 
 
 def capture_bound_workspace(run_dir: Path) -> ReviewWorkspaceSnapshot:
@@ -166,26 +135,58 @@ def resume_agent_task_card(
         expected_head_sha=snapshot.head_sha,
         expected_branch=card.branch,
     )
-    run_id, run_dir = create_run_dir(
+    run_id, run_dir = create_claimed_resume_run(
         workspace,
-        f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent-resume",
-    )
-    acquire_task_card_resume_claim(
         repo_root,
         task_card_sha256=task_card_sha256,
-        run_dir=run_dir,
         task_card=relative_task,
     )
     published = False
     try:
-        state = state_from_task_card(run_id, repo_root, card, snapshot)
         capsule = card.resume_capsule
         changed_files = list(capsule.changed_files) if capsule else []
+        change_workspace = (
+            prepare_resumed_change_workspace(
+                workspace,
+                repo_root,
+                run_id=run_id,
+                card=card,
+                relative_task=relative_task,
+                handoff_revision=snapshot.head_sha,
+            )
+            if card.change_run is not None
+            else None
+        )
+        bound_repository = (
+            change_workspace.handle.worktree_path
+            if change_workspace is not None
+            else repo_root
+        )
+        current_snapshot = (
+            change_workspace.snapshot
+            if change_workspace is not None
+            else snapshot
+        )
+        if change_workspace is not None:
+            prepare_verification_temp_root(bound_repository)
+        state = state_from_task_card(
+            run_id,
+            bound_repository,
+            card,
+            current_snapshot,
+            accepted_checkpoint_sha=(
+                change_workspace.accepted_checkpoint_sha
+                if change_workspace is not None
+                else None
+            ),
+        )
         resumed_failed_attempts = list(dict.fromkeys(
             [*card.failed_attempts, *(capsule.failed_attempts if capsule else [])]
         ))
         comparison_base = (
-            (
+            change_workspace.accepted_checkpoint_sha
+            if change_workspace is not None
+            else (
                 capsule.comparison_base_revision
                 or card.handoff_base_revision
             )
@@ -194,18 +195,33 @@ def resume_agent_task_card(
         )
         write_run_metadata(
             run_dir,
-            repo_root,
-            snapshot.head_sha,
+            bound_repository,
+            (
+                card.base_revision
+                if change_workspace is not None
+                else snapshot.head_sha
+            ),
             task_card=relative_task,
             task_card_sha256=task_card_sha256,
             comparison_base_revision=comparison_base,
-            comparison_paths=changed_files,
+            comparison_paths=[] if change_workspace is not None else changed_files,
+            change_run=(
+                change_run_metadata(change_workspace.handle)
+                if change_workspace is not None
+                else None
+            ),
         )
+        if card.change_run is not None:
+            save_change_run_artifacts(
+                run_dir,
+                card.change_run.contract,
+                card.change_run.execution_plan,
+            )
         save_agent_plan(run_dir, card.plan)
         checkpoint = write_checkpoint(
             run_dir,
             state,
-            snapshot,
+            current_snapshot,
             reason="已从 Git 跟踪的 Resume Capsule 建立新本机 run",
             status="safe" if card.handoff_status == "handoff_ready" else "blocked",
             pending_actions=list(state.allowed_actions),
@@ -254,6 +270,12 @@ def resume_agent_task_card(
             ),
         )
         save_agent_state(run_dir / "agent-state.json", state)
+        validated_dir, validated_state, _, _ = load_agent_bundle(
+            workspace,
+            run_id,
+        )
+        if validated_dir != run_dir or validated_state != state:
+            raise ValueError("恢复后的 Agent run 自校验结果不一致")
         published = True
         return AgentRun(run_dir=run_dir, state=state, plan=card.plan)
     finally:
@@ -339,6 +361,10 @@ def write_task_brief(
         confirmed_facts=confirmed_facts or (),
         failed_attempts=failed_attempts or (),
         artifact_refs=artifact_refs or (),
+        worker_verification=task_brief_worker_verification(
+            run_dir,
+            state,
+        ),
         max_bytes=DEFAULT_TASK_BRIEF_MAX_BYTES,
     )
     write_redacted_text(run_dir / "task-brief.md", brief.content)
@@ -466,31 +492,4 @@ def publish_observation_transition(
     )
     release_terminal_writer_claim(
         repo, previous_state, state, observation, authority
-    )
-
-
-def state_from_task_card(
-    run_id: str,
-    repo: Path,
-    card: AgentTaskCard,
-    snapshot: ReviewWorkspaceSnapshot,
-) -> AgentState:
-    requires_human = card.handoff_status == "handoff_blocked" or card.status == "needs_human"
-    allowed_actions = (
-        ["human"] if requires_human
-        else list(card.resume_capsule.allowed_actions) if card.resume_capsule else ["human"]
-    )
-    return AgentState(
-        run_id=run_id,
-        task_id=card.task_id,
-        repository_id=repository_scope(repo),
-        phase="needs_human" if requires_human else "ready",
-        goal_revision=card.plan.goal_revision,
-        plan_revision=card.plan.plan_revision,
-        approved_plan_digest=card.plan.approved_digest,
-        current_work_item=card.current_work_item,
-        workspace_fingerprint=snapshot.fingerprint,
-        allowed_actions=allowed_actions,
-        # 新 run 不继承旧 Handoff 发布态，避免后续失败被误判为已经完成交接。
-        handoff_status="none",
     )
