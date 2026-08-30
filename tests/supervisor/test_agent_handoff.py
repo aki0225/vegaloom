@@ -258,6 +258,9 @@ def test_clean_change_run_can_resume_and_handoff_again(tmp_path: Path) -> None:
         str(second_clone),
     )
     _git(second_clone, "config", "core.autocrlf", "false")
+    # clone 不继承仓库本地身份；显式配置，避免测试误用开发机全局 Git 配置。
+    _git(second_clone, "config", "user.name", "Vega Test")
+    _git(second_clone, "config", "user.email", "vega@example.invalid")
     second_workspace = tmp_path / "second-workspace"
     second_workspace.mkdir()
     second_runtime = SupervisorAgentRuntime(second_workspace)
