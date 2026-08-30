@@ -1,17 +1,49 @@
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 from .agent_contract import AgentState
 from .agent_handoff_safety import TaskCardError
+from .agent_repository_guard import acquire_task_card_resume_claim
 from .agent_task_card import (
     AgentTaskCard,
     discover_handoff_task_cards,
     parse_task_card,
 )
 from .repository_identity import repository_scope
+from .run_utils import create_run_dir
 from .workspace_snapshot import ReviewWorkspaceSnapshot
+
+
+def create_claimed_resume_run(
+    workspace: Path,
+    repo: Path,
+    *,
+    task_card_sha256: str,
+    task_card: str,
+) -> tuple[str, Path]:
+    """创建并独占恢复 run；Claim 失败时只撤销尚未写入证据的空目录。"""
+
+    run_id, run_dir = create_run_dir(
+        workspace,
+        f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent-resume",
+    )
+    try:
+        acquire_task_card_resume_claim(
+            repo,
+            task_card_sha256=task_card_sha256,
+            run_dir=run_dir,
+            task_card=task_card,
+        )
+    except BaseException:
+        try:
+            run_dir.rmdir()
+        except OSError:
+            pass
+        raise
+    return run_id, run_dir
 
 
 def resolve_resume_task(

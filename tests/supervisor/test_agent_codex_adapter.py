@@ -29,10 +29,10 @@ from vega.agent_persistence import (
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_recovery_request import AgentRecoveryRequest
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_handoff_digest import compute_handoff_workspace_digest
 from vega.agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
-    compute_handoff_workspace_digest,
     save_task_card,
 )
 from vega.agent_verification_retry import SupervisorAgentVerificationRetry

@@ -15,11 +15,8 @@ from .agent_git_worktree import (
     prepare_managed_worktree,
     restore_handoff_wip,
 )
-from .agent_task_card import (
-    AgentTaskCard,
-    ChangeRunResume,
-    compute_handoff_workspace_digest,
-)
+from .agent_handoff_digest import compute_handoff_workspace_digest
+from .agent_task_card import AgentTaskCard, ChangeRunResume
 from .agent_task_card_discovery import task_card_chain_paths
 from .workspace_check import capture_review_workspace
 from .workspace_inventory import workspace_ignored_path_exclusions
@@ -112,7 +109,6 @@ def prepare_resumed_change_workspace(
     )
     restore_handoff_wip(
         handle,
-        accepted_checkpoint_sha=change_run.accepted_checkpoint_sha,
         handoff_revision=handoff_revision,
         restored_checkpoint_sha=resumed_checkpoint,
         changed_files=list(capsule.changed_files),
@@ -123,10 +119,13 @@ def prepare_resumed_change_workspace(
     )
     if set(snapshot.changed_files) != set(capsule.changed_files):
         raise ValueError("恢复后的 ChangeRun WIP 文件与 Resume Capsule 不一致")
-    if (
+    # 新卡已在源 Handoff revision 上绑定 Git Blob；恢复只需验证签出的路径集合。
+    # 旧卡没有 revision 级摘要，仍按恢复后的原始字节重新核对。
+    if capsule.workspace_digest_kind == "workspace-bytes-v1" and (
         compute_handoff_workspace_digest(
             handle.worktree_path,
             list(capsule.changed_files),
+            digest_kind=capsule.workspace_digest_kind,
         )
         != capsule.workspace_digest
     ):

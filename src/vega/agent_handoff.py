@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import agent_handoff_digest
 from .agent_contract import (
     AgentCheckpoint,
     AgentObservation,
@@ -48,7 +49,6 @@ from .agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
     TaskCardError,
-    compute_handoff_workspace_digest,
     discover_local_handoff_task_cards,
     load_task_card,
     render_task_card,
@@ -170,9 +170,9 @@ def create_handoff(
     )
 
     observation, observation_time = _latest_observation(run_dir)
-    workspace_digest = compute_handoff_workspace_digest(
-        repo,
-        list(handoff_snapshot.changed_files),
+    workspace_digest = agent_handoff_digest.compute_handoff_workspace_digest(
+        repo, list(handoff_snapshot.changed_files),
+        digest_kind=agent_handoff_digest.PORTABLE_WORKSPACE_DIGEST_KIND,
     )
     gate_evidence = historical_gate_evidence(
         observation,
@@ -220,6 +220,7 @@ def create_handoff(
         ),
         changed_files=list(handoff_snapshot.changed_files),
         comparison_base_revision=comparison_base_revision,
+        workspace_digest_kind=agent_handoff_digest.PORTABLE_WORKSPACE_DIGEST_KIND,
         workspace_digest=workspace_digest,
         gate_evidence=gate_evidence,
         external_side_effects=latest.external_side_effects,

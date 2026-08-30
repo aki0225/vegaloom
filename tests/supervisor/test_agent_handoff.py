@@ -26,6 +26,10 @@ from vega.agent_persistence import (
     read_agent_trace,
     save_agent_checkpoint,
 )
+from vega.agent_handoff_digest import (
+    PORTABLE_WORKSPACE_DIGEST_KIND,
+    compute_handoff_workspace_digest,
+)
 from vega.agent_handoff_safety import assert_portable_task_card_payload
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_recovery_request import AgentRecoveryRequest
@@ -78,7 +82,15 @@ def test_cli_handoff_writes_card_checkpoint_and_manifest(
     assert str(tmp_path) not in card_path.read_text(encoding="utf-8")
 
 
-def test_change_run_handoff_preserves_metadata_and_status(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "source_newline",
+    ["\n", "\r\n"],
+    ids=["lf-blob", "crlf-blob"],
+)
+def test_change_run_handoff_preserves_metadata_and_status(
+    tmp_path: Path,
+    source_newline: str,
+) -> None:
     repo, workspace, runtime, approved, managed_repo = _approved_change_run(
         tmp_path,
         task_id="task-change-handoff",
@@ -90,7 +102,7 @@ def test_change_run_handoff_preserves_metadata_and_status(tmp_path: Path) -> Non
     (managed_repo / "README.md").write_text(
         "fixture\nchange run handoff wip\n",
         encoding="utf-8",
-        newline="\n",
+        newline=source_newline,
     )
     stopped = SupervisorAgentRecovery(workspace).stop(
         approved.run_dir.name,
@@ -111,7 +123,14 @@ def test_change_run_handoff_preserves_metadata_and_status(tmp_path: Path) -> Non
     assert card.change_run.accepted_checkpoint_sha == original_accepted
     assert card.resume_capsule is not None
     assert card.resume_capsule.comparison_base_revision == original_accepted
+    assert card.resume_capsule.workspace_digest_kind == "git-blob-v1"
     task_card = handoff.task_card_path.relative_to(managed_repo).as_posix()
+    if source_newline == "\r\n":
+        handoff.task_card_path.write_text(
+            handoff.task_card_path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+            newline="\r\n",
+        )
     _git(managed_repo, "add", "README.md", task_card)
     _git(managed_repo, "commit", "-m", "测试：提交 ChangeRun Handoff")
 
@@ -119,14 +138,16 @@ def test_change_run_handoff_preserves_metadata_and_status(tmp_path: Path) -> Non
     _git(
         tmp_path,
         "-c",
-        "core.autocrlf=false",
+        "core.autocrlf=true",
         "clone",
         "--branch",
         card.branch,
         str(repo),
         str(clone),
     )
-    _git(clone, "config", "core.autocrlf", "false")
+    _git(clone, "config", "core.autocrlf", "true")
+    assert b"\r\n" in (clone / "README.md").read_bytes()
+    assert b"\r\n" in (clone / task_card).read_bytes()
     next_workspace = tmp_path / "next-workspace"
     next_workspace.mkdir()
 
@@ -474,9 +495,30 @@ def test_same_task_card_cannot_resume_twice_in_one_git_repository(
         SupervisorAgentRuntime(second_workspace).resume_task_card(repo)
 
     assert first.state.phase == "ready"
-    assert not list(
-        (second_workspace / "runs").glob("*-agent-resume*/agent-state.json")
+    assert not list((second_workspace / "runs").glob("*-agent-resume*"))
+
+
+def test_portable_workspace_digest_binds_git_file_mode(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "repo")
+    readme = repo / "README.md"
+    readme.write_text("fixture\nmode change\n", encoding="utf-8", newline="\n")
+    before = compute_handoff_workspace_digest(
+        repo,
+        ["README.md"],
+        digest_kind=PORTABLE_WORKSPACE_DIGEST_KIND,
     )
+    _git(repo, "add", "README.md")
+    _git(repo, "update-index", "--chmod=+x", "README.md")
+    _git(repo, "commit", "-m", "测试：提交 mode 变化")
+
+    after = compute_handoff_workspace_digest(
+        repo,
+        ["README.md"],
+        digest_kind=PORTABLE_WORKSPACE_DIGEST_KIND,
+        revision=_head(repo),
+    )
+
+    assert before != after
 
 
 def test_task_card_supports_two_handoff_hops(

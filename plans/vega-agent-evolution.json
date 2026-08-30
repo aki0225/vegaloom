@@ -359,6 +359,28 @@
         "repository-hygiene",
         "pr-ci"
       ]
+    },
+    {
+      "id": "VALID-02",
+      "title": "修复真实验收暴露的恢复与高风险审查问题",
+      "summary": "处理 V030-REAL-01 暴露的必审风险 Reviewer、ChangeRun Handoff 与验证上下文问题，使跨机器恢复不依赖 checkout 行尾策略。",
+      "depends_on": [
+        "SESSION-04"
+      ],
+      "acceptance": [
+        "命名必审风险命中 human-review 时仍运行隔离 Reviewer，并保持 needs_human 终态",
+        "Task Card 携带当前批准合同、Execution Plan 与 Accepted Checkpoint，恢复后仍是同一 ChangeRun",
+        "同一 Handoff 提交在 LF 与 CRLF checkout 下均可恢复，真实内容变化继续 fail-closed",
+        "历史门禁只用于定位，Worker 最小自检与 Candidate 冻结后的确定性 Gate 明确分开"
+      ],
+      "required_checks": [
+        "handoff-tests",
+        "risk-review-tests",
+        "supervisor-tests",
+        "full-test-shards",
+        "repository-hygiene",
+        "pr-ci"
+      ]
     }
   ]
 }

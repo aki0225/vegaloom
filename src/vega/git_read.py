@@ -41,6 +41,8 @@ def run_git_text(
 def run_git_capture(
     repo_path: Path,
     command: list[str],
+    *,
+    input_data: bytes | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     repo = repo_path.resolve()
     safe_directory = resolve_explicit_safe_directory(repo)
@@ -56,6 +58,7 @@ def run_git_capture(
         result = subprocess.run(
             harden_git_read_command(command),
             cwd=repo,
+            input=input_data,
             capture_output=True,
             env=environment,
             timeout=30,

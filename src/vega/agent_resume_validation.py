@@ -3,11 +3,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from .agent_handoff_safety import validate_handoff_history
+from .agent_handoff_digest import compute_handoff_workspace_digest
+from .agent_handoff_safety import (
+    validate_handoff_history,
+)
 from .agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
-    compute_handoff_workspace_digest,
     task_card_content_digest,
 )
 from .agent_task_card_discovery import task_card_chain_paths
@@ -136,6 +138,12 @@ def _validate_resume_content(
     current_digest = compute_handoff_workspace_digest(
         repo,
         capsule.changed_files,
+        digest_kind=capsule.workspace_digest_kind,
+        revision=(
+            snapshot.head_sha
+            if capsule.workspace_digest_kind == "git-blob-v1"
+            else None
+        ),
     )
     if card.handoff_workspace_digest != current_digest:
         raise ValueError(

@@ -374,3 +374,61 @@ Task Card 由人工使用 `git add -f`，没有扩大 Vega 的 Git 写入权限�
 
 最终完整 pytest 为 `1454 passed, 2 skipped`，耗时 `5022.35s`。Compileall、Ruff、架构增长、
 仓库卫生和 `git diff --check` 继续通过。
+
+## 跨行尾恢复缺陷修复复核：2026-08-29
+
+提交前的独立复核继续发现：同一 Handoff 提交换到 `core.autocrlf=true` 的 clone 后，Task Card
+和代码文件会按目标 checkout 规则变为 CRLF。旧实现一处按 Git 提交内容校验，另一处按工作区
+原始字节校验，导致合法换机恢复被拒绝；没有 WIP 的场景还可能先返回成功，随后由 `status`
+发现恢复出的本机 run 无效。
+
+修复后，新 Task Card 使用 `git-blob-v1` 绑定交接文件的 Git Blob 身份。恢复前先用 Handoff
+revision 校验 Blob，恢复时由 `git read-tree` 按目标仓库的 checkout 规则签出，再把该 Tree
+转成未暂存 WIP。Task Card 的本机运行绑定只规范化文本换行，不放宽字段或内容校验。恢复命令
+在返回成功前重新加载完整 Agent bundle；生成状态无法通过同一套读取合同，就不会发布成功。
+
+行尾回归同时覆盖两种源提交：
+
+- 仓库存储 LF Blob，目标 clone 使用 CRLF checkout；
+- 仓库存储 CRLF Blob，目标 clone 使用 `core.autocrlf=true`。
+
+两种场景都恢复为同一 ChangeRun，保留批准合同、Execution Plan 和新的 Accepted Checkpoint，
+恢复后 `status` 可正常读取。路径变化、Blob 变化、Task Card 语义变化或 Git Tree 无法安全
+签出时仍然 fail-closed。旧 `workspace-bytes-v1` Task Card 保持原校验语义，不伪装成可移植
+格式。
+
+本轮验证：
+
+- Handoff 完整回归：`54 passed`；
+- Task Card、旧版 Resume 与必审风险回归：`15 passed`；
+- 完整 pytest：`1455 passed, 2 skipped`，耗时 `5015.16s`；
+- Compileall、Ruff、架构增长、仓库卫生和 `git diff --check`：通过；
+- 架构增长：`C901 32→32`，Python 模块 `187→190`。
+
+`VALID-02` 已登记为进行中；完成事件仍等待 PR CI。本轮没有 push、合并或发布。
+
+## 最终 Diff 审查与门禁复核：2026-08-30
+
+在上一轮完整测试之后，三路独立只读审查又发现并修复了三个边界问题：
+
+- Task Card Blob 本身使用 CRLF 时，工作区读取与 Git Blob 读取的换行语义不一致，合法恢复会
+  被误拒。现在 Task Card 内容摘要统一规范化文本换行，字段或正文变化仍会被拒绝。
+- 同一 Task Card 重复恢复时，Claim 会正确拒绝第二次恢复，但旧流程会先留下一个空 run 目录。
+  现在只撤销本次尚未写入任何证据的空目录；已经产生 Artifact 的失败 run 仍原样保留。
+- 可移植 Workspace 摘要原先只绑定 Blob，没有绑定 `100644`、`100755` 或 `120000` mode。
+  现在摘要同时绑定 Git mode 与 Blob，权限或文件类型变化不会静默通过。
+
+为保持模块职责和增长门禁，Git 条目摘要移入独立的 `agent_handoff_digest.py`，恢复 Claim 的
+占用逻辑归入已有 `agent_task_card_resume.py`。没有增加公共命令、状态或第二套成功语义。
+
+最终验证：
+
+- Handoff 聚焦回归：`6 passed`，覆盖 LF/CRLF Task Card、重复 Resume、mode 绑定、内容漂移和
+  safe.directory 输入；
+- 完整 pytest：`1456 passed, 2 skipped`，耗时 `5235.19s`；
+- Compileall、Ruff、架构增长、仓库卫生、计划状态和 `git diff --check`：通过；
+- 架构增长：`C901 32→32`，Python 模块 `187→191`。
+
+本节替代上一节的最终工作树计数；上一节的 `187→190` 与 `1455 passed, 2 skipped` 保留为当时
+快照。`VALID-02` 完成事件已作为当前提交候选追加，只有通过 PR CI 并进入 `main` 后才成为主线
+事实。本轮没有 push、合并或发布。

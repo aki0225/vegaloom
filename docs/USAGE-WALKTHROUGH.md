@@ -274,6 +274,10 @@ vega resume --repo . --task .vega/tasks/<task-card>.md
 若目标项目把 `.vega/` 整体写入 `.gitignore`，只对生成的 Task Card 显式使用
 `git add -f -- .vega/tasks/<task-card>.md`；WIP 仍按正常规则逐项暂存。
 
+新生成的 Task Card 使用 Git 条目身份（mode + Blob）绑定交接内容。换机后的 CRLF/LF
+checkout 差异不会被误判为代码变化；路径、mode、Blob 内容或 Task Card 语义发生变化时仍会
+拒绝恢复。
+
 恢复会创建新的本机 run。旧聊天、Thread ID、Trace 和凭据不参与恢复。
 
 ## 14. 完成

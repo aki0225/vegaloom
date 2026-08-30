@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -52,7 +51,6 @@ from .agent_repository_binding import (
     write_run_metadata,
 )
 from .agent_repository_guard import (
-    acquire_task_card_resume_claim,
     prepare_terminal_writer_claim_release,
     release_task_card_resume_claim,
     release_terminal_writer_claim,
@@ -62,12 +60,13 @@ from .agent_runtime_logic import update_state
 from .agent_status_card import write_status_card as _write_status_card
 from .agent_task_card import task_card_content_digest
 from .agent_task_card_resume import (
+    create_claimed_resume_run,
     load_task_card_with_content,
     resolve_resume_task,
     state_from_task_card,
 )
 from .redaction import write_redacted_json, write_redacted_text
-from .run_utils import create_run_dir, resolve_run_dir
+from .run_utils import resolve_run_dir
 from .workspace_inventory import prepare_verification_temp_root
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
@@ -136,14 +135,10 @@ def resume_agent_task_card(
         expected_head_sha=snapshot.head_sha,
         expected_branch=card.branch,
     )
-    run_id, run_dir = create_run_dir(
+    run_id, run_dir = create_claimed_resume_run(
         workspace,
-        f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent-resume",
-    )
-    acquire_task_card_resume_claim(
         repo_root,
         task_card_sha256=task_card_sha256,
-        run_dir=run_dir,
         task_card=relative_task,
     )
     published = False
@@ -275,6 +270,12 @@ def resume_agent_task_card(
             ),
         )
         save_agent_state(run_dir / "agent-state.json", state)
+        validated_dir, validated_state, _, _ = load_agent_bundle(
+            workspace,
+            run_id,
+        )
+        if validated_dir != run_dir or validated_state != state:
+            raise ValueError("恢复后的 Agent run 自校验结果不一致")
         published = True
         return AgentRun(run_dir=run_dir, state=state, plan=card.plan)
     finally:

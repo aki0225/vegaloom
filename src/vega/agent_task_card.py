@@ -27,6 +27,7 @@ from .agent_contract import (
     StrictAgentModel,
     canonical_digest,
 )
+from .agent_handoff_digest import WorkspaceDigestKind
 from .agent_handoff_safety import TaskCardError, assert_portable_task_card_payload
 from .redaction import redact_value
 
@@ -90,6 +91,7 @@ class ResumeCapsule(StrictAgentModel):
     human_checks: list[NonEmptyText] = Field(default_factory=list)
     changed_files: list[RelativePathText] = Field(default_factory=list)
     comparison_base_revision: NonEmptyText | None = None
+    workspace_digest_kind: WorkspaceDigestKind = "workspace-bytes-v1"
     workspace_digest: Sha256Text
     gate_evidence: list[HistoricalGateEvidence] = Field(default_factory=list)
     external_side_effects: Literal["none", "known", "unknown"] = "none"
@@ -367,46 +369,8 @@ def discover_local_handoff_task_cards(
 
 
 def task_card_content_digest(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-
-def compute_handoff_workspace_digest(
-    repo: Path,
-    changed_files: list[str],
-) -> str:
-    """绑定准备交接的 WIP 文件内容；Task Card 自身不参与，避免自引用摘要。"""
-
-    root = repo.resolve(strict=True)
-    entries: list[dict[str, object]] = []
-    for relative in _normalize_relative_paths(changed_files):
-        path = (root / PurePosixPath(relative)).resolve(strict=False)
-        if not path.is_relative_to(root):
-            raise TaskCardError(f"交接文件越过仓库边界：{relative}")
-        try:
-            metadata = path.lstat()
-        except FileNotFoundError:
-            entries.append({"path": relative, "kind": "missing"})
-            continue
-        if path.is_symlink():
-            entries.append(
-                {
-                    "path": relative,
-                    "kind": "symlink",
-                    "target": os.readlink(path),
-                }
-            )
-            continue
-        if not path.is_file():
-            raise TaskCardError(f"交接文件不是普通文件：{relative}")
-        entries.append(
-            {
-                "path": relative,
-                "kind": "file",
-                "size": metadata.st_size,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            }
-        )
-    return canonical_digest({"changed_files": entries})
+    canonical_content = content.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
 
 
 def _validate_task_card_change_run(card: AgentTaskCard) -> None:

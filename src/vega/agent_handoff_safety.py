@@ -9,8 +9,6 @@ from urllib.parse import unquote, urlsplit
 
 from .agent_contract import AgentCheckpoint, AgentState
 from .git_read import run_git_capture
-
-
 _WINDOWS_ABSOLUTE_PATH_PATTERN = re.compile(
     r"(?i)(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/][^\\/\s]+)"
     r"[^\r\n\t\"'`<>]*"

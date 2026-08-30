@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 from pathlib import Path
 
 from .agent_contract import AgentState
 from .agent_persistence import load_agent_state
+from .agent_task_card import task_card_content_digest
 from .comparison_binding import require_comparison_binding_from_mapping
 from .redaction import write_redacted_json
 from .repository_identity import repository_scope, resolve_git_revision
@@ -193,7 +193,12 @@ def _validate_task_card_binding(
         raise ValueError("Agent run 绑定的 Task Card 不存在") from exc
     if not task_path.is_relative_to(repo) or not task_path.is_file():
         raise ValueError("Agent run 绑定的 Task Card 越过仓库或不是普通文件")
-    if hashlib.sha256(task_path.read_bytes()).hexdigest() != digest:
+    try:
+        task_card_content = task_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("Agent run 绑定的 Task Card 不是有效 UTF-8 文本") from exc
+    canonical_digest = task_card_content_digest(task_card_content)
+    if canonical_digest != digest:
         raise ValueError("Agent run 绑定的 Task Card 内容已变化")
 
 

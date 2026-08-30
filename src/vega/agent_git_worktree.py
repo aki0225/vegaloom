@@ -196,7 +196,6 @@ def create_resume_checkpoint(
 def restore_handoff_wip(
     handle: ManagedChangeWorktree,
     *,
-    accepted_checkpoint_sha: str,
     handoff_revision: str,
     restored_checkpoint_sha: str,
     changed_files: list[str],
@@ -206,28 +205,31 @@ def restore_handoff_wip(
     handle.require_state(restored_checkpoint_sha)
     if not changed_files:
         return
-    patch = run_git_bytes(
-        handle.source_repo,
+    handle.run_write(
         [
             "git",
-            "--literal-pathspecs",
-            "diff",
-            "--binary",
-            "--full-index",
-            "--no-ext-diff",
-            accepted_checkpoint_sha,
+            "read-tree",
+            "--reset",
+            "-u",
             handoff_revision,
-            "--",
-            *changed_files,
         ],
+        "恢复 Handoff Git Tree",
     )
-    if not patch:
-        raise GitCandidateError("Resume Capsule 声明了变更文件，但提交中没有对应 Diff")
-    _run_git_write_input(
+    staged = capture_tracked_scope_snapshot(
         handle.worktree_path,
-        ["git", "apply", "--whitespace=nowarn", "--"],
-        patch,
-        "恢复 Handoff WIP",
+        include_untracked=True,
+    )
+    if (
+        staged.head_sha != restored_checkpoint_sha
+        or set(staged.staged_files) != set(changed_files)
+        or staged.unstaged_files
+        or staged.untracked_files
+        or staged.unsafe_index_paths
+    ):
+        raise GitCandidateError("Handoff Git Tree 无法安全签出")
+    handle.run_write(
+        ["git", "reset", "--mixed", "HEAD"],
+        "把 Handoff Git Tree 转为未暂存 WIP",
     )
     snapshot = capture_tracked_scope_snapshot(
         handle.worktree_path,
@@ -245,21 +247,6 @@ def restore_handoff_wip(
         or observed != set(changed_files)
     ):
         raise GitCandidateError("Handoff WIP 恢复后的 Git 现场与 Resume Capsule 不一致")
-    matches_source = run_git_capture(
-        handle.worktree_path,
-        [
-            "git",
-            "--literal-pathspecs",
-            "diff",
-            "--quiet",
-            "--no-ext-diff",
-            handoff_revision,
-            "--",
-            *changed_files,
-        ],
-    )
-    if matches_source.returncode != 0:
-        raise GitCandidateError("恢复后的 WIP 内容与 Handoff 提交不一致")
 
 
 def validate_managed_branch_name(branch: str) -> None:
@@ -380,31 +367,6 @@ def _run_git_write(repo: Path, command: list[str], label: str) -> None:
         process = subprocess.run(
             command,
             cwd=repo,
-            capture_output=True,
-            env=environment,
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise GitCandidateError(f"{label}无法执行") from exc
-    if process.returncode != 0:
-        stderr = process.stderr.decode("utf-8", errors="replace").strip()
-        detail = redact_text(stderr) if stderr else "Git 返回非零状态"
-        raise GitCandidateError(f"{label}失败：{detail}")
-
-
-def _run_git_write_input(
-    repo: Path,
-    command: list[str],
-    content: bytes,
-    label: str,
-) -> None:
-    environment = git_read_environment()
-    try:
-        process = subprocess.run(
-            command,
-            cwd=repo,
-            input=content,
             capture_output=True,
             env=environment,
             timeout=30,
