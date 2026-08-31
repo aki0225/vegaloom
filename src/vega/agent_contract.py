@@ -437,6 +437,7 @@ class AgentState(StrictAgentModel):
     current_work_item: NonEmptyText | None = None
     active_child_run: NonEmptyText | None = None
     active_operation_id: NonEmptyText | None = None
+    active_planning_execution_id: NonEmptyText | None = None
     # dispatch 落盘后即保守视为 operation 可能已开始，直到受信执行证据完成对账。
     operation_started: bool = False
     workspace_fingerprint: Sha256Text | None = None
@@ -450,8 +451,21 @@ class AgentState(StrictAgentModel):
     def validate_phase_bindings(self) -> AgentState:
         has_child = self.active_child_run is not None
         has_operation = self.active_operation_id is not None
+        has_planning_execution = self.active_planning_execution_id is not None
         if has_child != has_operation:
             raise ValueError("active_child_run 与 active_operation_id 必须同时存在或同时为空")
+        if has_planning_execution and (
+            self.run_kind != "change"
+            or self.contract_revision is not None
+            or self.phase not in {"planning", "needs_human"}
+            or has_child
+            or self.active_candidate_sha is not None
+            or self.operation_started
+            or self.handoff_status != "none"
+        ):
+            raise ValueError(
+                "active Planning execution 只允许绑定未编译、未交接且没有 Writer/Candidate 的 Planning ChangeRun"
+            )
         if self.phase == "acting" and not has_child:
             raise ValueError("acting 阶段必须绑定 active child 与 operation")
         if self.operation_started and not has_child:

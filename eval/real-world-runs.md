@@ -1300,3 +1300,26 @@ sandbox 与审批策略均由 App Server 响应核对，目标仓库保持干净
 本 Case 只证明自然语言目标可以进入只读调查并形成待编译 Proposal，也证明 Codex App Server
 的同 Thread 权限切换在当前版本可观察。它不证明 Proposal 已经成为 Approved Contract，不启动
 Worker，也不覆盖 Contract Compiler、有界自动批准、Claude Code Provider 或生产任务成功率。
+
+## 2026-09-01 AUTONOMY-01 停止恢复修复后复验
+
+本条在 AUTONOMY-01 停止、恢复和跨机交接修复后的工作树上，使用可丢弃 Python 仓库
+`da63f3f9422af6588bdef792cede54aadc35e7bb` 复验真实 Codex App Server。自然语言只描述
+“商品数量大于 1 时总价偏低”，并要求本轮只读调查。
+
+run `20260901-012425-9d38ad49f5b9-agent` 的第一次 Turn 因模型改写 `user_goal` 被确定性校验
+拒绝，状态停在 `planning`，没有发布 Proposal，也没有修改目标仓库。通过 Steer 明确要求逐字
+保留原始目标后，同一 Thread 的第二次 Turn 生成完整 Proposal：8 条观察事实、2 条假设、
+4 个未决问题和 2 个 Work Item。目标仓库的 HEAD 与工作区保持不变。
+
+随后复用该 Thread 执行权限切换 smoke。App Server 返回并由 Vega 核对：
+
+- Thread ID 与只读调查阶段一致；
+- sandbox 从 `read-only` 切换为 `workspace-write`；
+- approval policy 从 `never` 切换为 `on-request`；
+- `permissions_verified = true`；
+- 第三个 Turn 结束后目标仓库仍然干净。
+
+本次复验证明无效 Proposal 会 fail-closed，同一 Planning Thread 可以重试，并能在服务端明确
+确认权限后切换到受控写入。它仍不等于批准合同，也没有启动 Worker、创建 Candidate、提交、
+Push 或合并。

@@ -228,8 +228,12 @@ def validate_published_planning_proposal(
     if (
         checkpoint.run_id != state.run_id
         or checkpoint.checkpoint_id != state.latest_checkpoint_id
-        or checkpoint.phase != "planning"
-        or checkpoint.status != "safe"
+        or (checkpoint.phase, checkpoint.status)
+        not in {
+            ("planning", "safe"),
+            ("needs_human", "blocked"),
+            ("stopped", "safe"),
+        }
         or checkpoint.current_work_item != state.current_work_item
         or checkpoint.workspace_fingerprint != state.workspace_fingerprint
         or checkpoint.state_version + 1 != state.state_version

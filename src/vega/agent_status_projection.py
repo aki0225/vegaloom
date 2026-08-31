@@ -75,6 +75,9 @@ def payload_fields(state: dict[str, Any]) -> dict[str, Any]:
         "agent_run_kind": state.get("agent_run_kind"),
         "accepted_checkpoint_sha": state.get("accepted_checkpoint_sha"),
         "active_candidate_sha": state.get("active_candidate_sha"),
+        "active_planning_execution_id": state.get(
+            "active_planning_execution_id"
+        ),
         "persisted_agent_state": state.get("persisted_agent_state"),
         "recorded_agent_phase": state.get("recorded_agent_phase"),
         "recorded_terminal_status": state.get("recorded_terminal_status"),

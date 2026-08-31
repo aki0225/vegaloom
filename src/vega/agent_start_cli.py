@@ -73,7 +73,10 @@ def agent_run(
 
     try:
         _, state, _, _ = load_agent_bundle(Path.cwd(), run)
-        if state.phase == "planning":
+        if (
+            state.run_kind == "change"
+            and state.contract_revision is None
+        ):
             ensure_runner_ready("codex-exec", "Coding Agent")
             result = PlanningProposalRunner(
                 Path.cwd(),

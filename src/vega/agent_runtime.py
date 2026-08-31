@@ -44,12 +44,12 @@ from .agent_runtime_support import (
     capture_bound_workspace,
     load_agent_bundle,
     publish_observation_transition,
-    resume_agent_task_card,
     save_agent_plan,
     write_checkpoint,
     write_status_card,
     write_task_brief,
 )
+from .agent_task_card_runtime import resume_agent_task_card
 from .redaction import write_redacted_json, write_redacted_json_once
 
 class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):

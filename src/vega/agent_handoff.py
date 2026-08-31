@@ -1,27 +1,29 @@
 from __future__ import annotations
 
-import json
-import os
-import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 from . import agent_handoff_digest
 from .agent_contract import (
     AgentCheckpoint,
-    AgentObservation,
-    AgentPlan,
-    AgentState,
-    utc_now,
 )
 from .agent_change_handoff import build_change_handoff_details
 from .comparison_binding import require_comparison_binding_from_mapping
 from .agent_handoff_safety import (
     collect_handoff_issues,
-    prepare_task_card_root,
-    require_plain_task_card_root,
     require_plain_task_card_tree,
+)
+from .agent_handoff_support import (
+    compact,
+    current_work_item,
+    ensure_no_existing_handoff,
+    latest_observation,
+    metadata_revision,
+    prepare_task_card_parent,
+    task_card_path,
+    task_card_status,
+    validate_handoff_bindings,
+    validate_handoff_state,
 )
 from .agent_handoff_rendering import git_checklist, render_handoff_summary
 from .agent_persistence import (
@@ -29,11 +31,11 @@ from .agent_persistence import (
     append_agent_trace_commit,
     load_agent_checkpoint,
     read_optional_artifact,
-    read_agent_trace,
     remove_artifact_if_published,
     restore_optional_artifact,
     save_agent_state,
 )
+from .agent_planning_handoff import load_planning_handoff_context
 from .agent_run import AgentRun
 from .agent_runtime_logic import update_state
 from .agent_runtime_support import (
@@ -48,9 +50,6 @@ from .agent_runtime_support import (
 from .agent_task_card import (
     AgentTaskCard,
     ResumeCapsule,
-    TaskCardError,
-    discover_local_handoff_task_cards,
-    load_task_card,
     render_task_card,
     save_task_card,
     task_card_content_digest,
@@ -58,10 +57,6 @@ from .agent_task_card import (
 from .agent_task_card_discovery import next_handoff_sequence
 from .agent_status_history import historical_gate_evidence
 from .redaction import sensitive_path_reason, write_redacted_json, write_redacted_text
-
-
-_HANDOFF_PHASES = frozenset({"ready", "needs_human", "stopped"})
-_TASK_CARD_STATUS = frozenset({"ready", "needs_human"})
 
 
 @dataclass(frozen=True)
@@ -85,33 +80,28 @@ def create_handoff(
         raise ValueError("handoff 必须提供 reason")
 
     run_dir, state, plan, metadata = load_agent_bundle(workspace, run)
-    if state.handoff_status != "none":
-        raise ValueError("当前 Agent run 已经生成 Handoff，拒绝重复发布 Task Card")
-    if state.active_child_run or state.active_operation_id:
-        raise ValueError("Writer 仍处于 active binding；先 stop 并完成 recover 对账")
-    if state.phase not in _HANDOFF_PHASES:
-        raise ValueError(
-            f"当前阶段 {state.phase} 不能生成 Handoff；必须先停止调度并完成现场对账"
-        )
-    if not plan.approval_is_current():
-        raise ValueError("只有当前已批准 Plan 才能生成 Handoff")
-    if not state.current_work_item:
-        raise ValueError("当前 Agent run 没有可交接的 Work Item")
-    if state.latest_checkpoint_id is None:
-        raise ValueError("当前 Agent run 缺少最近 Checkpoint，拒绝生成 Handoff")
-
-    work_item = _current_work_item(plan, state)
+    validate_handoff_bindings(state)
     repo = bound_repo(run_dir)
+    planning = load_planning_handoff_context(
+        run_dir,
+        repo,
+        state,
+        plan,
+    )
+    validate_handoff_state(state, plan, planning=planning.enabled)
+
+    work_item = current_work_item(plan, state)
+    planning_resume = planning.resume
     branch = current_branch(repo)
     source_task_card = metadata.get("task_card")
     previous_task_card = source_task_card if isinstance(source_task_card, str) else None
-    _ensure_no_existing_handoff(
+    ensure_no_existing_handoff(
         repo,
         state.task_id,
         branch,
         allowed_existing=previous_task_card,
     )
-    card_path = _task_card_path(repo, state.task_id)
+    card_path = task_card_path(repo, state.task_id)
     snapshot = capture_bound_workspace(run_dir)
     comparison_base_revision, comparison_paths = require_comparison_binding_from_mapping(
         metadata,
@@ -127,7 +117,7 @@ def create_handoff(
         snapshot,
         legacy_comparison_base_revision=(
             comparison_base_revision
-            or _metadata_revision(metadata, snapshot.head_sha)
+            or metadata_revision(metadata, snapshot.head_sha)
         ),
     )
     handoff_snapshot = change_handoff.snapshot
@@ -169,7 +159,7 @@ def create_handoff(
         external_side_effects=latest.external_side_effects,
     )
 
-    observation, observation_time = _latest_observation(run_dir)
+    observation, observation_time = latest_observation(run_dir)
     workspace_digest = agent_handoff_digest.compute_handoff_workspace_digest(
         repo, list(handoff_snapshot.changed_files),
         digest_kind=agent_handoff_digest.PORTABLE_WORKSPACE_DIGEST_KIND,
@@ -183,38 +173,41 @@ def create_handoff(
     capsule = ResumeCapsule(
         current_work_item=state.current_work_item,
         stopped_at=f"{reason.strip()}；当前阶段：{state.phase}",
-        confirmed_facts=_compact(
+        confirmed_facts=compact(
             [
                 *plan.observed_facts,
                 f"交接基线 HEAD：{snapshot.head_sha}",
             ]
         ),
-        unresolved_hypotheses=_compact(
+        unresolved_hypotheses=compact(
             [
                 *plan.hypotheses,
                 *(f"未决：{value}" for value in plan.unresolved_decisions),
             ]
         ),
-        failed_attempts=_compact(list(latest.failed_attempts)),
-        restrictions=_compact(
+        failed_attempts=compact(list(latest.failed_attempts)),
+        restrictions=compact(
             [
                 *plan.non_goals,
+                *planning.non_goals,
                 *(f"禁止路径：{value}" for value in work_item.forbidden_paths),
             ]
         ),
-        risk_notes=_compact(
+        risk_notes=compact(
             [
                 *work_item.risk_notes,
+                *planning.risk_notes,
                 f"外部副作用状态：{latest.external_side_effects}",
                 "ignored 文件不会进入 Task Card 或 Git 提交；新机器必须按项目说明重建",
                 *issues,
             ]
         ),
-        human_checks=_compact(
+        human_checks=compact(
             [
                 "把 WIP 文件与 Task Card 一起提交前，执行 git diff --cached --check",
                 "旧 Verification、Risk、Reviewer 结果在新机器上只能作为 historical 证据",
                 "确认当前任务不依赖未提交的 ignored 文件或本机私密配置",
+                *planning.verification,
                 *work_item.verification,
             ]
         ),
@@ -229,6 +222,8 @@ def create_handoff(
         allowed_actions=(
             ["human"]
             if handoff_status == "handoff_blocked"
+            else ["replan", "human"]
+            if planning_resume is not None
             else ["repair", "human"]
             if handoff_snapshot.changed_files
             else ["next", "human"]
@@ -245,9 +240,13 @@ def create_handoff(
     )
     card = AgentTaskCard(
         task_id=state.task_id,
-        status=_task_card_status(state, handoff_status),
+        status=task_card_status(
+            state,
+            handoff_status,
+            planning=planning_resume is not None,
+        ),
         branch=branch,
-        base_revision=_metadata_revision(metadata, snapshot.head_sha),
+        base_revision=metadata_revision(metadata, snapshot.head_sha),
         previous_task_card=previous_task_card,
         plan=plan,
         current_work_item=state.current_work_item,
@@ -261,7 +260,7 @@ def create_handoff(
         handoff_base_revision=snapshot.head_sha,
         handoff_workspace_digest=workspace_digest,
         last_handoff_checkpoint=checkpoint.checkpoint_id,
-        progress_notes=_compact(
+        progress_notes=compact(
             [
                 latest.reason,
                 *( [observation.machine_summary] if observation else []),
@@ -275,6 +274,7 @@ def create_handoff(
         ],
         resume_capsule=capsule,
         change_run=change_handoff.resume,
+        planning_run=planning_resume,
     )
 
     card_content = render_task_card(card)
@@ -305,7 +305,7 @@ def create_handoff(
         write_run_metadata(
             run_dir,
             repo,
-            _metadata_revision(metadata, snapshot.head_sha),
+            metadata_revision(metadata, snapshot.head_sha),
             task_card=relative_card,
             task_card_sha256=card_digest,
             comparison_base_revision=comparison_base_revision,
@@ -347,7 +347,7 @@ def create_handoff(
                 issues=issues,
             ),
         )
-        _prepare_task_card_parent(repo, card_path)
+        prepare_task_card_parent(repo, card_path)
         require_plain_task_card_tree(repo, card_path.parent)
         save_task_card(card_path, card)
         card_published = True
@@ -397,103 +397,3 @@ def create_handoff(
         task_card_digest=card_digest,
         handoff_status=handoff_status,
     )
-
-
-def _latest_observation(
-    run_dir: Path,
-) -> tuple[AgentObservation | None, str]:
-    try:
-        trace = read_agent_trace(run_dir / "trace.jsonl")
-    except (OSError, ValueError):
-        return None, utc_now()
-    for item in reversed(trace):
-        refs = item.get("artifact_refs")
-        if not isinstance(refs, list):
-            continue
-        for ref in reversed(refs):
-            if not isinstance(ref, str) or not ref.startswith("observations/"):
-                continue
-            path = run_dir / ref
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-                observation = AgentObservation.model_validate(payload)
-            except (OSError, ValueError, json.JSONDecodeError):
-                continue
-            timestamp = item.get("ts")
-            return observation, timestamp if isinstance(timestamp, str) else utc_now()
-    return None, utc_now()
-
-
-def _current_work_item(plan: AgentPlan, state: AgentState):
-    try:
-        return next(
-            item for item in plan.work_items if item.work_item_id == state.current_work_item
-        )
-    except StopIteration as exc:
-        raise ValueError("当前 Work Item 不属于已批准 Plan") from exc
-
-
-def _task_card_status(state: AgentState, handoff_status: str) -> str:
-    if handoff_status == "handoff_blocked":
-        return "needs_human"
-    if state.phase == "stopped":
-        return "ready"
-    if state.phase not in _TASK_CARD_STATUS:
-        raise ValueError(f"当前阶段不能写入 Task Card：{state.phase}")
-    return state.phase
-
-
-def _metadata_revision(metadata: dict[str, object], fallback: str) -> str:
-    revision = metadata.get("base_revision")
-    return revision if isinstance(revision, str) and revision else fallback
-
-
-def _task_card_path(repo: Path, task_id: str) -> Path:
-    date = datetime.now(UTC)
-    slug = re.sub(r"[^a-z0-9]+", "-", task_id.lower()).strip("-")[:48] or "task"
-    root = require_plain_task_card_root(repo, date.strftime("%Y-%m"))
-    base = root / f"{date.strftime('%Y-%m-%d')}-{slug}-handoff.md"
-    candidate = base
-    suffix = 2
-    while os.path.lexists(candidate):
-        candidate = root / f"{date.strftime('%Y-%m-%d')}-{slug}-handoff-{suffix:02d}.md"
-        suffix += 1
-    return candidate
-
-
-def _prepare_task_card_parent(repo: Path, card_path: Path) -> None:
-    prepared_root = prepare_task_card_root(repo, card_path.parent.name)
-    if prepared_root != card_path.parent:
-        raise TaskCardError("Task Card 目录与预期路径不一致")
-
-
-def _ensure_no_existing_handoff(
-    repo: Path,
-    task_id: str,
-    branch: str,
-    *,
-    allowed_existing: str | None = None,
-) -> None:
-    task_root = repo / ".vega" / "tasks"
-    if not os.path.lexists(task_root):
-        return
-    require_plain_task_card_tree(repo, task_root)
-    for path in discover_local_handoff_task_cards(repo, branch=branch):
-        card = load_task_card(path)
-        if (
-            card.task_id == task_id
-            and path.relative_to(repo).as_posix() != allowed_existing
-        ):
-            raise TaskCardError(
-                "当前任务和分支已存在未终止 Handoff Task Card；"
-                "请先人工处理旧卡，拒绝生成重复交接"
-            )
-
-
-def _compact(values: list[str]) -> list[str]:
-    unique: list[str] = []
-    for value in values:
-        text = value.strip()
-        if text and text not in unique:
-            unique.append(text)
-    return unique

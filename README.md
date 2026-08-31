@@ -137,8 +137,9 @@ Handoff 生成 Git 可跟踪的 Task Card 和本机 Resume Capsule。人工检�
 vega resume --repo .
 ```
 
-Provider Thread ID 只用于本机续接。跨机器恢复依赖任务分支、Git Candidate、Change Contract、
-Execution Plan 和 Task Card。
+Provider Thread ID 只用于本机续接。跨机器恢复依赖任务分支和 Git 跟踪的 Task Card；已进入
+执行阶段时携带 Candidate、Change Contract 与 Execution Plan，只读调查阶段则携带固定
+source revision 的 Planning Proposal。恢复后的历史 Proposal 不算当前验证证据。
 
 ## 最终报告
 

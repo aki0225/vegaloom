@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "event_id": "20260831T182420Z-AUTONOMY-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTONOMY-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-31T18:24:20Z",
+  "summary": "自然语言 Planning 已补齐 execution 启动预约、停止与异常对账、Proposal 原子发布和 Git Task Card 跨机恢复；活跃或终态不明的受管进程会保留绑定并 fail-closed，真实 Codex App Server 已复验同 Thread 重试与只读到受控写入权限切换。",
+  "evidence": {
+    "pull_requests": [
+      97
+    ],
+    "commits": [],
+    "checks": [
+      "planning-contract-tests",
+      "supervisor-tests",
+      "security-tests",
+      "real-codex-app-server",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_planning_runtime.py",
+      "src/vega/agent_planning_execution_reservation.py",
+      "src/vega/agent_planning_control.py",
+      "src/vega/agent_planning_recovery.py",
+      "src/vega/agent_planning_publication.py",
+      "src/vega/agent_planning_handoff.py",
+      "src/vega/agent_task_card_runtime.py",
+      "tests/supervisor/test_agent_planning.py",
+      "tests/security/test_redaction.py",
+      "eval/real-world-runs.md",
+      "docs/BOUNDED-AUTONOMY-V1-PLAN.md"
+    ]
+  }
+}

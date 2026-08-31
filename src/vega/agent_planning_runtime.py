@@ -10,24 +10,35 @@ from pydantic import ValidationError
 from .agent_contract import AgentPlan, AgentState
 from .agent_persistence import (
     append_agent_trace,
-    read_agent_trace,
     save_agent_state,
 )
 from .agent_planning import (
     PLANNING_CONTEXT_ARTIFACT,
-    PLANNING_PROPOSAL_ARTIFACT,
-    PLANNING_REPORT_ARTIFACT,
     PLANNING_REQUEST_ARTIFACT,
     PlanningProposal,
     PlanningRequest,
     build_planning_prompt,
-    render_planning_proposal,
     validate_planning_proposal,
-    validate_published_planning_proposal,
 )
 from .agent_planning_execution import (
     PreparedPlanningTurn,
     execute_planning_turn,
+    planning_attempt,
+)
+from .agent_planning_execution_reservation import reserve_planning_execution
+from .agent_planning_publication import (
+    planning_publication_committed,
+    publish_active_planning_blocked,
+    publish_planning_failure,
+    publish_planning_proposal,
+    publish_planning_stopped,
+    reuse_or_publish_planning_proposal,
+)
+from .agent_planning_recovery import (
+    planning_stop_was_requested,
+    prepare_planning_state,
+    reconcile_planning_exception,
+    require_terminal_planning_execution,
 )
 from .agent_run import AgentRun
 from .agent_runtime_logic import update_state
@@ -35,17 +46,10 @@ from .agent_runtime_support import (
     bound_repo,
     capture_bound_workspace,
     load_agent_bundle,
-    save_agent_plan,
-    write_checkpoint,
     write_status_card,
 )
 from .codex_app_server_runner import CodexAppServerRunner
 from .project_config import load_project_config
-from .redaction import (
-    redact_text,
-    write_redacted_json_once,
-    write_redacted_text,
-)
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 from .runner import CodexExecRunner, Runner, RunnerResult
@@ -72,37 +76,55 @@ class PlanningProposalRunner:
     def run(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
         if not 60 <= timeout_seconds <= 3600:
             raise ValueError("Planning timeout 必须在 60..3600 秒之间")
-        run_dir = self._resolve_run_dir(run)
+        run_dir = resolve_run_dir(self.workspace, run)
         with RunMutationLock.acquire(run_dir, "agent.planning"):
-            prepared = self._prepare_locked(run_dir)
+            prepared = self._prepare_locked(
+                run_dir,
+                timeout_seconds=timeout_seconds,
+            )
         if isinstance(prepared, AgentRun):
             return prepared
-        result = execute_planning_turn(
-            prepared,
-            timeout_seconds=timeout_seconds,
-            progress_reporter=self.progress_reporter,
-        )
+        try:
+            result = execute_planning_turn(
+                prepared,
+                timeout_seconds=timeout_seconds,
+                progress_reporter=self.progress_reporter,
+            )
+        except Exception as exc:
+            with RunMutationLock.acquire(run_dir, "agent.planning"):
+                return reconcile_planning_exception(
+                    self.workspace,
+                    prepared,
+                    exc,
+                    event_reporter=self.event_reporter,
+                )
         with RunMutationLock.acquire(run_dir, "agent.planning"):
             return self._reconcile_locked(prepared, result)
 
     def _prepare_locked(
         self,
         run_dir: Path,
+        *,
+        timeout_seconds: int,
     ) -> PreparedPlanningTurn | AgentRun:
         run_dir, state, plan, _ = load_agent_bundle(
             self.workspace,
             run_dir.name,
         )
-        if state.phase != "planning" or state.run_kind != "change":
-            raise ValueError("当前 ChangeRun 不在 Planning 阶段")
-        if state.active_child_run or state.active_candidate_sha:
-            raise ValueError("Planning 阶段不能绑定 Worker 或 Candidate")
+        prepared_state = prepare_planning_state(
+            run_dir,
+            state,
+            plan,
+            event_reporter=self.event_reporter,
+        )
+        if isinstance(prepared_state, AgentRun):
+            return prepared_state
+        before = prepared_state
         request = _load_planning_request(run_dir, state)
         repo = bound_repo(run_dir)
-        before = capture_bound_workspace(run_dir)
         if (
             before.fingerprint != state.workspace_fingerprint
-            or before.head_sha != request.source_revision
+            or before.head_sha != state.accepted_checkpoint_sha
         ):
             return self._fail_human(
                 run_dir,
@@ -111,16 +133,17 @@ class PlanningProposalRunner:
                 before,
                 "只读调查前 Workspace 已漂移，必须人工核对",
             )
-        if (run_dir / PLANNING_PROPOSAL_ARTIFACT).exists():
-            try:
-                validate_published_planning_proposal(
-                    run_dir, repo, state, plan, request
-                )
-            except ValueError as exc:
-                return self._fail_human(
-                    run_dir, state, plan, before, str(exc)
-                )
-            return AgentRun(run_dir=run_dir, state=state, plan=plan)
+        existing = reuse_or_publish_planning_proposal(
+            run_dir,
+            repo,
+            state,
+            plan,
+            before,
+            request,
+            event_reporter=self.event_reporter,
+        )
+        if existing is not None:
+            return existing
         prompt = _planning_prompt(run_dir, request)
         config = load_project_config(
             repo,
@@ -138,7 +161,7 @@ class PlanningProposalRunner:
                     f"{config.prompt_budget.worker_max_chars}"
                 ),
             )
-        attempt = _planning_attempt(run_dir)
+        attempt = planning_attempt(run_dir)
         execution_id = uuid4().hex
         runner = self.runner or _default_planning_runner(
             run_dir,
@@ -146,16 +169,45 @@ class PlanningProposalRunner:
             config.runner.codex_exec.worker,
             persistent_session=self.persistent_session,
         )
-        self._event(f"开始只读调查：attempt {attempt}")
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="planning_turn_started",
-            state=state,
-            observation_summary=f"只读 Planning attempt {attempt} 已启动",
+        reservation = reserve_planning_execution(
+            run_dir,
+            execution_id=execution_id,
+            attempt=attempt,
+            timeout_seconds=timeout_seconds,
         )
+        active_state = update_state(
+            state,
+            state_version=state.state_version + 1,
+            active_planning_execution_id=execution_id,
+        )
+        try:
+            save_agent_state(run_dir / "agent-state.json", active_state)
+        except Exception:
+            reservation.discard()
+            raise
+        try:
+            self._event(f"开始只读调查：attempt {attempt}")
+            append_agent_trace(
+                run_dir / "trace.jsonl",
+                event="planning_turn_started",
+                state=active_state,
+                observation_summary=f"只读 Planning attempt {attempt} 已启动",
+                artifact_refs=[
+                    f"executions/planning/{execution_id}/execution.json"
+                ],
+            )
+            write_status_card(
+                run_dir,
+                active_state,
+                plan,
+                next_step="只读调查正在运行；可使用 status/watch 查看进度，或显式 stop",
+            )
+        except Exception as exc:
+            reservation.finish_if_unclaimed(None, error=exc)
+            raise
         return PreparedPlanningTurn(
             run_dir=run_dir,
-            state_version=state.state_version,
+            state_version=active_state.state_version,
             request=request,
             repo=repo,
             before=before,
@@ -163,6 +215,7 @@ class PlanningProposalRunner:
             runner=runner,
             attempt=attempt,
             execution_id=execution_id,
+            reservation=reservation,
         )
 
     def _reconcile_locked(
@@ -174,10 +227,13 @@ class PlanningProposalRunner:
             self.workspace,
             prepared.run_dir.name,
         )
-        if state.phase != "planning" or state.state_version != prepared.state_version:
+        if (
+            state.phase != "planning"
+            or state.state_version != prepared.state_version
+            or state.active_planning_execution_id != prepared.execution_id
+        ):
             self._event("Planning Turn 已结束，但 run 状态已变化；本轮结果未发布")
             return AgentRun(run_dir=run_dir, state=state, plan=plan)
-        after = capture_bound_workspace(run_dir)
         request = prepared.request
         execution_ref = (
             f"executions/planning/{prepared.execution_id}/execution.json"
@@ -185,6 +241,23 @@ class PlanningProposalRunner:
         evidence_refs = (
             [execution_ref] if (run_dir / execution_ref).is_file() else []
         )
+        try:
+            require_terminal_planning_execution(
+                run_dir,
+                prepared.execution_id,
+            )
+        except ValueError as exc:
+            return publish_active_planning_blocked(
+                run_dir,
+                state,
+                plan,
+                prepared.before,
+                f"Planning execution 终态无法确认：{exc}",
+                evidence_refs=evidence_refs,
+                event_reporter=self.event_reporter,
+            )
+        state = update_state(state, active_planning_execution_id=None)
+        after = capture_bound_workspace(run_dir)
         if (
             after.fingerprint != prepared.before.fingerprint
             or after.head_sha != request.source_revision
@@ -204,6 +277,18 @@ class PlanningProposalRunner:
                 plan,
                 after,
                 "Planning 进程终止未确认，不能安全重试",
+                evidence_refs=evidence_refs,
+            )
+        if planning_stop_was_requested(
+            run_dir,
+            prepared.execution_id,
+        ):
+            return self._publish_stopped(
+                run_dir,
+                state,
+                plan,
+                after,
+                result.error or "Planning 已按 stop request 停止",
                 evidence_refs=evidence_refs,
             )
         if result.status != "success":
@@ -233,15 +318,40 @@ class PlanningProposalRunner:
                 f"Planning Proposal 无效：{exc}",
                 evidence_refs=evidence_refs,
             )
-        return self._publish_proposal(
-            run_dir,
-            state,
-            plan,
-            after,
-            proposal,
-            evidence_refs=evidence_refs,
-        )
-
+        try:
+            return self._publish_proposal(
+                run_dir,
+                state,
+                plan,
+                after,
+                proposal,
+                evidence_refs=evidence_refs,
+            )
+        except OSError as exc:
+            _, current_state, current_plan, _ = load_agent_bundle(
+                self.workspace,
+                run_dir.name,
+            )
+            if planning_publication_committed(run_dir, current_state):
+                recovered = reuse_or_publish_planning_proposal(
+                    run_dir,
+                    prepared.repo,
+                    current_state,
+                    current_plan,
+                    after,
+                    prepared.request,
+                    event_reporter=self.event_reporter,
+                )
+                assert recovered is not None
+                return recovered
+            return self._fail_retryable(
+                run_dir,
+                current_state,
+                current_plan,
+                after,
+                f"Planning Proposal 发布中断：{type(exc).__name__}",
+                evidence_refs=evidence_refs,
+            )
     def _publish_proposal(
         self,
         run_dir: Path,
@@ -252,78 +362,15 @@ class PlanningProposalRunner:
         *,
         evidence_refs: list[str],
     ) -> AgentRun:
-        write_redacted_json_once(
-            run_dir / PLANNING_PROPOSAL_ARTIFACT,
-            proposal.model_dump(mode="json"),
-        )
-        write_redacted_text(
-            run_dir / PLANNING_REPORT_ARTIFACT,
-            render_planning_proposal(proposal),
-        )
-        projected = plan.model_copy(
-            update={
-                "observed_facts": [
-                    fact.statement for fact in proposal.observed_facts
-                ],
-                "hypotheses": list(proposal.hypotheses),
-                "unresolved_decisions": [
-                    *proposal.unresolved_questions,
-                    "Planning Proposal 尚未经过 Contract Compiler",
-                ],
-            }
-        )
-        next_state = update_state(
+        return publish_planning_proposal(
+            run_dir,
             state,
-            state_version=state.state_version + 1,
-            workspace_fingerprint=snapshot.fingerprint,
-        )
-        checkpoint = write_checkpoint(
-            run_dir,
-            next_state,
+            plan,
             snapshot,
-            reason="Planning Proposal 已生成，等待编译为可批准合同",
-            status="safe",
-            pending_actions=["replan", "human"],
-            evidence_refs=[
-                *evidence_refs,
-                PLANNING_PROPOSAL_ARTIFACT,
-                PLANNING_REPORT_ARTIFACT,
-            ],
-            operation_started=False,
-            external_side_effects="none",
+            proposal,
+            evidence_refs=evidence_refs,
+            event_reporter=self.event_reporter,
         )
-        next_state = update_state(
-            next_state,
-            latest_checkpoint_id=checkpoint.checkpoint_id,
-            state_version=next_state.state_version + 1,
-        )
-        save_agent_plan(run_dir, projected)
-        save_agent_state(run_dir / "agent-state.json", next_state)
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="planning_proposal_created",
-            state=next_state,
-            observation_summary=(
-                f"{len(proposal.observed_facts)} 条事实，"
-                f"{len(proposal.hypotheses)} 条假设，"
-                f"{len(proposal.unresolved_questions)} 个未决问题"
-            ),
-            artifact_refs=[
-                PLANNING_PROPOSAL_ARTIFACT,
-                PLANNING_REPORT_ARTIFACT,
-                f"checkpoints/{checkpoint.checkpoint_id}.json",
-                *evidence_refs,
-            ],
-        )
-        write_status_card(
-            run_dir,
-            next_state,
-            projected,
-            checkpoint=checkpoint,
-            next_step=checkpoint.reason,
-        )
-        self._event("Planning Proposal 已生成")
-        return AgentRun(run_dir=run_dir, state=next_state, plan=projected)
 
     def _fail_retryable(
         self,
@@ -335,7 +382,7 @@ class PlanningProposalRunner:
         *,
         evidence_refs: list[str] | None = None,
     ) -> AgentRun:
-        return self._publish_failure(
+        return publish_planning_failure(
             run_dir,
             state,
             plan,
@@ -343,6 +390,7 @@ class PlanningProposalRunner:
             reason,
             needs_human=False,
             evidence_refs=evidence_refs or [],
+            event_reporter=self.event_reporter,
         )
 
     def _fail_human(
@@ -355,7 +403,7 @@ class PlanningProposalRunner:
         *,
         evidence_refs: list[str] | None = None,
     ) -> AgentRun:
-        return self._publish_failure(
+        return publish_planning_failure(
             run_dir,
             state,
             plan,
@@ -363,9 +411,10 @@ class PlanningProposalRunner:
             reason,
             needs_human=True,
             evidence_refs=evidence_refs or [],
+            event_reporter=self.event_reporter,
         )
 
-    def _publish_failure(
+    def _publish_stopped(
         self,
         run_dir: Path,
         state: AgentState,
@@ -373,56 +422,17 @@ class PlanningProposalRunner:
         snapshot,
         reason: str,
         *,
-        needs_human: bool,
         evidence_refs: list[str],
     ) -> AgentRun:
-        safe_reason = redact_text(reason.strip())[:2000]
-        next_state = update_state(
+        return publish_planning_stopped(
+            run_dir,
             state,
-            phase="needs_human" if needs_human else "planning",
-            state_version=state.state_version + 1,
-            workspace_fingerprint=snapshot.fingerprint,
-            allowed_actions=["human"] if needs_human else ["replan", "human"],
-        )
-        checkpoint = write_checkpoint(
-            run_dir,
-            next_state,
-            snapshot,
-            reason=safe_reason,
-            status="blocked" if needs_human else "safe",
-            pending_actions=["human"] if needs_human else ["replan", "human"],
-            evidence_refs=evidence_refs,
-            operation_started=False,
-            external_side_effects="unknown" if needs_human else "none",
-        )
-        next_state = update_state(
-            next_state,
-            latest_checkpoint_id=checkpoint.checkpoint_id,
-            state_version=next_state.state_version + 1,
-        )
-        save_agent_state(run_dir / "agent-state.json", next_state)
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="planning_blocked" if needs_human else "planning_retry_required",
-            state=next_state,
-            route_reason=safe_reason,
-            artifact_refs=[
-                f"checkpoints/{checkpoint.checkpoint_id}.json",
-                *evidence_refs,
-            ],
-        )
-        write_status_card(
-            run_dir,
-            next_state,
             plan,
-            checkpoint=checkpoint,
-            next_step=safe_reason,
+            snapshot,
+            reason,
+            evidence_refs=evidence_refs,
+            event_reporter=self.event_reporter,
         )
-        self._event(safe_reason)
-        return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
-
-    def _resolve_run_dir(self, run: str) -> Path:
-        return resolve_run_dir(self.workspace, run)
 
     def _event(self, message: str) -> None:
         if self.event_reporter is not None:
@@ -487,14 +497,4 @@ def _default_planning_runner(
         options=options,
         output_schema=PlanningProposal.model_json_schema(),
         isolate_mcp=True,
-    )
-
-
-def _planning_attempt(run_dir: Path) -> int:
-    try:
-        trace = read_agent_trace(run_dir / "trace.jsonl")
-    except (OSError, ValueError):
-        return 1
-    return (
-        sum(item.get("event") == "planning_turn_started" for item in trace) + 1
     )

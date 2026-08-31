@@ -6,6 +6,13 @@ from typing import Any
 
 def agent_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     phase = state.get("agent_phase")
+    pre_contract_steps = _pre_contract_change_next_steps(
+        run_dir,
+        state,
+        phase,
+    )
+    if pre_contract_steps is not None:
+        return pre_contract_steps
     if phase in {"planning", "awaiting_approval"}:
         if state.get("agent_run_kind") == "change":
             return [
@@ -56,6 +63,64 @@ def agent_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     return [f"读取 `{run_dir / 'agent-state.json'}`，人工确认 Agent 状态。"]
 
 
+def _pre_contract_change_next_steps(
+    run_dir: Path,
+    state: dict[str, Any],
+    phase: object,
+) -> list[str] | None:
+    if not _is_pre_contract_change(state):
+        return None
+    if phase in {"planning", "awaiting_approval"}:
+        return _pre_contract_planning_next_steps(run_dir)
+    if phase == "needs_human":
+        if state.get("active_planning_execution_id"):
+            return [
+                f"读取 `{run_dir / 'status-card.md'}` 与当前 Planning execution，"
+                "先确认受管进程已经退出。",
+                f"进程退出后重新运行：`vega run --run {run_dir.name}`，"
+                "只做终态对账，不启动第二个 Planner。",
+                f"进程仍在运行时可请求停止：`vega stop --run {run_dir.name} "
+                "--reason \"...\"`。",
+            ]
+        return [
+            f"读取 `{run_dir / 'status-card.md'}` 和最新 Checkpoint，确认 Planning 阻断原因。",
+            "未编译的 Planning ChangeRun 不能使用 resume 伪造 ready；"
+            "按阻断原因重新调查、生成 Handoff 或新建 Planning run。",
+        ]
+    if phase == "stopped" and not (run_dir / "planning-proposal.json").is_file():
+        return [
+            f"读取 `{run_dir / 'status-card.md'}` 和最新 Checkpoint，确认 Planning 已停止。",
+            "当前 run 没有完整 Proposal，不能生成跨机 Handoff；"
+            "如需继续，请创建新的 Planning ChangeRun。",
+        ]
+    return None
+
+
+def _pre_contract_planning_next_steps(
+    run_dir: Path,
+) -> list[str]:
+    if (run_dir / "planning-proposal.json").is_file():
+        return [
+            f"读取 `{run_dir / 'planning-proposal.md'}`，核对事实、假设、范围和未决问题。",
+            "当前 Proposal 尚未编译为 Change Contract，不能批准或启动 Worker。",
+            f"需要换机时运行：`vega handoff --run {run_dir.name} --reason \"...\"`。",
+        ]
+    return [
+        f"运行只读调查：`vega run --run {run_dir.name}`。",
+        f"另一个终端可运行：`vega watch --run {run_dir.name} --follow`。",
+        f"如需停止：`vega stop --run {run_dir.name} --reason \"...\"`。",
+    ]
+
+
+def _is_pre_contract_change(state: dict[str, Any]) -> bool:
+    persisted = state.get("persisted_agent_state")
+    return (
+        state.get("agent_run_kind") == "change"
+        and isinstance(persisted, dict)
+        and persisted.get("contract_revision") is None
+    )
+
+
 def agent_artifact_names(state: dict[str, Any]) -> list[str]:
     names = [
         "agent-state.json",
@@ -70,14 +135,28 @@ def agent_artifact_names(state: dict[str, Any]) -> list[str]:
     if isinstance(checkpoint_id, str):
         names.append(f"checkpoints/{checkpoint_id}.json")
     if state.get("agent_run_kind") == "change":
-        names.extend(
-            [
-                "change-contract.json",
-                "execution-plan.json",
-                "agent-final-report.json",
-                "agent-final-report.md",
-            ]
-        )
+        persisted = state.get("persisted_agent_state")
+        if (
+            isinstance(persisted, dict)
+            and persisted.get("contract_revision") is None
+        ):
+            names.extend(
+                [
+                    "planning-request.json",
+                    "project-context.md",
+                    "planning-proposal.json",
+                    "planning-proposal.md",
+                ]
+            )
+        else:
+            names.extend(
+                [
+                    "change-contract.json",
+                    "execution-plan.json",
+                    "agent-final-report.json",
+                    "agent-final-report.md",
+                ]
+            )
     return names
 
 

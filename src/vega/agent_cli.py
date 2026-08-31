@@ -96,6 +96,8 @@ def agent_stop(
         typer.echo("Agent 已停止，现场未回滚。")
     elif result.state.active_child_run:
         typer.echo("停止请求已发送，等待当前 Worker 返回终态。")
+    elif result.state.active_planning_execution_id:
+        typer.echo("停止请求已发送，等待当前 Planning Turn 返回终态。")
     else:
         typer.echo("停止请求未取得安全终态，现场已交还人工。")
     typer.echo("")
