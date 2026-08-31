@@ -142,12 +142,12 @@ def render_agent_status_card(card: AgentStatusCard) -> str:
             ]
         )
     return "\n".join(lines).rstrip() + "\n"
-
 def _render_provider_sessions(card: AgentStatusCard) -> list[str]:
     if not card.provider_sessions:
         return []
     lines = ["", "## Provider Sessions"]
     for session in card.provider_sessions:
+        permissions = "verified" if session.permissions_verified else "unverified"
         usage = ""
         if session.total_tokens is not None:
             usage = f"；tokens={session.total_tokens}"
@@ -159,11 +159,11 @@ def _render_provider_sessions(card: AgentStatusCard) -> list[str]:
             f"- `{session.role}`：{session.lifecycle}；owner={session.owner}；"
             f"turns={session.turn_count}；compactions={session.compaction_count}；"
             f"thread=`{session.thread_id or '尚未建立'}`；"
+            f"sandbox={session.sandbox or 'unknown'}；permissions={permissions}；"
             f"待响应={session.pending_interactions}；"
             f"待发送 steer={session.queued_steers}{usage}"
         )
     return lines
-
 def write_agent_final_report(
     workspace: Path,
     run_dir: Path,

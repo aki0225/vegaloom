@@ -17,6 +17,7 @@ from vega.codex_app_server import (
     _AppServerClient,
     _app_server_command,
 )
+from vega.codex_app_server_permissions import require_thread_permissions
 from vega.codex_app_server_runner import (
     CodexAppServerRunner,
     _strict_output_schema,
@@ -55,7 +56,7 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
     first = runner.run(
         "第一轮 EARLY_COMPLETE",
         repo,
-        sandbox="workspace-write",
+        sandbox="read-only",
         timeout_seconds=30,
         execution_context=_execution_context(
             run_dir,
@@ -73,7 +74,7 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
     second = runner.run(
         "第二轮",
         repo,
-        sandbox="read-only",
+        sandbox="workspace-write",
         timeout_seconds=30,
         execution_context=_execution_context(
             run_dir,
@@ -89,13 +90,19 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
     assert fake_state["starts"] == 1
     assert fake_state["resumes"] == 1
     assert fake_state["thread_start_params"]["model"] == "fake-model"
+    assert fake_state["thread_start_params"]["approvalPolicy"] == "never"
     assert fake_state["turn_start_params"][0]["effort"] == "high"
-    assert fake_state["resume_params"][0]["approvalPolicy"] == "never"
+    assert fake_state["resume_params"][0]["sandbox"] == "workspace-write"
+    assert fake_state["resume_params"][0]["approvalPolicy"] == "on-request"
     assert fake_state["server_args"] == ["--listen", "stdio://"]
     assert "Vega Task Anchor" in fake_state["prompts"][1]
     assert "补充检查边界条件" in fake_state["prompts"][1]
     assert any(event.endswith("thread_ready") for event in events)
     assert any(event.endswith("context_compacted") for event in events)
+    current = load_provider_sessions(run_dir).handles["worker"]
+    assert current.sandbox == "workspace-write"
+    assert current.approval_policy == "on-request"
+    assert current.permissions_verified is True
     profile_runner = CodexAppServerRunner(
         run_dir,
         "worker",
@@ -246,6 +253,17 @@ def test_app_server_normalizes_reviewer_output_schema() -> None:
     finding = normalized["$defs"]["ReviewFinding"]
     assert finding["required"] == list(finding["properties"])
     assert original["required"] == ["summary"]
+
+
+def test_app_server_rejects_unverified_read_only_permission() -> None:
+    with pytest.raises(RuntimeError, match="实际 sandbox 与请求不一致"):
+        require_thread_permissions(
+            {
+                "sandbox": {"type": "workspaceWrite"},
+                "approvalPolicy": "never",
+            },
+            requested_sandbox="read-only",
+        )
 
 
 def test_app_server_waits_for_explicit_approval_response(
@@ -521,6 +539,18 @@ def save():
 def send(payload):
     print(json.dumps(payload, ensure_ascii=False), flush=True)
 
+def thread_result(params):
+    sandbox_types = {
+        "read-only": "readOnly",
+        "workspace-write": "workspaceWrite",
+        "danger-full-access": "dangerFullAccess",
+    }
+    return {
+        "thread": {"id": thread_id},
+        "sandbox": {"type": sandbox_types[params["sandbox"]]},
+        "approvalPolicy": params.get("approvalPolicy", "on-request"),
+    }
+
 def complete():
     message = json.dumps({
         "claimed_status": "completed",
@@ -569,12 +599,12 @@ for raw in sys.stdin:
         state["thread_start_params"] = request["params"]
         save()
         send({"method": "thread/started", "params": {"thread": {"id": thread_id}}})
-        send({"id": request["id"], "result": {"thread": {"id": thread_id}}})
+        send({"id": request["id"], "result": thread_result(request["params"])})
     elif method == "thread/resume":
         state["resumes"] += 1
         state.setdefault("resume_params", []).append(request["params"])
         save()
-        send({"id": request["id"], "result": {"thread": {"id": thread_id}}})
+        send({"id": request["id"], "result": thread_result(request["params"])})
     elif method == "turn/start":
         turn_id = f"turn-{len(state['prompts']) + 1}"
         prompt = request["params"]["input"][0]["text"]

@@ -1272,3 +1272,31 @@ Worker → Candidate → Verification → Reviewer → Finish 基础链路仍可
 Steer 和 Worker Thread 复用由 2026-08-28 Dogfood 覆盖；LF/CRLF、Git mode、重复 Resume
 Claim 和内容漂移由 `VALID-02` 自动化回归覆盖。本条不证明通用成功率、生产安全、
 Claude Code Provider 或未知外部副作用可安全重放。
+
+## 2026-08-31 AUTONOMY-01 真实只读 Planning Proposal
+
+本条使用一个可丢弃的三文件 Python 仓库验证自然语言 Planning 入口。固定基线
+`1a057d53a05af9ead0c194be3392bbcfb7dee83d` 中，`calculate_total` 只累加 `price`，
+现有测试要求 `price * quantity`。输入只描述 Bug 现象，并明确本轮只调查、不修改代码。
+
+真实 run `20260831-194722-3b0e9a983243-agent` 保留了实施中暴露的三类问题：
+
+1. Planning 持有父 run mutation lock 时，App Server 无法写 Provider Session；实现改为
+   调查 Turn 前后分别锁定状态，外部进程运行期间释放生命周期锁。
+2. 第一份结构化输出在 `file`、`test` 引用中同时给出 symbol；Schema 原先把这种有效定位
+   误判为非法。
+3. Planner 把原始任务中的“只调查”从建议合同目标中剥离；原先要求两个目标逐字相等，
+   导致有效 Proposal 被拒绝。
+
+上述失败都停在 `planning`，没有启动 Worker，也没有修改目标 Worktree。修复后的同一
+Provider Thread 生成 `planning-proposal.json` 与 `planning-proposal.md`，包含 8 条观察事实、
+2 条根因假设、4 个未决问题、允许和禁止路径、验证建议及 2 个 Work Item。再次执行同一 run
+只复核已发布 Artifact，不新增 Turn。
+
+另一个真实 App Server smoke 在同一 Thread 上先确认 `read-only / approvalPolicy=never`，
+再恢复为 `workspace-write / approvalPolicy=on-request`；两次返回的 Thread ID 一致，实际
+sandbox 与审批策略均由 App Server 响应核对，目标仓库保持干净。
+
+本 Case 只证明自然语言目标可以进入只读调查并形成待编译 Proposal，也证明 Codex App Server
+的同 Thread 权限切换在当前版本可观察。它不证明 Proposal 已经成为 Approved Contract，不启动
+Worker，也不覆盖 Contract Compiler、有界自动批准、Claude Code Provider 或生产任务成功率。

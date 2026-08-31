@@ -365,6 +365,9 @@ class ProviderSessionStatus(StrictAgentModel):
     lifecycle: Literal["new", "idle", "active", "waiting_user", "unavailable"]
     thread_id: NonEmptyText | None = None
     work_item_id: NonEmptyText | None = None
+    sandbox: Literal["read-only", "workspace-write", "danger-full-access", "external"] | None = None
+    approval_policy: NonEmptyText | None = None
+    permissions_verified: bool = False
     turn_count: int = Field(default=0, ge=0)
     compaction_count: int = Field(default=0, ge=0)
     last_event: NonEmptyText | None = None

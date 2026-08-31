@@ -17,7 +17,23 @@ Adapter 只写入 `.agents/skills/vega-agent/SKILL.md`。目标仓库已有同�
 ## 2. 调查
 
 在 Codex 主会话中调用 `$vega-agent`，或者按
-[修改前调查与计划](PLAN-FIRST-PROTOCOL.md) 手工完成：
+只有现象、根因和范围都不清楚时，可以先建立只读 Planning ChangeRun：
+
+```powershell
+vega start --repo <target-repo> --text "导出按钮点击后没有反应"
+vega run --run <run_id> --timeout 900
+```
+
+Vega 在固定 Git revision 的受管 Worktree 中调查，输出：
+
+```text
+runs/<run_id>/planning-proposal.json
+runs/<run_id>/planning-proposal.md
+```
+
+Proposal 区分事实、假设、未决问题、建议范围和验证建议，并保留来源引用。它尚未经过
+Contract Compiler，不能批准，也不能启动 Worker。当前版本接下来仍按
+[修改前调查与计划](PLAN-FIRST-PROTOCOL.md) 整理：
 
 1. 读取项目规则和 Git 状态；
 2. 复现或定位问题；
@@ -26,7 +42,7 @@ Adapter 只写入 `.agents/skills/vega-agent/SKILL.md`。目标仓库已有同�
 5. 生成 Execution Plan；
 6. 展示给用户确认。
 
-批准前不启动 Worker。
+目标和范围已经明确时，可以直接准备 Change Contract 与 Execution Plan。批准前不启动 Worker。
 
 ## 3. 创建 ChangeRun
 

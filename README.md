@@ -51,7 +51,16 @@ vega adapters init codex --repo .
 
 最后一条命令写入仓库级 `$vega-agent` Skill。它不会安装 Hook，也不会修改 Codex 全局配置。
 
-在 Codex 主会话中描述 Bug 或功能。Skill 会先读项目规则、代码和测试，再生成两份文件：
+如果只有 Bug 现象，先让 Vega 做只读调查：
+
+```powershell
+vega start --repo . --text "导出按钮点击后没有反应"
+vega run --run <run_id> --timeout 900
+```
+
+这一步只生成 `planning-proposal.json` 和 `planning-proposal.md`，记录已确认事实、假设、
+未决问题、建议范围和验证建议。它不会启动 Worker。当前版本仍需由主会话或人工把 Proposal
+整理为下面两份可批准文件：
 
 - **Change Contract**：目标、验收、不变量、非目标、风险、验证和允许范围；
 - **Execution Plan**：已确认事实、假设和有限 Work Item。

@@ -12,19 +12,14 @@ from .agent_change_cli import (
     agent_replan,
     agent_retry,
 )
-from .agent_change_contract import ChangeContract, ExecutionPlan
-from .agent_codex_adapter import SupervisorAgentCodexAdapter
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import (
     capture_bound_workspace,
     load_agent_bundle,
 )
-from .cli_support import (
-    ensure_runner_ready,
-    report_execution_progress,
-    require_repo_directory,
-)
+from .agent_start_cli import agent_run, agent_start
+from .cli_support import require_repo_directory
 from .provider_session import (
     load_provider_sessions,
     queue_steer,
@@ -57,35 +52,6 @@ def register_agent_commands(app: typer.Typer) -> None:
     app.command("capabilities")(agent_capabilities)
 
 
-def agent_start(
-    repo: Path = typer.Option(..., "--repo", help="目标 Git 仓库根目录。"),
-    contract_path: Path = typer.Option(
-        ...,
-        "--contract",
-        help="Change Contract JSON。",
-    ),
-    execution_plan_path: Path = typer.Option(
-        ...,
-        "--execution-plan",
-        help="Execution Plan JSON。",
-    ),
-) -> None:
-    """创建 ChangeRun 与隔离 Worktree，等待人工批准。"""
-
-    repo = require_repo_directory(repo)
-    try:
-        result = _runtime().start_change(
-            repo,
-            contract=_load_change_contract(contract_path),
-            execution_plan=_load_execution_plan(execution_plan_path),
-        )
-    except (OSError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    typer.echo(f"ChangeRun 已创建：{result.run_dir.name}")
-    typer.echo("")
-    typer.echo(_runtime().status(result.run_dir.name))
-
-
 def agent_approve(
     run: str = typer.Option(..., "--run", help="ChangeRun ID 或 runs/<run-id>。"),
     actor: str = typer.Option("human", "--actor", help="批准人标识。"),
@@ -97,39 +63,6 @@ def agent_approve(
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("Change Contract 已批准。")
-    typer.echo("")
-    typer.echo(_runtime().status(result.run_dir.name))
-
-
-def agent_run(
-    run: str = typer.Option(..., "--run", help="ChangeRun ID 或 runs/<run-id>。"),
-    timeout_seconds: int = typer.Option(
-        900,
-        "--timeout",
-        min=60,
-        max=3600,
-        help="单次 Worker 或 Reviewer 外部进程超时秒数。",
-    ),
-    fresh_session: bool = typer.Option(
-        False,
-        "--fresh-session",
-        help="显式改用短生命周期 codex exec；默认复用 App Server Thread。",
-    ),
-) -> None:
-    """执行当前 Work Item，并完成验证、风险检查和独立审查。"""
-
-    try:
-        _, state, _, _ = load_agent_bundle(Path.cwd(), run)
-        if state.phase == "finalizing":
-            result = _runtime().finalize(run)
-        else:
-            ensure_runner_ready("codex-exec", "worker")
-            result = _adapter(persistent_sessions=not fresh_session).run(
-                run,
-                timeout_seconds=timeout_seconds,
-            )
-    except (FileNotFoundError, OSError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
     typer.echo("")
     typer.echo(_runtime().status(result.run_dir.name))
 
@@ -374,15 +307,6 @@ def _recovery() -> SupervisorAgentRecovery:
     return SupervisorAgentRecovery(Path.cwd())
 
 
-def _adapter(*, persistent_sessions: bool) -> SupervisorAgentCodexAdapter:
-    return SupervisorAgentCodexAdapter(
-        Path.cwd(),
-        persistent_sessions=persistent_sessions,
-        progress_reporter=report_execution_progress,
-        event_reporter=lambda message: typer.echo(f"[vega] {message}", err=True),
-    )
-
-
 def _agent_run_dir(run: str) -> Path:
     try:
         return resolve_run_dir(Path.cwd(), run)
@@ -476,17 +400,3 @@ def _wait_for_session_idle(
             return
         time.sleep(0.1)
     raise ValueError("活动 Turn 尚未确认停止，拒绝变更会话所有者")
-
-
-def _load_change_contract(path: Path) -> ChangeContract:
-    try:
-        return ChangeContract.model_validate_json(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise typer.BadParameter(f"无法读取 Change Contract：{path.name}") from exc
-
-
-def _load_execution_plan(path: Path) -> ExecutionPlan:
-    try:
-        return ExecutionPlan.model_validate_json(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise typer.BadParameter(f"无法读取 Execution Plan：{path.name}") from exc

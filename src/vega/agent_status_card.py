@@ -85,7 +85,8 @@ def read_status_card(
         observation_issue=observation_issue,
         next_step=(
             checkpoint.reason
-            if checkpoint is not None and state.phase in {"ready", "needs_human"}
+            if checkpoint is not None
+            and state.phase in {"planning", "ready", "needs_human"}
             else None
         ),
     )
@@ -475,6 +476,8 @@ def _load_status_observation_for_display(
 
 
 def default_next_step(phase: str, current_index: int) -> str:
+    if phase == "planning":
+        return "运行或恢复只读调查；未编译 Proposal 不能启动 Worker"
     if phase == "awaiting_approval":
         return "人工审查当前 Plan revision"
     if phase == "ready":

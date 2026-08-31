@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "event_id": "20260831T123357Z-AUTONOMY-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTONOMY-01",
+  "transition": "completed",
+  "recorded_at": "2026-08-31T12:33:57Z",
+  "summary": "自然语言目标已可在固定 Git revision 的只读 Worktree 中生成带来源引用的 Planning Proposal；无效输出、Workspace 漂移和 Provider 权限不一致保持 fail-closed，同一 Codex Thread 的只读到受控写入切换已完成真实验证。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "planning-contract-tests",
+      "supervisor-tests",
+      "security-tests",
+      "real-codex-app-server",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_planning.py",
+      "src/vega/agent_planning_runtime.py",
+      "src/vega/agent_planning_start.py",
+      "src/vega/codex_app_server_permissions.py",
+      "tests/supervisor/test_agent_planning.py",
+      "tests/supervisor/test_codex_app_server.py",
+      "eval/real-world-runs.md"
+    ]
+  }
+}

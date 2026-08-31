@@ -92,7 +92,9 @@ def load_agent_bundle(
         raise ValueError(f"Agent run 无法恢复：{run_dir.name}") from exc
     if state.run_id != run_dir.name or plan.task_id != state.task_id:
         raise ValueError("Agent run 身份绑定不一致")
-    if state.phase not in {"planning", "awaiting_approval"}:
+    if (
+        state.run_kind == "legacy" or state.contract_revision is not None
+    ) and state.phase not in {"planning", "awaiting_approval"}:
         if (
             state.goal_revision != plan.goal_revision
             or state.plan_revision != plan.plan_revision

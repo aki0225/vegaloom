@@ -21,6 +21,7 @@ _ALLOWED_OPERATIONS = {
     "agent.observe",
     "agent.pause",
     "agent.plan",
+    "agent.planning",
     "agent.recover",
     "agent.replan",
     "agent.reclaim",

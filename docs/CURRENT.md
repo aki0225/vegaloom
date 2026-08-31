@@ -5,29 +5,27 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：19 / 24
-- 最近事件：`20260830T040822Z-VALID-02-completed`
+- 已完成：20 / 24
+- 最近事件：`20260831T123357Z-AUTONOMY-01-completed`
 
 ## 当前事项
 
-### 下一项：`AUTONOMY-01` 从自然语言生成 Planning Proposal
+### 下一项：`AUTONOMY-02` 编译 Change Contract 与 Execution Plan
 
-让 Coding Agent 在只读 Workspace 中调查自然语言目标，生成带事实引用、假设和未决问题的 Planning Proposal，再进入人工批准。新入口继续复用现有 ChangeRun。
+用确定性 Contract Compiler 把 Planning Proposal、仓库规则和项目配置编译为未批准合同与执行计划，不让模型自由输出的命令直接进入执行。
 
 验收条件：
 
-- 只有 Bug 现象、根因未知的任务可以在不修改业务文件的情况下形成带来源引用的 Proposal
-- Proposal 明确区分观察事实、根因假设、未决问题、建议范围和验证建议
-- Proposal 不完整、引用失效、Provider 中断或只读边界被突破时 fail-closed
-- 显式 Change Contract 与 Execution Plan 入口保持不变
-- 真实 Codex App Server 验证同一 Thread 从只读调查进入受控写入；不可靠时回退到独立 Worker Thread
+- Proposal 的事实、假设和未决问题不会在编译后混为一类
+- 越界路径、未知 Verification、高风险声明缺失和 source revision 漂移均被拒绝
+- 编译通过的结果可以进入现有 approve 与 ChangeRun
+- Compiler 不新增第二套成功状态、证据系统或 Planner Runtime
 
 要求检查：
 
-- `planning-contract-tests`
+- `contract-compiler-tests`
 - `supervisor-tests`
 - `security-tests`
-- `real-codex-app-server`
 - `repository-hygiene`
 - `pr-ci`
 
@@ -54,7 +52,7 @@
 | 已完成 | `SESSION-03` | 统一 Agent 入口与交付报告 | `SESSION-02` |
 | 已完成 | `SESSION-04` | 完成真实 Agent 验收与 v0.3.0 准备 | `SESSION-03` |
 | 已完成 | `VALID-02` | 修复真实验收暴露的恢复与高风险审查问题 | `SESSION-04` |
-| 待开始 | `AUTONOMY-01` | 从自然语言生成 Planning Proposal | `VALID-02` |
+| 已完成 | `AUTONOMY-01` | 从自然语言生成 Planning Proposal | `VALID-02` |
 | 待开始 | `AUTONOMY-02` | 编译 Change Contract 与 Execution Plan | `AUTONOMY-01` |
 | 待开始 | `AUTONOMY-03` | 增加有界自动批准 | `AUTONOMY-02` |
 | 待开始 | `AUTONOMY-04` | 精简 Provider 会话适配 | `AUTONOMY-03` |
