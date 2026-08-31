@@ -27,6 +27,12 @@ SessionLifecycle = Literal[
 ]
 SteerStatus = Literal["queued", "delivered", "rejected"]
 InteractionStatus = Literal["pending", "responded", "closed"]
+ProviderSandbox = Literal[
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+    "external",
+]
 
 
 class ProviderSessionHandle(BaseModel):
@@ -42,6 +48,9 @@ class ProviderSessionHandle(BaseModel):
     work_item_id: str | None = None
     contract_revision: int | None = Field(default=None, ge=1)
     plan_revision: int | None = Field(default=None, ge=1)
+    sandbox: ProviderSandbox | None = None
+    approval_policy: str | None = None
+    permissions_verified: bool = False
     last_turn_id: str | None = None
     compaction_pending: bool = False
     turn_count: int = Field(default=0, ge=0)
@@ -198,6 +207,9 @@ def ensure_session_handle(
         handle.thread_id = None
         handle.lifecycle = "new"
         handle.last_turn_id = None
+        handle.sandbox = None
+        handle.approval_policy = None
+        handle.permissions_verified = False
         handle.compaction_pending = False
         handle.turn_count = 0
         handle.compaction_count = 0
@@ -358,6 +370,9 @@ def session_status_projection(
                 "lifecycle": handle.lifecycle,
                 "thread_id": handle.thread_id,
                 "work_item_id": handle.work_item_id,
+                "sandbox": handle.sandbox,
+                "approval_policy": handle.approval_policy,
+                "permissions_verified": handle.permissions_verified,
                 "turn_count": handle.turn_count,
                 "compaction_count": handle.compaction_count,
                 "last_event": handle.last_event,

@@ -20,6 +20,11 @@ from .agent_persistence import (
     append_agent_trace,
     save_agent_state,
 )
+from .agent_planning_handoff import (
+    planning_handoff_checkpoint_refs,
+    planning_stop_trace_event,
+)
+from .agent_planning_control import stop_planning_run
 from .agent_repository_guard import (
     acquire_writer_claim,
     mark_writer_claim_releasing,
@@ -275,11 +280,16 @@ class SupervisorAgentRecovery:
         return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
     @agent_mutation("agent.pause")
     def pause(self, run: str, *, reason: str) -> AgentRun:
+        _, state, _, _ = load_agent_bundle(self.workspace, run)
+        if state.active_planning_execution_id is not None:
+            raise ValueError("Planning Turn 仍绑定；先执行 stop 并等待执行终态")
         return self._hold(run, reason=reason, stopped=False)
 
     @agent_mutation("agent.stop")
     def stop(self, run: str, *, reason: str) -> AgentRun:
         run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
+        if state.active_planning_execution_id is not None:
+            return stop_planning_run(run_dir, state, plan, reason)
         if state.active_child_run:
             return stop_active_child(
                 self.workspace, run_dir, state, plan, metadata,
@@ -290,6 +300,12 @@ class SupervisorAgentRecovery:
     @agent_mutation("agent.resume")
     def resume_local(self, run: str) -> AgentRun:
         run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
+        if state.run_kind == "change" and state.contract_revision is None:
+            raise ValueError(
+                "未编译的 Planning ChangeRun 不能恢复为 ready；"
+                "可重试调查请继续运行 `vega run --run <run-id>`，"
+                "Workspace 漂移或终止不明时请新建 Planning run 或生成可验证 Handoff"
+            )
         if state.phase != "needs_human" or state.active_child_run:
             raise ValueError("只有已暂停且没有 active Writer 的 run 可以本机恢复")
         checkpoint = latest_checkpoint(run_dir, state)
@@ -349,9 +365,15 @@ class SupervisorAgentRecovery:
         if not stopped and state.phase == "needs_human":
             raise ValueError("当前 run 已在等待人工；无需重复 pause")
         actual = capture_bound_workspace(run_dir)
-        external_side_effects = latest_checkpoint(
-            run_dir, state
-        ).external_side_effects if state.latest_checkpoint_id is not None else "none"
+        latest = (
+            latest_checkpoint(run_dir, state)
+            if state.latest_checkpoint_id is not None
+            else None
+        )
+        external_side_effects = (
+            latest.external_side_effects if latest is not None else "none"
+        )
+        planning_refs = planning_handoff_checkpoint_refs(state, latest)
         if state.workspace_fingerprint != actual.fingerprint:
             blocked_reason = (
                 f"{action} 前 Workspace 已漂移；现场已保留并交由人工对账"
@@ -426,6 +448,7 @@ class SupervisorAgentRecovery:
             pending_actions=pending_actions,
             operation_started=False,
             external_side_effects=external_side_effects,
+            evidence_refs=planning_refs,
         )
         next_state = update_state(
             next_state,
@@ -435,7 +458,11 @@ class SupervisorAgentRecovery:
         save_agent_state(run_dir / "agent-state.json", next_state)
         append_agent_trace(
             run_dir / "trace.jsonl",
-            event="agent_stopped" if stopped else "agent_paused",
+            event=(
+                planning_stop_trace_event(state)
+                if stopped
+                else "agent_paused"
+            ),
             state=next_state,
             route_reason=reason.strip(),
             artifact_refs=[f"checkpoints/{checkpoint.checkpoint_id}.json"],

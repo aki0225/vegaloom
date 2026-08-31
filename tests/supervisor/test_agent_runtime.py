@@ -13,6 +13,7 @@ from vega import agent_runtime as agent_runtime_module
 from vega import agent_repository_guard as agent_repository_guard_module
 from vega import agent_runtime_support as agent_runtime_support_module
 from vega import agent_status_card as agent_status_card_module
+from vega import agent_task_card_runtime as agent_task_card_runtime_module
 from vega.agent_cli import _interaction_response
 from vega.agent_contract import (
     AgentObservation,
@@ -1762,15 +1763,15 @@ def test_resume_tracked_task_card_rebuilds_local_run(
         ("write_status_card", "status card"),
     )
     for attribute, label in failure_targets:
-        original = getattr(agent_runtime_support_module, attribute)
+        original = getattr(agent_task_card_runtime_module, attribute)
 
         def fail_artifact(*args, _label=label, **kwargs):
             raise OSError(f"simulated {_label} failure")
 
-        monkeypatch.setattr(agent_runtime_support_module, attribute, fail_artifact)
+        monkeypatch.setattr(agent_task_card_runtime_module, attribute, fail_artifact)
         with pytest.raises(OSError, match=f"simulated {label} failure"):
             SupervisorAgentRuntime(workspace).resume_task_card(repo)
-        monkeypatch.setattr(agent_runtime_support_module, attribute, original)
+        monkeypatch.setattr(agent_task_card_runtime_module, attribute, original)
         failed_runs = sorted((workspace / "runs").glob("*-agent-resume*"))
         assert all(
             not (failed_run / "agent-state.json").exists()

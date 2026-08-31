@@ -11,7 +11,7 @@
 | 当前事项与下一项 | [`CURRENT.md`](CURRENT.md) | 由机器计划和事件账本生成的当前状态 |
 | 演进事项与验收 | [`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json) | 稳定事项、依赖和要求检查 |
 | 路线决策与历史 | [`ROADMAP.md`](ROADMAP.md) | 为什么选择或停止某条路线 |
-| 已批准的下一阶段 | [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md) | 自然语言 Planning、Contract Compiler 和有界批准 |
+| 有界自主执行计划 | [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md) | 自然语言 Planning、Contract Compiler 和有界批准 |
 | 已完成的治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 三轮治理范围、Dogfood 和验收结果 |
 | 完整使用流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | ChangeRun、交互、恢复和交付 |
 | 调查和计划协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | 修改前调查、事实与假设、人工确认 |

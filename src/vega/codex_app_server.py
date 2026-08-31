@@ -17,6 +17,7 @@ from .codex_app_server_process import (
     install_parent_termination_handler,
     terminate_app_server_tree,
 )
+from .codex_app_server_permissions import require_thread_permissions
 from .execution_output import MAX_JSONL_LINE_CHARS
 from .execution_process import prepare_subprocess_command
 from .provider_session import (
@@ -75,12 +76,12 @@ class _AppServerClient:
     def _open_thread(self) -> None:
         state = load_provider_sessions(self.run_dir)
         handle = state.handles[self.invocation.role_key]
+        approval_policy = "never" if self.invocation.sandbox == "read-only" else "on-request"
         params = {
             "cwd": self.invocation.repo_path,
             "sandbox": self.invocation.sandbox,
+            "approvalPolicy": approval_policy,
         }
-        if self.invocation.sandbox == "read-only":
-            params["approvalPolicy"] = "never"
         if self.invocation.model is not None:
             params["model"] = self.invocation.model
         if handle.thread_id:
@@ -88,6 +89,9 @@ class _AppServerClient:
             result = self._request("thread/resume", params)
         else:
             result = self._request("thread/start", params)
+        sandbox, approval_policy = require_thread_permissions(
+            result, requested_sandbox=self.invocation.sandbox,
+        )
         thread = result.get("thread") if isinstance(result, dict) else None
         thread_id = thread.get("id") if isinstance(thread, dict) else None
         if not isinstance(thread_id, str) or not thread_id:
@@ -96,7 +100,10 @@ class _AppServerClient:
         def mutation(session_state) -> None:
             current = session_state.handles[self.invocation.role_key]
             current.thread_id = thread_id
-            current.lifecycle = "idle"
+            current.sandbox = sandbox
+            current.approval_policy = approval_policy
+            current.permissions_verified = True
+            current.lifecycle = "active"
             current.last_event = "thread_ready"
             current.updated_at = utc_now()
         mutate_provider_sessions(self.run_dir, "agent.session", mutation)

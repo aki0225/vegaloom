@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "event_id": "20260831T153014Z-AUTONOMY-01-reopened",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTONOMY-01",
+  "transition": "reopened",
+  "recorded_at": "2026-08-31T15:30:14Z",
+  "summary": "独立审阅发现 Planning execution 停止、未编译 run 恢复、Proposal 换机交接和中断发布仍有缺口；事项重新打开，在同一 PR 中修复后再完成。",
+  "evidence": {
+    "pull_requests": [
+      97
+    ],
+    "commits": [],
+    "checks": [
+      "independent-review"
+    ],
+    "artifacts": [
+      "src/vega/agent_planning_runtime.py",
+      "src/vega/agent_recovery.py",
+      "src/vega/agent_handoff.py"
+    ]
+  }
+}

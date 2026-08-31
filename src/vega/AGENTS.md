@@ -56,8 +56,10 @@ CLI
 
 当前 `agent_*` 文件保持扁平结构，按以下职责查找，不为整理文件数量做批量搬迁：
 
-- 入口与编排：`agent_cli`、`agent_runtime*`、`agent_routing`、`agent_worker`、
-  `agent_finalization`。
+- 入口与编排：`agent_cli`、`agent_start_cli`、`agent_runtime*`、`agent_routing`、
+  `agent_worker`、`agent_finalization`。
+- 自然语言规划：`agent_planning*` 只生成未批准 Proposal；不得直接写入 Approved Contract、
+  启动 Worker 或创造验证事实。
 - 合同与持久化：`agent_contract`、`agent_change_contract`、`agent_persistence`、`agent_run`、
   `agent_mutation`、`agent_change_core`、`agent_change_task_card`、`agent_change_verification_retry`。
 - Provider 无关执行后置流程：`agent_candidate_pipeline`、`agent_worker_evidence`、

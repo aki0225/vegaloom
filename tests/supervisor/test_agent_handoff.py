@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 import vega.agent_handoff as agent_handoff_module
 import vega.agent_resume_validation as agent_resume_validation_module
 import vega.agent_runtime_support as agent_runtime_support_module
+import vega.agent_task_card_runtime as agent_task_card_runtime_module
 import vega.agent_task_card_resume as agent_task_card_resume_module
 import vega.workspace_check as workspace_check_module
 from vega.agent_change_contract import (
@@ -211,7 +212,7 @@ def test_handoff_status_keeps_old_gates_visible_as_historical(
     )
     monkeypatch.setattr(
         agent_handoff_module,
-        "_latest_observation",
+        "latest_observation",
         lambda _: (observation, "2026-08-29T00:00:00+00:00"),
     )
 
@@ -793,7 +794,7 @@ def test_resume_rejects_task_card_changed_after_loading(
     relative_task = result.task_card_path.relative_to(repo).as_posix()
     _git(repo, "add", "src/example.py", relative_task)
     _git(repo, "commit", "-m", "测试：提交 Handoff WIP")
-    original_load = agent_runtime_support_module.load_task_card_with_content
+    original_load = agent_task_card_runtime_module.load_task_card_with_content
 
     def advance_task_card(path: Path):
         card, content = original_load(path)
@@ -810,7 +811,7 @@ def test_resume_rejects_task_card_changed_after_loading(
         return card, content
 
     monkeypatch.setattr(
-        agent_runtime_support_module,
+        agent_task_card_runtime_module,
         "load_task_card_with_content",
         advance_task_card,
     )

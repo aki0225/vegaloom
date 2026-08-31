@@ -44,6 +44,7 @@ class CodexAppServerRunner:
         output_schema: dict[str, Any] | None = None,
         executable: str = "codex",
         isolate_reviewer: bool = False,
+        isolate_session: bool = False,
         options: CodexExecOptions | None = None,
     ) -> None:
         self.run_dir = run_dir.resolve()
@@ -53,7 +54,7 @@ class CodexAppServerRunner:
         self.plan_revision = plan_revision
         self.output_schema = output_schema
         self.executable = executable
-        self.isolate_reviewer = isolate_reviewer
+        self.isolate_session = isolate_reviewer or isolate_session
         self.options = options or CodexExecOptions()
 
     def run(
@@ -110,6 +111,7 @@ class CodexAppServerRunner:
                 newline="\n",
             )
         except (CodexMcpIsolationError, OSError, ValueError) as exc:
+            self._mark_unavailable()
             return RunnerResult(
                 status="error",
                 output="",
@@ -193,7 +195,7 @@ class CodexAppServerRunner:
 
     def _server_args(self, resolved: str, repo_path: Path) -> list[str]:
         args: list[str] = []
-        if not self.isolate_reviewer:
+        if not self.isolate_session:
             return args
         args.extend([
             "--disable",
@@ -222,6 +224,11 @@ class CodexAppServerRunner:
             )
             if handle.owner != "vega":
                 raise ValueError("Provider Session 当前由人工接管")
+            if handle.lifecycle in {"active", "waiting_user"}:
+                raise ValueError("Provider Session 已有活动 Turn")
+            handle.lifecycle = "active"
+            handle.permissions_verified = False
+            handle.last_event = "turn_preparing"
 
         mutate_provider_sessions(self.run_dir, "agent.session", mutation)
 

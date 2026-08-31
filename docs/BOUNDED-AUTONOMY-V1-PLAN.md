@@ -1,6 +1,7 @@
 # Vega 有界自主执行 V1 计划
 
-> 状态：已批准，实施尚未开始。
+> 状态：已批准。实施进度以 [`CURRENT.md`](CURRENT.md) 和 `plans/events/` 为准，
+> 本文件不重复维护瞬时状态。
 >
 > 计划日期：2026-08-31
 >
@@ -166,7 +167,7 @@ contract_proposal:
   non_goals: []
   authorized_risk_reviews: []
   side_effect_policy: {}
-  required_verification: []
+  verification_suggestions: []
   authority_envelope: {}
 
 execution_plan:
@@ -328,7 +329,8 @@ Finding、失败验证和最近 Trace，并可 steer、pause、stop 或 takeover
 
 ### 5.3 跨机器
 
-跨机器恢复继续依赖 Git 与 Task Card：
+跨机器恢复继续依赖 Git 与 Task Card。只读调查已经形成完整 Planning Proposal 时，也允许
+先生成 Task Card 再换机：
 
 - 原始用户目标；
 - Planning Proposal 或 Approved Contract；
@@ -339,8 +341,12 @@ Finding、失败验证和最近 Trace，并可 steer、pause、stop 或 takeover
 - 下一步；
 - Provider Thread ID 作为可选提示。
 
-Provider Thread 无法跨机器恢复时，新会话从这些材料重建 Task Brief。不能因为旧会话不可用
-而重放未知外部副作用。
+Planning Task Card 绑定 Proposal 的固定 source revision。新机器从该 revision 建立受管
+Worktree，并用包含 Task Card 的本地 Checkpoint 恢复交接现场；历史 Proposal 只用于继续
+编译合同，不成为当前 Verification 或 Reviewer 证据。
+
+Provider Thread 无法跨机器恢复时，新会话从这些材料重建 Task Brief。旧会话不可用时不重放
+未知外部副作用。
 
 ## 六、实施事项
 

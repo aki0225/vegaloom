@@ -26,6 +26,7 @@ from .agent_finalization import finalize_agent_state
 from .agent_persistence import append_agent_trace, save_agent_state
 from .agent_legacy_lifecycle import approve_legacy_plan, start_legacy_agent
 from .agent_mutation import agent_mutation
+from .agent_planning_start import start_planning_run
 from .agent_plan_archive import archive_agent_plan_revision
 from .agent_run import AgentRun
 from .agent_routing import decide_next_action, transition_state
@@ -43,12 +44,12 @@ from .agent_runtime_support import (
     capture_bound_workspace,
     load_agent_bundle,
     publish_observation_transition,
-    resume_agent_task_card,
     save_agent_plan,
     write_checkpoint,
     write_status_card,
     write_task_brief,
 )
+from .agent_task_card_runtime import resume_agent_task_card
 from .redaction import write_redacted_json, write_redacted_json_once
 
 class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
@@ -82,6 +83,9 @@ class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
             contract=contract,
             execution_plan=execution_plan,
         )
+
+    def start_planning(self, repo: Path, *, goal: str) -> AgentRun:
+        return start_planning_run(self.workspace, repo, goal=goal)
 
     @agent_mutation("agent.approve")
     def approve(self, run: str, *, actor: str = "human") -> AgentRun:

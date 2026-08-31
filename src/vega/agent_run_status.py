@@ -26,6 +26,14 @@ _PHASE_STATUS = {
 _TRACE_PROGRESS = {
     "agent_started": ("agent", "started"),
     "change_run_started": ("agent", "started"),
+    "planning_run_started": ("agent", "planning_run_started"),
+    "planning_turn_started": ("agent", "planning_turn_started"),
+    "planning_stop_requested": ("agent", "planning_stop_requested"),
+    "planning_proposal_created": ("agent", "planning_proposal_created"),
+    "planning_retry_required": ("agent", "planning_retry_required"),
+    "planning_blocked": ("agent", "planning_blocked"),
+    "planning_stopped": ("agent", "planning_stopped"),
+    "planning_task_card_resumed": ("agent", "planning_task_card_resumed"),
     "plan_approved": ("agent", "plan_updated"),
     "change_contract_approved": ("agent", "plan_updated"),
     "plan_revised": ("agent", "plan_updated"),
@@ -57,6 +65,8 @@ _TRACE_STATUS = {
     "supervisor_human": "needs_human",
     "agent_recovery_blocked": "needs_human",
     "agent_recovery_execution_blocked": "needs_human",
+    "planning_blocked": "needs_human",
+    "planning_stopped": "stopped",
 }
 
 
@@ -101,6 +111,7 @@ def load_agent_status_state(
         "task_id": state.task_id,
         "current_work_item": state.current_work_item,
         "active_child_run": state.active_child_run,
+        "active_planning_execution_id": state.active_planning_execution_id,
         "last_child_run": latest_child_run,
         "brief_run": latest_child_run,
         "latest_checkpoint_id": state.latest_checkpoint_id,
@@ -325,6 +336,9 @@ def agent_status_lines(payload: dict[str, Any]) -> list[str]:
         )
     if payload.get("active_child_run"):
         lines.append(f"- active child：`{payload['active_child_run']}`")
+    if payload.get("active_planning_execution_id"):
+        value = str(payload["active_planning_execution_id"])[:12]
+        lines.append(f"- active planning：`{value}`")
     if payload.get("live_child_stage"):
         lines.append(f"- Core 子流程：`{payload['live_child_stage']}`")
     if payload.get("terminal_status"):

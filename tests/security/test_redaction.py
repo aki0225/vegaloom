@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import vega.redaction as redaction_module
 from vega.redaction import (
     REDACTION_TEXT,
     assert_not_sensitive_path,
@@ -12,10 +14,29 @@ from vega.redaction import (
     redact_text,
     redact_value,
     sensitive_path_reason,
+    write_redacted_json_once,
 )
 
 
 FAKE_SECRET = "sk-review-fake-secret-123456"
+
+
+def test_write_redacted_json_once_leaves_no_partial_target_on_publish_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "artifact.json"
+
+    def fail_link(_: Path, __: Path) -> None:
+        raise OSError("simulated publish failure")
+
+    monkeypatch.setattr(redaction_module.os, "link", fail_link)
+
+    with pytest.raises(OSError, match="simulated publish failure"):
+        write_redacted_json_once(target, {"status": "safe"})
+
+    assert not target.exists()
+    assert not list(tmp_path.glob(".json-*"))
 
 
 def test_redact_text_removes_common_secret_shapes() -> None:

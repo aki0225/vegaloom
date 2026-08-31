@@ -25,7 +25,7 @@ v0.3.0 只有这一条公开 ChangeRun 流程。旧 `do`、`loop`、`agent`、`g
 | 事实 | 权威来源 |
 |---|---|
 | 用户要解决什么 | 用户要求、仓库规则、Change Contract |
-| 已经确认和仍在猜测什么 | Execution Plan |
+| 已经确认和仍在猜测什么 | Planning Proposal；编译后进入 Execution Plan |
 | 当前代码内容 | Git Candidate SHA 与实际 Worktree |
 | Worker 做了什么 | 机器 Observation；Worker Claim 仅作待验证输入 |
 | 测试是否通过 | 当前 Candidate 上实际执行的 Verification Artifact |
@@ -35,6 +35,14 @@ v0.3.0 只有这一条公开 ChangeRun 流程。旧 `do`、`loop`、`agent`、`g
 | 跨机器需要恢复什么 | 任务分支、Task Card、Contract、Plan 和 Candidate |
 
 Trace、状态卡、Task Brief 和最终报告都是这些事实的投影，不能反向创造成功证据。
+
+## Planning Proposal
+
+`start --text` 先把自然语言目标绑定到固定 Git revision，并在只读 Worktree 中生成
+Planning Proposal。Proposal 保存事实引用、假设、未决问题、建议范围和验证建议。
+
+它不是 Approved Contract。Planner 提出的路径、命令、风险和 Work Item 只能作为编译输入；
+在 Contract Compiler 与人工批准完成前，Vega 不启动 Worker。
 
 ## Change Contract
 

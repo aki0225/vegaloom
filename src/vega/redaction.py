@@ -3,8 +3,11 @@ from __future__ import annotations
 import ast
 import json
 import re
+import os
+import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from uuid import uuid4
 from typing import Any, TypeVar
 
 
@@ -299,13 +302,30 @@ def write_redacted_json(path: Path, payload: Any, *, indent: int = 2) -> None:
 
 
 def write_redacted_json_once(path: Path, payload: Any, *, indent: int = 2) -> None:
-    """独占创建 JSON artifact，避免重试覆盖既有证据。"""
+    """原子、独占创建 JSON artifact，避免中断留下半个证据文件。"""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8", newline="\n") as stream:
-        stream.write(
-            json.dumps(redact_value(payload), ensure_ascii=False, indent=indent) + "\n"
-        )
+    temp_path = path.with_name(f".json-{uuid4().hex}")
+    try:
+        with temp_path.open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write(
+                json.dumps(redact_value(payload), ensure_ascii=False, indent=indent)
+                + "\n"
+            )
+        for attempt in range(10):
+            try:
+                os.link(temp_path, path)
+                break
+            except FileExistsError:
+                raise
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(0.02)
+        else:  # pragma: no cover - 循环只会 break 或抛出
+            raise OSError("无法独占发布 JSON artifact")
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def append_redacted_jsonl(path: Path, payload: Any) -> None:

@@ -101,6 +101,7 @@ def state_from_task_card(
     *,
     accepted_checkpoint_sha: str | None = None,
 ) -> AgentState:
+    planning_run = card.planning_run is not None
     requires_human = (
         card.handoff_status == "handoff_blocked"
         or card.status == "needs_human"
@@ -116,8 +117,18 @@ def state_from_task_card(
         run_id=run_id,
         task_id=card.task_id,
         repository_id=repository_scope(repo),
-        run_kind="change" if card.change_run is not None else "legacy",
-        phase="needs_human" if requires_human else "ready",
+        run_kind=(
+            "change"
+            if card.change_run is not None or planning_run
+            else "legacy"
+        ),
+        phase=(
+            "needs_human"
+            if requires_human
+            else "planning"
+            if planning_run
+            else "ready"
+        ),
         goal_revision=card.plan.goal_revision,
         plan_revision=card.plan.plan_revision,
         approved_plan_digest=card.plan.approved_digest,
@@ -136,7 +147,11 @@ def state_from_task_card(
             if card.change_run is not None
             else None
         ),
-        accepted_checkpoint_sha=accepted_checkpoint_sha,
+        accepted_checkpoint_sha=(
+            accepted_checkpoint_sha
+            if card.change_run is not None or planning_run
+            else None
+        ),
         current_work_item=card.current_work_item,
         workspace_fingerprint=snapshot.fingerprint,
         allowed_actions=allowed_actions,

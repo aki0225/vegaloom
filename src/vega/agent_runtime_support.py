@@ -13,11 +13,8 @@ from .agent_context import (
     compile_task_brief,
     task_brief_manifest,
 )
-from .agent_change_handoff import prepare_resumed_change_workspace
 from .agent_change_run import (
-    change_run_metadata,
     load_change_run_context,
-    save_change_run_artifacts,
     task_brief_worker_verification,
 )
 from .agent_contract import (
@@ -39,35 +36,22 @@ from .agent_persistence import (
 )
 from .agent_resume_validation import (
     current_branch as current_branch,
-    require_resume_repository_identity,
-    validate_resume_workspace,
 )
 from .agent_repository_binding import (
     bound_repo as _bound_repo,
     capture_bound_workspace as _capture_bound_workspace,
     load_run_metadata as _load_run_metadata,
-    require_git_root,
+    require_git_root as require_git_root,
     validate_run_repository_binding,
-    write_run_metadata,
+    write_run_metadata as write_run_metadata,
 )
 from .agent_repository_guard import (
     prepare_terminal_writer_claim_release,
-    release_task_card_resume_claim,
     release_terminal_writer_claim,
 )
-from .agent_run import AgentRun
-from .agent_runtime_logic import update_state
 from .agent_status_card import write_status_card as _write_status_card
-from .agent_task_card import task_card_content_digest
-from .agent_task_card_resume import (
-    create_claimed_resume_run,
-    load_task_card_with_content,
-    resolve_resume_task,
-    state_from_task_card,
-)
 from .redaction import write_redacted_json, write_redacted_text
 from .run_utils import resolve_run_dir
-from .workspace_inventory import prepare_verification_temp_root
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
@@ -92,7 +76,9 @@ def load_agent_bundle(
         raise ValueError(f"Agent run 无法恢复：{run_dir.name}") from exc
     if state.run_id != run_dir.name or plan.task_id != state.task_id:
         raise ValueError("Agent run 身份绑定不一致")
-    if state.phase not in {"planning", "awaiting_approval"}:
+    if (
+        state.run_kind == "legacy" or state.contract_revision is not None
+    ) and state.phase not in {"planning", "awaiting_approval"}:
         if (
             state.goal_revision != plan.goal_revision
             or state.plan_revision != plan.plan_revision
@@ -111,180 +97,6 @@ def save_agent_plan(run_dir: Path, plan: AgentPlan) -> None:
 
 def bound_repo(run_dir: Path) -> Path:
     return _bound_repo(run_dir)
-
-
-def resume_agent_task_card(
-    workspace: Path,
-    repo: Path,
-    task_path: Path | None = None,
-) -> AgentRun:
-    repo_root = require_git_root(repo)
-    resolved_task, relative_task = resolve_resume_task(repo_root, task_path)
-    card, task_card_content = load_task_card_with_content(resolved_task)
-    task_card_sha256 = task_card_content_digest(task_card_content)
-    # 新机器不会携带空的运行目录；先重建 Vega 自己的固定根路径，再冻结新现场。
-    prepare_verification_temp_root(repo_root)
-    snapshot = validate_resume_workspace(
-        repo_root,
-        card,
-        relative_task=relative_task,
-        task_card_content=task_card_content,
-    )
-    require_resume_repository_identity(
-        repo_root,
-        expected_head_sha=snapshot.head_sha,
-        expected_branch=card.branch,
-    )
-    run_id, run_dir = create_claimed_resume_run(
-        workspace,
-        repo_root,
-        task_card_sha256=task_card_sha256,
-        task_card=relative_task,
-    )
-    published = False
-    try:
-        capsule = card.resume_capsule
-        changed_files = list(capsule.changed_files) if capsule else []
-        change_workspace = (
-            prepare_resumed_change_workspace(
-                workspace,
-                repo_root,
-                run_id=run_id,
-                card=card,
-                relative_task=relative_task,
-                handoff_revision=snapshot.head_sha,
-            )
-            if card.change_run is not None
-            else None
-        )
-        bound_repository = (
-            change_workspace.handle.worktree_path
-            if change_workspace is not None
-            else repo_root
-        )
-        current_snapshot = (
-            change_workspace.snapshot
-            if change_workspace is not None
-            else snapshot
-        )
-        if change_workspace is not None:
-            prepare_verification_temp_root(bound_repository)
-        state = state_from_task_card(
-            run_id,
-            bound_repository,
-            card,
-            current_snapshot,
-            accepted_checkpoint_sha=(
-                change_workspace.accepted_checkpoint_sha
-                if change_workspace is not None
-                else None
-            ),
-        )
-        resumed_failed_attempts = list(dict.fromkeys(
-            [*card.failed_attempts, *(capsule.failed_attempts if capsule else [])]
-        ))
-        comparison_base = (
-            change_workspace.accepted_checkpoint_sha
-            if change_workspace is not None
-            else (
-                capsule.comparison_base_revision
-                or card.handoff_base_revision
-            )
-            if capsule is not None and changed_files
-            else snapshot.head_sha
-        )
-        write_run_metadata(
-            run_dir,
-            bound_repository,
-            (
-                card.base_revision
-                if change_workspace is not None
-                else snapshot.head_sha
-            ),
-            task_card=relative_task,
-            task_card_sha256=task_card_sha256,
-            comparison_base_revision=comparison_base,
-            comparison_paths=[] if change_workspace is not None else changed_files,
-            change_run=(
-                change_run_metadata(change_workspace.handle)
-                if change_workspace is not None
-                else None
-            ),
-        )
-        if card.change_run is not None:
-            save_change_run_artifacts(
-                run_dir,
-                card.change_run.contract,
-                card.change_run.execution_plan,
-            )
-        save_agent_plan(run_dir, card.plan)
-        checkpoint = write_checkpoint(
-            run_dir,
-            state,
-            current_snapshot,
-            reason="已从 Git 跟踪的 Resume Capsule 建立新本机 run",
-            status="safe" if card.handoff_status == "handoff_ready" else "blocked",
-            pending_actions=list(state.allowed_actions),
-            evidence_refs=[relative_task],
-            failed_attempts=resumed_failed_attempts,
-            external_side_effects=capsule.external_side_effects if capsule else "unknown",
-        )
-        state = update_state(
-            state,
-            latest_checkpoint_id=checkpoint.checkpoint_id,
-            state_version=state.state_version + 1,
-        )
-        confirmed_facts = list(
-            dict.fromkeys(
-                [
-                    *card.plan.observed_facts,
-                    *(capsule.confirmed_facts if capsule else []),
-                ]
-            )
-        )
-        write_task_brief(
-            run_dir,
-            card.plan,
-            state,
-            checkpoint,
-            confirmed_facts=confirmed_facts,
-            failed_attempts=resumed_failed_attempts,
-            artifact_refs=[relative_task],
-        )
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="task_card_resumed",
-            state=state,
-            observation_summary="旧门禁已作为历史证据，当前现场已重新对账",
-            artifact_refs=[relative_task, "task-brief.md"],
-        )
-        write_status_card(
-            run_dir,
-            state,
-            card.plan,
-            checkpoint=checkpoint,
-            next_step=(
-                capsule.next_step
-                if capsule is not None
-                else "人工确认当前 Work Item 后继续"
-            ),
-        )
-        save_agent_state(run_dir / "agent-state.json", state)
-        validated_dir, validated_state, _, _ = load_agent_bundle(
-            workspace,
-            run_id,
-        )
-        if validated_dir != run_dir or validated_state != state:
-            raise ValueError("恢复后的 Agent run 自校验结果不一致")
-        published = True
-        return AgentRun(run_dir=run_dir, state=state, plan=card.plan)
-    finally:
-        if not published:
-            release_task_card_resume_claim(
-                repo_root,
-                task_card_sha256=task_card_sha256,
-                run_id=run_id,
-            )
 
 
 def write_checkpoint(

@@ -1,7 +1,7 @@
 # 架构
 
-> 本文描述 v0.3.x 已发布架构。v0.3.1 没有改变 v0.3.0 的 Runtime 结构。
-> 已批准但尚未实现的自然语言 Planning 与 Contract Compiler 见
+> 本文描述 v0.3.x 已发布架构，以及主线中已实现的只读 Planning Proposal。
+> Contract Compiler 与后续有界自动批准见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。
 
@@ -11,9 +11,8 @@ Vega v0.3.x 使用一条 ChangeRun：
 
 ```text
 Host Session
-  ├─ 只读调查
-  ├─ Change Contract
-  └─ Execution Plan
+  ├─ 自然语言目标 -> 只读 Planning Proposal
+  └─ Change Contract + Execution Plan
           │
           ▼
   Supervisor State Machine
@@ -55,6 +54,12 @@ planning
 
 状态机只根据当前 Agent State、Contract、Plan 和机器 Observation 路由。Provider 输出不能直接
 写成功终态。
+
+### Planning Proposal
+
+`start --text` 在同一条 ChangeRun 中建立只读 Planning 阶段。Planner 绑定固定 Git revision，
+输出事实引用、假设、未决问题、建议范围和验证建议；Workspace 发生变化、引用失效或 Provider
+终态不可信时停止。Proposal 只是 Contract Compiler 的输入，不拥有批准或执行权限。
 
 ### Change Contract 与 Execution Plan
 

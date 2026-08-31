@@ -29,6 +29,7 @@ from .agent_contract import (
 )
 from .agent_handoff_digest import WorkspaceDigestKind
 from .agent_handoff_safety import TaskCardError, assert_portable_task_card_payload
+from .agent_planning import PlanningProposal
 from .redaction import redact_value
 
 
@@ -77,6 +78,19 @@ class ChangeRunResume(StrictAgentModel):
             raise ValueError("ChangeRun Resume 必须携带当前已批准 Contract")
         if self.historical_candidate_sha == self.accepted_checkpoint_sha:
             raise ValueError("历史 Candidate 不能与 Accepted Checkpoint 相同")
+        return self
+
+
+class PlanningRunResume(StrictAgentModel):
+    """跨机器恢复未编译 Planning ChangeRun 所需的只读提案。"""
+
+    source_revision: GitOidText
+    proposal: PlanningProposal
+
+    @model_validator(mode="after")
+    def validate_planning_run(self) -> PlanningRunResume:
+        if self.proposal.source_revision != self.source_revision:
+            raise ValueError("Planning Resume 与 Proposal 的 source revision 不一致")
         return self
 
 
@@ -149,6 +163,7 @@ class AgentTaskCard(StrictAgentModel):
     verification_notes: list[NonEmptyText] = Field(default_factory=list)
     resume_capsule: ResumeCapsule | None = None
     change_run: ChangeRunResume | None = None
+    planning_run: PlanningRunResume | None = None
 
     @field_validator("branch")
     @classmethod
@@ -192,8 +207,12 @@ class AgentTaskCard(StrictAgentModel):
             item.work_item_id for item in self.plan.work_items
         }:
             raise ValueError("current_work_item 不属于当前 Plan")
+        if self.change_run is not None and self.planning_run is not None:
+            raise ValueError("Task Card 不能同时携带 Planning 与已编译 ChangeRun Resume")
         if self.change_run is not None:
             _validate_task_card_change_run(self)
+        if self.planning_run is not None:
+            _validate_task_card_planning_run(self)
 
         if self.handoff_status == "none":
             _validate_empty_handoff(self)
@@ -210,6 +229,7 @@ def _validate_empty_handoff(card: AgentTaskCard) -> None:
         card.last_handoff_checkpoint,
         card.resume_capsule,
         card.change_run,
+        card.planning_run,
     )
     if card.handoff_sequence != 0 or any(value is not None for value in handoff_values):
         raise ValueError("无交接状态不能包含 Resume Capsule 或交接绑定")
@@ -390,6 +410,32 @@ def _validate_task_card_change_run(card: AgentTaskCard) -> None:
     )
     if comparison_base != change_run.accepted_checkpoint_sha:
         raise ValueError("ChangeRun Resume 的比较基线必须是 Accepted Checkpoint")
+
+
+def _validate_task_card_planning_run(card: AgentTaskCard) -> None:
+    assert card.planning_run is not None
+    proposal = card.planning_run.proposal
+    if card.status != "planning":
+        raise ValueError("Planning Task Card 必须保持 planning 状态")
+    if card.current_work_item != "WI-PLANNING":
+        raise ValueError("Planning Task Card 必须绑定 WI-PLANNING")
+    if card.plan.approved or card.plan.approval_is_current():
+        raise ValueError("Planning Task Card 不能伪造已批准 Plan")
+    if proposal.task_id != card.task_id or proposal.user_goal != card.plan.user_goal:
+        raise ValueError("Planning Task Card 与 Proposal 的任务身份不一致")
+    if card.base_revision != proposal.source_revision:
+        raise ValueError("Planning Task Card 基线必须等于 Proposal source revision")
+    if (
+        card.plan.observed_facts
+        != [fact.statement for fact in proposal.observed_facts]
+        or card.plan.hypotheses != proposal.hypotheses
+        or card.plan.unresolved_decisions
+        != [
+            *proposal.unresolved_questions,
+            "Planning Proposal 尚未经过 Contract Compiler",
+        ]
+    ):
+        raise ValueError("Planning Task Card 的 Plan 投影与 Proposal 不一致")
 
 
 def _parse_parts(content: str) -> tuple[dict[str, object], dict[str, object]]:

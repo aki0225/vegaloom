@@ -137,6 +137,45 @@ def prepare_resumed_change_workspace(
     )
 
 
+def prepare_resumed_planning_workspace(
+    workspace: Path,
+    source_repo: Path,
+    *,
+    run_id: str,
+    card: AgentTaskCard,
+    relative_task: str,
+    handoff_revision: str,
+) -> ResumedChangeWorkspace:
+    """在新机器按 Proposal 的固定 revision 重建只读 Planning Worktree。"""
+
+    planning_run = card.planning_run
+    if planning_run is None:
+        raise ValueError("Task Card 缺少 Planning Resume")
+    source_revision = planning_run.source_revision
+    handle = prepare_managed_worktree(
+        source_repo,
+        workspace_root=change_worktree_root(workspace, source_repo),
+        run_id=run_id,
+        base_revision=source_revision,
+    )
+    resumed_checkpoint = create_resume_checkpoint(
+        handle,
+        source_revision=handoff_revision,
+        task_card_path=relative_task,
+    )
+    snapshot = capture_review_workspace(
+        handle.worktree_path,
+        comparison_base_sha=resumed_checkpoint,
+    )
+    if snapshot.head_sha != resumed_checkpoint or snapshot.changed_files:
+        raise ValueError("恢复后的 Planning Worktree 与恢复 Checkpoint 不一致")
+    return ResumedChangeWorkspace(
+        handle=handle,
+        snapshot=snapshot,
+        accepted_checkpoint_sha=resumed_checkpoint,
+    )
+
+
 def _change_run_resume(
     context: ChangeRunContext,
     state: AgentState,

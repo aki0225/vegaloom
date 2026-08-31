@@ -27,12 +27,18 @@ def validate_change_state_bindings(state: ChangeStateView) -> None:
         if any(value is not None for value in change_fields):
             raise ValueError("legacy Agent State 不能携带 ChangeRun 字段")
         return
-    if (
-        state.contract_revision is None
-        or state.execution_plan_revision is None
-        or state.accepted_checkpoint_sha is None
-    ):
-        raise ValueError("ChangeRun State 缺少合同、执行计划或 Checkpoint 绑定")
+    if state.accepted_checkpoint_sha is None:
+        raise ValueError("ChangeRun State 缺少 Accepted Checkpoint")
+    if state.contract_revision is None or state.execution_plan_revision is None:
+        if (
+            state.contract_revision is not None
+            or state.execution_plan_revision is not None
+            or state.phase not in {"planning", "needs_human", "stopped"}
+            or state.approved_contract_digest is not None
+            or state.active_candidate_sha is not None
+        ):
+            raise ValueError("未编译的 Planning ChangeRun 携带了不可执行合同状态")
+        return
     if (
         state.phase not in {"planning", "awaiting_approval"}
         and state.approved_contract_digest is None

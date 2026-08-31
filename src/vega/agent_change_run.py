@@ -224,6 +224,10 @@ def load_change_run_context(
 ) -> ChangeRunContext | None:
     if state.run_kind == "legacy":
         return None
+    if state.contract_revision is None or state.execution_plan_revision is None:
+        if state.phase not in {"planning", "needs_human", "stopped"}:
+            raise ValueError("ChangeRun 在可执行阶段缺少合同或执行计划")
+        return None
     try:
         contract = ChangeContract.model_validate_json(
             (run_dir / CHANGE_CONTRACT_ARTIFACT).read_text(encoding="utf-8")
