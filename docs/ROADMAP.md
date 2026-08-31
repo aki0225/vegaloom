@@ -7,6 +7,23 @@
 
 ## 最近一次路线决策
 
+2026-08-31，Vega 批准“有界自主执行 V1”，补齐自然语言目标到现有 ChangeRun 之间的入口：
+
+1. Coding Agent 先在只读 Workspace 中调查，输出带来源引用的 Planning Proposal；
+2. 确定性 Contract Compiler 把 Proposal、仓库规则和 `.vega.yaml` 编译为未批准的
+   Change Contract 与 Execution Plan；
+3. 默认由人工批准。仓库可以预先授权低风险任务，但必须同时显式启用策略和 `bounded` 模式；
+4. Planner 与 Worker 默认复用同一 Provider Thread；真实验证不可靠时回退到独立 Worker
+   Thread，不为会话复用降低权限边界；
+5. Reviewer 保持独立只读 Thread，现有 Candidate、Verification、Risk、Repair/Replan、
+   Finish 和最终人工 Git 交付边界不变；
+6. `v0.4.0` 先完成 Codex 真实验收，再按同一 Provider Session 合同接入 Claude Code；
+7. 不增加 Planner Runtime、第二套状态机、Memory Engine、LangGraph 或自动 Git 交付。
+
+实施事项已追加为 `AUTONOMY-01`～`AUTONOMY-05`。详细边界见
+[`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)，当前执行项以
+[`CURRENT.md`](CURRENT.md) 为准。
+
 2026-08-28，Vega 把已验证的 Bounded Change Loop 提升为唯一公共 Agent 入口：
 
 1. 使用 Codex App Server 保存 Worker Thread；Repair 和后续 Work Item 不再依赖人工转贴上下文；
@@ -102,7 +119,7 @@ Verification/Risk/Reviewer/Finish 和确定性状态机推进有限 Work Item。
 [`ASSURANCE-CONTRACT-CANDIDATE.md`](ASSURANCE-CONTRACT-CANDIDATE.md) 为准，历史验证证据
 以 [`../eval/assurance-validation.md`](../eval/assurance-validation.md) 为准。本文不复制这些
 文档的完整内容。当前稳定版本见
-[`RELEASE-NOTES-0.3.0.md`](RELEASE-NOTES-0.3.0.md) 与
+[`RELEASE-NOTES-0.3.1.md`](RELEASE-NOTES-0.3.1.md) 与
 [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)；V1 的历史实施计划见
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)，文档状态见
 [`README.md`](README.md)。

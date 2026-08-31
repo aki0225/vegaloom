@@ -56,7 +56,7 @@ python -m pytest -q *> .local-validation\pytest.log
 ruff check src tests *> .local-validation\ruff.log
 ```
 
-这份规范只约束文件位置，不改变 v0.1 的运行语义，也不要求把本地运行 artifacts
+这份规范只约束文件位置，不改变当前公开运行语义，也不要求把本地运行 artifacts
 提交到 Git。
 
 ## 本地产物保留与清理

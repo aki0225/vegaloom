@@ -1,5 +1,9 @@
 # v0.3.0 范围
 
+> 这是 v0.3.0 发布时的冻结能力快照。v0.3.1 是维护版本，没有新增 Runtime 能力。
+> 当前产品边界见 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md)，已批准的后续计划见
+> [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)。
+
 ## 产品
 
 - `Vega`：产品名；

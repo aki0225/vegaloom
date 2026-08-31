@@ -1,5 +1,9 @@
 # 持久交互式 Agent V1
 
+> 本文是 v0.3.0 的冻结实施记录，不是当前待办列表。当前状态见 [`CURRENT.md`](CURRENT.md)，
+> 后续自然语言 Planning 计划见
+> [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)。
+
 ## 目标
 
 Vega v0.3.0 使用一条公开流程：

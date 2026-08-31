@@ -11,13 +11,14 @@
 | 当前事项与下一项 | [`CURRENT.md`](CURRENT.md) | 由机器计划和事件账本生成的当前状态 |
 | 演进事项与验收 | [`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json) | 稳定事项、依赖和要求检查 |
 | 路线决策与历史 | [`ROADMAP.md`](ROADMAP.md) | 为什么选择或停止某条路线 |
+| 已批准的下一阶段 | [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md) | 自然语言 Planning、Contract Compiler 和有界批准 |
 | 已完成的治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 三轮治理范围、Dogfood 和验收结果 |
 | 完整使用流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | ChangeRun、交互、恢复和交付 |
 | 调查和计划协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | 修改前调查、事实与假设、人工确认 |
-| Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | ChangeRun、Provider Session、Core 与数据流 |
+| Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | v0.3.x ChangeRun、Provider Session、Core 与数据流 |
 | Supervisor 状态合同 | [`SUPERVISOR-AGENT-STATE-AUTHORITY.md`](SUPERVISOR-AGENT-STATE-AUTHORITY.md) | 状态、恢复和事实权威 |
-| 当前版本能力 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 当前公开能力与明确不做的范围 |
-| 持久交互式 Agent 决策 | [`PERSISTENT-INTERACTIVE-AGENT-V1.md`](PERSISTENT-INTERACTIVE-AGENT-V1.md) | v0.3.0 实施边界 |
+| v0.3.0 能力快照 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 已发布范围与当时明确不做的内容 |
+| v0.3.0 实施记录 | [`PERSISTENT-INTERACTIVE-AGENT-V1.md`](PERSISTENT-INTERACTIVE-AGENT-V1.md) | 持久交互式 Agent 的冻结决策 |
 | 工作区文件规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 临时文件、运行产物和清理边界 |
 
 ## 发布

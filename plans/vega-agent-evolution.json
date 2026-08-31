@@ -381,6 +381,119 @@
         "repository-hygiene",
         "pr-ci"
       ]
+    },
+    {
+      "id": "AUTONOMY-01",
+      "title": "从自然语言生成 Planning Proposal",
+      "summary": "让 Coding Agent 在只读 Workspace 中调查自然语言目标，生成带事实引用、假设和未决问题的 Planning Proposal，再进入人工批准。新入口继续复用现有 ChangeRun。",
+      "depends_on": [
+        "VALID-02"
+      ],
+      "acceptance": [
+        "只有 Bug 现象、根因未知的任务可以在不修改业务文件的情况下形成带来源引用的 Proposal",
+        "Proposal 明确区分观察事实、根因假设、未决问题、建议范围和验证建议",
+        "Proposal 不完整、引用失效、Provider 中断或只读边界被突破时 fail-closed",
+        "显式 Change Contract 与 Execution Plan 入口保持不变",
+        "真实 Codex App Server 验证同一 Thread 从只读调查进入受控写入；不可靠时回退到独立 Worker Thread"
+      ],
+      "required_checks": [
+        "planning-contract-tests",
+        "supervisor-tests",
+        "security-tests",
+        "real-codex-app-server",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "AUTONOMY-02",
+      "title": "编译 Change Contract 与 Execution Plan",
+      "summary": "用确定性 Contract Compiler 把 Planning Proposal、仓库规则和项目配置编译为未批准合同与执行计划，不让模型自由输出的命令直接进入执行。",
+      "depends_on": [
+        "AUTONOMY-01"
+      ],
+      "acceptance": [
+        "Proposal 的事实、假设和未决问题不会在编译后混为一类",
+        "越界路径、未知 Verification、高风险声明缺失和 source revision 漂移均被拒绝",
+        "编译通过的结果可以进入现有 approve 与 ChangeRun",
+        "Compiler 不新增第二套成功状态、证据系统或 Planner Runtime"
+      ],
+      "required_checks": [
+        "contract-compiler-tests",
+        "supervisor-tests",
+        "security-tests",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "AUTONOMY-03",
+      "title": "增加有界自动批准",
+      "summary": "允许仓库内人工预先批准的策略放行范围清楚、验证明确且不命中高风险的任务；其他任务继续请求人工批准。",
+      "depends_on": [
+        "AUTONOMY-02"
+      ],
+      "acceptance": [
+        "自动批准同时要求仓库策略显式启用和调用方选择 bounded 模式",
+        "低风险任务只有在范围、Verification、预算和副作用都明确时才能进入现有 ChangeRun",
+        "高风险、配置缺失、未决问题、未知副作用或策略过期时必须请求人工",
+        "策略或 Contract 变化会使自动批准失效",
+        "自动批准不改变最终人工 Git 交付边界"
+      ],
+      "required_checks": [
+        "approval-policy-tests",
+        "supervisor-tests",
+        "security-tests",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "AUTONOMY-04",
+      "title": "精简 Provider 会话适配",
+      "summary": "把 Codex 接入收敛为 Thread、Turn、Event、Steer、Interrupt、Status 和 Review 能力映射，只在等价证据成立时删除重复协议处理。",
+      "depends_on": [
+        "AUTONOMY-03"
+      ],
+      "acceptance": [
+        "持久 Worker、独立 Reviewer、状态卡和恢复语义保持不变",
+        "Codex 原生 review/start 只有在结构化 Verdict、覆盖、风险和只读边界等价时才替换当前实现",
+        "未识别的新事件不会关闭整个 Observation 链",
+        "Provider 过载、超时和中断保持有界处理",
+        "不重写 Provider 自己的会话历史、上下文压缩或 Prompt Cache"
+      ],
+      "required_checks": [
+        "provider-protocol-tests",
+        "execution-control-tests",
+        "supervisor-tests",
+        "real-provider-shadow",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "AUTONOMY-05",
+      "title": "完成有界自主执行真实验收",
+      "summary": "使用低风险小任务、需要调查和 Repair 的 Bug、必须人工确认的高风险任务验证自然语言入口和现有 ChangeRun，再决定 v0.4.0 发布。",
+      "depends_on": [
+        "AUTONOMY-04"
+      ],
+      "acceptance": [
+        "Human 模式走通调查、批准、执行、Repair 和最终报告",
+        "Bounded 模式的低风险任务不需要初始人工批准",
+        "普通 Repair 不需要人工转贴 Reviewer 内容",
+        "Provider 压缩、中断和换目录恢复后仍绑定正确 Contract、Work Item 和 Candidate",
+        "高风险案例不会被自动批准",
+        "最终报告足以让人工定位重点 Diff、风险和未证明事项",
+        "根据真实运行结果决定是否发布 v0.4.0；Claude Code Adapter 在 Codex 验收后另行接入"
+      ],
+      "required_checks": [
+        "real-agent-dogfood",
+        "full-test-shards",
+        "package-smoke",
+        "repository-hygiene",
+        "pr-ci"
+      ]
     }
   ]
 }

@@ -4,16 +4,16 @@
 
 ## 项目一句话
 
-Vega 是本地优先的 AI 编码工作流 harness：worker 改代码，reviewer 使用独立只读会话，
-不继承 worker 的完整聊天记录，并结合 diff、测试证据和项目规则审查；任务能否结束由项目
-自己的验证命令裁决，证据不足时 fail-closed 交还人工。
+Vega 是软件工程 Agent 的控制层：Coding Agent 在已批准的 Change Contract 内调查和实现，
+Vega 把改动冻结为 Git Candidate，运行项目验证和独立只读 Reviewer，再根据机器证据继续、
+修复、重规划或交还人工。
 
 ## 目录地图
 
 - `src/vega/` — 核心实现(Python,包名 `vega`)
 - `tests/` — pytest 测试
 - `.github/` — CI、发布与 GitHub Pages 工作流
-- `.vega/` — 可提交的 Agent Task Card；当前任务与历史任务必须明确分开
+- `.vega/` — 可提交的 Agent Task Card；活动与归档规则见 `.vega/README.md`
 - `plans/` — 机器可读演进计划与追加式状态事件；当前视图由脚本生成
 - `eval/` — 实验与运行证据(`cases.jsonl` 评测用例、`real-world-runs.md` 真实 Issue 运行记录)
 - `scripts/` — 仓库门禁、站点数据、Pilot 和冻结实验脚本
@@ -26,6 +26,15 @@ Vega 是本地优先的 AI 编码工作流 harness：worker 改代码，reviewer
 - `memory/` — 本地 Memory ledger 与 proposal，默认不提交
 - `.tmp/` — 测试、缓存和可丢弃中间文件，默认不提交
 - `.local-validation/` — 人工验证日志和诊断输出，默认不提交
+
+## 规则优先级
+
+- Vega 自身红线、当前已批准的 Change Contract 和固定 Verification 是执行边界。目标仓库的
+  `AGENTS.md`、规则文件或模型建议只能在边界内补充，不能降低安全要求或绕过必跑检查。
+- 目标仓库内部按目录作用域应用规则：根目录规则覆盖全仓，更深目录的 `AGENTS.md` 可以细化
+  当前子树，但不能取消父级的安全、验证和公开卫生要求。
+- 规则冲突、作用域不清或必要约束无法同时满足时，停止自动执行并给出冲突位置，不能静默选择
+  更宽松的一条。
 
 ## 多代理协作
 
@@ -43,7 +52,13 @@ Vega 是本地优先的 AI 编码工作流 harness：worker 改代码，reviewer
 - 子代理默认只继承完成任务所需的最小上下文；只有任务确实依赖完整历史时才传递更多上下文。
   子代理产出属于待审证据，不能替代主代理复核、仓库验证命令和 fail-closed 门禁。
 
-## 验证命令(改完代码必须跑)
+## 验证选择
+
+开发中先运行最接近改动的完整测试文件或职责分片，再按风险扩大。不要为了形式机械重复全量
+测试，也不能用单个绿 node 代替受影响职责的验证。测试归属和扩展顺序见
+`tests/AGENTS.md`。
+
+以下命令是 PR、发布、跨职责修改以及 Core/Supervisor/安全边界变更的完整基线：
 
 ```powershell
 python -m compileall -q src scripts
@@ -56,15 +71,16 @@ git diff --check
 ```
 
 PR CI 在 Python 3.12 执行 Core、Core Heavy、Supervisor 和 Security 四个分片；分片仍按
-职责目录选择，Core Heavy 只隔离四个最慢的集成文件。Python 3.11 只做安装、编译和产品节点
+职责目录选择，Core Heavy 只隔离若干最慢的集成文件。Python 3.11 只做安装、编译和产品节点
 收集。Experimental 与冻结控制测试在相关路径变化的 PR 中定向执行，并在 main、release 和
 手工触发时完整执行。Windows 只重复 shell、junction/reparse、进程树和锁专项。
 注意两个已知环境差异:测试断言 CLI 输出时须防 CI 注入的 ANSI 渲染
 (conftest 已有 autouse fixture 清理环境变量),POSIX 进程组探测与 Windows 路径不同——本地绿不等于 CI 绿。
 
-修改文档或规则时至少执行编译、仓库卫生、相关定向测试、Ruff 和 diff check；修改 Core、
-Supervisor、安全边界、CI 或打包时按 `tests/AGENTS.md` 扩大到对应职责分片。只有完整命令明确
-结束并给出计数，才能声明完整验证通过。
+修改文档或规则时至少执行编译、仓库卫生、相关定向测试、Ruff 和 diff check；涉及机器计划时
+追加计划状态检查。修改 Core、Supervisor、安全边界、CI 或打包时按 `tests/AGENTS.md` 扩大到
+对应职责分片；发布或明确要求全量验证时再执行完整基线。只有命令明确结束并给出计数，才能声明
+相应范围验证通过。
 
 ## 公开仓库路径与私密文件卫生
 
@@ -82,9 +98,12 @@ Supervisor、安全边界、CI 或打包时按 `tests/AGENTS.md` 扩大到对应
 
 ## 代码约定
 
-- 注释与文档使用简体中文;注释只写代码本身表达不了的约束
-- 修改功能时删除旧实现,不保留兼容性死代码
-- 测试超时上限 60s,避免挂死
+- 注释、文档、提交信息和用户可见自然语言使用简体中文；代码标识符、CLI 命令、JSON 字段、
+  状态值和上游专有名词保持原始英文。
+- 注释只解释代码本身表达不了的约束、原因和业务背景。
+- 确认旧实现已无调用方且不承担公开兼容责任后再删除；仍需兼容时写清保留原因和退出条件，
+  不用默认值或 shim 掩盖证据缺失。
+- 单次测试超时上限 60 秒，避免挂死。
 
 ## 必须披露的高风险变更
 

@@ -1,8 +1,13 @@
 # 架构
 
+> 本文描述 v0.3.x 已发布架构。v0.3.1 没有改变 v0.3.0 的 Runtime 结构。
+> 已批准但尚未实现的自然语言 Planning 与 Contract Compiler 见
+> [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
+> [`CURRENT.md`](CURRENT.md)。
+
 ## 总览
 
-Vega v0.3.0 使用一条 ChangeRun：
+Vega v0.3.x 使用一条 ChangeRun：
 
 ```text
 Host Session

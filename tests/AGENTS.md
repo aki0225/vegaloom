@@ -17,6 +17,10 @@
 每个测试文件只归一个职责目录。跨多个领域时，归入拥有最终裁决或最高风险合同的目录；不要复制同一
 场景到多个目录，也不要从其他测试模块导入 helper。
 
+Planning Proposal、Contract Compiler、批准来源和 Provider Thread 切换属于 `supervisor/`；
+只有路径越界、规则降级、写审隔离或成功语义的负向合同进入 `security/`。新事项只保护公开
+Schema、拒绝路径和恢复边界，不为字段转发、私有 helper 或上游 Provider 内部行为重复写测试。
+
 ## 测试选择
 
 - 先运行最接近改动的完整 node id 或测试文件，再扩大到受影响职责目录。
