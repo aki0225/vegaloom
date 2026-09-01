@@ -1,7 +1,7 @@
 # 架构
 
-> 本文描述 v0.3.x 已发布架构，以及主线中已实现的只读 Planning Proposal 和
-> Contract Compiler。后续有界自动批准见
+> 本文描述 v0.3.x 已发布架构，以及主线中已实现的只读 Planning Proposal、Contract Compiler
+> 和有界自动批准。演进计划见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。
 
@@ -75,6 +75,18 @@ planning
 编译通过后状态进入 `awaiting_approval`。拒绝结果进入 `needs_human`，不启动 Worker，也不创建
 第二套状态机或成功语义。AGENTS.md 等自由文本规则已绑定在 Planning 上下文中；机器强制的
 路径、验证和风险仍以 `.vega.yaml` 为准。
+
+### 批准策略
+
+`approval_policy_config.py` 定义仓库内的 bounded 策略，
+`agent_approval_policy.py` 负责纯判断，`agent_approval_runtime.py` 负责把结果接回现有
+ChangeRun。
+
+默认仍由 `vega approve` 记录人工批准。`vega run --approval bounded` 只有在仓库策略已启用，
+且范围、Verification、预算、副作用和风险都满足策略时，才写入带策略摘要的批准记录。拒绝时
+状态保持 `awaiting_approval`，Trace 和状态卡给出原因。
+
+批准后的每次可执行恢复都会重新检查策略和 Contract 绑定。失效的批准不能继续启动 Worker。
 
 ### Change Contract 与 Execution Plan
 

@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 
 from .agent_contract import (
+    GitOidText,
     NonEmptyText,
     Sha256Text,
     StrictAgentModel,
@@ -17,6 +18,19 @@ from .scope_path_matching import path_matches_pattern, validate_scope_pattern
 
 
 RevisionDecision = Literal["unchanged", "auto_apply", "requires_approval"]
+ApprovalSource = Literal["human", "bounded"]
+CHANGE_APPROVAL_METADATA_FIELDS = frozenset(
+    {
+        "approved",
+        "approved_at",
+        "approved_by",
+        "approved_digest",
+        "approval_source",
+        "approval_policy_id",
+        "approval_policy_digest",
+        "approval_policy_revision",
+    }
+)
 
 
 class ChangeSideEffectPolicy(StrictAgentModel):
@@ -85,6 +99,10 @@ class ChangeContract(StrictAgentModel):
     approved_at: str | None = None
     approved_by: str | None = None
     approved_digest: Sha256Text | None = None
+    approval_source: ApprovalSource | None = None
+    approval_policy_id: NonEmptyText | None = None
+    approval_policy_digest: Sha256Text | None = None
+    approval_policy_revision: GitOidText | None = None
 
     @field_validator("authorized_risk_reviews")
     @classmethod
@@ -98,8 +116,25 @@ class ChangeContract(StrictAgentModel):
         approval_fields = (self.approved_at, self.approved_by, self.approved_digest)
         if self.approved and any(value is None for value in approval_fields):
             raise ValueError("已批准合同必须包含批准时间、批准人和批准摘要")
-        if not self.approved and any(value is not None for value in approval_fields):
+        policy_fields = (
+            self.approval_policy_id,
+            self.approval_policy_digest,
+            self.approval_policy_revision,
+        )
+        if not self.approved and (
+            any(value is not None for value in approval_fields)
+            or self.approval_source is not None
+            or any(value is not None for value in policy_fields)
+        ):
             raise ValueError("未批准合同不能包含批准记录")
+        if self.approval_source == "bounded" and any(
+            value is None for value in policy_fields
+        ):
+            raise ValueError("bounded 批准必须绑定策略 ID、摘要和 Git revision")
+        if self.approval_source != "bounded" and any(
+            value is not None for value in policy_fields
+        ):
+            raise ValueError("只有 bounded 批准可以包含策略绑定")
         return self
 
     def semantic_content(self) -> dict[str, object]:
@@ -107,19 +142,13 @@ class ChangeContract(StrictAgentModel):
 
         return self.model_dump(
             mode="json",
-            exclude={
-                "contract_revision",
-                "approved",
-                "approved_at",
-                "approved_by",
-                "approved_digest",
-            },
+            exclude={"contract_revision", *CHANGE_APPROVAL_METADATA_FIELDS},
         )
 
     def content_for_approval(self) -> dict[str, object]:
         return self.model_dump(
             mode="json",
-            exclude={"approved", "approved_at", "approved_by", "approved_digest"},
+            exclude=CHANGE_APPROVAL_METADATA_FIELDS,
         )
 
     def expected_approval_digest(self) -> str:
@@ -193,9 +222,18 @@ def approve_change_contract(
     *,
     actor: str,
     approved_at: str | None = None,
+    source: ApprovalSource = "human",
+    policy_id: str | None = None,
+    policy_digest: str | None = None,
+    policy_revision: str | None = None,
 ) -> ChangeContract:
     if not actor.strip():
         raise ValueError("批准人不能为空")
+    policy_fields = (policy_id, policy_digest, policy_revision)
+    if source == "bounded" and any(value is None for value in policy_fields):
+        raise ValueError("bounded 批准缺少策略 ID、摘要或 Git revision")
+    if source == "human" and any(value is not None for value in policy_fields):
+        raise ValueError("人工批准不能携带 bounded 策略绑定")
     payload = contract.model_dump(mode="json")
     payload.update(
         {
@@ -203,6 +241,10 @@ def approve_change_contract(
             "approved_by": actor.strip(),
             "approved_at": approved_at or datetime.now(UTC).isoformat(),
             "approved_digest": contract.expected_approval_digest(),
+            "approval_source": source,
+            "approval_policy_id": policy_id,
+            "approval_policy_digest": policy_digest,
+            "approval_policy_revision": policy_revision,
         }
     )
     return ChangeContract.model_validate(payload)

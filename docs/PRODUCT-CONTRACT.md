@@ -8,7 +8,7 @@ Vega 是软件工程 Agent 的控制层。它不重新实现 Coding Agent，而�
 ```text
 只读调查
   -> Change Contract / Execution Plan
-  -> 人工批准
+  -> 人工批准 / bounded 策略
   -> 隔离 Worktree
   -> 持久 Worker
   -> Git Candidate
@@ -63,6 +63,23 @@ Change Contract 冻结人工授权：
 
 合同字段变化会使旧批准失效。实际 Git Diff 即使没有出现在新计划中，只要越出授权范围或命中
 未授权风险，也必须停止。
+
+## 批准来源
+
+人工批准是默认路径。`bounded` 只在仓库跟踪的 `.vega.yaml` 明确启用，且调用方显式选择时
+生效。Vega 会检查：
+
+- Contract 和 Work Item 都使用具体文件，不用 glob 代替实际范围；
+- 所有 Verification 已在项目配置中登记；
+- 文件、Work Item、Repair 和 Replan 没有超过策略预算；
+- 没有未决问题、高影响副作用或需要人工审查的风险命中；
+- Planning 基线、Workspace 和影响批准资格的项目策略没有漂移。
+
+通过后，Change Contract 记录批准来源、策略 ID、策略摘要、Contract 摘要、批准时间和源
+revision。恢复或继续执行时重新检查这些绑定；策略、Contract 或资格条件变化后，旧批准不可用。
+
+bounded 只替代初始人工批准。Candidate、Verification、Risk、Reviewer、Finish 和最终人工 Git
+交付继续走同一条 ChangeRun。
 
 ## Execution Plan
 

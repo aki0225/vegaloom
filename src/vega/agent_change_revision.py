@@ -7,6 +7,7 @@ from uuid import uuid4
 from pydantic import Field
 
 from .agent_change_contract import (
+    CHANGE_APPROVAL_METADATA_FIELDS,
     ChangeContract,
     DeclaredRevisionAssessment,
     ExecutionPlan,
@@ -218,11 +219,16 @@ def _validate_proposed_approval(
         if proposed.approved:
             raise ValueError("合同字段变化时，提案必须先移除旧批准记录")
         return
+    approval_record_changed = any(
+        getattr(proposed, field) != getattr(current, field)
+        for field in CHANGE_APPROVAL_METADATA_FIELDS
+    )
     if (
         not proposed.approval_is_current()
         or proposed.approved_digest != current.approved_digest
+        or approval_record_changed
     ):
-        raise ValueError("合同内容未变化时必须保留当前有效批准")
+        raise ValueError("合同内容未变化时必须原样保留当前有效批准记录")
 
 
 def _scope_violations(

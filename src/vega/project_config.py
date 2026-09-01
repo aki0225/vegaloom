@@ -10,6 +10,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from .approval_policy_config import ApprovalConfig, render_bounded_approval_summary
 from .git_read import coerce_git_output_bytes, run_git_capture
 from .project_config_preflight import (
     ProjectConfigIssue,
@@ -47,19 +48,14 @@ def project_policy_snapshot(repo_path: Path) -> dict[str, str | None]:
     for name in CONFIG_FILENAMES:
         path = repo / name
         if path.is_file():
-            return {
-                "path": name,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-            }
+            return {"path": name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     return {"path": None, "sha256": None}
 
 
 def scope_policy_sha256(scope: ScopeConfig) -> str:
     """计算 scope 规则的规范化摘要，供 run 根状态与各阶段证据绑定。"""
     payload = json.dumps(
-        scope.model_dump(mode="json"),
-        ensure_ascii=False,
-        sort_keys=True,
+        scope.model_dump(mode="json"), ensure_ascii=False, sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
@@ -231,6 +227,7 @@ class ProjectConfig(BaseModel):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
     scope: ScopeConfig = Field(default_factory=ScopeConfig)
+    approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
     budget_profiles: dict[str, BudgetConfig] = Field(default_factory=dict)
     prompt_budget: PromptBudgetConfig = Field(default_factory=PromptBudgetConfig)
     runner: RunnerConfig = Field(default_factory=RunnerConfig)
@@ -542,6 +539,7 @@ def render_project_config_summary(config: ProjectConfig) -> str:
             f"- 默认 worker：`{config.runner.worker or 'codex-exec'}`",
             f"- 默认 reviewer：`{config.runner.reviewer or 'codex-exec'}`",
             "",
+            *render_bounded_approval_summary(config.approval.bounded),
             "## Codex Exec 角色策略",
             "",
             *_render_codex_exec_options("worker", config.runner.codex_exec.worker),

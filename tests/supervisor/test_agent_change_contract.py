@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from vega.agent_change_contract import (
+    CHANGE_APPROVAL_METADATA_FIELDS,
     ChangeAuthorityEnvelope,
     ChangeContract,
     ChangeSideEffectPolicy,
@@ -45,12 +46,7 @@ def test_contract_change_requires_new_human_approval() -> None:
         {
             **current_contract.model_dump(
                 mode="json",
-                exclude={
-                    "approved",
-                    "approved_at",
-                    "approved_by",
-                    "approved_digest",
-                },
+                exclude=CHANGE_APPROVAL_METADATA_FIELDS,
             ),
             "contract_revision": 2,
             "side_effect_policy": {
@@ -80,10 +76,12 @@ def test_contract_change_without_revision_increment_is_rejected() -> None:
     current_contract = _approved_contract()
     proposed_contract = current_contract.model_copy(
         update={
+            **{
+                field: None
+                for field in CHANGE_APPROVAL_METADATA_FIELDS
+                if field != "approved"
+            },
             "approved": False,
-            "approved_at": None,
-            "approved_by": None,
-            "approved_digest": None,
             "non_goals": ["允许调整公共 API"],
         }
     )
@@ -181,6 +179,15 @@ def test_contract_approval_digest_detects_frozen_field_change() -> None:
 
     assert approved.approval_is_current()
     assert not changed.approval_is_current()
+
+
+def test_human_approval_records_source_without_policy_binding() -> None:
+    approved = _approved_contract()
+
+    assert approved.approval_source == "human"
+    assert approved.approval_policy_id is None
+    assert approved.approval_policy_digest is None
+    assert approved.approval_policy_revision is None
 
 
 def _approved_contract() -> ChangeContract:

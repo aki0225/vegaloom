@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import typer
 
@@ -9,6 +10,7 @@ from .agent_contract_compiler import PLAN_CARD_ARTIFACT
 from .agent_codex_adapter import SupervisorAgentCodexAdapter
 from .agent_planning import PLANNING_PROPOSAL_ARTIFACT
 from .agent_planning_runtime import PlanningProposalRunner
+from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
 from .cli_support import (
@@ -70,38 +72,34 @@ def agent_run(
         "--fresh-session",
         help="显式改用短生命周期 codex exec；默认复用 App Server Thread。",
     ),
+    approval: Literal["human", "bounded"] = typer.Option(
+        "human",
+        "--approval",
+        help="批准模式；bounded 还要求仓库策略显式启用。",
+    ),
 ) -> None:
     """执行当前 Planning 或 Work Item。"""
 
     try:
-        run_dir, state, _, _ = load_agent_bundle(Path.cwd(), run)
-        if (
-            state.run_kind == "change"
-            and state.contract_revision is None
-        ):
-            if not (run_dir / PLANNING_PROPOSAL_ARTIFACT).is_file():
-                ensure_runner_ready("codex-exec", "Coding Agent")
-            result = PlanningProposalRunner(
-                Path.cwd(),
-                persistent_session=not fresh_session,
-                progress_reporter=report_execution_progress,
-                event_reporter=_event,
-            ).run(run, timeout_seconds=timeout_seconds)
-            if (
-                result.state.phase == "planning"
-                and (result.run_dir / PLANNING_PROPOSAL_ARTIFACT).is_file()
-            ):
-                result = SupervisorAgentRuntime(Path.cwd()).compile_planning(
-                    result.run_dir.name
-                )
-                if (result.run_dir / PLAN_CARD_ARTIFACT).is_file():
-                    _event("Contract Compiler 已生成未批准合同")
-        elif state.phase == "finalizing":
-            result = SupervisorAgentRuntime(Path.cwd()).finalize(run)
-        else:
+        workspace = Path.cwd()
+        runtime = SupervisorAgentRuntime(workspace)
+        result, should_run_provider = _advance_current_phase(
+            workspace,
+            runtime,
+            run,
+            timeout_seconds=timeout_seconds,
+            fresh_session=fresh_session,
+        )
+        result, should_run_provider = _apply_requested_approval(
+            runtime,
+            result,
+            approval=approval,
+            should_run_provider=should_run_provider,
+        )
+        if should_run_provider:
             ensure_runner_ready("codex-exec", "Coding Agent")
             result = SupervisorAgentCodexAdapter(
-                Path.cwd(),
+                workspace,
                 persistent_sessions=not fresh_session,
                 progress_reporter=report_execution_progress,
                 event_reporter=_event,
@@ -110,6 +108,80 @@ def agent_run(
         raise typer.BadParameter(str(exc)) from exc
     typer.echo("")
     typer.echo(SupervisorAgentRuntime(Path.cwd()).status(result.run_dir.name))
+
+
+def _advance_current_phase(
+    workspace: Path,
+    runtime: SupervisorAgentRuntime,
+    run: str,
+    *,
+    timeout_seconds: int,
+    fresh_session: bool,
+) -> tuple[AgentRun, bool]:
+    run_dir, state, plan, _ = load_agent_bundle(workspace, run)
+    if state.run_kind == "change" and state.contract_revision is None:
+        result = _run_planning_phase(
+            workspace,
+            runtime,
+            run,
+            run_dir=run_dir,
+            timeout_seconds=timeout_seconds,
+            fresh_session=fresh_session,
+        )
+        return result, False
+    if state.phase == "finalizing":
+        return runtime.finalize(run), False
+    return (
+        AgentRun(run_dir=run_dir, state=state, plan=plan),
+        state.phase != "awaiting_approval",
+    )
+
+
+def _run_planning_phase(
+    workspace: Path,
+    runtime: SupervisorAgentRuntime,
+    run: str,
+    *,
+    run_dir: Path,
+    timeout_seconds: int,
+    fresh_session: bool,
+) -> AgentRun:
+    if not (run_dir / PLANNING_PROPOSAL_ARTIFACT).is_file():
+        ensure_runner_ready("codex-exec", "Coding Agent")
+    result = PlanningProposalRunner(
+        workspace,
+        persistent_session=not fresh_session,
+        progress_reporter=report_execution_progress,
+        event_reporter=_event,
+    ).run(run, timeout_seconds=timeout_seconds)
+    if (
+        result.state.phase == "planning"
+        and (result.run_dir / PLANNING_PROPOSAL_ARTIFACT).is_file()
+    ):
+        result = runtime.compile_planning(result.run_dir.name)
+        if (result.run_dir / PLAN_CARD_ARTIFACT).is_file():
+            _event("Contract Compiler 已生成未批准合同")
+    return result
+
+
+def _apply_requested_approval(
+    runtime: SupervisorAgentRuntime,
+    result: AgentRun,
+    *,
+    approval: Literal["human", "bounded"],
+    should_run_provider: bool,
+) -> tuple[AgentRun, bool]:
+    if result.state.phase != "awaiting_approval":
+        return result, should_run_provider
+    if approval == "human":
+        _event("当前 Contract 等待人工批准")
+        return result, False
+    approved = runtime.approve_bounded(result.run_dir.name)
+    if approved.state.phase != "ready":
+        _event("bounded 策略未放行，仍等待人工批准")
+        return approved, False
+    _event("bounded 策略已批准当前 Contract")
+    return approved, True
 
 
 def _event(message: str) -> None:

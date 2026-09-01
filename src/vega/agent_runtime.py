@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .agent_approval_runtime import BoundedApprovalRuntimeMixin
 from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_change_control import prepare_change_decision
 from .agent_contract_compilation_runtime import compile_planning_run
@@ -53,7 +54,7 @@ from .agent_runtime_support import (
 from .agent_task_card_runtime import resume_agent_task_card
 from .redaction import write_redacted_json, write_redacted_json_once
 
-class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
+class SupervisorAgentRuntime(BoundedApprovalRuntimeMixin, ChangeRevisionRuntimeMixin):
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace.resolve()
 

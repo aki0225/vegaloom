@@ -9,10 +9,12 @@ import pytest
 from typer.testing import CliRunner
 
 from vega.agent_change_contract import (
+    CHANGE_APPROVAL_METADATA_FIELDS,
     ChangeAuthorityEnvelope,
     ChangeContract,
     ExecutionPlan,
     ExecutionWorkItem,
+    approve_change_contract,
 )
 from vega.agent_change_control import (
     ChangeBudgetSnapshot,
@@ -20,6 +22,7 @@ from vega.agent_change_control import (
     guard_change_decision_budget,
     require_change_review_budget,
 )
+from vega.agent_change_revision import assess_change_revision
 from vega.agent_change_run import (
     load_change_run_context,
     write_candidate_artifact,
@@ -120,12 +123,7 @@ def test_actual_risk_path_requires_contract_revision_and_human_approval(
         {
             **current_contract.model_dump(
                 mode="json",
-                exclude={
-                    "approved",
-                    "approved_at",
-                    "approved_by",
-                    "approved_digest",
-                },
+                exclude=CHANGE_APPROVAL_METADATA_FIELDS,
             ),
             "contract_revision": 2,
             "authorized_risk_reviews": ["payment"],
@@ -229,12 +227,7 @@ def test_active_candidate_can_be_restored_for_contract_boundary_replan(
         {
             **current_contract.model_dump(
                 mode="json",
-                exclude={
-                    "approved",
-                    "approved_at",
-                    "approved_by",
-                    "approved_digest",
-                },
+                exclude=CHANGE_APPROVAL_METADATA_FIELDS,
             ),
             "contract_revision": 2,
             "authorized_risk_reviews": ["payment"],
@@ -304,12 +297,7 @@ def test_contract_revision_also_advances_execution_plan_revision(
         {
             **current_contract.model_dump(
                 mode="json",
-                exclude={
-                    "approved",
-                    "approved_at",
-                    "approved_by",
-                    "approved_digest",
-                },
+                exclude=CHANGE_APPROVAL_METADATA_FIELDS,
             ),
             "contract_revision": 2,
             "goal": "更新两个模块",
@@ -324,6 +312,56 @@ def test_contract_revision_also_advances_execution_plan_revision(
             approved.run_dir.name,
             proposed_contract=proposed_contract,
             proposed_execution_plan=stale_plan_revision,
+        )
+
+
+def test_plan_revision_cannot_replace_bounded_approval_record(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    contract = approve_change_contract(
+        _contract(),
+        actor="bounded:low-risk-v1",
+        source="bounded",
+        policy_id="low-risk-v1",
+        policy_digest="a" * 64,
+        policy_revision=_git(repo, "rev-parse", "HEAD"),
+    )
+    payload = contract.model_dump(mode="json")
+    payload.update(
+        {
+            "approval_source": "human",
+            "approval_policy_id": None,
+            "approval_policy_digest": None,
+            "approval_policy_revision": None,
+        }
+    )
+    proposed_contract = ChangeContract.model_validate(payload)
+    proposed_plan = _execution_plan().model_copy(
+        update={"plan_revision": 2, "hypotheses": ["调整实现顺序"]}
+    )
+
+    with pytest.raises(ValueError, match="原样保留当前有效批准记录"):
+        assess_change_revision(
+            repo=repo,
+            changed_files=[],
+            current_contract=contract,
+            proposed_contract=proposed_contract,
+            current_plan=_execution_plan(),
+            proposed_plan=proposed_plan,
+            budget=ChangeBudgetSnapshot(
+                run_id="run-approval-record",
+                work_item_id="WI-01",
+                worker_attempts_used=0,
+                repair_rounds_used=0,
+                auto_replans_used=0,
+                review_rounds_used=0,
+                verification_retries_used=0,
+                max_repair_rounds=1,
+                max_auto_replans=1,
+                max_review_rounds=1,
+                max_verification_retries=1,
+            ),
         )
 
 
