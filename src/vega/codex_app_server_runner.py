@@ -43,7 +43,6 @@ class CodexAppServerRunner:
         plan_revision: int | None,
         output_schema: dict[str, Any] | None = None,
         executable: str = "codex",
-        isolate_reviewer: bool = False,
         isolate_session: bool = False,
         options: CodexExecOptions | None = None,
     ) -> None:
@@ -54,7 +53,7 @@ class CodexAppServerRunner:
         self.plan_revision = plan_revision
         self.output_schema = output_schema
         self.executable = executable
-        self.isolate_session = isolate_reviewer or isolate_session
+        self.isolate_session = isolate_session
         self.options = options or CodexExecOptions()
 
     def run(
@@ -155,10 +154,16 @@ class CodexAppServerRunner:
         parsed = _extract_helper_result(owned.output)
         if owned.status != "success":
             self._mark_unavailable()
+            helper_status = parsed.get("status") if parsed is not None else None
+            helper_error = parsed.get("error") if parsed is not None else None
             return RunnerResult(
-                status=owned.status,
+                status="stopped" if helper_status == "stopped" else owned.status,
                 output="",
-                error=owned.error,
+                error=(
+                    redact_text(helper_error)
+                    if isinstance(helper_error, str) and helper_error.strip()
+                    else owned.error
+                ),
                 command=command,
                 termination_unconfirmed=owned.termination_unconfirmed,
             )

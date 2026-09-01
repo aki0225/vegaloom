@@ -95,6 +95,11 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
     assert fake_state["resume_params"][0]["sandbox"] == "workspace-write"
     assert fake_state["resume_params"][0]["approvalPolicy"] == "on-request"
     assert fake_state["server_args"] == ["--listen", "stdio://"]
+    opt_out = fake_state["initialize_params"]["capabilities"][
+        "optOutNotificationMethods"
+    ]
+    assert "item/agentMessage/delta" in opt_out
+    assert "item/completed" not in opt_out
     assert "Vega Task Anchor" in fake_state["prompts"][1]
     assert "补充检查边界条件" in fake_state["prompts"][1]
     assert any(event.endswith("thread_ready") for event in events)
@@ -325,6 +330,62 @@ def test_app_server_preserves_safe_turn_error(tmp_path: Path) -> None:
     assert result.status == "error"
     assert result.error is not None
     assert "fake turn failed" in result.error
+
+
+def test_app_server_ignores_unknown_event_flood(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_fake_app_server(repo)
+    run_dir = tmp_path / "runs" / "agent-run"
+    run_dir.mkdir(parents=True)
+
+    result = _runner(run_dir).run(
+        "UNKNOWN_EVENT_FLOOD",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=30,
+        execution_context=_execution_context(run_dir, "unknown-events", []),
+    )
+
+    assert result.status == "success"
+    assert "fake worker 完成" in result.output
+
+
+def test_app_server_retries_overload_with_fixed_budget(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_fake_app_server(repo)
+    run_dir = tmp_path / "runs" / "agent-run"
+    run_dir.mkdir(parents=True)
+
+    recovered = _runner(run_dir).run(
+        "OVERLOAD_THEN_SUCCESS",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=30,
+        execution_context=_execution_context(run_dir, "overload-recovered", []),
+    )
+    exhausted = _runner(run_dir).run(
+        "OVERLOAD_ALWAYS",
+        repo,
+        sandbox="workspace-write",
+        timeout_seconds=30,
+        execution_context=_execution_context(run_dir, "overload-exhausted", []),
+    )
+
+    assert recovered.status == "success"
+    fake_state = json.loads(
+        (repo / ".fake-app-server-state.json").read_text(encoding="utf-8")
+    )
+    assert fake_state["recoverable_overloads"] == 2
+    assert fake_state["exhausted_overloads"] == 4
+    assert exhausted.status == "error"
+    assert exhausted.error is not None
+    assert "-32001" in exhausted.error
 
 
 def test_app_server_does_not_wait_for_inherited_stderr_handle(
@@ -591,6 +652,8 @@ for raw in sys.stdin:
     request = json.loads(raw)
     method = request.get("method")
     if method == "initialize":
+        state["initialize_params"] = request["params"]
+        save()
         send({"id": request["id"], "result": {}})
     elif method == "initialized":
         pass
@@ -606,11 +669,32 @@ for raw in sys.stdin:
         save()
         send({"id": request["id"], "result": thread_result(request["params"])})
     elif method == "turn/start":
-        turn_id = f"turn-{len(state['prompts']) + 1}"
         prompt = request["params"]["input"][0]["text"]
+        if "OVERLOAD_THEN_SUCCESS" in prompt:
+            count = state.get("recoverable_overloads", 0)
+            if count < 2:
+                state["recoverable_overloads"] = count + 1
+                save()
+                send({"id": request["id"], "error": {
+                    "code": -32001,
+                    "message": "Server overloaded",
+                }})
+                continue
+        if "OVERLOAD_ALWAYS" in prompt:
+            state["exhausted_overloads"] = state.get("exhausted_overloads", 0) + 1
+            save()
+            send({"id": request["id"], "error": {
+                "code": -32001,
+                "message": "Server overloaded",
+            }})
+            continue
+        turn_id = f"turn-{len(state['prompts']) + 1}"
         state["prompts"].append(prompt)
         state.setdefault("turn_start_params", []).append(request["params"])
         save()
+        if "UNKNOWN_EVENT_FLOOD" in prompt:
+            for index in range(600):
+                send({"method": "future/event", "params": {"index": index}})
         if "HOLD_STDERR" in prompt:
             subprocess.Popen(
                 [sys.executable, "-c", "import time; time.sleep(10)"],

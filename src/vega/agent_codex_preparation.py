@@ -140,7 +140,7 @@ def ensure_isolated_reviewer(
             contract_revision=state.contract_revision,
             plan_revision=state.execution_plan_revision,
             output_schema=ReviewVerdict.model_json_schema(),
-            isolate_reviewer=True,
+            isolate_session=True,
             options=config.runner.codex_exec.reviewer,
         )
         return
@@ -453,7 +453,7 @@ def _final_review_runner(
             contract_revision=state.contract_revision,
             plan_revision=state.execution_plan_revision,
             output_schema=ReviewVerdict.model_json_schema(),
-            isolate_reviewer=True,
+            isolate_session=True,
             options=config.runner.codex_exec.reviewer,
         )
     return CodexExecRunner(

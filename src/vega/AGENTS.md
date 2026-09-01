@@ -69,8 +69,8 @@ CLI
 - Provider 无关执行后置流程：`agent_candidate_pipeline`、`agent_worker_evidence`、
   `agent_plan_scope`、`agent_core_observation`。
 - Codex 会话接入：`agent_codex_adapter`、`agent_codex_preparation`；
-  `codex_app_server`、`codex_app_server_runner`、`codex_process`、`codex_isolation`、
-  `codex_workspace`、`provider_session`；
+  `codex_app_server`、`codex_app_server_rpc`、`codex_app_server_runner`、
+  `codex_process`、`codex_isolation`、`codex_workspace`、`provider_session`；
   进程所有权与停止复用 `execution_control`、`execution_process`。
 - 仓库与上下文：`agent_context`、`agent_repository_*`、`agent_git_worktree`、
   `agent_git_candidate`、`agent_runtime_support`、`git_read`、`git_inventory`、

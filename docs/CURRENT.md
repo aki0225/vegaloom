@@ -5,29 +5,30 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：22 / 24
-- 最近事件：`20260901T055018Z-AUTONOMY-03-completed`
+- 已完成：23 / 24
+- 最近事件：`20260901T073651Z-AUTONOMY-04-completed`
 
 ## 当前事项
 
-### 下一项：`AUTONOMY-04` 精简 Provider 会话适配
+### 下一项：`AUTONOMY-05` 完成有界自主执行真实验收
 
-把 Codex 接入收敛为 Thread、Turn、Event、Steer、Interrupt、Status 和 Review 能力映射，只在等价证据成立时删除重复协议处理。
+使用低风险小任务、需要调查和 Repair 的 Bug、必须人工确认的高风险任务验证自然语言入口和现有 ChangeRun，再决定 v0.4.0 发布。
 
 验收条件：
 
-- 持久 Worker、独立 Reviewer、状态卡和恢复语义保持不变
-- Codex 原生 review/start 只有在结构化 Verdict、覆盖、风险和只读边界等价时才替换当前实现
-- 未识别的新事件不会关闭整个 Observation 链
-- Provider 过载、超时和中断保持有界处理
-- 不重写 Provider 自己的会话历史、上下文压缩或 Prompt Cache
+- Human 模式走通调查、批准、执行、Repair 和最终报告
+- Bounded 模式的低风险任务不需要初始人工批准
+- 普通 Repair 不需要人工转贴 Reviewer 内容
+- Provider 压缩、中断和换目录恢复后仍绑定正确 Contract、Work Item 和 Candidate
+- 高风险案例不会被自动批准
+- 最终报告足以让人工定位重点 Diff、风险和未证明事项
+- 根据真实运行结果决定是否发布 v0.4.0；Claude Code Adapter 在 Codex 验收后另行接入
 
 要求检查：
 
-- `provider-protocol-tests`
-- `execution-control-tests`
-- `supervisor-tests`
-- `real-provider-shadow`
+- `real-agent-dogfood`
+- `full-test-shards`
+- `package-smoke`
 - `repository-hygiene`
 - `pr-ci`
 
@@ -57,7 +58,7 @@
 | 已完成 | `AUTONOMY-01` | 从自然语言生成 Planning Proposal | `VALID-02` |
 | 已完成 | `AUTONOMY-02` | 编译 Change Contract 与 Execution Plan | `AUTONOMY-01` |
 | 已完成 | `AUTONOMY-03` | 增加有界自动批准 | `AUTONOMY-02` |
-| 待开始 | `AUTONOMY-04` | 精简 Provider 会话适配 | `AUTONOMY-03` |
+| 已完成 | `AUTONOMY-04` | 精简 Provider 会话适配 | `AUTONOMY-03` |
 | 待开始 | `AUTONOMY-05` | 完成有界自主执行真实验收 | `AUTONOMY-04` |
 
 ## 状态规则
