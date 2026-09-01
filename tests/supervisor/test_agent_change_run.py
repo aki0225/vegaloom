@@ -71,6 +71,8 @@ def test_change_run_starts_in_isolated_worktree_and_approves_contract(
     assert approved.state.current_work_item == "WI-01"
     assert approved.plan.approval_is_current()
     assert len(approved.plan.work_items) == 2
+    assert approved.plan.work_items[0].allowed_paths == ["src/one.py"]
+    assert approved.plan.work_items[1].allowed_paths == ["src/two.py"]
     assert approved.plan.work_items[0].verification == [
         "python -m pytest tests/test_one.py -q"
     ]
@@ -420,6 +422,8 @@ def test_multi_item_change_run_adds_one_final_integration_review(
         integration_paths[0].read_text(encoding="utf-8")
     )
     assert integration["status"] == "approve"
+    assert '"verification": "passed"' in reviewer.prompts[-1]
+    assert "不要仅因 Reviewer sandbox" in reviewer.prompts[-1]
     report = json.loads(
         (result.run_dir / "agent-final-report.json").read_text(encoding="utf-8")
     )
@@ -599,6 +603,7 @@ class _ReviewerRunner:
     def __init__(self, verdicts: list[str] | None = None) -> None:
         self.calls = 0
         self.verdicts = verdicts or ["approve"]
+        self.prompts: list[str] = []
 
     def run(
         self,
@@ -612,6 +617,7 @@ class _ReviewerRunner:
         del timeout_seconds, execution_context
         assert sandbox == "read-only"
         self.calls += 1
+        self.prompts.append(prompt)
         final_batch = re.search(
             r"必须在 reviewed_files 中完整列出：(\[[^\n]+\])",
             prompt,

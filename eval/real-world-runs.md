@@ -1323,3 +1323,36 @@ run `20260901-012425-9d38ad49f5b9-agent` 的第一次 Turn 因模型改写 `user
 本次复验证明无效 Proposal 会 fail-closed，同一 Planning Thread 可以重试，并能在服务端明确
 确认权限后切换到受控写入。它仍不等于批准合同，也没有启动 Worker、创建 Candidate、提交、
 Push 或合并。
+
+## 2026-09-01 AUTONOMY-05 有界自主执行真实验收
+
+本条使用三个无远端、可丢弃的 Python 仓库和一个中断夹具，验证从自然语言 Planning 到
+Bounded/Human 批准、自动 Repair、高风险人工门禁、原生 Provider 压缩、中断和换目录恢复。
+完整预注册与逐项结果见 [`autonomy-05-real-agent.md`](autonomy-05-real-agent.md)。
+
+真实运行先暴露四个控制面问题：Planner 会改写任务身份或伪造验证命令；首次批准前无法 revision；
+最终 Reviewer 会把只读环境不能重跑 pytest 误判为证据不足；多 Work Item 的路径投影无法可靠
+归因 Repair WIP。实现分别收紧 Planning 合同、允许未批准 revision、向最终 Reviewer 传递
+Candidate 绑定的机器 Gate 状态，并把 Work Item 路径缩小到自身 `likely_files`。这些修复没有
+放宽 Verification、Risk 或 Reviewer 门禁。
+
+最终验收结果：
+
+- Bounded run `20260901-181253-ccd9aff16132-agent` 无需人工 `approve`，只修改两个允许文件，
+  终态为 `completed / ready_to_commit`；
+- Human run `20260901-200144-4b371e8e9ac3-agent` 的 Reviewer 真实返回
+  `request_changes`，Supervisor 自动生成 Fix Packet 并在同一 Worker Thread 的下一 Turn
+  修复，最终 Candidate 为 `532ebe7048775ba17e1365f614de5a9256033516`；
+- 高风险 run `20260901-201536-35b9796e7519-agent` 被 Bounded Policy 拒绝自动批准，人工批准
+  后仍因 Migration 必审风险停在 `needs_human`；
+- Task Card 经本地任务分支和本地裸仓库带到另一个目录，`vega resume --repo .` 恢复
+  Contract revision 1、Plan revision 3 和 `WI-01`，但不会复用历史 Gate 作为当前通过证据；
+- A05-02 的真实 Worker Thread 完成一次 App Server 原生压缩，下一 Turn 仍绑定正确 run、
+  Contract、Plan、Work Item 和 Accepted Checkpoint；
+- 中断 run `20260901-203654-543fded1271a-agent` 在真实 Worker pytest 期间收到精确 stop
+  request，保留 partial diff，转 `needs_human`，没有第二 Writer 或自动重放。
+
+开发过程中的失败 run 和未满足强证据条件的“成功”也保留在专项记录中，没有纳入通过计数。当前
+结果支持准备 `v0.4.0` 候选，但不证明 Claude Code Adapter、生产数据库写入、未知外部副作用
+重放或通用任务成功率。完成事件仍须随同一提交通过完整基线、包安装 Smoke 和 PR CI 后进入
+`main`。

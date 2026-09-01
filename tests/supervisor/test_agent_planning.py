@@ -21,6 +21,7 @@ from vega.agent_planning import (
     PlanningObservedFact,
     PlanningProposal,
     PlanningSourceRef,
+    build_planning_prompt,
     validate_planning_proposal,
 )
 from vega.agent_planning_runtime import PlanningProposalRunner
@@ -30,6 +31,28 @@ from vega.agent_task_card import load_task_card
 from vega.cli_entrypoint import app
 from vega.execution_control import ExecutionController, run_owned_process
 from vega.runner import RunnerResult
+
+
+def test_planning_prompt_requires_exact_registered_verification_commands() -> None:
+    prompt = build_planning_prompt(
+        task_id="task-1",
+        user_goal="修复示例函数",
+        source_revision="a" * 40,
+        project_context=(
+            "## 显式验证命令\n\n"
+            "- `python -m pytest -q`\n"
+            "- `git diff --check`\n"
+        ),
+    )
+
+    assert "task_id、user_goal 和 source_revision 是任务身份字段" in prompt
+    assert "proposal_revision 固定填写 1" in prompt
+    assert "只能逐字复制下方“显式验证命令”" in prompt
+    assert "不能伪装成验证命令" in prompt
+    assert "不会从自然语言中猜测或提取命令" in prompt
+    assert "max_review_rounds 至少应为 N+1" in prompt
+    assert "unresolved_questions 只填写会阻止合同成立" in prompt
+    assert "不能仅因尚未验证就阻止批准" in prompt
 
 
 def test_planning_proposal_binds_source_refs_to_fixed_revision(

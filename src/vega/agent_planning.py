@@ -134,8 +134,14 @@ class PlanningProposal(StrictAgentModel):
     """只读调查的结构化结果；它是待编译输入，不是 Approved Contract。"""
 
     task_id: PlanningShortText
-    proposal_revision: int = Field(default=1, ge=1)
-    user_goal: PlanningText
+    proposal_revision: int = Field(
+        default=1,
+        ge=1,
+        description="初始 Proposal 固定为 1；Planning attempt 不是 Proposal revision",
+    )
+    user_goal: PlanningText = Field(
+        description="必须逐字复制输入中的用户目标，不得概括、改写或补充"
+    )
     source_revision: GitOidText
     observed_facts: list[PlanningObservedFact] = Field(min_length=1, max_length=64)
     hypotheses: list[PlanningText] = Field(default_factory=list, max_length=32)
@@ -275,11 +281,28 @@ def build_planning_prompt(
                 "",
                 "- 只调查当前固定 revision 的代码、测试、配置和调用关系。",
                 "- 不修改文件、Git index、分支或提交，不执行部署、外部写入或数据库写操作。",
+                "- task_id、user_goal 和 source_revision 是任务身份字段，必须逐字复制"
+                "本指令给出的值；目标摘要只能写入 contract_proposal.goal。",
+                "- proposal_revision 固定填写 1；重试次数不是 Proposal revision，"
+                "不得随 Planning attempt 增长。",
                 "- 已确认事实与根因假设分开写；每条事实至少附一个可追查来源。",
                 "- command 引用只记录本轮实际执行的只读命令及结果摘要，不算验证通过证据。",
-                "- verification_suggestions 和 additional_check_suggestions 只是建议，"
-                "后续 Contract Compiler 不会直接信任或执行。",
-                "- 不能确认的内容放入 unresolved_questions，不要为了填满 Schema 编造结论。",
+                "- verification_suggestions、每个 Work Item 的 verification 和 "
+                "additional_check_suggestions 只能逐字复制下方“显式验证命令”；"
+                "不要添加“运行”“检查”等前缀、Markdown 反引号或自然语言检查项。",
+                "- 代码审查、覆盖范围和人工检查建议应写入 acceptance、risk_notes 或 "
+                "implementation_strategy，不能伪装成验证命令。",
+                "- Contract Compiler 会拒绝任何未在 `.vega.yaml` 登记的命令，"
+                "也不会从自然语言中猜测或提取命令。",
+                "- Reviewer 打回后还需要再次审查；若允许 N 次 Reviewer 驱动的 Repair，"
+                "max_review_rounds 至少应为 N+1，不能把 repair=1、review=1 写成"
+                "看似可修复但实际无法复审的预算。",
+                "- unresolved_questions 只填写会阻止合同成立、确实需要人工选择的问题。"
+                "运行时环境待验证、仓库外状态未知、兼容性风险或可采用 fail-closed 默认值的"
+                "内容，应写入 observed_facts、hypotheses、risk_notes、acceptance 或 "
+                "non_goals，不能仅因尚未验证就阻止批准。",
+                "- 不能确认的事实不要编造；若它不影响合同边界，保留为假设或风险，而不是"
+                "机械填入 unresolved_questions。",
                 "",
                 project_context.rstrip(),
                 "",

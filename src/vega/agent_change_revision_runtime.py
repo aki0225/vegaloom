@@ -52,7 +52,12 @@ def revise_change_run(
         or state.active_operation_id
     ):
         raise ValueError("当前状态不能修订 ChangeRun")
-    if state.phase not in {"planning", "ready", "needs_human"}:
+    if state.phase not in {
+        "planning",
+        "awaiting_approval",
+        "ready",
+        "needs_human",
+    }:
         raise ValueError("ChangeRun 只允许在可重规划或人工处理阶段提交 revision")
     context = load_change_run_context(run_dir, state, plan, metadata)
     assert context is not None

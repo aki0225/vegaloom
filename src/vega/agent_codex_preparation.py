@@ -205,10 +205,17 @@ def review_final_candidate(
     event_reporter(f"最终集成审查已启动：{len(batches)} 个批次")
     verdicts: list[ReviewVerdict] = []
     runner_statuses: list[str] = []
+    machine_evidence = {
+        "candidate_sha": candidate_sha,
+        "verification": observation.verification,
+        "risk": observation.risk,
+        "work_item_review": observation.review,
+    }
     for index, (files, diff_text) in enumerate(batches, start=1):
         prompt = _final_review_prompt(
             context.contract.model_dump(mode="json"),
             context.execution_plan.model_dump(mode="json"),
+            machine_evidence,
             files,
             diff_text,
             batch=index,
@@ -354,10 +361,7 @@ def _require_batch_coverage(
 
 
 def _final_review_batches(
-    repo: Path,
-    base_sha: str,
-    candidate_sha: str,
-    max_chars: int,
+    repo: Path, base_sha: str, candidate_sha: str, max_chars: int
 ) -> list[tuple[list[str], str]]:
     names = _git_output(
         repo,
@@ -413,6 +417,7 @@ def _git_output(repo: Path, args: list[str]) -> str:
 def _final_review_prompt(
     contract: dict[str, object],
     plan: dict[str, object],
+    machine_evidence: dict[str, object],
     files: list[str],
     diff_text: str,
     *,
@@ -425,6 +430,12 @@ def _final_review_prompt(
         "不要相信 Worker 自述，不要修改文件。输出严格匹配 ReviewVerdict JSON。\n\n"
         f"## Change Contract\n```json\n{json.dumps(contract, ensure_ascii=False)}\n```\n\n"
         f"## Execution Plan\n```json\n{json.dumps(plan, ensure_ascii=False)}\n```\n\n"
+        "## 已绑定机器证据\n"
+        f"```json\n{json.dumps(machine_evidence, ensure_ascii=False)}\n```\n\n"
+        "上述状态由 Vega 按 Candidate SHA 对账，Verification 已在可写环境执行。"
+        "不要仅因 Reviewer sandbox 无法创建临时文件或重跑测试而降级结论。"
+        "Diff 有合同内问题时返回 request_changes；合同边界、外部状态或必要事实"
+        "确实无法判断时才返回 needs_human。\n\n"
         f"## 批次\n{batch}/{total}；必须在 reviewed_files 中完整列出："
         f"{json.dumps(files, ensure_ascii=False)}\n\n"
         f"## 累计 Diff\n```diff\n{diff_text}\n```\n"
@@ -432,13 +443,8 @@ def _final_review_prompt(
 
 
 def _final_review_runner(
-    run_dir: Path,
-    state: AgentState,
-    candidate_sha: str,
-    config: ProjectConfig,
-    *,
-    persistent_session: bool,
-    reviewer_runner: Runner | None,
+    run_dir: Path, state: AgentState, candidate_sha: str, config: ProjectConfig,
+    *, persistent_session: bool, reviewer_runner: Runner | None,
 ):
     if reviewer_runner is not None and not isinstance(
         reviewer_runner,
@@ -464,11 +470,8 @@ def _final_review_runner(
 
 
 def _blocked_final_observation(
-    run_dir: Path,
-    observation: AgentObservation,
-    reason: str,
-    *,
-    payload: dict[str, object],
+    run_dir: Path, observation: AgentObservation, reason: str,
+    *, payload: dict[str, object],
 ) -> AgentObservation:
     ref = f"integration-reviews/{observation.operation_id}.json"
     write_redacted_json_once(
