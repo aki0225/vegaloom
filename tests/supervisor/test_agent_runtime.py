@@ -1589,6 +1589,12 @@ def test_agent_cli_status_card_and_capabilities(
     capability_payload = json.loads(capabilities.output)
     assert capability_payload["control_plane"] == "deterministic-state-machine"
     assert capability_payload["provider"] == "codex-app-server"
+    assert capability_payload["provider_capabilities"]["thread"] == (
+        "thread/start + thread/resume"
+    )
+    assert capability_payload["provider_capabilities"]["review"] == (
+        "独立只读 Thread + turn/start"
+    )
     assert capability_payload["persistent_worker_thread"] is True
     assert capability_payload["reviewer_isolation"] == "per-work-item"
     assert capability_payload["automatic_commit_push_release"] is False

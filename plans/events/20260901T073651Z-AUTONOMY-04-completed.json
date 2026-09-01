@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "20260901T073651Z-AUTONOMY-04-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTONOMY-04",
+  "transition": "completed",
+  "recorded_at": "2026-09-01T07:36:51Z",
+  "summary": "Codex Provider 接入已收敛为 Thread、Turn、关键 Event、Steer、owned-process Interrupt、Status 和独立 Review 的明确映射；JSON-RPC 传输过滤未消费通知、有限重试过载并保留原有超时与停止边界。真实 review/start Shadow 未达到 Vega 的结构化 Verdict、覆盖、风险和会话隔离要求，因此没有替换当前 Reviewer。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "provider-protocol-tests",
+      "execution-control-tests",
+      "supervisor-tests",
+      "real-provider-shadow",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/codex_app_server_rpc.py",
+      "src/vega/codex_app_server.py",
+      "src/vega/codex_app_server_runner.py",
+      "tests/supervisor/test_codex_app_server.py",
+      "examples/evidence/autonomy-04-codex-review-shadow.md",
+      "docs/ARCHITECTURE.md"
+    ]
+  }
+}

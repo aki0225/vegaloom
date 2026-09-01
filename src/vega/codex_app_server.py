@@ -1,12 +1,8 @@
 from __future__ import annotations
 import json
 import os
-import queue
 import subprocess
 import sys
-import threading
-import time
-from collections import deque
 from pathlib import Path
 from uuid import uuid4
 from . import __version__
@@ -18,7 +14,11 @@ from .codex_app_server_process import (
     terminate_app_server_tree,
 )
 from .codex_app_server_permissions import require_thread_permissions
-from .execution_output import MAX_JSONL_LINE_CHARS
+from .codex_app_server_rpc import (
+    CODEX_SUPPORTED_SERVER_REQUESTS,
+    CodexAppServerRpc,
+    codex_initialize_capabilities,
+)
 from .execution_process import prepare_subprocess_command
 from .provider_session import (
     PendingInteraction, load_provider_sessions, mutate_provider_sessions,
@@ -31,14 +31,13 @@ class _AppServerClient:
         self.invocation = invocation
         self.run_dir = Path(invocation.run_dir).resolve()
         self.process: subprocess.Popen[str] | None = None
-        self.messages: queue.Queue[dict[str, object]] = queue.Queue(maxsize=512)
-        self.deferred: deque[dict[str, object]] = deque()
-        self.next_id = 1
+        self.rpc = CodexAppServerRpc()
         self.final_message: str | None = None
         self.thread_id: str | None = None
         self.turn_id: str | None = None
         self.safe_to_steer = False
         self.pending_rpc: dict[str, str] = {}
+        self.turn_error: str | None = None
     def run(self, prompt: str) -> int:
         command = _app_server_command(self.invocation, windows=os.name == "nt")
         exit_code = 1
@@ -56,7 +55,7 @@ class _AppServerClient:
                 bufsize=1,
                 **app_server_process_options(windows=os.name == "nt"),
             )
-            threading.Thread(target=self._read_stdout, daemon=True).start()
+            self.rpc.attach(self.process)
             self._initialize()
             self._open_thread()
             self._start_turn(prompt)
@@ -71,8 +70,15 @@ class _AppServerClient:
         return exit_code
     def _initialize(self) -> None:
         client = {"name": "vega", "title": "Vega", "version": __version__}
-        self._request("initialize", {"clientInfo": client})
-        self._write({"method": "initialized"})
+        self.rpc.request(
+            "initialize",
+            {
+                "clientInfo": client,
+                "capabilities": codex_initialize_capabilities(),
+            },
+            on_server_request=self._record_server_request,
+        )
+        self.rpc.notify("initialized")
     def _open_thread(self) -> None:
         state = load_provider_sessions(self.run_dir)
         handle = state.handles[self.invocation.role_key]
@@ -86,9 +92,17 @@ class _AppServerClient:
             params["model"] = self.invocation.model
         if handle.thread_id:
             params["threadId"] = handle.thread_id
-            result = self._request("thread/resume", params)
+            result = self.rpc.request(
+                "thread/resume",
+                params,
+                on_server_request=self._record_server_request,
+            )
         else:
-            result = self._request("thread/start", params)
+            result = self.rpc.request(
+                "thread/start",
+                params,
+                on_server_request=self._record_server_request,
+            )
         sandbox, approval_policy = require_thread_permissions(
             result, requested_sandbox=self.invocation.sandbox,
         )
@@ -128,7 +142,11 @@ class _AppServerClient:
             params["outputSchema"] = self.invocation.output_schema
         if self.invocation.reasoning_effort is not None:
             params["effort"] = self.invocation.reasoning_effort
-        result = self._request("turn/start", params)
+        result = self.rpc.request(
+            "turn/start",
+            params,
+            on_server_request=self._record_server_request,
+        )
         turn = result.get("turn") if isinstance(result, dict) else None
         turn_id = turn.get("id") if isinstance(turn, dict) else None
         if not isinstance(turn_id, str) or not turn_id:
@@ -154,15 +172,11 @@ class _AppServerClient:
         while True:
             self._send_pending_responses()
             self._send_pending_steers()
-            if self.deferred:
-                message = self.deferred.popleft()
-            else:
-                try:
-                    message = self.messages.get(timeout=0.1)
-                except queue.Empty:
-                    if self.process is not None and self.process.poll() is not None:
-                        raise RuntimeError("App Server 在 Turn 完成前退出")
-                    continue
+            message = self.rpc.receive(timeout=0.1)
+            if message is None:
+                if self.process is not None and self.process.poll() is not None:
+                    raise RuntimeError("App Server 在 Turn 完成前退出")
+                continue
             if "id" in message and "method" in message:
                 self._record_server_request(message)
                 continue
@@ -282,6 +296,8 @@ class _AppServerClient:
     def _record_server_request(self, message: dict[str, object]) -> None:
         rpc_id = json.dumps(message["id"], ensure_ascii=False, separators=(",", ":"))
         method = str(message["method"])
+        if method not in CODEX_SUPPORTED_SERVER_REQUESTS:
+            raise RuntimeError(f"App Server 请求类型不受支持：{method}")
         params = message.get("params")
         params = params if isinstance(params, dict) else {}
         interaction_id = f"request-{uuid4().hex[:12]}"
@@ -317,7 +333,7 @@ class _AppServerClient:
                 or interaction.response is None
             ):
                 continue
-            self._write({"id": _rpc_id(rpc_id), "result": interaction.response})
+            self.rpc.respond(_rpc_id(rpc_id), interaction.response)
             def mutation(session_state, target=interaction_id) -> None:
                 for item in session_state.interactions:
                     if item.interaction_id == target:
@@ -341,13 +357,14 @@ class _AppServerClient:
         ]
         for steer in queued:
             try:
-                self._request(
+                self.rpc.request(
                     "turn/steer",
                     {
                         "threadId": self.thread_id,
                         "expectedTurnId": self.turn_id,
                         "input": [{"type": "text", "text": steer.instruction}],
                     },
+                    on_server_request=self._record_server_request,
                 )
             except RuntimeError as exc:
                 status = "rejected"
@@ -363,52 +380,6 @@ class _AppServerClient:
                         item.result_note = note
             mutate_provider_sessions(self.run_dir, "agent.session", mutation)
         self.safe_to_steer = False
-    def _request(self, method: str, params: dict[str, object]) -> dict[str, object]:
-        request_id = self.next_id
-        self.next_id += 1
-        self._write({"id": request_id, "method": method, "params": params})
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            try:
-                message = self.messages.get(timeout=0.1)
-            except queue.Empty:
-                if self.process is not None and self.process.poll() is not None:
-                    raise RuntimeError(f"App Server 在 {method} 响应前退出")
-                continue
-            if message.get("id") != request_id:
-                if "id" in message and "method" in message:
-                    self._record_server_request(message)
-                else:
-                    self.deferred.append(message)
-                continue
-            error = message.get("error")
-            if error is not None:
-                raise RuntimeError(f"{method} 失败：{redact_text(str(error))}")
-            result = message.get("result")
-            return result if isinstance(result, dict) else {}
-        raise RuntimeError(f"{method} 响应超时")
-    def _write(self, payload: dict[str, object]) -> None:
-        process = self.process
-        if process is None or process.stdin is None:
-            raise RuntimeError("App Server stdin 不可用")
-        line = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        if len(line) > MAX_JSONL_LINE_CHARS:
-            raise RuntimeError("App Server 请求超过单行安全上限")
-        process.stdin.write(line + "\n")
-        process.stdin.flush()
-    def _read_stdout(self) -> None:
-        process = self.process
-        if process is None or process.stdout is None:
-            return
-        for line in process.stdout:
-            if len(line) > MAX_JSONL_LINE_CHARS:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                self.messages.put(payload)
     def _set_lifecycle(self, lifecycle: str, event: str) -> None:
         def mutation(session_state) -> None:
             handle = session_state.handles.get(self.invocation.role_key)

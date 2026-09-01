@@ -131,7 +131,8 @@ Git SHA 是代码快照权威。Candidate 变化会使之前绑定的 Verificati
 ### Codex App Server
 
 `codex_app_server_runner.py` 把 Provider Runner 接到现有 Execution Control。
-`codex_app_server.py` 是短生命周期 helper：
+`codex_app_server.py` 是短生命周期 helper，`codex_app_server_rpc.py` 只处理有界 JSON-RPC
+收发和通知白名单：
 
 1. 启动 `codex app-server --listen stdio://`；
 2. initialize；
@@ -143,6 +144,26 @@ Git SHA 是代码快照权威。Candidate 变化会使之前绑定的 Verificati
 
 外部进程继续使用既有 lease、heartbeat、stop request、timeout 和进程树终止逻辑。App Server
 stderr 由 Execution Control 脱敏后写入诊断 Artifact；JSON-RPC stdout 单独解析。
+
+Provider 映射保持窄而明确：
+
+| 能力 | Vega 使用方式 |
+|---|---|
+| Thread | `thread/start`、`thread/resume` |
+| Turn | `turn/start` |
+| Event | 只接收生命周期、最终 item、Token、压缩和错误通知 |
+| Steer | `turn/steer` |
+| Interrupt | 复用 Vega owned-process stop 与进程树确认 |
+| Status | 投影 `provider-sessions.json` |
+| Review | 独立只读 Thread，再用 `turn/start` 生成严格 `ReviewVerdict` |
+
+初始化时关闭正文和 Diff 增量通知；代码事实仍从 Worker 退出后的 Git Candidate 读取。未知
+notification 在 JSON-RPC 边界忽略，不会关闭 Observation 链。App Server 返回过载错误时只做
+三次有限退避；关键事件积压超过上限、请求超时或进程树终止未确认时直接失败。
+
+Codex CLI `0.149.1` 的真实 Shadow 表明，原生 `review/start` 能发现代码问题，但请求不能绑定
+Vega 的 Structured Output，响应也没有覆盖清单和风险披露。当前不替换 Reviewer，记录见
+[`examples/evidence/autonomy-04-codex-review-shadow.md`](../examples/evidence/autonomy-04-codex-review-shadow.md)。
 
 默认路径不可用时明确失败。`--fresh-session` 才显式改用一次性的 `codex exec`。
 
