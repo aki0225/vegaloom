@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_change_control import prepare_change_decision
+from .agent_contract_compilation_runtime import compile_planning_run
 from .agent_change_run import current_change_work_item
 from .agent_change_runtime import (
     approve_change_run,
@@ -86,6 +87,10 @@ class SupervisorAgentRuntime(ChangeRevisionRuntimeMixin):
 
     def start_planning(self, repo: Path, *, goal: str) -> AgentRun:
         return start_planning_run(self.workspace, repo, goal=goal)
+
+    @agent_mutation("agent.compile")
+    def compile_planning(self, run: str) -> AgentRun:
+        return compile_planning_run(self.workspace, run)
 
     @agent_mutation("agent.approve")
     def approve(self, run: str, *, actor: str = "human") -> AgentRun:

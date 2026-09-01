@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "20260901T023438Z-AUTONOMY-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTONOMY-02",
+  "transition": "completed",
+  "recorded_at": "2026-09-01T02:34:38Z",
+  "summary": "Planning Proposal 已可在同一条 ChangeRun 中确定性编译为未批准 Change Contract、Execution Plan 和 Plan Card；固定 source revision、具体候选文件、已登记验证、required review 与预算不满足时进入 needs_human，不启动 Worker，也不新增成功状态。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "contract-compiler-tests",
+      "supervisor-tests",
+      "security-tests",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_contract_compiler.py",
+      "src/vega/agent_contract_compilation_runtime.py",
+      "src/vega/agent_start_cli.py",
+      "tests/supervisor/test_agent_contract_compiler.py",
+      "docs/PRODUCT-CONTRACT.md",
+      "docs/ARCHITECTURE.md",
+      "docs/USAGE-WALKTHROUGH.md"
+    ]
+  }
+}

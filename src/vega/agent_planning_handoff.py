@@ -56,7 +56,7 @@ def load_planning_handoff_context(
 ) -> PlanningHandoffContext:
     if state.run_kind != "change" or state.contract_revision is not None:
         return PlanningHandoffContext()
-    if state.phase not in {"planning", "stopped"}:
+    if state.phase not in {"planning", "needs_human", "stopped"}:
         raise ValueError(
             f"当前阶段 {state.phase} 不能生成 Planning Handoff；"
             "必须先完成只读调查和现场对账"

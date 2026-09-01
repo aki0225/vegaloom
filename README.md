@@ -23,9 +23,10 @@
 
 </div>
 
-Vega 管一次代码变更的外层流程。主会话先调查并提交 Change Contract；人工批准后，Vega
-在隔离 Worktree 中复用一个 Coding Agent 会话完成实现，把 Git Candidate 交给项目验证、
-风险门禁和独立 Reviewer。普通问题自动回到 Worker，越出批准边界才停下来问人。
+Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言目标，Vega 把调查结果编译成
+待批准的 Change Contract；人工批准后，Vega 在隔离 Worktree 中复用一个 Coding Agent
+会话完成实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。普通问题自动回到
+Worker，越出批准边界才停下来问人。
 
 > 最新稳定版本：[v0.3.1](https://github.com/aki0225/vegaloom/releases/tag/v0.3.1)。
 
@@ -58,22 +59,24 @@ vega start --repo . --text "导出按钮点击后没有反应"
 vega run --run <run_id> --timeout 900
 ```
 
-这一步只生成 `planning-proposal.json` 和 `planning-proposal.md`，记录已确认事实、假设、
-未决问题、建议范围和验证建议。它不会启动 Worker。当前版本仍需由主会话或人工把 Proposal
-整理为下面两份可批准文件：
+`run` 先生成带来源引用的 Planning Proposal，再由确定性 Contract Compiler 对照固定
+source revision、`.vega.yaml`、路径、验证、风险和预算，生成：
 
 - **Change Contract**：目标、验收、不变量、非目标、风险、验证和允许范围；
-- **Execution Plan**：已确认事实、假设和有限 Work Item。
+- **Execution Plan**：已确认事实、假设和有限 Work Item；
+- **Plan Card**：原始要求、建议合同、未决问题和人工批准材料。
 
-确认内容后启动 ChangeRun：
+Compiler 不执行 Planner 自由生成的命令。路径越界、未知验证、高风险声明缺失或 source
+revision 漂移时，run 进入 `needs_human`，不会启动 Worker。编译通过后停在
+`awaiting_approval`；确认 `runs/<run_id>/plan-card.md` 后继续同一个 ChangeRun：
 
 ```powershell
-vega start --repo . `
-  --contract <change-contract.json> `
-  --execution-plan <execution-plan.json>
 vega approve --run <run_id> --actor human
 vega run --run <run_id> --timeout 900
 ```
+
+目标、范围和验证已经明确时，也可以使用显式
+`vega start --contract ... --execution-plan ...` 跳过只读调查。
 
 默认执行器是 Codex App Server。一个 ChangeRun 复用同一个 Worker Thread；Reviewer 使用
 独立只读 Thread。只有明确需要一次性短会话时才传 `--fresh-session`。

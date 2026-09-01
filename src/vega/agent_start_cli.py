@@ -5,7 +5,9 @@ from pathlib import Path
 import typer
 
 from .agent_change_contract import ChangeContract, ExecutionPlan
+from .agent_contract_compiler import PLAN_CARD_ARTIFACT
 from .agent_codex_adapter import SupervisorAgentCodexAdapter
+from .agent_planning import PLANNING_PROPOSAL_ARTIFACT
 from .agent_planning_runtime import PlanningProposalRunner
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
@@ -72,18 +74,28 @@ def agent_run(
     """执行当前 Planning 或 Work Item。"""
 
     try:
-        _, state, _, _ = load_agent_bundle(Path.cwd(), run)
+        run_dir, state, _, _ = load_agent_bundle(Path.cwd(), run)
         if (
             state.run_kind == "change"
             and state.contract_revision is None
         ):
-            ensure_runner_ready("codex-exec", "Coding Agent")
+            if not (run_dir / PLANNING_PROPOSAL_ARTIFACT).is_file():
+                ensure_runner_ready("codex-exec", "Coding Agent")
             result = PlanningProposalRunner(
                 Path.cwd(),
                 persistent_session=not fresh_session,
                 progress_reporter=report_execution_progress,
                 event_reporter=_event,
             ).run(run, timeout_seconds=timeout_seconds)
+            if (
+                result.state.phase == "planning"
+                and (result.run_dir / PLANNING_PROPOSAL_ARTIFACT).is_file()
+            ):
+                result = SupervisorAgentRuntime(Path.cwd()).compile_planning(
+                    result.run_dir.name
+                )
+                if (result.run_dir / PLAN_CARD_ARTIFACT).is_file():
+                    _event("Contract Compiler 已生成未批准合同")
         elif state.phase == "finalizing":
             result = SupervisorAgentRuntime(Path.cwd()).finalize(run)
         else:

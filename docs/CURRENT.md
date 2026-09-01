@@ -5,25 +5,26 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：20 / 24
-- 最近事件：`20260831T182420Z-AUTONOMY-01-completed`
+- 已完成：21 / 24
+- 最近事件：`20260901T023438Z-AUTONOMY-02-completed`
 
 ## 当前事项
 
-### 下一项：`AUTONOMY-02` 编译 Change Contract 与 Execution Plan
+### 下一项：`AUTONOMY-03` 增加有界自动批准
 
-用确定性 Contract Compiler 把 Planning Proposal、仓库规则和项目配置编译为未批准合同与执行计划，不让模型自由输出的命令直接进入执行。
+允许仓库内人工预先批准的策略放行范围清楚、验证明确且不命中高风险的任务；其他任务继续请求人工批准。
 
 验收条件：
 
-- Proposal 的事实、假设和未决问题不会在编译后混为一类
-- 越界路径、未知 Verification、高风险声明缺失和 source revision 漂移均被拒绝
-- 编译通过的结果可以进入现有 approve 与 ChangeRun
-- Compiler 不新增第二套成功状态、证据系统或 Planner Runtime
+- 自动批准同时要求仓库策略显式启用和调用方选择 bounded 模式
+- 低风险任务只有在范围、Verification、预算和副作用都明确时才能进入现有 ChangeRun
+- 高风险、配置缺失、未决问题、未知副作用或策略过期时必须请求人工
+- 策略或 Contract 变化会使自动批准失效
+- 自动批准不改变最终人工 Git 交付边界
 
 要求检查：
 
-- `contract-compiler-tests`
+- `approval-policy-tests`
 - `supervisor-tests`
 - `security-tests`
 - `repository-hygiene`
@@ -53,7 +54,7 @@
 | 已完成 | `SESSION-04` | 完成真实 Agent 验收与 v0.3.0 准备 | `SESSION-03` |
 | 已完成 | `VALID-02` | 修复真实验收暴露的恢复与高风险审查问题 | `SESSION-04` |
 | 已完成 | `AUTONOMY-01` | 从自然语言生成 Planning Proposal | `VALID-02` |
-| 待开始 | `AUTONOMY-02` | 编译 Change Contract 与 Execution Plan | `AUTONOMY-01` |
+| 已完成 | `AUTONOMY-02` | 编译 Change Contract 与 Execution Plan | `AUTONOMY-01` |
 | 待开始 | `AUTONOMY-03` | 增加有界自动批准 | `AUTONOMY-02` |
 | 待开始 | `AUTONOMY-04` | 精简 Provider 会话适配 | `AUTONOMY-03` |
 | 待开始 | `AUTONOMY-05` | 完成有界自主执行真实验收 | `AUTONOMY-04` |
