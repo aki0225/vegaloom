@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "event_id": "20260901T125605Z-AUTONOMY-05-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTONOMY-05",
+  "transition": "completed",
+  "recorded_at": "2026-09-01T12:56:05Z",
+  "summary": "三个真实仓库已走通 Bounded 低风险任务、Human 批准与自动 Repair、高风险人工门禁和换目录恢复；真实 Codex Worker Thread 在原生压缩后保持 Task Anchor，真实中断保留 partial diff 并 fail-closed。运行暴露的 Planning、首次批准前 revision、最终集成审查和 Work Item 路径归因问题已做最小修复。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "real-agent-dogfood",
+      "native-provider-compaction",
+      "worker-interruption",
+      "cross-directory-recovery",
+      "full-test-shards",
+      "package-smoke",
+      "repository-hygiene",
+      "architecture-growth",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "eval/autonomy-05-real-agent.md",
+      "eval/real-world-runs.md",
+      "src/vega/agent_planning.py",
+      "src/vega/agent_change_contract.py",
+      "src/vega/agent_change_revision_runtime.py",
+      "src/vega/agent_change_run.py",
+      "src/vega/agent_codex_preparation.py",
+      "tests/supervisor/test_agent_planning.py",
+      "tests/supervisor/test_agent_change_revision.py",
+      "tests/supervisor/test_agent_change_run.py"
+    ]
+  }
+}

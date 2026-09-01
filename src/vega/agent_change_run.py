@@ -343,7 +343,10 @@ def _project_work_item(
     return AgentWorkItem(
         work_item_id=item.work_item_id,
         objective=item.objective,
-        allowed_paths=list(contract.authority_envelope.allowed_paths),
+        # Contract 约束整个 ChangeRun；当前 Work Item 只应修改自己在
+        # Execution Plan 中声明的文件。否则每个 Work Item 都会继承全局并集，
+        # 已接受项与后续 Repair 的 WIP 将无法可靠归因。
+        allowed_paths=list(item.likely_files),
         forbidden_paths=list(contract.authority_envelope.forbidden_paths),
         verification=verification,
         external_side_effects=external_side_effects,

@@ -43,6 +43,45 @@ from vega.cli_entrypoint import app
 _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
+def test_unapproved_contract_can_be_revised_before_approval(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    started = runtime.start_change(
+        repo,
+        contract=_contract(),
+        execution_plan=_execution_plan(),
+    )
+    current_contract = _load_contract(started.run_dir)
+    proposed_contract = current_contract.model_copy(
+        update={
+            "contract_revision": 2,
+            "invariants": ["示例 ID 在当前输入中保持唯一"],
+        }
+    )
+    proposed_plan = _execution_plan().model_copy(
+        update={
+            "contract_revision": 2,
+            "plan_revision": 2,
+            "unresolved_decisions": [],
+        }
+    )
+
+    revised = runtime.revise_change(
+        started.run_dir.name,
+        proposed_contract=proposed_contract,
+        proposed_execution_plan=proposed_plan,
+    )
+
+    assert revised.state.phase == "awaiting_approval"
+    assert revised.state.contract_revision == 2
+    assert revised.state.execution_plan_revision == 2
+    assert revised.state.approved_contract_digest is None
+
+
 def test_execution_plan_revision_auto_applies_inside_approved_contract(
     tmp_path: Path,
 ) -> None:

@@ -287,8 +287,14 @@ def classify_declared_revision(
 ) -> DeclaredRevisionAssessment:
     """只裁决声明内容；实际 Git Diff 和风险路径仍由运行时单独检查。"""
 
-    if not current_contract.approval_is_current():
-        raise ValueError("当前 Approved Contract 缺失或批准摘要已过期")
+    pending = _classify_pending_approval_revision(
+        current_contract=current_contract,
+        proposed_contract=proposed_contract,
+        current_plan=current_plan,
+        proposed_plan=proposed_plan,
+    )
+    if pending is not None:
+        return pending
     if proposed_contract.task_id != current_contract.task_id:
         raise ValueError("Contract revision 不能改变 task_id")
 
@@ -330,6 +336,80 @@ def classify_declared_revision(
         decision="auto_apply",
         changed_fields=plan_changes,
         reason="变化仅发生在 Approved Contract 内的执行计划",
+    )
+
+
+def _classify_pending_approval_revision(
+    *,
+    current_contract: ChangeContract,
+    proposed_contract: ChangeContract,
+    current_plan: ExecutionPlan,
+    proposed_plan: ExecutionPlan,
+) -> DeclaredRevisionAssessment | None:
+    if current_contract.approval_is_current():
+        return None
+    if current_contract.approved:
+        raise ValueError("当前 Approved Contract 缺失或批准摘要已过期")
+    return _classify_unapproved_revision(
+        current_contract=current_contract,
+        proposed_contract=proposed_contract,
+        current_plan=current_plan,
+        proposed_plan=proposed_plan,
+    )
+
+
+def _classify_unapproved_revision(
+    *,
+    current_contract: ChangeContract,
+    proposed_contract: ChangeContract,
+    current_plan: ExecutionPlan,
+    proposed_plan: ExecutionPlan,
+) -> DeclaredRevisionAssessment:
+    """允许人工在首次批准前解决未决问题，但仍保持 revision 单调递增。"""
+
+    if proposed_contract.task_id != current_contract.task_id:
+        raise ValueError("Contract revision 不能改变 task_id")
+    if proposed_contract.approved:
+        raise ValueError("首次批准前的 Contract revision 不能携带批准记录")
+
+    contract_changes = _changed_fields(
+        current_contract.semantic_content(),
+        proposed_contract.semantic_content(),
+    )
+    plan_changes = _changed_fields(
+        current_plan.semantic_content(),
+        proposed_plan.semantic_content(),
+    )
+    if not contract_changes and not plan_changes:
+        if (
+            proposed_contract.contract_revision
+            != current_contract.contract_revision
+            or proposed_plan.plan_revision != current_plan.plan_revision
+        ):
+            raise ValueError("内容未变化时不能单独修改 revision")
+        return DeclaredRevisionAssessment(
+            decision="unchanged",
+            reason="待批准合同与执行计划均未变化",
+        )
+
+    expected_contract_revision = (
+        current_contract.contract_revision + 1
+        if contract_changes
+        else current_contract.contract_revision
+    )
+    if proposed_contract.contract_revision != expected_contract_revision:
+        raise ValueError("首次批准前合同内容变化时 contract_revision 必须递增 1")
+    if proposed_plan.plan_revision != current_plan.plan_revision + 1:
+        raise ValueError("首次批准前执行内容变化时 plan_revision 必须递增 1")
+    validate_execution_plan_against_contract(proposed_contract, proposed_plan)
+    changed_fields = [
+        *[f"contract.{field}" for field in contract_changes],
+        *[f"execution_plan.{field}" for field in plan_changes],
+    ]
+    return DeclaredRevisionAssessment(
+        decision="requires_approval",
+        changed_fields=changed_fields,
+        reason="首次批准前的合同或执行计划已按人工决定修订",
     )
 
 
