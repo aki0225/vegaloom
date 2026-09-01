@@ -15,7 +15,6 @@ from .redaction import redact_text, redact_value
 
 PROGRESS_ARTIFACT = "progress.jsonl"
 PROGRESS_VERSION = 2
-
 _EVENT_LABELS = {
     "started": "已启动",
     "checkpoint_planned": "已生成 checkpoint 计划",
@@ -59,6 +58,7 @@ _EVENT_LABELS = {
     "planning_proposal_created": "Planning Proposal 已生成",
     "contract_compilation_completed": "Contract Compiler 已通过",
     "contract_compilation_rejected": "Contract Compiler 已拒绝",
+    "bounded_approval_rejected": "bounded 策略未放行",
     "planning_retry_required": "Planning 需要重试",
     "planning_blocked": "Planning 已交还人工",
     "planning_stopped": "Planning 已停止",

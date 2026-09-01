@@ -24,9 +24,9 @@
 </div>
 
 Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言目标，Vega 把调查结果编译成
-待批准的 Change Contract；人工批准后，Vega 在隔离 Worktree 中复用一个 Coding Agent
-会话完成实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。普通问题自动回到
-Worker，越出批准边界才停下来问人。
+待批准的 Change Contract；批准后，Vega 在隔离 Worktree 中复用一个 Coding Agent 会话完成
+实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。普通问题自动回到 Worker，
+越出批准边界才停下来问人。
 
 > 最新稳定版本：[v0.3.1](https://github.com/aki0225/vegaloom/releases/tag/v0.3.1)。
 
@@ -74,6 +74,30 @@ revision 漂移时，run 进入 `needs_human`，不会启动 Worker。编译通�
 vega approve --run <run_id> --actor human
 vega run --run <run_id> --timeout 900
 ```
+
+默认批准方式是人工确认。重复、低风险的小任务可以在仓库中预先登记 bounded 策略：
+
+```yaml
+approval:
+  bounded:
+    enabled: true
+    policy_id: docs-and-tests-v1
+    allowed_paths: [docs/**, tests/**]
+    max_changed_files: 4
+    max_work_items: 2
+    max_repair_rounds: 1
+    max_auto_replans: 0
+```
+
+调用方仍要显式选择：
+
+```powershell
+vega run --run <run_id> --timeout 900 --approval bounded
+```
+
+Vega 只放行范围、验证、预算和副作用都明确，且没有命中人工风险规则的 Contract。策略不匹配
+时 run 留在 `awaiting_approval`；策略或 Contract 变化后，旧批准失效。bounded 不会自动
+push、创建 PR 或合并。
 
 目标、范围和验证已经明确时，也可以使用显式
 `vega start --contract ... --execution-plan ...` 跳过只读调查。
@@ -164,6 +188,9 @@ runs/<run_id>/agent-final-report.md
 
 人批准“做什么、验收是什么、哪里不能动”。Agent 可以在这个边界内调整实现方案、Work Item
 和测试；触及合同字段就重新请求批准。
+
+仓库也可以为低风险范围登记 bounded 策略。它只是批准来源，不改变 ChangeRun、验证、Reviewer
+或最终人工 Git 交付边界。
 
 ### Git 保存代码事实
 

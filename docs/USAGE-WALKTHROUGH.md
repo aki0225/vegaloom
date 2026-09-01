@@ -79,10 +79,46 @@ vega status --run <run_id> --json
 
 ## 4. 批准并运行
 
+默认由人检查 Plan Card：
+
 ```powershell
 vega approve --run <run_id> --actor human
 vega run --run <run_id> --timeout 900
 ```
+
+仓库维护者也可以为重复、低风险任务预先配置：
+
+```yaml
+approval:
+  bounded:
+    enabled: true
+    policy_id: docs-and-tests-v1
+    allowed_paths:
+      - docs/**
+      - tests/**
+    max_changed_files: 4
+    max_work_items: 2
+    max_repair_rounds: 1
+    max_auto_replans: 0
+```
+
+配置必须进入 Git。调用方还要显式选择：
+
+```powershell
+vega run --run <run_id> --timeout 900 --approval bounded
+```
+
+这条命令只在以下条件全部成立时批准并继续 Worker：
+
+- Contract 与每个 Work Item 都列出具体文件；
+- Verification 已在 `.vega.yaml` 登记；
+- 没有未决问题、高影响副作用或人工风险规则命中；
+- 文件、Work Item、Repair 和 Replan 预算没有越界；
+- 当前 Workspace 与策略仍和 Planning 基线一致。
+
+任一条件不满足，状态仍是 `awaiting_approval`，状态卡说明原因。可以改用人工批准，也可以重新
+调查和修订任务。策略或 Contract 变化会使已有 bounded 批准失效；后续验证、Reviewer 和最终
+人工 Git 交付没有捷径。
 
 `run` 会连续推进合同允许的 `next` 和 `repair`，直到：
 

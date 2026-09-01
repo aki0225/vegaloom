@@ -32,6 +32,7 @@ _TRACE_PROGRESS = {
     "planning_proposal_created": ("agent", "planning_proposal_created"),
     "contract_compilation_completed": ("agent", "contract_compilation_completed"),
     "contract_compilation_rejected": ("agent", "contract_compilation_rejected"),
+    "bounded_approval_rejected": ("agent", "bounded_approval_rejected"),
     "planning_retry_required": ("agent", "planning_retry_required"),
     "planning_blocked": ("agent", "planning_blocked"),
     "planning_stopped": ("agent", "planning_stopped"),

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from .agent_approval_policy import validate_bounded_approval_freshness
 from .agent_change_contract import (
     ChangeContract,
     ExecutionPlan,
@@ -253,6 +254,12 @@ def load_change_run_context(
     worktree = managed_worktree_from_metadata(metadata)
     if worktree.run_id != state.run_id:
         raise ValueError("ChangeRun Worktree 与 State run_id 不一致")
+    if state.phase not in {"planning", "awaiting_approval"}:
+        validate_bounded_approval_freshness(
+            worktree.worktree_path,
+            contract,
+            execution_plan,
+        )
     return ChangeRunContext(
         contract=contract,
         execution_plan=execution_plan,

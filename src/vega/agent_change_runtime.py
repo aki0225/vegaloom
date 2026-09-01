@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .agent_change_contract import (
+    ApprovalSource,
     ChangeContract,
     ExecutionPlan,
     approve_change_contract,
@@ -136,6 +137,10 @@ def approve_change_run(
     metadata: dict[str, object],
     *,
     actor: str,
+    approval_source: ApprovalSource = "human",
+    policy_id: str | None = None,
+    policy_digest: str | None = None,
+    policy_revision: str | None = None,
     write_checkpoint_fn=write_checkpoint,
     write_task_brief_fn=write_task_brief,
 ) -> AgentRun:
@@ -148,7 +153,14 @@ def approve_change_run(
     work_item = current_change_work_item(plan, state)
     repo = bound_repo(run_dir)
     require_verification_commands_preflight(repo, work_item.verification)
-    approved_contract = approve_change_contract(context.contract, actor=actor)
+    approved_contract = approve_change_contract(
+        context.contract,
+        actor=actor,
+        source=approval_source,
+        policy_id=policy_id,
+        policy_digest=policy_digest,
+        policy_revision=policy_revision,
+    )
     approved_plan = project_agent_plan(
         approved_contract,
         context.execution_plan,
@@ -169,11 +181,16 @@ def approve_change_run(
     )
     save_change_run_artifacts(run_dir, approved_contract, context.execution_plan)
     save_agent_plan(run_dir, approved_plan)
+    approval_reason = (
+        f"Approved Contract 已由 bounded 策略 `{policy_id}` 批准"
+        if approval_source == "bounded"
+        else "Approved Contract 已批准"
+    )
     checkpoint = write_checkpoint_fn(
         run_dir,
         ready_state,
         snapshot,
-        reason="Approved Contract 已批准",
+        reason=approval_reason,
         status="safe",
         pending_actions=["next", "replan", "human"],
         evidence_refs=[CHANGE_CONTRACT_ARTIFACT, EXECUTION_PLAN_ARTIFACT],
@@ -194,7 +211,9 @@ def approve_change_run(
         run_dir / "trace.jsonl",
         event="change_contract_approved",
         state=ready_state,
-        observation_summary=f"Task Brief {task_brief.utf8_bytes} bytes",
+        observation_summary=(
+            f"{approval_reason}；Task Brief {task_brief.utf8_bytes} bytes"
+        ),
         artifact_refs=[
             CHANGE_CONTRACT_ARTIFACT,
             EXECUTION_PLAN_ARTIFACT,

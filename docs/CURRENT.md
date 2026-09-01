@@ -5,28 +5,29 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：21 / 24
-- 最近事件：`20260901T023438Z-AUTONOMY-02-completed`
+- 已完成：22 / 24
+- 最近事件：`20260901T055018Z-AUTONOMY-03-completed`
 
 ## 当前事项
 
-### 下一项：`AUTONOMY-03` 增加有界自动批准
+### 下一项：`AUTONOMY-04` 精简 Provider 会话适配
 
-允许仓库内人工预先批准的策略放行范围清楚、验证明确且不命中高风险的任务；其他任务继续请求人工批准。
+把 Codex 接入收敛为 Thread、Turn、Event、Steer、Interrupt、Status 和 Review 能力映射，只在等价证据成立时删除重复协议处理。
 
 验收条件：
 
-- 自动批准同时要求仓库策略显式启用和调用方选择 bounded 模式
-- 低风险任务只有在范围、Verification、预算和副作用都明确时才能进入现有 ChangeRun
-- 高风险、配置缺失、未决问题、未知副作用或策略过期时必须请求人工
-- 策略或 Contract 变化会使自动批准失效
-- 自动批准不改变最终人工 Git 交付边界
+- 持久 Worker、独立 Reviewer、状态卡和恢复语义保持不变
+- Codex 原生 review/start 只有在结构化 Verdict、覆盖、风险和只读边界等价时才替换当前实现
+- 未识别的新事件不会关闭整个 Observation 链
+- Provider 过载、超时和中断保持有界处理
+- 不重写 Provider 自己的会话历史、上下文压缩或 Prompt Cache
 
 要求检查：
 
-- `approval-policy-tests`
+- `provider-protocol-tests`
+- `execution-control-tests`
 - `supervisor-tests`
-- `security-tests`
+- `real-provider-shadow`
 - `repository-hygiene`
 - `pr-ci`
 
@@ -55,7 +56,7 @@
 | 已完成 | `VALID-02` | 修复真实验收暴露的恢复与高风险审查问题 | `SESSION-04` |
 | 已完成 | `AUTONOMY-01` | 从自然语言生成 Planning Proposal | `VALID-02` |
 | 已完成 | `AUTONOMY-02` | 编译 Change Contract 与 Execution Plan | `AUTONOMY-01` |
-| 待开始 | `AUTONOMY-03` | 增加有界自动批准 | `AUTONOMY-02` |
+| 已完成 | `AUTONOMY-03` | 增加有界自动批准 | `AUTONOMY-02` |
 | 待开始 | `AUTONOMY-04` | 精简 Provider 会话适配 | `AUTONOMY-03` |
 | 待开始 | `AUTONOMY-05` | 完成有界自主执行真实验收 | `AUTONOMY-04` |
 

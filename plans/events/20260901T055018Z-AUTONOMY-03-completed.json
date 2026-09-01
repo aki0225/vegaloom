@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "event_id": "20260901T055018Z-AUTONOMY-03-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "AUTONOMY-03",
+  "transition": "completed",
+  "recorded_at": "2026-09-01T05:50:18Z",
+  "summary": "仓库现在可以通过跟踪的 approval.bounded 策略和调用方显式选择，自动批准范围、验证、预算和副作用都明确的低风险 Change Contract；批准记录绑定策略、源 revision 与 Contract 摘要，策略或合同变化后拒绝继续执行，其他任务保持人工批准和最终人工 Git 交付边界。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "approval-policy-tests",
+      "supervisor-tests",
+      "security-tests",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/approval_policy_config.py",
+      "src/vega/agent_approval_policy.py",
+      "src/vega/agent_approval_runtime.py",
+      "src/vega/agent_change_contract.py",
+      "src/vega/agent_start_cli.py",
+      "tests/supervisor/test_agent_approval_policy.py",
+      "docs/PRODUCT-CONTRACT.md",
+      "docs/ARCHITECTURE.md",
+      "docs/USAGE-WALKTHROUGH.md"
+    ]
+  }
+}
