@@ -30,6 +30,8 @@ _TRACE_PROGRESS = {
     "planning_turn_started": ("agent", "planning_turn_started"),
     "planning_stop_requested": ("agent", "planning_stop_requested"),
     "planning_proposal_created": ("agent", "planning_proposal_created"),
+    "contract_compilation_completed": ("agent", "contract_compilation_completed"),
+    "contract_compilation_rejected": ("agent", "contract_compilation_rejected"),
     "planning_retry_required": ("agent", "planning_retry_required"),
     "planning_blocked": ("agent", "planning_blocked"),
     "planning_stopped": ("agent", "planning_stopped"),
@@ -67,6 +69,7 @@ _TRACE_STATUS = {
     "agent_recovery_execution_blocked": "needs_human",
     "planning_blocked": "needs_human",
     "planning_stopped": "stopped",
+    "contract_compilation_rejected": "needs_human",
 }
 
 
@@ -133,13 +136,11 @@ def read_live_child_stage(run_dir: Path, state: AgentState) -> str | None:
     child 的 `state.json` 是 assist loop 自己的权威状态。这里仅作展示投影，
     不用它推导父 Agent 的成功、失败或下一步决策。
     """
-
     if (
         state.phase not in {"acting", "observing", "needs_human"}
         or not state.active_child_run
     ):
         return None
-
     workspace = run_dir.parent.parent
     child_run = state.active_child_run
     try:
@@ -152,7 +153,6 @@ def read_live_child_stage(run_dir: Path, state: AgentState) -> str | None:
         raise ValueError(
             f"active child `{child_run}` 的路径无法安全解析；已拒绝展示。"
         ) from exc
-
     child_state = _load_live_child_state(child_dir, child_run)
     if child_state is None:
         return _LIVE_CHILD_WAITING

@@ -16,8 +16,8 @@ Adapter 只写入 `.agents/skills/vega-agent/SKILL.md`。目标仓库已有同�
 
 ## 2. 调查
 
-在 Codex 主会话中调用 `$vega-agent`，或者按
-只有现象、根因和范围都不清楚时，可以先建立只读 Planning ChangeRun：
+在 Codex 主会话中调用 `$vega-agent`，或者直接使用 CLI。只要根因、范围或验收仍有一项
+不明确，就先建立只读 Planning ChangeRun：
 
 ```powershell
 vega start --repo <target-repo> --text "导出按钮点击后没有反应"
@@ -29,24 +29,32 @@ Vega 在固定 Git revision 的受管 Worktree 中调查，输出：
 ```text
 runs/<run_id>/planning-proposal.json
 runs/<run_id>/planning-proposal.md
+runs/<run_id>/change-contract.json
+runs/<run_id>/execution-plan.json
+runs/<run_id>/plan-card.md
 ```
 
-Proposal 区分事实、假设、未决问题、建议范围和验证建议，并保留来源引用。它尚未经过
-Contract Compiler，不能批准，也不能启动 Worker。当前版本接下来仍按
-[修改前调查与计划](PLAN-FIRST-PROTOCOL.md) 整理：
+Proposal 区分事实、假设、未决问题、建议范围和验证建议，并保留来源引用。随后，同一次
+`run` 调用确定性 Contract Compiler：
 
-1. 读取项目规则和 Git 状态；
-2. 复现或定位问题；
-3. 区分事实、假设和未决问题；
-4. 生成 Change Contract；
-5. 生成 Execution Plan；
-6. 展示给用户确认。
+1. 重新校验 Proposal、固定 source revision 和 Planning 上下文；
+2. 只接受 `.vega.yaml` 已登记的验证命令；
+3. 检查候选路径、风险声明和文件/命令预算；
+4. 生成未批准的 Change Contract、Execution Plan 和 Plan Card；
+5. 停在 `awaiting_approval`。
 
-目标和范围已经明确时，可以直接准备 Change Contract 与 Execution Plan。批准前不启动 Worker。
+路径越界、未知验证、高风险声明缺失或 source revision 漂移时，状态进入 `needs_human`，
+不会创建合同或启动 Worker。编译通过后先读取 `plan-card.md`，再批准：
 
-## 3. 创建 ChangeRun
+```powershell
+vega approve --run <run_id> --actor human
+vega run --run <run_id> --timeout 900
+```
 
-保持在保存 `runs/` 的 Vega workspace 中执行：
+## 3. 使用显式 Contract 创建 ChangeRun
+
+目标、范围和验证已经明确时，可以跳过只读调查。保持在保存 `runs/` 的 Vega workspace
+中执行：
 
 ```powershell
 vega start --repo <target-repo> `

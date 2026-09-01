@@ -57,6 +57,8 @@ _EVENT_LABELS = {
     "planning_turn_started": "开始只读调查",
     "planning_stop_requested": "已请求停止 Planning",
     "planning_proposal_created": "Planning Proposal 已生成",
+    "contract_compilation_completed": "Contract Compiler 已通过",
+    "contract_compilation_rejected": "Contract Compiler 已拒绝",
     "planning_retry_required": "Planning 需要重试",
     "planning_blocked": "Planning 已交还人工",
     "planning_stopped": "Planning 已停止",

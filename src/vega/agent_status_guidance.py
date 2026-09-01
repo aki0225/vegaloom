@@ -153,6 +153,7 @@ def agent_artifact_names(state: dict[str, Any]) -> list[str]:
                 [
                     "change-contract.json",
                     "execution-plan.json",
+                    "plan-card.md",
                     "agent-final-report.json",
                     "agent-final-report.md",
                 ]

@@ -1,7 +1,7 @@
 # 架构
 
-> 本文描述 v0.3.x 已发布架构，以及主线中已实现的只读 Planning Proposal。
-> Contract Compiler 与后续有界自动批准见
+> 本文描述 v0.3.x 已发布架构，以及主线中已实现的只读 Planning Proposal 和
+> Contract Compiler。后续有界自动批准见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。
 
@@ -11,7 +11,7 @@ Vega v0.3.x 使用一条 ChangeRun：
 
 ```text
 Host Session
-  ├─ 自然语言目标 -> 只读 Planning Proposal
+  ├─ 自然语言目标 -> 只读 Planning Proposal -> Contract Compiler
   └─ Change Contract + Execution Plan
           │
           ▼
@@ -60,6 +60,21 @@ planning
 `start --text` 在同一条 ChangeRun 中建立只读 Planning 阶段。Planner 绑定固定 Git revision，
 输出事实引用、假设、未决问题、建议范围和验证建议；Workspace 发生变化、引用失效或 Provider
 终态不可信时停止。Proposal 只是 Contract Compiler 的输入，不拥有批准或执行权限。
+
+### Contract Compiler
+
+`agent_contract_compiler.py` 负责纯确定性编译，
+`agent_contract_compilation_runtime.py` 负责把结果发布回同一条 ChangeRun。Compiler：
+
+- 绑定 Planning Request、上下文摘要、Proposal 与 source revision；
+- 只接受固定 revision 中 `.vega.yaml` 已登记的验证命令；
+- 校验候选路径、required review、文件数量和每轮验证命令预算；
+- 保留事实、假设和未决问题的分类；
+- 生成未批准的 Change Contract、Execution Plan 和 `plan-card.md`。
+
+编译通过后状态进入 `awaiting_approval`。拒绝结果进入 `needs_human`，不启动 Worker，也不创建
+第二套状态机或成功语义。AGENTS.md 等自由文本规则已绑定在 Planning 上下文中；机器强制的
+路径、验证和风险仍以 `.vega.yaml` 为准。
 
 ### Change Contract 与 Execution Plan
 
@@ -260,8 +275,12 @@ Handoff 把任务语义写入 Git Task Card。本机 Provider Session、Trace、
 runs/<run_id>/
 ├── agent-state.json
 ├── agent-plan.json
+├── planning-request.json
+├── planning-proposal.json
+├── planning-proposal.md
 ├── change-contract.json
 ├── execution-plan.json
+├── plan-card.md
 ├── provider-sessions.json
 ├── trace.jsonl
 ├── progress.jsonl

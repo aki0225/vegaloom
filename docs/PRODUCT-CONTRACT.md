@@ -44,6 +44,11 @@ Planning Proposal。Proposal 保存事实引用、假设、未决问题、建议
 它不是 Approved Contract。Planner 提出的路径、命令、风险和 Work Item 只能作为编译输入；
 在 Contract Compiler 与人工批准完成前，Vega 不启动 Worker。
 
+Contract Compiler 不调用模型。它重新校验 Proposal 与 Planning 上下文绑定，只接受
+`.vega.yaml` 已登记的验证命令，并检查候选路径、风险声明和预算。通过后生成未批准的
+Change Contract、Execution Plan 和 Plan Card；任一绑定或规则检查失败时进入
+`needs_human`，不创建可执行合同。
+
 ## Change Contract
 
 Change Contract 冻结人工授权：

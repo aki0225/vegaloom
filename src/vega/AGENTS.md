@@ -60,6 +60,8 @@ CLI
   `agent_worker`、`agent_finalization`。
 - 自然语言规划：`agent_planning*` 只生成未批准 Proposal；不得直接写入 Approved Contract、
   启动 Worker 或创造验证事实。
+- 确定性合同编译：`agent_contract_compiler` 只做 Proposal 到现有合同模型的纯投影和规则检查；
+  `agent_contract_compilation_runtime` 把未批准结果发布回同一条 ChangeRun，不启动 Worker。
 - 合同与持久化：`agent_contract`、`agent_change_contract`、`agent_persistence`、`agent_run`、
   `agent_mutation`、`agent_change_core`、`agent_change_task_card`、`agent_change_verification_retry`。
 - Provider 无关执行后置流程：`agent_candidate_pipeline`、`agent_worker_evidence`、
