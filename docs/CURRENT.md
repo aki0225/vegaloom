@@ -5,12 +5,31 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：24 / 24
+- 已完成：24 / 28
 - 最近事件：`20260901T125605Z-AUTONOMY-05-completed`
 
 ## 当前事项
 
-当前没有可执行事项；计划已经完成，或剩余事项处于阻塞/已替代状态。
+### 下一项：`RELEASE-04` 发布 Vega v0.4.0
+
+把已完成真实验收的有界自主执行作为稳定版本发布，版本、制品、文档、Tag 与 GitHub Release 必须绑定同一主线提交。
+
+验收条件：
+
+- pyproject、vega.__version__、README、CI 版本断言和发布材料统一为 0.4.0
+- 完整测试、package smoke、PR CI 与合并后 main CI 均有明确通过结果
+- 注解 Tag v0.4.0 与 GitHub Release 绑定通过验证的 main 提交
+- 发布材料准确披露 Codex 已验收、Claude Code 尚未接入和最终人工 Git 交付边界
+
+要求检查：
+
+- `full-test-shards`
+- `package-smoke`
+- `repository-hygiene`
+- `pr-ci`
+- `main-ci`
+- `annotated-tag`
+- `github-release`
 
 ## 全部事项
 
@@ -40,6 +59,10 @@
 | 已完成 | `AUTONOMY-03` | 增加有界自动批准 | `AUTONOMY-02` |
 | 已完成 | `AUTONOMY-04` | 精简 Provider 会话适配 | `AUTONOMY-03` |
 | 已完成 | `AUTONOMY-05` | 完成有界自主执行真实验收 | `AUTONOMY-04` |
+| 待开始 | `RELEASE-04` | 发布 Vega v0.4.0 | `AUTONOMY-05` |
+| 待开始 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
+| 待开始 | `USAGE-02` | 修复真实使用中的高频摩擦 | `USAGE-01` |
+| 待开始 | `PROVIDER-01` | 接入 Claude Code Provider | `USAGE-02` |
 
 ## 状态规则
 

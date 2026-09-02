@@ -1,13 +1,13 @@
 # 架构
 
-> 本文描述 v0.3.x 已发布架构，以及主线中已实现的只读 Planning Proposal、Contract Compiler
+> 本文描述 v0.4.0 架构，以及主线中已实现的只读 Planning Proposal、Contract Compiler
 > 和有界自动批准。演进计划见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。
 
 ## 总览
 
-Vega v0.3.x 使用一条 ChangeRun：
+Vega v0.4.0 使用一条 ChangeRun：
 
 ```text
 Host Session

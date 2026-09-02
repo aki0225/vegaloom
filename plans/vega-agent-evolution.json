@@ -494,6 +494,93 @@
         "repository-hygiene",
         "pr-ci"
       ]
+    },
+    {
+      "id": "RELEASE-04",
+      "title": "发布 Vega v0.4.0",
+      "summary": "把已完成真实验收的有界自主执行作为稳定版本发布，版本、制品、文档、Tag 与 GitHub Release 必须绑定同一主线提交。",
+      "depends_on": [
+        "AUTONOMY-05"
+      ],
+      "acceptance": [
+        "pyproject、vega.__version__、README、CI 版本断言和发布材料统一为 0.4.0",
+        "完整测试、package smoke、PR CI 与合并后 main CI 均有明确通过结果",
+        "注解 Tag v0.4.0 与 GitHub Release 绑定通过验证的 main 提交",
+        "发布材料准确披露 Codex 已验收、Claude Code 尚未接入和最终人工 Git 交付边界"
+      ],
+      "required_checks": [
+        "full-test-shards",
+        "package-smoke",
+        "repository-hygiene",
+        "pr-ci",
+        "main-ci",
+        "annotated-tag",
+        "github-release"
+      ]
+    },
+    {
+      "id": "USAGE-01",
+      "title": "连续运行五个真实任务",
+      "summary": "在不同任务形态中连续使用 v0.4.0，统计自动完成、返修、人工介入、耗时和成本，不用夹具通过数替代真实使用结果。",
+      "depends_on": [
+        "RELEASE-04"
+      ],
+      "acceptance": [
+        "至少五个真实任务覆盖明确小改动、未知根因 Bug、多文件修改、Reviewer 打回和高风险人工门禁",
+        "每个任务绑定固定目标提交、批准合同、最终 Candidate、验证、Reviewer 与终态",
+        "如实登记失败、超时、人工接管和未完成任务，不只选择成功案例",
+        "形成可比较的操作数、返修轮次、人工介入原因、耗时和模型调用摘要"
+      ],
+      "required_checks": [
+        "real-agent-dogfood",
+        "append-only-eval",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "USAGE-02",
+      "title": "修复真实使用中的高频摩擦",
+      "summary": "只处理 USAGE-01 可复现且明显影响完成率、人工操作或现场解释的缺陷，避免按假设继续扩张控制面。",
+      "depends_on": [
+        "USAGE-01"
+      ],
+      "acceptance": [
+        "每项代码修改都能关联至少一个真实任务中的可复现问题",
+        "优先删除重复状态、提示或适配代码，除非现有合同无法表达真实缺口",
+        "新增测试只覆盖公开行为、故障恢复或安全边界，不复制私有实现",
+        "修复后重跑对应真实任务或等价最小复现，并保持 fail-closed 和写审隔离"
+      ],
+      "required_checks": [
+        "targeted-regression",
+        "full-test-shards",
+        "architecture-growth",
+        "repository-hygiene",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "PROVIDER-01",
+      "title": "接入 Claude Code Provider",
+      "summary": "在不改变 ChangeRun、Git Candidate、Verification、Risk、Reviewer 和 Finish 语义的前提下，让 Claude Code 实现现有 Provider Session 合同。",
+      "depends_on": [
+        "USAGE-02"
+      ],
+      "acceptance": [
+        "Claude Code Adapter 实现当前 Thread、Turn、Steer、Interrupt、Status 与只读 Reviewer 所需的最小能力映射",
+        "Provider 不支持的能力明确降级或拒绝，不用 Codex 专有事件伪装等价支持",
+        "真实 Claude Code smoke 覆盖持久 Worker、独立 Reviewer、Candidate Gate 和至少一次恢复或打回",
+        "Codex 路径保持兼容，状态机和最终成功语义不新增 Provider 分叉"
+      ],
+      "required_checks": [
+        "provider-contract-tests",
+        "real-claude-code-smoke",
+        "supervisor-tests",
+        "security-tests",
+        "package-smoke",
+        "repository-hygiene",
+        "pr-ci"
+      ]
     }
   ]
 }

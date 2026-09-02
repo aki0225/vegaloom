@@ -1,11 +1,21 @@
 # Vega 后续演进路线
 
-> 当前稳定版本：`v0.3.1`
+> 当前稳定版本：`v0.4.0`
 > 本文件保存路线决策和历史背景，不维护实时进度。
 > 当前事项与下一项：[`CURRENT.md`](CURRENT.md)
 > 机器可读计划：[`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json)
 
 ## 最近一次路线决策
+
+2026-09-02，AUTONOMY-05 真实验收完成后，后续顺序固定为：
+
+1. 发布 `v0.4.0`，把当前 Codex 有界自主执行作为稳定基线；
+2. 使用正式版本连续运行至少五个真实任务，记录完成、返修、人工介入、耗时和失败；
+3. 只修复真实运行中可复现的高频摩擦，不按假设继续增加控制层；
+4. 最后让 Claude Code 接入现有 Provider Session 合同，不复制 ChangeRun 或成功语义。
+
+对应事项为 `RELEASE-04`、`USAGE-01`、`USAGE-02` 和 `PROVIDER-01`。当前状态由
+[`CURRENT.md`](CURRENT.md) 生成。
 
 2026-08-31，Vega 批准“有界自主执行 V1”，补齐自然语言目标到现有 ChangeRun 之间的入口：
 
