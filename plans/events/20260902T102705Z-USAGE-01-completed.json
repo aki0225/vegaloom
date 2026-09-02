@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "event_id": "20260902T102705Z-USAGE-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "USAGE-01",
+  "transition": "completed",
+  "recorded_at": "2026-09-02T10:27:05Z",
+  "summary": "已使用正式 v0.4.0 wheel 连续运行五个历史真实缺陷；五项均进入 Worker，四项验证通过、一项验证超时，所有高风险或审查不完整结果均保持人工终态，并登记 Planning 风险 ID、验证超时路由和审批可见性等可复现摩擦。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [
+      "4dca293e522e8ddeeb770a7536a166348f1be4c1"
+    ],
+    "checks": [
+      "real-agent-dogfood",
+      "append-only-eval",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "eval/usage-01-v040-real-tasks.md"
+    ]
+  }
+}

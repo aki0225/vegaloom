@@ -5,26 +5,27 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：25 / 28
-- 最近事件：`20260902T065322Z-USAGE-01-started`
+- 已完成：26 / 28
+- 最近事件：`20260902T102705Z-USAGE-01-completed`
 
 ## 当前事项
 
-### 进行中：`USAGE-01` 连续运行五个真实任务
+### 下一项：`USAGE-02` 修复真实使用中的高频摩擦
 
-在不同任务形态中连续使用 v0.4.0，统计自动完成、返修、人工介入、耗时和成本，不用夹具通过数替代真实使用结果。
+只处理 USAGE-01 可复现且明显影响完成率、人工操作或现场解释的缺陷，避免按假设继续扩张控制面。
 
 验收条件：
 
-- 至少五个真实任务覆盖明确小改动、未知根因 Bug、多文件修改、Reviewer 打回和高风险人工门禁
-- 每个任务绑定固定目标提交、批准合同、最终 Candidate、验证、Reviewer 与终态
-- 如实登记失败、超时、人工接管和未完成任务，不只选择成功案例
-- 形成可比较的操作数、返修轮次、人工介入原因、耗时和模型调用摘要
+- 每项代码修改都能关联至少一个真实任务中的可复现问题
+- 优先删除重复状态、提示或适配代码，除非现有合同无法表达真实缺口
+- 新增测试只覆盖公开行为、故障恢复或安全边界，不复制私有实现
+- 修复后重跑对应真实任务或等价最小复现，并保持 fail-closed 和写审隔离
 
 要求检查：
 
-- `real-agent-dogfood`
-- `append-only-eval`
+- `targeted-regression`
+- `full-test-shards`
+- `architecture-growth`
 - `repository-hygiene`
 - `pr-ci`
 
@@ -57,7 +58,7 @@
 | 已完成 | `AUTONOMY-04` | 精简 Provider 会话适配 | `AUTONOMY-03` |
 | 已完成 | `AUTONOMY-05` | 完成有界自主执行真实验收 | `AUTONOMY-04` |
 | 已完成 | `RELEASE-04` | 发布 Vega v0.4.0 | `AUTONOMY-05` |
-| 进行中 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
+| 已完成 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
 | 待开始 | `USAGE-02` | 修复真实使用中的高频摩擦 | `USAGE-01` |
 | 待开始 | `PROVIDER-01` | 接入 Claude Code Provider | `USAGE-02` |
 
