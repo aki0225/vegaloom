@@ -1,5 +1,8 @@
 # Vega v0.4.0 发布摘要
 
+> 状态：已发布。注解 Tag `v0.4.0` 绑定提交
+> `bcc079e0fe4fce99bb20637fa09b021537f27abe`。
+
 v0.4.0 增加从自然语言目标开始的有界自主执行：
 
 - Coding Agent 先在只读 Workspace 中调查 Bug 或功能目标；
@@ -16,4 +19,8 @@ v0.4.0 增加从自然语言目标开始的有界自主执行：
 本版本只完成 Codex Provider。Claude Code、未知外部副作用重放以及自动 push、PR、merge 和
 release 不在 v0.4.0 范围内。
 
-详细内容见 [`RELEASE-NOTES-0.4.0.md`](RELEASE-NOTES-0.4.0.md)。
+详细内容见
+[`RELEASE-NOTES-0.4.0.md`](https://github.com/aki0225/vegaloom/blob/v0.4.0/docs/RELEASE-NOTES-0.4.0.md)。
+
+发布事实以注解 Tag 和
+[GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.4.0) 为准。

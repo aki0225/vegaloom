@@ -1,6 +1,7 @@
 # Vega v0.4.0 发布说明
 
-> 状态：发布候选。最终发布事实以远端注解 Tag `v0.4.0` 和 GitHub Release 为准。
+> 状态：已发布。注解 Tag `v0.4.0` 绑定提交
+> `bcc079e0fe4fce99bb20637fa09b021537f27abe`，GitHub Release 同时提供 wheel 和 sdist。
 
 v0.4.0 把自然语言任务接到现有 ChangeRun。用户只描述 Bug 现象或功能目标时，Vega 可以先让
 Coding Agent 在只读 Workspace 中调查，再把结果编译为待批准的 Change Contract 和

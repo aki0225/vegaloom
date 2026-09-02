@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "event_id": "20260902T063726Z-RELEASE-04-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "RELEASE-04",
+  "transition": "completed",
+  "recorded_at": "2026-09-02T06:37:26Z",
+  "summary": "Vega v0.4.0 已从通过完整本地基线、包安装 Smoke、PR CI 和 main CI 的提交发布；注解 Tag 与 GitHub Release 绑定同一 main 提交，并附带 wheel 和 sdist。",
+  "evidence": {
+    "pull_requests": [
+      102
+    ],
+    "commits": [
+      "bcc079e0fe4fce99bb20637fa09b021537f27abe"
+    ],
+    "checks": [
+      "full-test-shards",
+      "package-smoke",
+      "repository-hygiene",
+      "pr-ci",
+      "main-ci",
+      "annotated-tag",
+      "github-release"
+    ],
+    "artifacts": [
+      "docs/RELEASE-NOTES-0.4.0.md",
+      "docs/RELEASE-SUMMARY-0.4.0.md",
+      "docs/RELEASE-CHECKLIST.md",
+      "v0.4.0",
+      "https://github.com/aki0225/vegaloom/releases/tag/v0.4.0"
+    ]
+  }
+}
