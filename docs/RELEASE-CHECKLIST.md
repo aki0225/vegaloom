@@ -2,8 +2,9 @@
 
 发布版本：`v0.4.0`。
 
-> 当前状态：候选准备中。只有注解 Tag、GitHub Release 和对应提交均可核对后，才能改为
-> “已发布”。
+> 结果：2026-09-02 已发布。PR `#102` 以 Squash Merge 合入
+> `bcc079e0fe4fce99bb20637fa09b021537f27abe`；注解 Tag `v0.4.0` 和 GitHub Release
+> 均绑定该提交。
 
 ## 1. 候选范围
 
@@ -96,10 +97,13 @@ Vega Runtime 本身不执行这些 Git 交付动作；本清单属于仓库维�
 
 ## 8. 完成条件
 
-- 完整本地基线和 Package smoke 有明确结果；
-- PR CI 与合并后 main CI 全绿；
+本轮已满足：
+
+- 本地完整测试为 `1489 passed, 12 skipped, 1 warning`；
+- wheel、sdist、`twine check` 和两个干净虚拟环境安装 smoke 通过；
+- PR `#102` 与合并提交的 10 项 CI 均通过；
 - 注解 Tag `v0.4.0` 指向通过验证的 main 提交；
-- GitHub Release 已创建且正文与候选能力一致；
-- README、文档导航和发布状态没有继续把 `v0.3.1` 写成当前版本。
+- GitHub Release 已创建，并附带 wheel 与 sdist；
+- README、文档导航和发布状态均使用 `v0.4.0`。
 
 历史 `v0.3.1` 材料保持原样，发布事实由其 Tag 与 Release 负责。
