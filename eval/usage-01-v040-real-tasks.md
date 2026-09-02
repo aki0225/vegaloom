@@ -191,3 +191,68 @@
 - 参考修复 Diff 仍只在终态后离线比较，不进入 Planner、Worker 或 Reviewer 输入。
 
 本更正在更正 Case 启动前提交。原始预注册文字与错误基线记录不改写。
+
+## 执行记录（追加，2026-09-02）
+
+### 有效 Case 汇总
+
+本轮按预注册规则完成五个有效 Case。五项都进入了 Worker 或高风险人工门禁；没有把 `needs_human` 包装成成功，也没有把仅有夹具的本地基线当成真实任务结果。
+
+| Case | run | 基线提交 | Candidate | Worker | Verification | Risk / Reviewer | 最终状态 |
+|---|---|---|---|---|---|---|---|
+| `USAGE-01-07` | `20260902-160155-1509957974f1-agent` | `ffc1bacfb3eaecd316afe5db528a7a78dce48859` | `a11e034943e4d3f6c05a522bfa2a51ac6bd1d215` | 已执行 | 通过（`41 passed, 1 skipped`） | 高风险；Reviewer `needs_human` | `needs_human` |
+| `USAGE-01-08` | `20260902-162529-2ced120e9bcb-agent` | `2f3f2dffd1e15441e22840ce6f7709dfe55ce064` | `a4eaee870aa05ed0bb8e7d4ab0444cd3075d1c93` | 已执行 | 超时（配置 240 秒；基线同范围约 589 秒） | 未启动 | `needs_human` |
+| `USAGE-01-03` | `20260902-164726-c9b3c7085e4b-agent` | `6054889ce01f4778c65b0f3ec378a7d153a3ea41` | `36b3990096793160eca2fd4dd79df9ac29fa2465` | 已执行 | 通过（定向后端测试 + `git diff --check`） | 中风险；Reviewer Runner 超时，未形成可采信结论 | `needs_human` |
+| `USAGE-01-04` | `20260902-172511-ec3e1b1af76a-agent` | `55c0c6ff9ba9a6fb8949117556c4eaae7c7f0320` | `562315384ef1580c41ad52284493f59ae36706e8` | 已执行 | 通过（依赖安装、Vitest、TypeScript、`git diff --check`） | 高风险；Reviewer `needs_human` | `needs_human` |
+| `USAGE-01-05` | `20260902-173341-bd06c6ced981-agent` | `a93b4ca65af5a31cbf1cbb5cbea72dc8eb798606` | `668532b2469bc4fca475950d43e686581508240b` | 已执行（发生 1 次上下文压缩） | 通过（指定 Maven 回归 + `git diff --check`） | 高风险；资金审查证据不足，Reviewer `needs_human` | `needs_human` |
+
+五个 Case 的 Candidate 变更均留在隔离 Worktree 的本地分支，没有 push、merge、部署或外部写入。参考修复只在终态后离线比较。
+
+### 操作与耗时摘要
+
+- 五项 `contract_revision` 与 `plan_revision` 均为 `1`。`USAGE-01-07` 经过 1 次只读 Planning、1 次 Worker Turn 和 1 次 Reviewer Turn；其余四项使用预注册显式合同，其中 `USAGE-01-08` 为 1 次 Worker Turn、未启动 Reviewer，另外三项各为 1 次 Worker Turn 和 1 次 Reviewer Turn。
+- 自动 Repair 为 0 次，验证重试为 0 次。`USAGE-01-08` 因验证超时被路由回 `planning`，但没有生成或批准新 revision。
+- 正常路径仍不需要人工转贴 Worker 与 Reviewer 的自然语言内容；人工交互主要是 Provider 命令审批（`USAGE-01-03` 2 次、`USAGE-01-04` 1 次）。
+- 从 `run` 创建到终态的墙钟时间约为：`USAGE-01-07` 565 秒、`USAGE-01-08` 1,259 秒、`USAGE-01-03` 1,820 秒、`USAGE-01-04` 475 秒、`USAGE-01-05` 2,360 秒。该时间包含 Provider 调查、实现、验证和审查，不等同于单次模型调用时长。
+- Provider 成本字段在本轮没有可靠的货币值，故不推算金额；已保留可用 token/cache 字段在各 run 的 `provider-sessions.json`。长任务出现过一次 Provider 上下文压缩，但 Worker 终态和 Candidate 绑定仍可对账。
+- Reviewer 不是“默认通过器”：高风险 Case 固定交还人工；Reviewer Runner 超时或证据不完整也固定交还人工。
+
+Provider 最终报告的累计 `total_tokens / cached_input_tokens` 如下。这些是宿主返回的会话累计计数，只用于比较上下文规模，不能直接相加为账单用量：
+
+- `USAGE-01-07`：Planning/Worker `755005 / 503808`，Reviewer `177456 / 117248`；
+- `USAGE-01-08`：Worker `1710239 / 1273088`，Reviewer 未启动；
+- `USAGE-01-03`：Worker `2190726 / 1554688`，Reviewer `276166 / 83968`；
+- `USAGE-01-04`：Worker `1131247 / 1011968`，Reviewer `23512 / 3712`；
+- `USAGE-01-05`：Worker `10294360 / 9783296`，Reviewer `3404510 / 3093376`。
+
+### Candidate 明细
+
+- `USAGE-01-07`：只修改 `src/vega/execution_output.py`；验证耗时 7.779 秒。Reviewer 未发现明确静态缺陷，但指出缺少控制循环集成和高吞吐专项证据。
+- `USAGE-01-08`：修改 `src/vega/runner.py`、`tests/test_execution_control_safety.py`、`tests/test_smoke.py`；第一条验证在 240.067 秒超时，后续 `git diff --check` 未运行，Risk 与 Reviewer 均未启动。
+- `USAGE-01-03`：修改 `.trellis/spec/backend/error-handling.md`、`backend/app/ai_client.py`、`backend/app/main.py`、`backend/tests/test_chat_usage_and_export.py`；定向测试 21.254 秒、`git diff --check` 0.340 秒，Reviewer 在 900 秒内未形成可采信终态。
+- `USAGE-01-04`：修改 `frontend/src/ui/pages/SettingsPage.tsx` 与 `frontend/src/ui/pages/SettingsPage.test.tsx`；四条验证均通过。Reviewer 确认同步锁方向，另提出项目级后端测试证据不足；前端并发必审风险仍要求人工确认。
+- `USAGE-01-05`：修改 `TkZiyingBdDoneWorkbookBuilder.java`、`TkZiyingBdSnapshotAggregationSupport.java` 和两份对应测试；Maven 回归 35.972 秒、`git diff --check` 0.482 秒。Reviewer 在 900 秒内没有完成必审资金披露，终态保持人工检查。
+
+### 与参考修复的离线比较
+
+- `USAGE-01-07` 只改变 `src/vega/execution_output.py`，没有覆盖参考修复中 `execution_control.py`、`runner.py` 和大批专项测试；它证明了窄范围 Worker 可以定位并实现部分输出节流，但不能据此宣称完整修复。
+- `USAGE-01-08` 改动 `src/vega/runner.py` 与两份测试，方向覆盖最终消息提取解耦，但验证在配置超时前结束；因此不宣称与参考修复等价。
+- `USAGE-01-03` 覆盖了本 Case 指定的 `response.completed.response.error` 失败终态，但参考修复还处理 `response.failed`、`response.incomplete`、独立 `error` 事件和缺少完成事件；Candidate 不是参考修复的完整替代。
+- `USAGE-01-04` 与参考修复都使用同步 `ref` 锁阻止重复和交叉提交，Candidate 的定向回归覆盖成功与失败后的释放；参考修复还在请求期间禁用输入控件，属于本 Case 验收之外的额外差异。
+- `USAGE-01-05` 只覆盖了部分跨 Statement 去重和唯一订单候选逻辑，没有修改 `TkZiyingBdProfitSheetSupport.java`，也没有实现参考修复中的两类 negative balance 映射。登记验证通过但 Candidate 未满足全部验收条件，不能提交；高风险门禁保持 `needs_human` 是正确结果。
+
+### 可复现摩擦（转交 `USAGE-02`）
+
+1. **Planning 风险 ID 不是受限枚举**：自然语言 Planner 多次输出 `.vega.yaml` 未登记的自由文本风险名，Contract Compiler 正确 fail-closed，但清晰任务因此在 Worker 前终止。风险声明应只允许登记 ID，或明确映射到“未登记、需人工确认”，不能让普通计划因格式漂移反复失败。
+2. **验证超时缺少前置提示和准确路由**：`USAGE-01-08` 的登记命令实际基线约 589 秒，而配置为 240 秒。最终状态诚实地是超时，但 Supervisor 将其解释为“当前范围不足以直接修复”并转 `replan`，没有把“验证基础设施/配置预算不匹配”单独呈现给人。
+3. **Provider 命令审批摘要仍可能是 `unknown`**：App Server 请求能被记录和响应，但摘要没有提供足够的安全动作类别，用户难以判断是否应批准；需要改善可见性，不能写入原始命令、完整路径或参数。
+4. **高风险人工门禁与内部修复预算耦合**：高风险命中后当前直接固定 `needs_human`，即使 Reviewer 能给出合同内的局部修复建议，也不能在人工最终确认前自动完成一次内部修复。是否放宽需单独评估，不能削弱最终人工门禁。
+5. **Bounded approval 对 medium-risk path 的拒绝需要更清楚的解释**：`USAGE-01-08` 的合同明确且未改变高风险声明，但策略仍因 `medium_paths` 拒绝自动批准；行为安全，但提示应说明这是策略限制而非 Contract 无效。
+
+以上摩擦只登记事实，不在本记录中顺手修改 Runtime；下一事项仅处理能由这些运行复现的问题。
+
+### 证据位置
+
+- 每个 run 的 `agent-state.json`、`status-card.md`、`provider-sessions.json`、`trace.jsonl` 和 child `finish-summary.json`；
+- 本轮实验脚本与合同位于 `.tmp/usage-01/`（不跟踪、不提交）；
+- 错误基线的 `USAGE-01-01`、`USAGE-01-02`、自然 Planning 失败尝试和对应 Artifact 保留原样，仍不计入五项有效 Case。
