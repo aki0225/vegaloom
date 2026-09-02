@@ -6,11 +6,11 @@
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
 - 已完成：25 / 28
-- 最近事件：`20260902T063726Z-RELEASE-04-completed`
+- 最近事件：`20260902T065322Z-USAGE-01-started`
 
 ## 当前事项
 
-### 下一项：`USAGE-01` 连续运行五个真实任务
+### 进行中：`USAGE-01` 连续运行五个真实任务
 
 在不同任务形态中连续使用 v0.4.0，统计自动完成、返修、人工介入、耗时和成本，不用夹具通过数替代真实使用结果。
 
@@ -57,7 +57,7 @@
 | 已完成 | `AUTONOMY-04` | 精简 Provider 会话适配 | `AUTONOMY-03` |
 | 已完成 | `AUTONOMY-05` | 完成有界自主执行真实验收 | `AUTONOMY-04` |
 | 已完成 | `RELEASE-04` | 发布 Vega v0.4.0 | `AUTONOMY-05` |
-| 待开始 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
+| 进行中 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
 | 待开始 | `USAGE-02` | 修复真实使用中的高频摩擦 | `USAGE-01` |
 | 待开始 | `PROVIDER-01` | 接入 Claude Code Provider | `USAGE-02` |
 

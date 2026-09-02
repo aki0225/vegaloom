@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "event_id": "20260902T065322Z-USAGE-01-started",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "USAGE-01",
+  "transition": "started",
+  "recorded_at": "2026-09-02T06:53:22Z",
+  "summary": "已预注册五个历史真实缺陷和一个备用 Case；每项使用不含未来修复历史的单提交仓库、正式 v0.4.0 wheel、固定范围与验证，并登记失败、返修、人工介入和成本。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "released-wheel-digest",
+      "pre-registration",
+      "source-history-isolation"
+    ],
+    "artifacts": [
+      "eval/usage-01-v040-real-tasks.md",
+      "v0.4.0",
+      "https://github.com/aki0225/vegaloom/releases/tag/v0.4.0"
+    ]
+  }
+}
