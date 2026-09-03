@@ -11,19 +11,21 @@ from .agent_change_control import (
     aggregate_final_review_verdict,
     requires_final_integration_review,
 )
+from .agent_provider import AgentProvider
+from .agent_provider_factory import (
+    final_reviewer_runner,
+)
 from .agent_contract import AgentObservation, AgentState, AgentWorkItem
 from .agent_worker_evidence import hash_evidence_refs
-from .codex_app_server_runner import CodexAppServerRunner
 from .execution_control import RunnerExecutionContext
 from .agent_persistence import read_agent_trace
 from .comparison_binding import require_comparison_binding_from_mapping
-from .loop_runtime import LoopAutomationRuntime
 from .project_config import ProjectConfig
 from .progress import make_execution_progress_reporter
 from .redaction import write_redacted_json_once
 from .review_contract import ReviewVerdict
 from .review_runtime import parse_review_verdict
-from .runner import CodexExecRunner, Runner
+from .runner import Runner
 from .agent_runtime_support import load_agent_bundle
 from .verification_command_preflight import require_verification_commands_preflight
 from .workspace_check import ReviewWorkspaceSnapshot
@@ -113,42 +115,6 @@ def next_attempt_context(
         in {"plan_approved", "change_contract_approved"}
     )
     return attempts + 1, requires_clean_workspace
-def ensure_isolated_reviewer(
-    loop_runtime: object,
-    config: ProjectConfig,
-    *,
-    agent_run_dir: Path | None = None,
-    state: AgentState | None = None,
-    persistent_session: bool = False,
-) -> None:
-    """只为默认 Core Reviewer 注入 MCP 隔离，不覆盖显式测试或替代 runner。"""
-
-    if not isinstance(loop_runtime, LoopAutomationRuntime):
-        return
-    if (
-        loop_runtime.reviewer_runner is not None
-        and not isinstance(loop_runtime.reviewer_runner, CodexAppServerRunner)
-    ):
-        return
-    if persistent_session:
-        if agent_run_dir is None or state is None or state.current_work_item is None:
-            raise ValueError("持久 Reviewer 缺少 Agent run 或当前 Work Item")
-        loop_runtime.reviewer_runner = CodexAppServerRunner(
-            agent_run_dir,
-            f"reviewer:{state.current_work_item}",
-            work_item_id=state.current_work_item,
-            contract_revision=state.contract_revision,
-            plan_revision=state.execution_plan_revision,
-            output_schema=ReviewVerdict.model_json_schema(),
-            isolate_session=True,
-            options=config.runner.codex_exec.reviewer,
-        )
-        return
-    if loop_runtime.reviewer_runner is None:
-        loop_runtime.reviewer_runner = CodexExecRunner(
-            options=config.runner.codex_exec.reviewer,
-            isolate_mcp=True,
-        )
 
 
 def review_final_candidate(
@@ -162,6 +128,7 @@ def review_final_candidate(
     timeout_seconds: int,
     progress_reporter: Callable[[str, int], None] | None,
     event_reporter: Callable[[str], None],
+    provider: AgentProvider = "codex",
     reviewer_runner: Runner | None = None,
 ) -> AgentObservation:
     """在需要时审查累计 Candidate；结果仍交给原 Supervisor 路由。"""
@@ -228,13 +195,14 @@ def review_final_candidate(
                 "最终集成审查 Prompt 超过项目 Reviewer 预算",
                 payload={"status": "needs_human", "batch": index},
             )
-        runner = _final_review_runner(
+        runner = final_reviewer_runner(
             run_dir,
             current_state,
             candidate_sha,
             config,
+            provider=provider,
             persistent_session=persistent_session,
-            reviewer_runner=reviewer_runner,
+            explicit_runner=reviewer_runner,
         )
         execution_id = uuid4().hex
         result = runner.run(
@@ -439,33 +407,6 @@ def _final_review_prompt(
         f"## 批次\n{batch}/{total}；必须在 reviewed_files 中完整列出："
         f"{json.dumps(files, ensure_ascii=False)}\n\n"
         f"## 累计 Diff\n```diff\n{diff_text}\n```\n"
-    )
-
-
-def _final_review_runner(
-    run_dir: Path, state: AgentState, candidate_sha: str, config: ProjectConfig,
-    *, persistent_session: bool, reviewer_runner: Runner | None,
-):
-    if reviewer_runner is not None and not isinstance(
-        reviewer_runner,
-        CodexAppServerRunner,
-    ):
-        return reviewer_runner
-    if persistent_session:
-        return CodexAppServerRunner(
-            run_dir,
-            f"reviewer:integration:{candidate_sha[:12]}",
-            work_item_id=state.current_work_item,
-            contract_revision=state.contract_revision,
-            plan_revision=state.execution_plan_revision,
-            output_schema=ReviewVerdict.model_json_schema(),
-            isolate_session=True,
-            options=config.runner.codex_exec.reviewer,
-        )
-    return CodexExecRunner(
-        options=config.runner.codex_exec.reviewer,
-        output_schema=ReviewVerdict.model_json_schema(),
-        isolate_mcp=True,
     )
 
 

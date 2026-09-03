@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "event_id": "20260903T072520Z-PROVIDER-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "PROVIDER-01",
+  "transition": "completed",
+  "recorded_at": "2026-09-03T07:25:20Z",
+  "summary": "已在不分叉 ChangeRun 成功语义的前提下接入 Claude Code Provider：Planning 与 Worker 支持持久 Session，Reviewer 使用独立只读 Session，Steer 明确降级为下一 Turn 输入；真实运行覆盖 Candidate、Verification、Risk、Reviewer、Finish 和 Session 恢复。Codex 路径保持兼容，Claude 工具面、权限和 MCP 初始化均按固定策略校验。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "provider-contract-tests",
+      "real-claude-code-smoke",
+      "supervisor-tests",
+      "security-tests",
+      "package-smoke",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      ".github/workflows/ci.yml",
+      "README.md",
+      "docs/ARCHITECTURE.md",
+      "docs/PRODUCT-CONTRACT.md",
+      "docs/USAGE-WALKTHROUGH.md",
+      "examples/evidence/provider-01-claude-code-smoke.md",
+      "src/vega/agent_provider.py",
+      "src/vega/agent_provider_adapter.py",
+      "src/vega/agent_provider_factory.py",
+      "src/vega/agent_provider_preparation.py",
+      "src/vega/claude_code_process.py",
+      "src/vega/claude_code_runner.py",
+      "src/vega/provider_options.py",
+      "src/vega/provider_session.py",
+      "tests/supervisor/test_agent_provider_adapter.py",
+      "tests/supervisor/test_claude_code_provider.py"
+    ]
+  }
+}

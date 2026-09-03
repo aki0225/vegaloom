@@ -36,7 +36,7 @@ Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言
 
 ## 快速开始
 
-要求 Python `>=3.11`、Git，以及已经安装并登录的 Codex CLI。
+要求 Python `>=3.11`、Git，以及已经安装并登录的 Codex CLI 或 Claude Code CLI。
 
 ```powershell
 git clone https://github.com/aki0225/vegaloom.git
@@ -47,10 +47,11 @@ python -m pip install -e .
 
 vega capabilities
 vega config check --repo .
-vega adapters init codex --repo .
+vega adapters init codex --repo .  # 在 Codex 宿主中使用时
 ```
 
 最后一条命令写入仓库级 `$vega-agent` Skill。它不会安装 Hook，也不会修改 Codex 全局配置。
+直接从终端运行 Vega 时可以跳过。
 
 如果只有 Bug 现象，先让 Vega 做只读调查：
 
@@ -102,8 +103,15 @@ push、创建 PR 或合并。
 目标、范围和验证已经明确时，也可以使用显式
 `vega start --contract ... --execution-plan ...` 跳过只读调查。
 
-默认执行器是 Codex App Server。一个 ChangeRun 复用同一个 Worker Thread；Reviewer 使用
-独立只读 Thread。只有明确需要一次性短会话时才传 `--fresh-session`。
+默认 Provider 是 Codex。首次执行加 `--provider claude` 可改用 Claude Code；选定后，同一
+ChangeRun 会继续使用该 Provider，避免恢复时静默切换会话：
+
+```powershell
+vega run --run <run_id> --provider claude --timeout 900
+```
+
+两条路径复用同一个 ChangeRun、Git Candidate 和门禁。Worker Session 可跨 Work Item
+继续，Reviewer 使用独立 Session。只有明确需要一次性短会话时才传 `--fresh-session`。
 
 ## 运行方式
 
@@ -129,6 +137,9 @@ vega stop --run <run_id> --reason "方向变化"
 
 `steer` 只能补充当前执行，不能改写批准合同。范围、验收或风险边界变化时，提交新的 Contract
 和 Execution Plan：
+
+Codex 可以在当前 Turn 的安全事件边界接收 Steer；Claude Code V1 把它排到下一 Turn，不会把
+不支持的中途控制伪装成已经送达。
 
 ```powershell
 vega revise --run <run_id> `
@@ -210,8 +221,10 @@ LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`re
 
 ## 边界
 
-- 当前自动 Provider Adapter 只支持 Codex；Provider Session 合同不依赖 Codex 专有成功语义。
-- Reviewer 会话隔离不是容器或操作系统级安全沙箱。
+- 自动 Provider Adapter 支持 Codex 和 Claude Code；两者共用同一套成功语义。
+- Claude Code 使用 safe-mode、固定工具白名单和 Vega Worktree。这里没有额外宣称
+  OS 或容器级沙箱。
+- Reviewer 会话隔离用于切断 Worker 聊天上下文，不等于系统安全边界。
 - 项目没有可靠验证命令时，Vega 也无法凭空证明代码可交付。
 - 数据库迁移、支付、权限、部署和外部写入仍需要明确风险配置与人工判断。
 - 用户当前分支保持不动。Vega 只在受管 Worktree 中创建本地 Candidate/Checkpoint Commit；

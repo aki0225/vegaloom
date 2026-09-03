@@ -95,19 +95,21 @@ Execution Plan 记录 Agent 可以调整的实现安排：
 
 ## Worker 与 Reviewer
 
-默认 Provider 是 Codex App Server：
+默认 Provider 是 Codex，也可以在首次执行时显式选择 Claude Code。两条路径共用以下合同：
 
-- 一个 ChangeRun 复用一个 Worker Thread；
-- Contract revision 实质变化后，旧 Worker Thread 不再自动复用；
-- 每个 Work Item 有独立只读 Reviewer Thread；
-- 同一 Work Item 的 Repair 复查可以复用 Reviewer Thread；
-- Worker 和 Reviewer 使用不同 Thread，Reviewer 不接收 Worker 完整聊天或中间推理；
+- 一个 ChangeRun 复用一个 Worker Session；
+- Contract revision 实质变化后，旧 Worker Session 不再自动复用；
+- 每个 Work Item 有独立只读 Reviewer Session；
+- 同一 Work Item 的 Repair 复查可以复用 Reviewer Session；
+- Worker 和 Reviewer 使用不同 Session，Reviewer 不接收 Worker 完整聊天或中间推理；
 - 多 Work Item、Replan、高风险或 Repair 后的最终候选按条件增加一次累计集成审查。
 
-Worker 沿用用户选择的 Codex profile、model 和 reasoning effort。Reviewer 同样尊重项目配置，
-但固定只读、关闭审批，并禁用个人 hooks、memories、plugins 和 MCP 配置。
+Codex 沿用项目允许的 profile、model 和 reasoning effort；Claude Code 沿用项目允许的
+model 和 effort。Vega 固定 Claude Code 的 safe-mode、工具白名单和权限模式，项目 YAML
+不能放宽这些参数。Claude 的只读 Reviewer 只开放 `Read / Glob / Grep`，Worker 只增加
+`Edit / Write`；项目验证仍由 Vega 执行。
 
-Provider Session 只保存本机会话协调信息：Thread ID、owner、生命周期、Turn、压缩次数、Token
+Provider Session 只保存本机会话协调信息：Session ID、owner、生命周期、Turn、压缩次数、Token
 用量、待发送 Steer 和待响应请求。它不参与 Verification、Risk、Reviewer 或 Finish 裁决。
 
 ## Candidate 与门禁
@@ -147,7 +149,7 @@ LLM 只返回结构化结果。代码选择下一动作：
 
 - 查看状态卡和低频安全事件；
 - 给当前 Worker 或 Reviewer 排队发送 Steer；
-- 响应 App Server 的审批或用户输入请求；
+- 响应 Codex App Server 的审批或用户输入请求；
 - 暂停或停止自动调度；
 - 把 Provider Thread 交给人工原生会话。
 
@@ -156,14 +158,18 @@ Steer 不能修改冻结合同。敏感输入不得写入 Vega Artifact；需要
 直接 `reclaim`。活动 attempt 被接管时会先中断执行；人工处理后必须走 Recovery 或 Handoff，
 不能把旧 attempt 直接接回自动循环。
 
+Codex 支持在当前 Turn 的安全事件边界发送 Steer。Claude Code V1 没有等价的受控中途发送接口，
+因此只在下一次 Turn 输入中附加排队指令；状态卡会明确显示这一差异。
+
 ## 上下文与压缩
 
 Task Brief 只组合当前 Contract、Plan、Work Item、Checkpoint、验证、风险和 Reviewer 结果。
 完整日志和源码通过 Artifact 路径按需读取，不复制完整聊天或内部推理。
 
-Codex 自己负责会话压缩。Vega 在检测到压缩后，于下一 Turn 追加一个不超过 32 KiB 的
-Task Anchor，帮助会话重新定位当前 run、revision、Work Item 和 Accepted Checkpoint。该软上限
-没有下限；关键约束放不下时必须停止并请求人工，不能静默省略。
+Provider 自己负责会话压缩。Codex 报告压缩事件后，Vega 在下一 Turn 追加一个不超过 32 KiB
+的 Task Anchor，帮助会话重新定位当前 run、revision、Work Item 和 Accepted Checkpoint。
+Claude Code V1 不伪造压缩计数；每次 Turn 仍重新发送当前 Task Brief，并让长日志和源码保持
+按需读取。软上限没有下限；关键约束放不下时必须停止并请求人工，不能静默省略。
 
 ## 完成语义
 
@@ -204,7 +210,7 @@ vega adapters init codex
 
 vega start
 vega approve
-vega run
+vega run [--provider codex|claude]
 vega status
 vega watch
 vega latest

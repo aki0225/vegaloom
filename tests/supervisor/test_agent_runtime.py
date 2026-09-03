@@ -1588,12 +1588,11 @@ def test_agent_cli_status_card_and_capabilities(
     assert capabilities.exit_code == 0
     capability_payload = json.loads(capabilities.output)
     assert capability_payload["control_plane"] == "deterministic-state-machine"
-    assert capability_payload["provider"] == "codex-app-server"
-    assert capability_payload["provider_capabilities"]["thread"] == (
-        "thread/start + thread/resume"
-    )
-    assert capability_payload["provider_capabilities"]["review"] == (
-        "独立只读 Thread + turn/start"
+    assert capability_payload["default_provider"] == "codex"
+    assert set(capability_payload["providers"]) == {"codex", "claude"}
+    assert capability_payload["providers"]["codex"]["review"] == "独立只读 Thread"
+    assert capability_payload["providers"]["claude"]["steer"] == (
+        "下一 Turn 输入；不伪装中途 steer"
     )
     assert capability_payload["persistent_worker_thread"] is True
     assert capability_payload["reviewer_isolation"] == "per-work-item"
@@ -1709,6 +1708,7 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
     clean_help = _ANSI_ESCAPE_PATTERN.sub("", hidden_help.output)
     assert "--run" in clean_help
     assert "--fresh-session" in clean_help
+    assert "--provider" in clean_help
 
 
 def _help_lists_command(output: str, command: str) -> bool:

@@ -19,7 +19,7 @@ from vega.agent_change_contract import (
     ExecutionWorkItem,
 )
 from vega.agent_change_fix_packet import load_current_fix_packet
-from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
+from vega.agent_provider_adapter import SupervisorAgentProviderAdapter
 from vega.execution_control import ExecutionController, RunnerExecutionContext
 from vega.models import LoopAutomationState, LoopIterationState
 from vega.agent_runtime import SupervisorAgentRuntime
@@ -212,7 +212,7 @@ def test_change_run_accepts_candidate_and_advances_to_next_work_item(
     approved = runtime.approve(started.run_dir.name, actor="user")
     reviewer = _ReviewerRunner()
     loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_WorkerRunner(["src/one.py", "src/two.py"]),
         loop_runtime=loop_runtime,
@@ -303,7 +303,7 @@ def test_change_run_handoff_only_reports_changes_after_accepted_checkpoint(
     approved = runtime.approve(started.run_dir.name, actor="user")
     reviewer = _ReviewerRunner()
     loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
-    result = SupervisorAgentCodexAdapter(
+    result = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_WorkerRunner(["src/one.py"]),
         loop_runtime=loop_runtime,
@@ -360,7 +360,7 @@ def test_change_run_completes_final_work_item(tmp_path: Path) -> None:
     approved = runtime.approve(started.run_dir.name, actor="user")
     reviewer = _ReviewerRunner()
     loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_WorkerRunner(["src/one.py"]),
         loop_runtime=loop_runtime,
@@ -403,7 +403,7 @@ def test_multi_item_change_run_adds_one_final_integration_review(
     approved = runtime.approve(started.run_dir.name, actor="user")
     reviewer = _ReviewerRunner()
     loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_WorkerRunner(["src/one.py", "src/two.py"]),
         loop_runtime=loop_runtime,
@@ -440,7 +440,7 @@ def test_adapter_automatically_advances_ready_change_items(
     monkeypatch,
     allowed_action: str,
 ) -> None:
-    adapter = SupervisorAgentCodexAdapter(tmp_path)
+    adapter = SupervisorAgentProviderAdapter(tmp_path)
     ready = SimpleNamespace(
         run_dir=tmp_path / "runs" / "change-run",
         state=SimpleNamespace(
@@ -508,7 +508,7 @@ def test_failed_candidate_generates_fix_packet_for_next_attempt(
     approved = runtime.approve(started.run_dir.name, actor="user")
     reviewer = _ReviewerRunner(["request_changes", "approve"])
     loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_WorkerRunner(["src/one.py", "src/one.py"]),
         loop_runtime=loop_runtime,

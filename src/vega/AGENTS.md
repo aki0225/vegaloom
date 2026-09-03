@@ -68,9 +68,11 @@ CLI
   `agent_mutation`、`agent_change_core`、`agent_change_task_card`、`agent_change_verification_retry`。
 - Provider 无关执行后置流程：`agent_candidate_pipeline`、`agent_worker_evidence`、
   `agent_plan_scope`、`agent_core_observation`。
-- Codex 会话接入：`agent_codex_adapter`、`agent_codex_preparation`；
+- Provider 会话接入：`agent_provider_adapter`、`agent_provider_preparation`、
+  `agent_provider`、`provider_session`；Claude Code 使用 `claude_code_runner` 和
+  `claude_code_process`，Codex 使用
   `codex_app_server`、`codex_app_server_rpc`、`codex_app_server_runner`、
-  `codex_process`、`codex_isolation`、`codex_workspace`、`provider_session`；
+  `codex_process`、`codex_isolation`、`codex_workspace`；
   进程所有权与停止复用 `execution_control`、`execution_process`。
 - 仓库与上下文：`agent_context`、`agent_repository_*`、`agent_git_worktree`、
   `agent_git_candidate`、`agent_runtime_support`、`git_read`、`git_inventory`、
@@ -107,8 +109,10 @@ CLI
   文件。
 - `experimental/`：运行对应 Experimental 文件和 Core/Experimental 依赖边界测试，不把实验
   测试塞回产品分片。
-- 打包、入口、依赖或资源：运行 wheel/sdist smoke 或等价的干净环境验证。
-- 共享边界不明确时先运行最窄完整文件，再扩大到职责目录；不要从单个绿 node 推断整个分片通过。
+- 打包、入口、依赖或资源：从空构建目录运行 wheel/sdist smoke，并检查安装包没有残留已删除
+  模块。
+- 共享边界不明确时先运行最窄完整文件，再扩大到受影响文件；完整职责分片交给 PR CI。不要从
+  单个绿 node 推断整个分片通过，也不在本机机械重复 CI 全量。
 
 ## 修改要求
 
@@ -118,4 +122,5 @@ CLI
 - Worker 进程不得直接创建提交或切换分支；涉及 Candidate/Checkpoint Commit 的 Git 写操作必须
   由隔离 Worktree 所有者执行，并在写入前完成范围与工作区检查。
 - 状态兼容不能通过默认值或 shim 掩盖证据不足；安全兼容应保留旧信息，同时输出当前有效投影。
-- 修改成功语义、恢复、Writer 所有权或证据绑定时，至少覆盖正常、损坏或越界、恢复三个相关场景。
+- 修改成功语义、恢复、Writer 所有权或证据绑定时，先检查已有测试。只有本次确实改变了正常、
+  拒绝或恢复分支且现有覆盖不足时，才补对应的最小代表场景。

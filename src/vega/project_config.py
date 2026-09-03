@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import shutil
 from pathlib import Path
 from typing import Literal
@@ -15,6 +14,14 @@ from .git_read import coerce_git_output_bytes, run_git_capture
 from .project_config_preflight import (
     ProjectConfigIssue,
     validate_repository_preflight,
+)
+from .provider_options import (
+    ClaudeCodeConfig,
+    CodexExecConfig,
+    ClaudeCodeOptions as ClaudeCodeOptions,
+    CodexExecOptions as CodexExecOptions,
+    render_claude_options,
+    render_codex_options,
 )
 from .redaction import redact_text
 from .repository_identity import ResolvedGitRevision, resolve_git_revision
@@ -39,7 +46,6 @@ from .verification_shell import (
 
 
 CONFIG_FILENAMES = [".vega.yaml", ".vega.yml"]
-CODEX_PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 
 
 def project_policy_snapshot(repo_path: Path) -> dict[str, str | None]:
@@ -131,62 +137,13 @@ class PromptBudgetConfig(BaseModel):
     reviewer_diff_max_chars: int = Field(default=30_000, ge=1_000, le=500_000)
 
 
-class CodexExecOptions(BaseModel):
-    """允许项目按角色覆盖的 Codex exec 参数。
-
-    这里只开放模型、推理强度、profile 和临时会话，不接受任意 CLI 参数。这样既能让
-    worker/reviewer 使用不同成本策略，也不会把 sandbox bypass 等危险开关暴露给 YAML。
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    profile: str | None = None
-    model: str | None = None
-    reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] | None = None
-    ephemeral: bool = False
-
-    @field_validator("profile")
-    @classmethod
-    def validate_profile(cls, value: str | None) -> str | None:
-        normalized = _normalize_codex_cli_value(value, "profile")
-        if normalized is not None and not CODEX_PROFILE_PATTERN.fullmatch(normalized):
-            raise ValueError("profile 只能包含字母、数字、点、下划线和连字符")
-        return normalized
-
-    @field_validator("model")
-    @classmethod
-    def validate_model(cls, value: str | None, info: ValidationInfo) -> str | None:
-        return _normalize_codex_cli_value(value, info.field_name)
-
-
-def _normalize_codex_cli_value(value: str | None, field_name: str) -> str | None:
-    if value is None:
-        return None
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError(f"{field_name} 不能为空")
-    if len(normalized) > 200:
-        raise ValueError(f"{field_name} 长度不能超过 200")
-    if normalized.startswith("-"):
-        raise ValueError(f"{field_name} 不能以 '-' 开头")
-    if any(character in normalized for character in ("\r", "\n", "\0")):
-        raise ValueError(f"{field_name} 不能包含换行或 NUL")
-    return normalized
-
-
-class CodexExecConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    worker: CodexExecOptions = Field(default_factory=CodexExecOptions)
-    reviewer: CodexExecOptions = Field(default_factory=CodexExecOptions)
-
-
 class RunnerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     worker: str | None = None
     reviewer: str | None = None
     codex_exec: CodexExecConfig = Field(default_factory=CodexExecConfig)
+    claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
 
 
 class ProjectMemoryConfig(BaseModel):
@@ -542,8 +499,19 @@ def render_project_config_summary(config: ProjectConfig) -> str:
             *render_bounded_approval_summary(config.approval.bounded),
             "## Codex Exec 角色策略",
             "",
-            *_render_codex_exec_options("worker", config.runner.codex_exec.worker),
-            *_render_codex_exec_options("reviewer", config.runner.codex_exec.reviewer),
+            *render_codex_options("worker", config.runner.codex_exec.worker),
+            *render_codex_options("reviewer", config.runner.codex_exec.reviewer),
+            "",
+            "## Claude Code 角色策略",
+            "",
+            *render_claude_options(
+                "worker",
+                config.runner.claude_code.worker,
+            ),
+            *render_claude_options(
+                "reviewer",
+                config.runner.claude_code.reviewer,
+            ),
             "",
             "## Prompt 预算",
             "",
@@ -607,12 +575,3 @@ def render_project_config_summary(config: ProjectConfig) -> str:
     ):
         lines.append("- 未配置项目级风险策略。")
     return redact_text("\n".join(lines).rstrip() + "\n")
-
-
-def _render_codex_exec_options(role: str, options: CodexExecOptions) -> list[str]:
-    return [
-        f"- `{role}.profile`：`{options.profile or '继承用户配置'}`",
-        f"- `{role}.model`：`{options.model or '继承用户配置'}`",
-        f"- `{role}.reasoning_effort`：`{options.reasoning_effort or '继承用户配置'}`",
-        f"- `{role}.ephemeral`：`{options.ephemeral}`；个人上下文禁用 memories / plugins / hooks / notify",
-    ]

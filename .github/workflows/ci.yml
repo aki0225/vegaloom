@@ -434,7 +434,10 @@ jobs:
             & $vegaCli --help | Out-Null
             $capabilities = (& $vegaCli capabilities) -join "`n" | ConvertFrom-Json
             if (
-              $capabilities.provider -ne "codex-app-server" -or
+              $capabilities.schema_version -ne 3 -or
+              $capabilities.default_provider -ne "codex" -or
+              -not $capabilities.providers.codex.persistent_session -or
+              -not $capabilities.providers.claude.persistent_session -or
               -not $capabilities.persistent_worker_thread -or
               $capabilities.reviewer_isolation -ne "per-work-item" -or
               $capabilities.automatic_commit_push_release
@@ -557,7 +560,11 @@ jobs:
                   encoding="utf-8"
               )
           )
-          assert payload["provider"] == "codex-app-server"
+          assert payload["schema_version"] == 3
+          assert payload["default_provider"] == "codex"
+          assert set(payload["providers"]) == {"codex", "claude"}
+          assert payload["providers"]["codex"]["persistent_session"] is True
+          assert payload["providers"]["claude"]["persistent_session"] is True
           assert payload["persistent_worker_thread"] is True
           assert payload["reviewer_isolation"] == "per-work-item"
           assert payload["automatic_commit_push_release"] is False

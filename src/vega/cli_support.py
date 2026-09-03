@@ -61,10 +61,20 @@ def require_repo_directory(repo: Path) -> Path:
 
 
 def ensure_runner_ready(runner: str, role: str) -> None:
-    if runner.strip().lower() not in {"codex", "codex-exec"}:
-        raise typer.BadParameter(f"{role} 只支持 Codex CLI")
-    if shutil.which("codex"):
+    normalized = runner.strip().lower()
+    if normalized in {"codex", "codex-exec", "codex-app-server"}:
+        executable = "codex"
+        label = "Codex CLI"
+    elif normalized in {"claude", "claude-code"}:
+        executable = "claude"
+        label = "Claude Code CLI"
+    else:
+        raise typer.BadParameter(f"{role} 不支持 Provider：{runner}")
+    if shutil.which(executable) or (
+        executable == "claude" and shutil.which("claude.cmd")
+    ):
         return
     raise typer.BadParameter(
-        f"{role} 需要 Codex CLI，但当前 PATH 中未找到 codex；请先安装并登录。"
+        f"{role} 需要 {label}，但当前 PATH 中未找到 {executable}；"
+        "请先安装并登录。"
     )

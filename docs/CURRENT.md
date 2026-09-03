@@ -5,31 +5,12 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：27 / 28
-- 最近事件：`20260903T013644Z-USAGE-02-completed`
+- 已完成：28 / 28
+- 最近事件：`20260903T072520Z-PROVIDER-01-completed`
 
 ## 当前事项
 
-### 下一项：`PROVIDER-01` 接入 Claude Code Provider
-
-在不改变 ChangeRun、Git Candidate、Verification、Risk、Reviewer 和 Finish 语义的前提下，让 Claude Code 实现现有 Provider Session 合同。
-
-验收条件：
-
-- Claude Code Adapter 实现当前 Thread、Turn、Steer、Interrupt、Status 与只读 Reviewer 所需的最小能力映射
-- Provider 不支持的能力明确降级或拒绝，不用 Codex 专有事件伪装等价支持
-- 真实 Claude Code smoke 覆盖持久 Worker、独立 Reviewer、Candidate Gate 和至少一次恢复或打回
-- Codex 路径保持兼容，状态机和最终成功语义不新增 Provider 分叉
-
-要求检查：
-
-- `provider-contract-tests`
-- `real-claude-code-smoke`
-- `supervisor-tests`
-- `security-tests`
-- `package-smoke`
-- `repository-hygiene`
-- `pr-ci`
+当前没有可执行事项；计划已经完成，或剩余事项处于阻塞/已替代状态。
 
 ## 全部事项
 
@@ -62,12 +43,12 @@
 | 已完成 | `RELEASE-04` | 发布 Vega v0.4.0 | `AUTONOMY-05` |
 | 已完成 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
 | 已完成 | `USAGE-02` | 修复真实使用中的高频摩擦 | `USAGE-01` |
-| 待开始 | `PROVIDER-01` | 接入 Claude Code Provider | `USAGE-02` |
+| 已完成 | `PROVIDER-01` | 接入 Claude Code Provider | `USAGE-02` |
 
 ## 状态规则
 
 - 计划文件只描述事项、依赖和验收条件，不记录“等待 CI”等瞬时状态。
-- 实现 PR 在同一 Diff 中增加完成事件；事件进入 `main` 后，该事项才成为主线事实。
+- 实施机器计划事项的 PR 在同一 Diff 中增加完成事件；事件进入 `main` 后，该事项才成为主线事实。
 - CI 失败或 PR 关闭不会改变主线状态；合并后不再补状态专用提交。
 - 已进入主线的事件只允许追加，不允许改写或删除。
 - 已有状态事件的事项定义保持不变；尚无事件的未来事项可以随实现证据调整。

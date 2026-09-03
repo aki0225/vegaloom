@@ -48,11 +48,12 @@ from .agent_runtime_support import (
     load_agent_bundle,
     write_status_card,
 )
-from .codex_app_server_runner import CodexAppServerRunner
+from .agent_provider import AgentProvider
+from .agent_provider_factory import planning_runner
 from .project_config import load_project_config
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
-from .runner import CodexExecRunner, Runner, RunnerResult
+from .runner import Runner, RunnerResult
 
 
 class PlanningProposalRunner:
@@ -63,12 +64,14 @@ class PlanningProposalRunner:
         workspace: Path,
         *,
         runner: Runner | None = None,
+        provider: AgentProvider = "codex",
         persistent_session: bool = True,
         progress_reporter: Callable[[str, int], None] | None = None,
         event_reporter: Callable[[str], None] | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
         self.runner = runner
+        self.provider = provider
         self.persistent_session = persistent_session
         self.progress_reporter = progress_reporter
         self.event_reporter = event_reporter
@@ -163,10 +166,11 @@ class PlanningProposalRunner:
             )
         attempt = planning_attempt(run_dir)
         execution_id = uuid4().hex
-        runner = self.runner or _default_planning_runner(
+        runner = self.runner or planning_runner(
             run_dir,
             state,
-            config.runner.codex_exec.worker,
+            config,
+            provider=self.provider,
             persistent_session=self.persistent_session,
         )
         reservation = reserve_planning_execution(
@@ -472,29 +476,4 @@ def _planning_prompt(
         user_goal=request.user_goal,
         source_revision=request.source_revision,
         project_context=context,
-    )
-
-
-def _default_planning_runner(
-    run_dir: Path,
-    state: AgentState,
-    options,
-    *,
-    persistent_session: bool,
-) -> Runner:
-    if persistent_session:
-        return CodexAppServerRunner(
-            run_dir,
-            "worker",
-            work_item_id=state.current_work_item,
-            contract_revision=None,
-            plan_revision=None,
-            output_schema=PlanningProposal.model_json_schema(),
-            isolate_session=True,
-            options=options,
-        )
-    return CodexExecRunner(
-        options=options,
-        output_schema=PlanningProposal.model_json_schema(),
-        isolate_mcp=True,
     )

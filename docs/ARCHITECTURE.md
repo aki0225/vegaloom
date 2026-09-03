@@ -1,13 +1,13 @@
 # 架构
 
-> 本文描述 v0.4.0 架构，以及主线中已实现的只读 Planning Proposal、Contract Compiler
-> 和有界自动批准。演进计划见
+> 本文描述当前主线架构。`v0.4.0` 是 Codex 稳定基线；主线继续复用同一 ChangeRun 接入
+> Claude Code。演进计划见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。
 
 ## 总览
 
-Vega v0.4.0 使用一条 ChangeRun：
+Vega 使用一条 ChangeRun：
 
 ```text
 Host Session
@@ -17,7 +17,7 @@ Host Session
           ▼
   Supervisor State Machine
           │
-          ├─ Codex App Server Worker Thread
+          ├─ Codex / Claude Code Worker Session
           ├─ Git Worktree / Candidate Commit
           ├─ Core Verification / Risk / Reviewer / Finish
           ├─ Repair / Replan / Human
@@ -128,6 +128,15 @@ Git SHA 是代码快照权威。Candidate 变化会使之前绑定的 Verificati
 文件使用摘要 envelope 和 run mutation lock。待发送或待响应项不会被历史裁剪。
 这个 Artifact 只服务会话协调和状态展示，不参与成功判断。
 
+### Provider Adapter
+
+Codex 和 Claude Code 都实现现有 Runner / Provider Session 边界。Provider 只负责会话、工具调用
+和结构化结果；Candidate Pipeline、Verification、Risk、Reviewer、路由和 Finish 没有
+Provider 分支。
+
+同一 ChangeRun 首次执行后固定 Provider。Planning 与 Worker 可以复用同一个 Session；
+Reviewer 使用独立角色键和只读工具面。
+
 ### Codex App Server
 
 `codex_app_server_runner.py` 把 Provider Runner 接到现有 Execution Control。
@@ -167,12 +176,32 @@ Vega 的 Structured Output，响应也没有覆盖清单和风险披露。当前
 
 默认路径不可用时明确失败。`--fresh-session` 才显式改用一次性的 `codex exec`。
 
+### Claude Code
+
+`claude_code_runner.py` 通过短生命周期 helper 调用 Claude Code CLI。helper 消费原始
+`stream-json`，只向 Execution Control 输出阶段事件和最终结构化结果；模型正文、thinking、
+工具参数和本机路径不会进入进度流。
+
+持久模式首轮使用 `--session-id`，后续使用 `--resume`。Reviewer 和 Worker 使用不同 Session。
+Claude Code V1 没有等价的受控中途 Steer 接口，因此排队指令只附加到下一 Turn；Interrupt
+继续复用 Vega 的 owned-process stop。
+
+Claude 进程固定启用 safe-mode，并按角色限制内置工具：
+
+| 角色 | 工具 |
+|---|---|
+| Planning / Reviewer | `Read`、`Glob`、`Grep` |
+| Worker | `Read`、`Glob`、`Grep`、`Edit`、`Write` |
+
+这是一层工具面和 Worktree 边界，不宣传为 OS 或容器沙箱。Claude 不执行项目验证命令；
+Candidate 冻结后仍由 Vega Core 运行 Verification。
+
 ### Worker
 
-`agent_codex_adapter.py` 负责：
+`agent_provider_adapter.py` 负责：
 
 - 准备当前 Work Item；
-- 选择持久 App Server 或 fresh runner；
+- 选择 Codex 或 Claude Code 的持久 / fresh runner；
 - 发布单 Writer binding；
 - 启动 Worker；
 - 把 Worker 终态交给 Provider 无关 Candidate Pipeline。
@@ -192,7 +221,7 @@ Worker 输出必须满足 `WorkerClaim` schema，但 Claim 不拥有完成资格
 7. 生成 Machine Observation；
 8. 让 Supervisor 路由。
 
-Codex Adapter 不拥有 Workspace、Candidate、门禁或 Finish 语义。
+Provider Adapter 不拥有 Workspace、Candidate、门禁或 Finish 语义。
 
 ### Core 门禁
 

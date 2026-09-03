@@ -54,11 +54,13 @@ Vega 把改动冻结为 Git Candidate，运行项目验证和独立只读 Review
 
 ## 验证选择
 
-开发中先运行最接近改动的完整测试文件或职责分片，再按风险扩大。不要为了形式机械重复全量
-测试，也不能用单个绿 node 代替受影响职责的验证。测试归属和扩展顺序见
-`tests/AGENTS.md`。
+开发中先运行直接覆盖改动分支的测试节点；共享 fixture、模块边界或行为面较宽时，再扩大到
+完整测试文件或职责分片。不要为了形式机械重复全量测试，也不能用无关的单个绿 node 代替
+受影响职责的验证。测试归属和扩展顺序见 `tests/AGENTS.md`。
 
-以下命令是 PR、发布、跨职责修改以及 Core/Supervisor/安全边界变更的完整基线：
+本地开发负责尽快证明当前改动；PR CI 负责跨平台和完整职责分片。普通 PR 不要求在本机串行
+执行整个 pytest 集合。只有发布、明确要求全量验证、CI 无法覆盖关键环境，或改动测试基础设施
+本身时，才运行下面的完整基线：
 
 ```powershell
 python -m compileall -q src scripts
@@ -70,17 +72,17 @@ ruff check src tests scripts
 git diff --check
 ```
 
-PR CI 在 Python 3.12 执行 Core、Core Heavy、Supervisor 和 Security 四个分片；分片仍按
-职责目录选择，Core Heavy 只隔离若干最慢的集成文件。Python 3.11 只做安装、编译和产品节点
-收集。Experimental 与冻结控制测试在相关路径变化的 PR 中定向执行，并在 main、release 和
-手工触发时完整执行。Windows 只重复 shell、junction/reparse、进程树和锁专项。
-注意两个已知环境差异:测试断言 CLI 输出时须防 CI 注入的 ANSI 渲染
-(conftest 已有 autouse fixture 清理环境变量),POSIX 进程组探测与 Windows 路径不同——本地绿不等于 CI 绿。
+PR CI 在 Python 3.12 并行执行 Core、Core Heavy、Supervisor 和 Security 分片。Python 3.11
+只做安装、编译和产品节点收集；Experimental 按路径运行，Windows 只重复平台专项。不要在
+本机重跑这些分片来替代 CI，也不要把本地绿当成跨平台结论。
 
-修改文档或规则时至少执行编译、仓库卫生、相关定向测试、Ruff 和 diff check；涉及机器计划时
-追加计划状态检查。修改 Core、Supervisor、安全边界、CI 或打包时按 `tests/AGENTS.md` 扩大到
-对应职责分片；发布或明确要求全量验证时再执行完整基线。只有命令明确结束并给出计数，才能声明
-相应范围验证通过。
+纯文档或注释修改通常只需仓库卫生和 `git diff --check`；修改生成文件、机器计划、可执行示例
+或文档中的公开合同，再补对应生成器、计划检查或定向测试。修改 Core、Supervisor、安全边界、
+CI 或打包时，按 `tests/AGENTS.md` 选择受影响文件和必要负向场景，再交给 PR CI 扩大覆盖。
+
+打包验证必须从干净 checkout 或空的构建目录开始，并检查 wheel/sdist 实际内容。忽略目录中的
+旧 `build/`、缓存或已删除模块不能作为当前源码的安装包证据。只有命令明确结束并给出计数，
+才能声明相应范围验证通过。
 
 ## 公开仓库路径与私密文件卫生
 
@@ -103,7 +105,8 @@ PR CI 在 Python 3.12 执行 Core、Core Heavy、Supervisor 和 Security 四个�
 - 注释只解释代码本身表达不了的约束、原因和业务背景。
 - 确认旧实现已无调用方且不承担公开兼容责任后再删除；仍需兼容时写清保留原因和退出条件，
   不用默认值或 shim 掩盖证据缺失。
-- 单次测试超时上限 60 秒，避免挂死。
+- 单个测试用例原则上不超过 60 秒；完整测试文件或职责分片可以更长。遇到慢文件先确认是在
+  运行真实集成行为，再按职责分片，不把整个测试命令误判为单个超时用例。
 
 ## 必须披露的高风险变更
 

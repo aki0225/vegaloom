@@ -16,8 +16,8 @@ Adapter 只写入 `.agents/skills/vega-agent/SKILL.md`。目标仓库已有同�
 
 ## 2. 调查
 
-在 Codex 主会话中调用 `$vega-agent`，或者直接使用 CLI。只要根因、范围或验收仍有一项
-不明确，就先建立只读 Planning ChangeRun：
+在 Codex 主会话中调用 `$vega-agent`，或从 Codex、Claude Code、普通终端直接使用 CLI。
+只要根因、范围或验收仍有一项不明确，就先建立只读 Planning ChangeRun：
 
 ```powershell
 vega start --repo <target-repo> --text "导出按钮点击后没有反应"
@@ -128,13 +128,20 @@ vega run --run <run_id> --timeout 900 --approval bounded
 - 达到预算；
 - 被暂停、停止或中断。
 
-单次 Worker 或 Reviewer timeout 为 60～3600 秒。默认使用 Codex App Server；一次性短会话：
+单次 Worker 或 Reviewer timeout 为 60～3600 秒。默认使用 Codex；首次执行可选 Claude Code：
+
+```powershell
+vega run --run <run_id> --provider claude --timeout 900
+```
+
+同一 ChangeRun 会沿用已经建立的 Provider Session。显式传入另一个 Provider 会被拒绝，避免
+Planning、Worker 和恢复阶段意外落到不同会话。一次性短会话：
 
 ```powershell
 vega run --run <run_id> --timeout 900 --fresh-session
 ```
 
-App Server 不可用时默认报错，不会静默切换到 fresh session。
+当前 Provider 不可用时默认报错，不会静默切换到另一个 Provider 或 fresh session。
 
 ## 5. 看进度
 
@@ -166,10 +173,11 @@ vega steer --run <run_id> `
 
 `--role reviewer` 会选择最近的 Reviewer Session，也可以传完整角色名。
 
-Turn 运行中，Steer 在安全事件边界发送；Turn 尚未开始时，它会附加到下一次输入。Steer
-超过 8 KiB、目标由人工接管或 Session 不存在时拒绝。
+Codex Turn 运行中，Steer 在安全事件边界发送；Turn 尚未开始时，它会附加到下一次输入。
+Claude Code V1 只支持后一种方式：排队后在下一 Turn 发送，状态卡不会把它标成中途送达。
+Steer 超过 8 KiB、目标由人工接管或 Session 不存在时拒绝。
 
-## 7. 响应 App Server 请求
+## 7. 响应 Codex App Server 请求
 
 命令或文件审批：
 
@@ -209,6 +217,8 @@ vega respond --run <run_id> `
 
 响应中检测到敏感信息时 Vega 拒绝落盘。改用原生会话接管。
 
+Claude Code Provider 使用固定工具白名单和非交互权限模式，不生成这类待响应请求。
+
 ## 8. 原生会话接管
 
 ```powershell
@@ -219,6 +229,12 @@ Vega 先请求停止活动 Turn，确认终态后把 Thread owner 改为 `human`
 
 ```text
 codex resume <thread_id>
+```
+
+Claude Code Session 对应显示：
+
+```text
+claude --resume <session_id>
 ```
 
 如果接管时 Session 原本空闲、没有 active Writer binding，且人工没有改 Workspace，可以交还：
