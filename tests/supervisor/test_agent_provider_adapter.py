@@ -11,7 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from vega import agent_finalization as agent_finalization_module
-from vega.agent_codex_adapter import SupervisorAgentCodexAdapter
+from vega.agent_provider_adapter import SupervisorAgentProviderAdapter
+from vega.agent_provider_factory import ensure_reviewer_runner
 from vega.agent_worker_evidence import (
     _verification_status,
     require_single_executable_work_item,
@@ -282,9 +283,16 @@ def test_adapter_configures_mcp_isolated_default_reviewer(
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    adapter = SupervisorAgentCodexAdapter(workspace)
+    adapter = SupervisorAgentProviderAdapter(workspace)
 
-    adapter._ensure_isolated_reviewer(ProjectConfig())
+    ensure_reviewer_runner(
+        adapter.loop_runtime,
+        ProjectConfig(),
+        agent_run_dir=None,
+        state=None,
+        provider="codex",
+        persistent_session=False,
+    )
 
     reviewer = adapter.loop_runtime.reviewer_runner
     assert isinstance(reviewer, CodexExecRunner)
@@ -299,7 +307,7 @@ def test_adapter_serializes_child_creation_before_writer_binding(
     workspace = tmp_path / "workspace"
     run_dir = workspace / "runs" / "agent-run"
     run_dir.mkdir(parents=True)
-    adapter = SupervisorAgentCodexAdapter(workspace)
+    adapter = SupervisorAgentProviderAdapter(workspace)
     first_entered = threading.Event()
     release_first = threading.Event()
     child_count = 0
@@ -660,7 +668,7 @@ def test_resumed_committed_handoff_runs_core_with_capsule_diff(
     monkeypatch.chdir(workspace)
     resumed = SupervisorAgentRuntime(workspace).resume_task_card(repo)
     reviewer = _FakeReviewerRunner(changed_files)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(mutate_each_run=False),
         loop_runtime=LoopAutomationRuntime(
@@ -711,7 +719,7 @@ def test_agent_success_path_preserves_completed_worker_in_status_card(
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
     runner = _FakeWorkerRunner()
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=runner,
         loop_runtime=loop,
@@ -777,7 +785,7 @@ def test_successful_core_cannot_override_declared_external_side_effects(
     approved = runtime.approve(run.run_dir.name)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -805,7 +813,7 @@ def test_agent_status_revalidates_supervisor_evidence_after_scope_tamper(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -854,7 +862,7 @@ def test_agent_status_downgrades_completed_run_after_workspace_drift(
     repo, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -899,7 +907,7 @@ def test_agent_status_degrades_terminal_run_with_invalid_observation(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -933,7 +941,7 @@ def test_agent_finalize_recovers_after_terminal_publish_interruption(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1001,7 +1009,7 @@ def test_adapter_keeps_untrusted_ready_finish_fail_closed(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1041,7 +1049,7 @@ def test_approved_checkpoint_includes_first_assist_runtime_root(
     approved = runtime.approve(run.run_dir.name)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace, prepare_runtime_root=True)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1073,7 +1081,7 @@ def test_repo_local_agent_runs_do_not_drift_on_own_artifacts(
     run = runtime.start(repo, goal=plan.user_goal, plan=plan)
     approved = runtime.approve(run.run_dir.name)
     loop = _FakeLoopRuntime(repo, prepare_runtime_root=True)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         repo,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1108,7 +1116,7 @@ def test_repo_local_agent_runs_still_detect_other_ignored_changes(
         "unexpected\n",
         encoding="utf-8",
     )
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         repo,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=_FakeLoopRuntime(repo),
@@ -1126,7 +1134,7 @@ def test_worker_timeout_preserves_partial_diff_and_skips_core(
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
     runner = _FakeWorkerRunner(status="timed_out")
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=runner,
         loop_runtime=loop,
@@ -1155,7 +1163,7 @@ def test_missing_codex_preflight_failure_releases_writer_binding(
     monkeypatch.chdir(workspace)
     monkeypatch.setattr("vega.runner.shutil.which", lambda _: None)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=CodexExecRunner(executable="missing-codex"),
         loop_runtime=loop,
@@ -1184,7 +1192,7 @@ def test_invalid_worker_claim_skips_core_and_routes_human(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(output='{"claimed_status":"completed"}'),
         loop_runtime=loop,
@@ -1220,7 +1228,7 @@ def test_blocked_worker_claim_skips_core_and_routes_human(
         },
         ensure_ascii=False,
     )
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(output=blocked_claim),
         loop_runtime=loop,
@@ -1257,7 +1265,7 @@ def test_reviewer_request_changes_routes_back_to_repair(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace, finish_status="needs_fix")
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1291,7 +1299,7 @@ def test_verification_retry_reuses_original_worker_and_completes(
         verification_status="failed",
     )
     worker = _FakeWorkerRunner()
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=worker,
         loop_runtime=loop,
@@ -1375,7 +1383,7 @@ def test_verification_retry_allows_only_ignored_environment_change(
         verification_status="failed",
     )
     worker = _FakeWorkerRunner()
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=worker,
         loop_runtime=loop,
@@ -1423,7 +1431,7 @@ def test_verification_retry_rejects_tracked_diff_change(
         verification_status="failed",
     )
     worker = _FakeWorkerRunner()
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=worker,
         loop_runtime=loop,
@@ -1468,7 +1476,7 @@ def test_verification_retry_rejects_non_verification_plan_change(
         verification_status="failed",
     )
     worker = _FakeWorkerRunner()
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=worker,
         loop_runtime=loop,
@@ -1508,7 +1516,7 @@ def test_verification_retry_interruption_can_release_operation_binding(
         finish_status="needs_fix",
         verification_status="failed",
     )
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1564,7 +1572,7 @@ def test_adapter_rejects_third_attempt_before_creating_child(
             observation_summary=f"历史 attempt {index + 1}",
         )
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1588,7 +1596,7 @@ def test_replan_starts_new_initial_child_without_discarding_old_attempt(
         finish_status="needs_human",
         verification_status="failed",
     )
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1627,7 +1635,7 @@ def test_repair_attempt_reuses_child_and_preserves_execution_history(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace, finish_status="needs_fix")
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1699,7 +1707,7 @@ def test_adapter_rejects_invalid_verification_before_creating_child(
     run = runtime.start(repo, goal=plan.user_goal, plan=plan)
     approved = runtime.approve(run.run_dir.name)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1724,7 +1732,7 @@ def test_adapter_rejects_dirty_initial_workspace_before_creating_child(
     run = runtime.start(repo, goal=plan.user_goal, plan=plan)
     approved = runtime.approve(run.run_dir.name)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1744,7 +1752,7 @@ def test_repair_without_new_workspace_change_does_not_reuse_old_diff(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace, finish_status="needs_fix")
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(mutate_each_run=False),
         loop_runtime=loop,
@@ -1779,7 +1787,7 @@ def test_core_side_effect_outside_plan_is_reconciled_before_supervisor_success(
         workspace,
         core_mutation_relative="README.md",
     )
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(),
         loop_runtime=loop,
@@ -1814,7 +1822,7 @@ def test_outside_approved_plan_scope_skips_core_and_requires_replan(
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
     loop = _FakeLoopRuntime(workspace)
-    adapter = SupervisorAgentCodexAdapter(
+    adapter = SupervisorAgentProviderAdapter(
         workspace,
         worker_runner=_FakeWorkerRunner(target_relative="README.md"),
         loop_runtime=loop,

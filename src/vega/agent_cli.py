@@ -19,6 +19,7 @@ from .agent_runtime_support import (
     load_agent_bundle,
 )
 from .agent_start_cli import agent_run, agent_start
+from .agent_provider import provider_resume_command
 from .cli_support import require_repo_directory
 from .provider_session import (
     load_provider_sessions,
@@ -172,6 +173,7 @@ def agent_steer(
     run_dir = _agent_run_dir(run)
     try:
         role_key = resolve_session_role(run_dir, role)
+        handle = load_provider_sessions(run_dir).handles[role_key]
         steer = queue_steer(
             run_dir,
             role_key,
@@ -179,7 +181,13 @@ def agent_steer(
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
-    typer.echo(f"Steer 已排队：{steer.steer_id}；目标={role_key}")
+    if handle.provider == "claude-code":
+        typer.echo(
+            f"Steer 已排队：{steer.steer_id}；目标={role_key}；"
+            "将在下一次 Claude Code Turn 输入中发送"
+        )
+    else:
+        typer.echo(f"Steer 已排队：{steer.steer_id}；目标={role_key}")
 
 
 def agent_respond(
@@ -242,7 +250,10 @@ def agent_takeover(
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"会话已交给人工：{role_key}")
-    typer.echo(f"可使用 `codex resume {handle.thread_id}` 继续。")
+    typer.echo(
+        "可使用 "
+        f"`{provider_resume_command(handle.provider, handle.thread_id)}` 继续。"
+    )
     if interrupted:
         typer.echo(
             "当前 attempt 已中断并保留 Writer binding；人工处理后先完成 recover 或 handoff，"
@@ -282,23 +293,36 @@ def agent_capabilities() -> None:
     typer.echo(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "control_plane": "deterministic-state-machine",
-                "provider": "codex-app-server",
-                "provider_capabilities": {
-                    "thread": "thread/start + thread/resume",
-                    "turn": "turn/start",
-                    "event": "关键生命周期通知白名单",
-                    "steer": "turn/steer",
-                    "interrupt": "Vega owned-process stop",
-                    "status": "provider-sessions.json 投影",
-                    "review": "独立只读 Thread + turn/start",
+                "default_provider": "codex",
+                "providers": {
+                    "codex": {
+                        "persistent_session": True,
+                        "event": "关键生命周期通知白名单",
+                        "steer": "当前 Turn 安全事件边界或下一 Turn",
+                        "interrupt": "Vega owned-process stop",
+                        "interactive_response": True,
+                        "review": "独立只读 Thread",
+                        "filesystem_isolation": "Codex sandbox",
+                    },
+                    "claude": {
+                        "persistent_session": True,
+                        "event": "脱敏后的阶段事件",
+                        "steer": "下一 Turn 输入；不伪装中途 steer",
+                        "interrupt": "Vega owned-process stop",
+                        "interactive_response": False,
+                        "review": "独立只读工具会话",
+                        "filesystem_isolation": (
+                            "Vega Worktree + Claude 工具白名单；非 OS 沙箱"
+                        ),
+                    },
                 },
                 "fresh_session_fallback": "explicit-only",
                 "persistent_worker_thread": True,
                 "reviewer_isolation": "per-work-item",
-                "interactive_steer": True,
-                "interactive_response": True,
+                "interactive_steer": "provider-specific",
+                "interactive_response": "provider-specific",
                 "human_takeover": True,
                 "git_task_card_resume": True,
                 "finish_owned_by_core": True,

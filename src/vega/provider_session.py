@@ -178,6 +178,7 @@ def ensure_session_handle(
     state: ProviderSessionState,
     role_key: str,
     *,
+    provider: str = "codex",
     work_item_id: str | None,
     contract_revision: int | None,
     plan_revision: int | None,
@@ -185,6 +186,7 @@ def ensure_session_handle(
     handle = state.handles.get(role_key)
     if handle is None:
         handle = ProviderSessionHandle(
+            provider=provider,
             role=role_key,
             work_item_id=work_item_id,
             contract_revision=contract_revision,
@@ -192,6 +194,9 @@ def ensure_session_handle(
         )
         state.handles[role_key] = handle
         return handle
+    provider_changed = handle.provider != provider
+    if provider_changed and handle.owner != "vega":
+        raise ValueError("人工接管的 Provider Session 不能切换 Provider")
     contract_changed = (
         handle.contract_revision is not None
         and contract_revision is not None
@@ -203,37 +208,56 @@ def ensure_session_handle(
         and plan_revision is not None
         and handle.plan_revision != plan_revision
     )
-    if contract_changed or reviewer_plan_changed:
-        handle.thread_id = None
-        handle.lifecycle = "new"
-        handle.last_turn_id = None
-        handle.sandbox = None
-        handle.approval_policy = None
-        handle.permissions_verified = False
-        handle.compaction_pending = False
-        handle.turn_count = 0
-        handle.compaction_count = 0
-        handle.total_tokens = None
-        handle.cached_input_tokens = None
-        handle.context_window = None
-        handle.last_event = (
-            "contract_revision_changed"
-            if contract_changed
-            else "review_plan_revision_changed"
+    if provider_changed or contract_changed or reviewer_plan_changed:
+        reason = (
+            "provider_changed"
+            if provider_changed
+            else (
+                "contract_revision_changed"
+                if contract_changed
+                else "review_plan_revision_changed"
+            )
         )
-        for steer in state.steers:
-            if steer.role_key == role_key and steer.status == "queued":
-                steer.status = "rejected"
-                steer.result_note = "合同 revision 已变化"
-        for interaction in state.interactions:
-            if interaction.role_key == role_key and interaction.status == "pending":
-                interaction.status = "closed"
-                interaction.resolved_at = utc_now()
+        _reset_session_handle(state, handle, reason)
+    handle.provider = provider
     handle.work_item_id = work_item_id
     handle.contract_revision = contract_revision
     handle.plan_revision = plan_revision
     handle.updated_at = utc_now()
     return handle
+
+
+def _reset_session_handle(
+    state: ProviderSessionState,
+    handle: ProviderSessionHandle,
+    reason: str,
+) -> None:
+    handle.thread_id = None
+    handle.lifecycle = "new"
+    handle.last_turn_id = None
+    handle.sandbox = None
+    handle.approval_policy = None
+    handle.permissions_verified = False
+    handle.compaction_pending = False
+    handle.turn_count = 0
+    handle.compaction_count = 0
+    handle.total_tokens = None
+    handle.cached_input_tokens = None
+    handle.context_window = None
+    handle.last_event = reason
+    note = {
+        "provider_changed": "Provider 已变化",
+        "contract_revision_changed": "合同 revision 已变化",
+        "review_plan_revision_changed": "Reviewer Plan revision 已变化",
+    }[reason]
+    for steer in state.steers:
+        if steer.role_key == handle.role and steer.status == "queued":
+            steer.status = "rejected"
+            steer.result_note = note
+    for interaction in state.interactions:
+        if interaction.role_key == handle.role and interaction.status == "pending":
+            interaction.status = "closed"
+            interaction.resolved_at = utc_now()
 
 
 def resolve_session_role(run_dir: Path, requested: str) -> str:

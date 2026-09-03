@@ -7,9 +7,10 @@ import typer
 
 from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_contract_compiler import PLAN_CARD_ARTIFACT
-from .agent_codex_adapter import SupervisorAgentCodexAdapter
+from .agent_provider_adapter import SupervisorAgentProviderAdapter
 from .agent_planning import PLANNING_PROPOSAL_ARTIFACT
 from .agent_planning_runtime import PlanningProposalRunner
+from .agent_provider import AgentProvider, resolve_run_provider
 from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
@@ -70,12 +71,17 @@ def agent_run(
     fresh_session: bool = typer.Option(
         False,
         "--fresh-session",
-        help="显式改用短生命周期 codex exec；默认复用 App Server Thread。",
+        help="显式改用短生命周期会话；默认复用当前 Provider Session。",
     ),
     approval: Literal["human", "bounded"] = typer.Option(
         "human",
         "--approval",
         help="批准模式；bounded 还要求仓库策略显式启用。",
+    ),
+    provider: Literal["codex", "claude"] | None = typer.Option(
+        None,
+        "--provider",
+        help="Coding Agent Provider；首次执行默认 codex，后续沿用当前 run。",
     ),
 ) -> None:
     """执行当前 Planning 或 Work Item。"""
@@ -83,12 +89,15 @@ def agent_run(
     try:
         workspace = Path.cwd()
         runtime = SupervisorAgentRuntime(workspace)
+        run_dir, _, _, _ = load_agent_bundle(workspace, run)
+        selected_provider = resolve_run_provider(run_dir, provider)
         result, should_run_provider = _advance_current_phase(
             workspace,
             runtime,
             run,
             timeout_seconds=timeout_seconds,
             fresh_session=fresh_session,
+            provider=selected_provider,
         )
         result, should_run_provider = _apply_requested_approval(
             runtime,
@@ -97,9 +106,10 @@ def agent_run(
             should_run_provider=should_run_provider,
         )
         if should_run_provider:
-            ensure_runner_ready("codex-exec", "Coding Agent")
-            result = SupervisorAgentCodexAdapter(
+            ensure_runner_ready(selected_provider, "Coding Agent")
+            result = SupervisorAgentProviderAdapter(
                 workspace,
+                provider=selected_provider,
                 persistent_sessions=not fresh_session,
                 progress_reporter=report_execution_progress,
                 event_reporter=_event,
@@ -117,6 +127,7 @@ def _advance_current_phase(
     *,
     timeout_seconds: int,
     fresh_session: bool,
+    provider: AgentProvider,
 ) -> tuple[AgentRun, bool]:
     run_dir, state, plan, _ = load_agent_bundle(workspace, run)
     if state.run_kind == "change" and state.contract_revision is None:
@@ -127,6 +138,7 @@ def _advance_current_phase(
             run_dir=run_dir,
             timeout_seconds=timeout_seconds,
             fresh_session=fresh_session,
+            provider=provider,
         )
         return result, False
     if state.phase == "finalizing":
@@ -145,11 +157,13 @@ def _run_planning_phase(
     run_dir: Path,
     timeout_seconds: int,
     fresh_session: bool,
+    provider: AgentProvider,
 ) -> AgentRun:
     if not (run_dir / PLANNING_PROPOSAL_ARTIFACT).is_file():
-        ensure_runner_ready("codex-exec", "Coding Agent")
+        ensure_runner_ready(provider, "Coding Agent")
     result = PlanningProposalRunner(
         workspace,
+        provider=provider,
         persistent_session=not fresh_session,
         progress_reporter=report_execution_progress,
         event_reporter=_event,

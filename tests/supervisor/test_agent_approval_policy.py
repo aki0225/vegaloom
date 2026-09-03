@@ -48,7 +48,7 @@ def test_cli_bounded_mode_requires_explicit_opt_in_and_repository_policy(
 
     monkeypatch.chdir(workspace)
     monkeypatch.setattr(
-        "vega.agent_start_cli.SupervisorAgentCodexAdapter",
+        "vega.agent_start_cli.SupervisorAgentProviderAdapter",
         StaticAdapter,
     )
     monkeypatch.setattr(

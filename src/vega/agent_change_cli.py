@@ -7,11 +7,13 @@ import typer
 from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_recovery_request import AgentRecoveryRequest
+from .agent_provider import resolve_run_provider
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_side_effect_adjudication import SupervisorAgentSideEffectAdjudicator
 from .agent_verification_retry import SupervisorAgentVerificationRetry
 from .cli_support import report_execution_progress
 from .redaction import redact_text
+from .run_utils import resolve_run_dir
 
 
 def agent_replan(
@@ -49,17 +51,28 @@ def agent_replan(
 
 def agent_retry(
     run: str = typer.Option(..., "--run", help="ChangeRun ID 或 runs/<run-id>。"),
+    provider: str | None = typer.Option(
+        None,
+        "--provider",
+        help="默认沿用当前 ChangeRun 的 Coding Agent Provider。",
+    ),
 ) -> None:
     """保留当前 Diff，只重跑验证、风险门禁和独立 Reviewer。"""
 
     try:
+        workspace = Path.cwd()
+        selected_provider = resolve_run_provider(
+            resolve_run_dir(workspace, run),
+            provider,
+        )
         result = SupervisorAgentVerificationRetry(
-            Path.cwd(),
+            workspace,
             progress_reporter=report_execution_progress,
             event_reporter=lambda message: typer.echo(
                 f"[vega] {message}",
                 err=True,
             ),
+            provider=selected_provider,
         ).run(run)
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc

@@ -32,8 +32,13 @@ from .agent_operation import operation_ref
 from .agent_plan_scope import (
     capture_plan_scope_baseline,
 )
-from .agent_codex_preparation import (
-    ensure_isolated_reviewer,
+from .agent_provider import AgentProvider
+from .agent_provider_factory import (
+    ensure_reviewer_runner,
+    runner_name,
+    worker_runner,
+)
+from .agent_provider_preparation import (
     next_attempt_context as _next_attempt_context,
     prepare_dispatch_binding,
     read_task_brief as _read_task_brief,
@@ -41,7 +46,6 @@ from .agent_codex_preparation import (
     validate_prepared_workspace,
 )
 from .agent_contract import AgentObservation, AgentState
-from .codex_app_server_runner import CodexAppServerRunner
 from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import (
@@ -61,11 +65,11 @@ from .models import BriefInput, LoopAutomationState
 from .project_config import ProjectConfig, load_project_config
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
-from .runner import CodexExecRunner, Runner, RunnerResult
+from .runner import Runner, RunnerResult
 
 
-class SupervisorAgentCodexAdapter:
-    """把一个真实 Codex Worker 接到现有 assist loop 与 Supervisor。"""
+class SupervisorAgentProviderAdapter:
+    """把真实 Coding Agent Provider 接到同一条 Candidate Pipeline。"""
 
     def __init__(
         self,
@@ -76,6 +80,7 @@ class SupervisorAgentCodexAdapter:
         finish_runtime: FinishRuntime | None = None,
         progress_reporter: Callable[[str, int], None] | None = None,
         event_reporter: Callable[[str], None] | None = None,
+        provider: AgentProvider = "codex",
         persistent_sessions: bool = True,
     ) -> None:
         self.workspace = workspace.resolve()
@@ -87,6 +92,7 @@ class SupervisorAgentCodexAdapter:
         self.finish_runtime = finish_runtime or FinishRuntime(self.workspace)
         self.progress_reporter = progress_reporter
         self.event_reporter = event_reporter
+        self.provider = provider
         self.persistent_sessions = persistent_sessions
         self.runtime = SupervisorAgentRuntime(self.workspace)
         self.worker = SupervisorAgentWorker(self.workspace)
@@ -216,22 +222,16 @@ class SupervisorAgentCodexAdapter:
         task_brief = _read_task_brief(run_dir)
         config = load_project_config(repo)
         self._ensure_reviewer_for_attempt(run_dir, state, config)
-        runner = self.worker_runner or (
-            CodexAppServerRunner(
-                run_dir,
-                "worker",
-                work_item_id=state.current_work_item,
-                contract_revision=state.contract_revision,
-                plan_revision=state.execution_plan_revision,
-                output_schema=WorkerClaim.model_json_schema(),
-                options=config.runner.codex_exec.worker,
-            )
-            if self.persistent_sessions
-            else CodexExecRunner(
-                options=config.runner.codex_exec.worker,
-                output_schema=WorkerClaim.model_json_schema(),
-                single_writer=True,
-            )
+        runner = self.worker_runner or worker_runner(
+            run_dir,
+            state,
+            config,
+            provider=self.provider,
+            persistent_session=self.persistent_sessions,
+        )
+        worker_name = runner_name(
+            self.provider,
+            persistent_session=self.persistent_sessions,
         )
         return PreparedWorkerAttempt(
             run_dir=run_dir,
@@ -245,26 +245,13 @@ class SupervisorAgentCodexAdapter:
             verification_commands=tuple(work_item.verification),
             external_side_effects=work_item.external_side_effects,
             plan_scope_baseline=plan_scope_baseline,
-            worker_name=(
-                "codex-app-server"
-                if self.persistent_sessions
-                else "codex-exec"
-            ),
-            reviewer_name=(
-                "codex-app-server"
-                if self.persistent_sessions
-                else "codex-exec"
-            ),
+            worker_name=worker_name,
+            reviewer_name=worker_name,
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
             change_context=change_context,
             timeout_seconds=timeout_seconds,
         )
-
-    def _ensure_isolated_reviewer(self, config: ProjectConfig) -> None:
-        """保留 fresh-session 路径的 Reviewer 隔离注入。"""
-
-        ensure_isolated_reviewer(self.loop_runtime, config)
 
     def _ensure_reviewer_for_attempt(
         self,
@@ -272,11 +259,12 @@ class SupervisorAgentCodexAdapter:
         state: AgentState,
         config: ProjectConfig,
     ) -> None:
-        ensure_isolated_reviewer(
+        ensure_reviewer_runner(
             self.loop_runtime,
             config,
             agent_run_dir=run_dir,
             state=state,
+            provider=self.provider,
             persistent_session=self.persistent_sessions,
         )
 
@@ -401,6 +389,7 @@ class SupervisorAgentCodexAdapter:
                 timeout_seconds=executed.prepared.timeout_seconds,
                 progress_reporter=self.progress_reporter,
                 event_reporter=self._event,
+                provider=self.provider,
                 reviewer_runner=getattr(
                     self.loop_runtime,
                     "reviewer_runner",

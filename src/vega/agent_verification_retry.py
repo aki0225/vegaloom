@@ -12,8 +12,9 @@ from .agent_worker_evidence import (
     require_child_quiescent,
     require_single_executable_work_item,
 )
-from .agent_codex_preparation import comparison_binding_from_metadata
-from .agent_codex_preparation import ensure_isolated_reviewer, review_final_candidate
+from .agent_provider import AgentProvider
+from . import agent_provider_preparation as provider_preparation
+from .agent_provider_factory import ensure_reviewer_runner
 from .agent_plan_scope import (
     capture_plan_scope_baseline,
     evaluate_plan_scope,
@@ -73,6 +74,7 @@ class SupervisorAgentVerificationRetry:
         finish_runtime: FinishRuntime | None = None,
         progress_reporter=None,
         event_reporter=None,
+        provider: AgentProvider = "codex",
         persistent_sessions: bool = True,
     ) -> None:
         self.workspace = workspace.resolve()
@@ -83,6 +85,7 @@ class SupervisorAgentVerificationRetry:
         self.finish_runtime = finish_runtime or FinishRuntime(self.workspace)
         self.progress_reporter = progress_reporter
         self.event_reporter = event_reporter
+        self.provider = provider
         self.persistent_sessions = persistent_sessions
         self.runtime = SupervisorAgentRuntime(self.workspace)
     def run(self, run: str) -> AgentRun:
@@ -103,12 +106,7 @@ class SupervisorAgentVerificationRetry:
         if state.phase != "ready" or state.active_child_run or state.active_operation_id:
             raise ValueError("当前 Agent 状态不允许验证专用恢复")
         validate_dispatch_artifacts(run_dir, state, plan)
-        require_change_verification_retry_budget(
-            run_dir,
-            state,
-            plan,
-            metadata,
-        )
+        require_change_verification_retry_budget(run_dir, state, plan, metadata)
         work_item = require_single_executable_work_item(plan, state)
         if work_item.external_side_effects != "none":
             raise ValueError("验证专用恢复只接受 external_side_effects=none 的 Work Item")
@@ -160,7 +158,7 @@ class SupervisorAgentVerificationRetry:
             repo,
             before,
         )
-        comparison_base_sha, comparison_paths = comparison_binding_from_metadata(
+        comparison_base_sha, comparison_paths = provider_preparation.comparison_binding_from_metadata(
             metadata
         )
         next_iteration = child_state.current_iteration + 1
@@ -183,11 +181,12 @@ class SupervisorAgentVerificationRetry:
         )
         if pre_core_scope.status == "failed":
             raise ValueError(plan_scope_failure(pre_core_scope))
-        ensure_isolated_reviewer(
+        ensure_reviewer_runner(
             self.loop_runtime,
             load_project_config(repo),
             agent_run_dir=run_dir,
             state=state,
+            provider=self.provider,
             persistent_session=self.persistent_sessions,
         )
         return PreparedVerificationRetry(
@@ -388,7 +387,7 @@ class SupervisorAgentVerificationRetry:
             external_side_effects="none",
         )
         if observation.all_work_items_completed:
-            observation = review_final_candidate(
+            observation = provider_preparation.review_final_candidate(
                 self.workspace,
                 prepared.run_dir,
                 observation,
@@ -398,6 +397,7 @@ class SupervisorAgentVerificationRetry:
                 timeout_seconds=900,
                 progress_reporter=self.progress_reporter,
                 event_reporter=self._event,
+                provider=self.provider,
                 reviewer_runner=getattr(self.loop_runtime, "reviewer_runner", None),
             )
         self._event("验证恢复后的 Workspace 与 Core Artifact 已完成对账")
