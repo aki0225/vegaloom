@@ -5,27 +5,29 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：26 / 28
-- 最近事件：`20260902T102705Z-USAGE-01-completed`
+- 已完成：27 / 28
+- 最近事件：`20260903T013644Z-USAGE-02-completed`
 
 ## 当前事项
 
-### 下一项：`USAGE-02` 修复真实使用中的高频摩擦
+### 下一项：`PROVIDER-01` 接入 Claude Code Provider
 
-只处理 USAGE-01 可复现且明显影响完成率、人工操作或现场解释的缺陷，避免按假设继续扩张控制面。
+在不改变 ChangeRun、Git Candidate、Verification、Risk、Reviewer 和 Finish 语义的前提下，让 Claude Code 实现现有 Provider Session 合同。
 
 验收条件：
 
-- 每项代码修改都能关联至少一个真实任务中的可复现问题
-- 优先删除重复状态、提示或适配代码，除非现有合同无法表达真实缺口
-- 新增测试只覆盖公开行为、故障恢复或安全边界，不复制私有实现
-- 修复后重跑对应真实任务或等价最小复现，并保持 fail-closed 和写审隔离
+- Claude Code Adapter 实现当前 Thread、Turn、Steer、Interrupt、Status 与只读 Reviewer 所需的最小能力映射
+- Provider 不支持的能力明确降级或拒绝，不用 Codex 专有事件伪装等价支持
+- 真实 Claude Code smoke 覆盖持久 Worker、独立 Reviewer、Candidate Gate 和至少一次恢复或打回
+- Codex 路径保持兼容，状态机和最终成功语义不新增 Provider 分叉
 
 要求检查：
 
-- `targeted-regression`
-- `full-test-shards`
-- `architecture-growth`
+- `provider-contract-tests`
+- `real-claude-code-smoke`
+- `supervisor-tests`
+- `security-tests`
+- `package-smoke`
 - `repository-hygiene`
 - `pr-ci`
 
@@ -59,7 +61,7 @@
 | 已完成 | `AUTONOMY-05` | 完成有界自主执行真实验收 | `AUTONOMY-04` |
 | 已完成 | `RELEASE-04` | 发布 Vega v0.4.0 | `AUTONOMY-05` |
 | 已完成 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
-| 待开始 | `USAGE-02` | 修复真实使用中的高频摩擦 | `USAGE-01` |
+| 已完成 | `USAGE-02` | 修复真实使用中的高频摩擦 | `USAGE-01` |
 | 待开始 | `PROVIDER-01` | 接入 Claude Code Provider | `USAGE-02` |
 
 ## 状态规则

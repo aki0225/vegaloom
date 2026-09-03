@@ -190,6 +190,8 @@ cancel
 
 `accept-session` 由 Provider 的会话级审批缓存解释，只对后续匹配请求生效。命令类型、权限或
 策略范围不同，Codex 仍会再次询问；Vega 不在本地扩大这份授权。
+App Server 不能安全分类命令时，状态卡显示“未分类命令执行”，并要求先接管原生会话确认；
+Vega 不会把原始命令或参数复制进协调状态来换取更详细的摘要。
 
 权限、工具用户输入和 MCP elicitation 使用 JSON：
 

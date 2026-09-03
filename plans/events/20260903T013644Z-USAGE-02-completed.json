@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "event_id": "20260903T013644Z-USAGE-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "USAGE-02",
+  "transition": "completed",
+  "recorded_at": "2026-09-03T01:36:44Z",
+  "summary": "已针对 USAGE-01 的三个确定性复现做最小修复：Contract Compiler 从仓库规则和候选文件生成机器风险 ID，并保留 Planner 自由文本为非授权提示；验证超时、停止或终止未确认改为明确交还人工；App Server 无法分类的命令审批不再显示 unknown，而是要求接管原生会话确认。普通测试失败、写审隔离和 fail-closed 语义未改变。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "targeted-regression",
+      "full-test-shards",
+      "architecture-growth",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "eval/usage-01-v040-real-tasks.md",
+      "src/vega/agent_contract_compiler.py",
+      "src/vega/agent_core_observation.py",
+      "src/vega/provider_session.py",
+      "tests/supervisor/test_agent_contract_compiler.py",
+      "tests/supervisor/test_agent_codex_adapter.py",
+      "tests/supervisor/test_codex_app_server.py"
+    ]
+  }
+}

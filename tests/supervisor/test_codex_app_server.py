@@ -37,8 +37,25 @@ from vega.provider_session import (
     queue_steer,
     respond_to_interaction,
     set_session_owner,
+    summarize_provider_interaction,
 )
 from vega.review_contract import ReviewVerdict
+
+
+def test_command_approval_summary_hides_unknown_action_label() -> None:
+    summary = summarize_provider_interaction(
+        "item/commandExecution/requestApproval",
+        {
+            "commandActions": [
+                {"type": "unknown", "command": "opaque"},
+            ],
+            "reason": "需要删除生成缓存",
+        },
+    )
+
+    assert summary == (
+        "未分类命令执行（请接管原生会话确认）；需要删除生成缓存"
+    )
 
 
 def test_app_server_reuses_thread_and_injects_pending_anchor(

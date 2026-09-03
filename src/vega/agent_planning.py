@@ -92,6 +92,10 @@ class PlanningContractProposal(StrictAgentModel):
     authorized_risk_reviews: list[PlanningShortText] = Field(
         default_factory=list,
         max_length=64,
+        description=(
+            "兼容字段；Planner 必须返回空数组。"
+            "机器风险 ID 由 Contract Compiler 根据仓库策略和候选文件生成。"
+        ),
     )
     side_effect_policy: ChangeSideEffectPolicy = Field(
         default_factory=ChangeSideEffectPolicy
@@ -294,6 +298,9 @@ def build_planning_prompt(
                 "implementation_strategy，不能伪装成验证命令。",
                 "- Contract Compiler 会拒绝任何未在 `.vega.yaml` 登记的命令，"
                 "也不会从自然语言中猜测或提取命令。",
+                "- authorized_risk_reviews 固定填写空数组。风险 ID 由 Contract Compiler "
+                "根据候选文件和 `.vega.yaml` 的 required_reviews 确定；语义风险写入 "
+                "Work Item 的 risk_notes。",
                 "- Reviewer 打回后还需要再次审查；若允许 N 次 Reviewer 驱动的 Repair，"
                 "max_review_rounds 至少应为 N+1，不能把 repair=1、review=1 写成"
                 "看似可修复但实际无法复审的预算。",
