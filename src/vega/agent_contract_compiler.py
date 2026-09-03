@@ -48,7 +48,7 @@ def compile_planning_proposal(
     verification = _compile_verification(proposal, registered_commands, config)
     likely_files = _likely_files(proposal)
     _validate_scope(repo, likely_files, proposal, config)
-    risk_hits = _compile_risk_hits(repo, proposal, config, likely_files)
+    risk_hits = _compile_risk_hits(repo, config, likely_files)
     envelope = _compile_authority_envelope(proposal, config, likely_files)
     contract_proposal = proposal.contract_proposal
     contract = ChangeContract(
@@ -58,9 +58,9 @@ def compile_planning_proposal(
         acceptance=list(contract_proposal.acceptance),
         invariants=list(contract_proposal.invariants),
         non_goals=list(contract_proposal.non_goals),
-        authorized_risk_reviews=list(
-            contract_proposal.authorized_risk_reviews
-        ),
+        authorized_risk_reviews=[
+            risk_id for risk_id, _label, _files in risk_hits
+        ],
         side_effect_policy=contract_proposal.side_effect_policy,
         required_verification=verification,
         authority_envelope=envelope,
@@ -196,6 +196,16 @@ def render_plan_card(
             )
     else:
         lines.append("- 未命中 `.vega.yaml` 的 required_reviews。")
+    if proposal.contract_proposal.authorized_risk_reviews:
+        lines.extend(
+            [
+                "- Planner 风险提示（仅供人工阅读，不作为机器风险 ID）：",
+                *[
+                    f"  - {value}"
+                    for value in proposal.contract_proposal.authorized_risk_reviews
+                ],
+            ]
+        )
     lines.extend(["", "## 工作项", ""])
     for item in plan.work_items:
         lines.append(f"- `{item.work_item_id}`：{item.objective}")
@@ -407,25 +417,12 @@ def _validate_scope(
 
 def _compile_risk_hits(
     repo: Path,
-    proposal: PlanningProposal,
     config: ProjectConfig,
     files: list[str],
 ) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
-    configured_ids = {rule.id for rule in config.risk.required_reviews}
-    declared_ids = set(proposal.contract_proposal.authorized_risk_reviews)
-    unknown = sorted(declared_ids - configured_ids)
-    if unknown:
-        raise ValueError(
-            "risk.authorized_risk_reviews：包含未知风险领域："
-            + "、".join(unknown)
-        )
+    """风险 ID 只由仓库策略和候选文件确定，不接受 Planner 自由命名。"""
+
     hits = match_required_reviews(repo, files, config.risk.required_reviews)
-    missing = sorted({hit.id for hit in hits} - declared_ids)
-    if missing:
-        raise ValueError(
-            "risk.authorized_risk_reviews：缺少命中风险领域："
-            + "、".join(missing)
-        )
     return tuple(
         (hit.id, hit.label, tuple(hit.matched_files))
         for hit in hits

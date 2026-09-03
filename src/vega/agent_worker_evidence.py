@@ -374,6 +374,7 @@ def observation_from_child(
         worker_claim=claim.summary,
         machine_summary=(
             f"child Finish={finish_status}；"
+            f"CoreStep={child_state.current_step}；"
             f"Verification={verification}；Risk={risk}；Reviewer={review}"
         ),
         workspace_fingerprint=snapshot.fingerprint,

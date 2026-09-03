@@ -418,10 +418,19 @@ def _command_approval_summary(params: dict[str, object]) -> str:
     actions = params.get("commandActions")
     if not isinstance(actions, list):
         return "命令执行"
+    action_labels = {
+        "read": "读取文件",
+        "listFiles": "列出文件",
+        "search": "搜索文件",
+    }
     labels = [
-        str(action.get("type") or action.get("name"))
+        action_labels[action_type]
         for action in actions[:5]
         if isinstance(action, dict)
-        and isinstance(action.get("type") or action.get("name"), str)
+        and isinstance((action_type := action.get("type")), str)
+        and action_type in action_labels
     ]
-    return "、".join(labels) or "命令执行"
+    return (
+        "、".join(dict.fromkeys(labels))
+        or "未分类命令执行（请接管原生会话确认）"
+    )

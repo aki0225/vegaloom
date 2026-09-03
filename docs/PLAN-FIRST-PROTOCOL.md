@@ -93,6 +93,11 @@ Contract 回答“Agent 被授权做什么”：
 }
 ```
 
+`authorized_risk_reviews` 只使用 `.vega.yaml` 中登记的风险 ID。自然语言 Planning
+阶段保持该字段为空；Contract Compiler 根据候选文件确定命中的 ID，再写入待批准合同。
+Planner 对风险的解释放在 Work Item 的 `risk_notes`，不能自行发明机器风险标识。Provider
+仍输出旧式自由文本时，计划卡只把它显示为非授权提示，不会拿它放宽或替代项目风险规则。
+
 未列出的副作用默认不授权。需要数据库、公共 API、依赖、部署、支付、权限、数据删除或验证期间
 外部写入时，必须显式写入 `side_effect_policy`。
 

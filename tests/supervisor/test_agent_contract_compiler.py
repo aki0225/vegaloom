@@ -12,7 +12,10 @@ from vega.agent_change_contract import (
     ChangeSideEffectPolicy,
     ExecutionWorkItem,
 )
-from vega.agent_contract_compiler import compile_planning_proposal
+from vega.agent_contract_compiler import (
+    compile_planning_proposal,
+    render_plan_card,
+)
 from vega.agent_planning import (
     PlanningContractProposal,
     PlanningExecutionPlan,
@@ -103,7 +106,6 @@ def test_contract_compiler_enters_existing_approval_flow(
         ("proposal_revision", "初始 Planning Proposal 必须为 1"),
         ("glob_likely_file", "必须列出具体文件"),
         ("outside_scope", "越出项目允许范围"),
-        ("missing_risk", "缺少命中风险领域"),
     ],
 )
 def test_contract_compiler_rejects_untrusted_proposal_fields(
@@ -142,20 +144,43 @@ def test_contract_compiler_rejects_untrusted_proposal_fields(
         proposal.execution_plan.work_items[0].likely_files.append(
             "docs/guide.md"
         )
-    else:
-        proposal.contract_proposal.authority_envelope.allowed_paths.append(
-            "src/db/**"
-        )
-        proposal.execution_plan.work_items[0].likely_files.append(
-            "src/db/schema.py"
-        )
-
     with pytest.raises(ValueError, match=expected):
         compile_planning_proposal(
             repo,
             proposal,
             config,
         )
+
+
+def test_contract_compiler_derives_registered_risk_ids_from_candidate_files(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo", include_database_risk=True)
+    proposal = _proposal(repo, task_id="task-1", goal="修复示例函数")
+    proposal.contract_proposal.authorized_risk_reviews = [
+        "数据库迁移与并发风险"
+    ]
+    proposal.contract_proposal.authority_envelope.allowed_paths.append(
+        "src/db/**"
+    )
+    proposal.execution_plan.work_items[0].likely_files.append(
+        "src/db/schema.py"
+    )
+    config = load_project_config(
+        repo,
+        tracked_only=True,
+        tracked_revision=proposal.source_revision,
+    )
+
+    compiled = compile_planning_proposal(repo, proposal, config)
+
+    assert compiled.contract.authorized_risk_reviews == ["database"]
+    assert compiled.risk_hits == (
+        ("database", "数据库", ("src/db/schema.py",)),
+    )
+    plan_card = render_plan_card(proposal, compiled)
+    assert "Planner 风险提示（仅供人工阅读，不作为机器风险 ID）" in plan_card
+    assert "数据库迁移与并发风险" in plan_card
 
 
 def test_contract_compiler_fails_closed_when_source_revision_drifts(

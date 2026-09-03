@@ -133,11 +133,13 @@ LLM 只返回结构化结果。代码选择下一动作：
 | `next` | 当前 Work Item 通过，进入下一项 |
 | `repair` | 问题仍在合同内，可生成 Fix Packet |
 | `replan` | 当前假设或执行安排不成立 |
-| `human` | 合同、风险、现场、副作用或预算需要人工决定 |
+| `human` | 合同、风险、现场、副作用、验证中断或预算需要人工决定 |
 | `finalize` | 所有 Work Item 和必需门禁通过 |
 
 普通 Repair 返回同一个 Worker Thread，不需要人工转贴 Reviewer finding。预算耗尽、同一问题反复
-出现、Worker 没有形成有效 Diff、未知外部副作用或审查未完成时进入 `needs_human`。
+出现、Worker 没有形成有效 Diff、验证超时或终止未确认、未知外部副作用或审查未完成时进入
+`needs_human`。普通测试断言失败仍可按批准范围进入 Repair；基础设施或执行中断不会伪装成
+“修改范围不足”的 Replan。
 
 ## Steer、响应和接管
 

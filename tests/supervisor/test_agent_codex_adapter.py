@@ -374,6 +374,65 @@ def test_verification_failure_takes_precedence_over_passed_finish_flag() -> None
     assert _verification_status(failed_iteration, trusted_finish) == "failed"
 
 
+def test_verification_timeout_requires_human_instead_of_replan() -> None:
+    finish = {
+        "verification_passed": False,
+        "latest_verification_failed": True,
+        "artifact_integrity": {"valid": True},
+        "evidence_freshness": {"fresh": False},
+        "verification_results": [
+            {
+                "iteration": 1,
+                "interruption_status": "timed_out",
+                "results": [
+                    {
+                        "status": "timeout",
+                        "interruption_status": "timed_out",
+                    }
+                ],
+            }
+        ],
+    }
+    iteration = LoopIterationState(
+        iteration=1,
+        verification_status="failed",
+        verification_failed_count=1,
+    )
+
+    assert _verification_status(iteration, finish) == "blocked"
+
+
+def test_latest_passed_verification_ignores_historical_timeout() -> None:
+    finish = {
+        "verification_passed": True,
+        "latest_verification_failed": False,
+        "artifact_integrity": {"valid": True},
+        "evidence_freshness": {"fresh": True},
+        "verification_results": [
+            {
+                "iteration": 1,
+                "interruption_status": "timed_out",
+                "results": [
+                    {"interruption_status": "timed_out"},
+                ],
+            },
+            {
+                "iteration": 2,
+                "interruption_status": None,
+                "results": [
+                    {"interruption_status": None},
+                ],
+            },
+        ],
+    }
+    iteration = LoopIterationState(
+        iteration=2,
+        verification_status="passed",
+    )
+
+    assert _verification_status(iteration, finish) == "passed"
+
+
 def test_untrusted_finish_evidence_blocks_passed_verification_flag() -> None:
     untrusted_finish = {
         "verification_passed": True,
