@@ -7,6 +7,16 @@ from pathlib import Path
 import typer
 
 from . import __version__
+from .agent_cli_snapshot import (
+    build_agent_cli_snapshot,
+    resolve_agent_cli_run,
+)
+from .agent_cli_status import (
+    explanation_json_payload,
+    render_agent_explanation,
+    render_status_snapshot,
+)
+from .agent_run_selection import ChangeRunSelectionError
 from .cli_support import require_repo_directory
 from .progress import (
     render_progress_items,
@@ -88,22 +98,78 @@ def latest(
 
 @app.command("status")
 def status(
-    run: str = typer.Option(..., "--run", help="ChangeRun ID 或 runs/<run-id>。"),
+    run: str | None = typer.Option(
+        None,
+        "--run",
+        help="ChangeRun ID 或 runs/<run-id>；省略时按当前仓库选择。",
+    ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="文本输出显示完整状态卡；JSON 始终保留完整排障字段。",
+    ),
     json_output: bool = typer.Option(False, "--json", help="输出 JSON。"),
 ) -> None:
     """显示当前阶段、会话、Diff、门禁和下一步。"""
 
     try:
+        target = resolve_agent_cli_run(Path.cwd(), run)
+        snapshot = build_agent_cli_snapshot(
+            target,
+            include_full=full and not json_output,
+        )
         if json_output:
             typer.echo(
                 json.dumps(
-                    run_status_payload(Path.cwd(), run),
+                    snapshot.status,
                     ensure_ascii=False,
                     indent=2,
                 )
             )
         else:
-            typer.echo(_render_status(run))
+            typer.echo(render_status_snapshot(snapshot, full=full))
+    except ChangeRunSelectionError as exc:
+        typer.echo(f"无法选择 ChangeRun：{exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command("explain")
+def explain(
+    run: str | None = typer.Option(
+        None,
+        "--run",
+        help="ChangeRun ID 或 runs/<run-id>；省略时按当前仓库选择。",
+    ),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="附带完整状态卡或完整 JSON 状态。",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="输出 JSON。"),
+) -> None:
+    """只读解释当前决定、已确认事实、未知项和安全动作。"""
+
+    try:
+        target = resolve_agent_cli_run(Path.cwd(), run)
+        snapshot = build_agent_cli_snapshot(
+            target,
+            include_full=full and not json_output,
+        )
+        if json_output:
+            typer.echo(
+                json.dumps(
+                    explanation_json_payload(snapshot, full=full),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            typer.echo(render_agent_explanation(snapshot, full=full))
+    except ChangeRunSelectionError as exc:
+        typer.echo(f"无法选择 ChangeRun：{exc}", err=True)
+        raise typer.Exit(code=2) from exc
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 

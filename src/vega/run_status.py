@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +10,8 @@ from .agent_run_status import (
 )
 from .agent_status_guidance import agent_artifact_names, agent_next_steps
 from . import agent_status_projection as asp
-from .execution_control import (
-    ACTIVE_EXECUTION_STATUSES,
-    ExecutionRecord,
-    find_execution_records,
-)
+from .execution_control import ACTIVE_EXECUTION_STATUSES, find_execution_records
+from .run_execution_status import latest_execution_payload
 from .run_status_guidance import (
     classify_assist_initialization_status as _classify_init,
     initialization_next_steps as _initialization_next_steps,
@@ -52,13 +48,30 @@ def render_run_status(workspace: Path, run: str) -> str:
 
 def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     run_dir = resolve_run_dir(workspace, run)
-    state = _read_state(run_dir)
+    state = _read_state(run_dir, include_agent_child_projection=False)
     kind = _infer_kind(run_dir, state)
+    agent_projection = None
     if kind != "agent":
         state = _classify_init(workspace, run_dir, state)
     else:
-        asp.apply_agent_projection(workspace, run, run_dir, state)
-    decisions = asp.combined_decisions(run_dir, include_agent=kind == "agent")
+        agent_projection = asp.apply_agent_projection(
+            workspace, run, run_dir, state
+        )
+    decisions = (
+        list(agent_projection.decision_history)
+        if agent_projection is not None
+        else asp.combined_decisions(run_dir, include_agent=False)
+    )
+    review_queue = (
+        agent_projection.review_queue
+        if agent_projection is not None
+        else projected_review_queue_status_payload(
+            workspace,
+            run_dir,
+            state,
+            kind,
+        )
+    )
     return {
         "run_id": run_dir.name,
         "run_dir": str(run_dir.resolve()),
@@ -69,29 +82,43 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         "risk": state.get("risk"),
         "recommendation": state.get("recommendation"),
         "active_child_run": state.get("active_child_run"),
-        "last_child_run": state.get("last_child_run"),
+        "last_child_run": (
+            agent_projection.last_child_run
+            if agent_projection is not None
+            else state.get("last_child_run")
+        ),
         "last_child_status": state.get("last_child_status"),
         "decision_count": len(decisions),
         "latest_decisions": decisions[-3:],
-        "execution": _latest_execution_payload(run_dir, state.get("status")),
+        "execution": (
+            agent_projection.execution
+            if agent_projection is not None
+            else latest_execution_payload(run_dir, state.get("status"))
+        ),
         "agent_phase": state.get("agent_phase"),
         "current_work_item": state.get("current_work_item"),
         "latest_checkpoint_id": state.get("latest_checkpoint_id"),
         "allowed_actions": state.get("allowed_actions"),
         "terminal_status": state.get("terminal_status"),
-        **projected_review_queue_status_payload(
-            workspace, run_dir, state, kind
-        ),
+        **review_queue,
         **asp.payload_fields(state),
         **agent_live_stage_payload(state),
-        "next_steps": next_steps_for_run(workspace, run_dir, state, kind),
-        "key_artifacts": key_artifacts_for_run(run_dir, state, kind),
+        "next_steps": (
+            list(agent_projection.next_steps)
+            if agent_projection is not None
+            else next_steps_for_run(workspace, run_dir, state, kind)
+        ),
+        "key_artifacts": (
+            list(agent_projection.key_artifacts)
+            if agent_projection is not None
+            else key_artifacts_for_run(run_dir, state, kind)
+        ),
     }
 
 
 def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], kind: str | None = None) -> list[str]:
     run_kind = kind or _infer_kind(run_dir, state)
-    execution = _latest_execution_payload(run_dir, state.get("status"))
+    execution = latest_execution_payload(run_dir, state.get("status"))
     if (
         run_kind in {"loop", "review"}
         and execution
@@ -333,13 +360,16 @@ def _loop_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
     return [f"读取 `{run_dir / 'state.json'}` 确认当前 loop 状态。"]
 
 
-def _read_state(run_dir: Path) -> dict[str, Any]:
+def _read_state(
+    run_dir: Path, *, include_agent_child_projection: bool = True
+) -> dict[str, Any]:
     state_path = run_dir / "state.json"
     agent_state_path = run_dir / "agent-state.json"
     if agent_state_path.exists():
         return load_agent_status_state(
             run_dir,
             ordinary_state_exists=state_path.exists(),
+            include_child_projection=include_agent_child_projection,
         )
     if not state_path.exists():
         return {}
@@ -535,34 +565,3 @@ def _latest_goal_artifacts(run_dir: Path) -> list[str]:
         if matches:
             result.append(str(matches[-1].resolve()))
     return result
-
-
-def _latest_execution_payload(run_dir: Path, run_status: object) -> dict[str, Any] | None:
-    records = find_execution_records(run_dir)
-    if not records:
-        return None
-    unconfirmed = [record for record in records if record.lease.termination_unconfirmed]
-    preferred = [r for r in records if (r.lease.status in ACTIVE_EXECUTION_STATUSES) == (run_status == "running")]
-    record = max(unconfirmed or preferred or records, key=_execution_heartbeat_utc)
-    lease = record.lease
-    return {
-        "status": lease.status,
-        "step": lease.step,
-        "iteration": lease.iteration,
-        "owner_pid": lease.owner_pid,
-        "child_pid": lease.child_pid,
-        "termination_unconfirmed": lease.termination_unconfirmed,
-        "last_heartbeat": lease.last_heartbeat,
-        "deadline": lease.deadline,
-        "path": str(record.path.resolve()),
-    }
-
-
-def _execution_heartbeat_utc(record: ExecutionRecord) -> datetime:
-    try:
-        parsed = datetime.fromisoformat(record.lease.last_heartbeat)
-    except ValueError as exc:
-        raise ValueError(f"execution 记录 `{record.path}` 的 last_heartbeat 不是有效 ISO 时间。") from exc
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)

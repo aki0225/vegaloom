@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .agent_contract import AgentObservation, AgentState
+from .agent_child_status import read_live_child_stage
 from .agent_persistence import AgentArtifactError, load_agent_state, read_agent_trace
-from .models import LoopAutomationState
-from .progress import PROGRESS_VERSION, RunProgressLog, safe_run_id, safe_run_step
+from .progress import PROGRESS_VERSION, RunProgressLog, safe_run_id
 from .run_utils import resolve_run_dir
 
 
@@ -78,13 +77,11 @@ class AgentTraceReadError(ValueError):
     """Trace 无法读取时的专用错误，便于诊断卡安全降级。"""
 
 
-_LIVE_CHILD_WAITING = "等待子流程状态"
-
-
 def load_agent_status_state(
     run_dir: Path,
     *,
     ordinary_state_exists: bool,
+    include_child_projection: bool = True,
 ) -> dict[str, Any]:
     if ordinary_state_exists:
         raise ValueError(
@@ -103,7 +100,11 @@ def load_agent_status_state(
             "agent-state.json run_id 与 run 目录身份不一致；"
             "为避免展示错误证据链，已拒绝读取。"
         )
-    latest_child_run = latest_trusted_child_run(run_dir, state)
+    latest_child_run = (
+        latest_trusted_child_run(run_dir, state)
+        if include_child_projection
+        else state.active_child_run
+    )
     payload = {
         "_run_kind": "agent",
         "automation_mode": None,
@@ -124,101 +125,12 @@ def load_agent_status_state(
         "accepted_checkpoint_sha": state.accepted_checkpoint_sha,
         "active_candidate_sha": state.active_candidate_sha,
     }
-    live_child_stage = read_live_child_stage(run_dir, state)
-    if live_child_stage is not None:
-        # 这是 status 的只读投影，不回写 Agent State，也不改变父流程阶段。
-        payload["live_child_stage"] = live_child_stage
+    if include_child_projection:
+        live_child_stage = read_live_child_stage(run_dir, state)
+        if live_child_stage is not None:
+            # 这是 status 的只读投影，不回写 Agent State，也不改变父流程阶段。
+            payload["live_child_stage"] = live_child_stage
     return payload
-
-
-def read_live_child_stage(run_dir: Path, state: AgentState) -> str | None:
-    """读取 active assist child 的当前步骤，供 status 实时展示。
-
-    child 的 `state.json` 是 assist loop 自己的权威状态。这里仅作展示投影，
-    不用它推导父 Agent 的成功、失败或下一步决策。
-    """
-    if (
-        state.phase not in {"acting", "observing", "needs_human"}
-        or not state.active_child_run
-    ):
-        return None
-    workspace = run_dir.parent.parent
-    child_run = state.active_child_run
-    try:
-        child_dir = resolve_run_dir(workspace, child_run)
-    except FileNotFoundError as exc:
-        # dispatch 已落盘但 child 可能还没创建自己的 state.json；此时只能等待，
-        # 绝不能把缺失状态显示成 passed 或其他成功阶段。
-        if "run 不存在于当前 workspace" in str(exc):
-            return _LIVE_CHILD_WAITING
-        raise ValueError(
-            f"active child `{child_run}` 的路径无法安全解析；已拒绝展示。"
-        ) from exc
-    child_state = _load_live_child_state(child_dir, child_run)
-    if child_state is None:
-        return _LIVE_CHILD_WAITING
-    _require_live_child_repo_binding(run_dir, child_run, child_state)
-    if not child_state.current_step.strip():
-        raise ValueError(
-            "active child state.json 缺少有效 current_step；已拒绝展示。"
-        )
-    return safe_run_step(child_state.current_step)
-
-
-def _load_live_child_state(
-    child_dir: Path,
-    child_run: str,
-) -> LoopAutomationState | None:
-    state_path = child_dir / "state.json"
-    if not state_path.exists():
-        return None
-
-    try:
-        child_state = LoopAutomationState.model_validate_json(
-            state_path.read_text(encoding="utf-8")
-        )
-    except (OSError, ValueError, UnicodeError) as exc:
-        raise ValueError(
-            f"active child `{child_run}` 的 state.json 无法验证；已拒绝展示。"
-        ) from exc
-
-    if child_state.run_id != child_run:
-        raise ValueError(
-            "active child state.json 的 run_id 与绑定 child 不一致；"
-            "已拒绝展示错误证据。"
-        )
-    return child_state
-
-
-def _require_live_child_repo_binding(
-    run_dir: Path,
-    child_run: str,
-    child_state: LoopAutomationState,
-) -> None:
-    try:
-        metadata = json.loads(
-            (run_dir / "agent-run.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            f"Agent run `{run_dir.name}` 的 agent-run.json 无法验证；"
-            "已拒绝核对 child 仓库身份。"
-        ) from exc
-    if not isinstance(metadata, dict) or not isinstance(metadata.get("repo_path"), str):
-        raise ValueError(
-            f"Agent run `{run_dir.name}` 缺少可验证的 repo binding；已拒绝展示 child。"
-        )
-    try:
-        parent_repo = Path(metadata["repo_path"]).resolve()
-        child_repo = Path(child_state.repo_path).resolve()
-    except (OSError, ValueError) as exc:
-        raise ValueError(
-            "active child 与 Agent run 的 repo binding 无法解析；已拒绝展示。"
-        ) from exc
-    if child_repo != parent_repo:
-        raise ValueError(
-            "active child 与 Agent run 的仓库身份不一致；已拒绝展示。"
-        )
 
 
 def latest_trusted_child_run(
@@ -300,18 +212,36 @@ def trusted_worker_label(
 ) -> str:
     """为状态卡生成不越过证据边界的 Worker 标签。"""
 
+    return trusted_worker_status(
+        run_dir,
+        state,
+        observation=observation,
+        checkpoint_status=checkpoint_status,
+    )[0]
+
+
+def trusted_worker_status(
+    run_dir: Path,
+    state: AgentState,
+    *,
+    observation: AgentObservation | None,
+    checkpoint_status: str | None,
+) -> tuple[str, str | None]:
+    """同时返回 Worker 展示标签和最近可信 child，避免重复读取 Trace。"""
+
     try:
-        return latest_trusted_child_run(
+        child_run = latest_trusted_child_run(
             run_dir,
             state,
             observation=observation,
-        ) or "未启动"
+        )
+        return child_run or "未启动", child_run
     except AgentTraceReadError:
         if checkpoint_status != "blocked":
             raise
         # Trace 损坏时只能说明 binding 仍被保留，不能把未验证 child
         # 当成可信证据展示；详细原因由 Checkpoint 和 recovery 报告承载。
-        return "未验证（保留 binding）"
+        return "未验证（保留 binding）", None
 
 
 def agent_status_lines(payload: dict[str, Any]) -> list[str]:

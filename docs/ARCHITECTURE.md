@@ -1,7 +1,8 @@
 # 架构
 
-> 本文描述当前主线架构。`v0.4.0` 是 Codex 稳定基线；主线继续复用同一 ChangeRun 接入
-> Claude Code。演进计划见
+> 本文描述当前主线架构。`v0.5.0` 是日常入口候选；它在同一 ChangeRun 合同内同时支持
+> Codex 和 Claude Code。真实 Codex bounded 与 Claude Code human smoke 已完成；完整 CI、
+> package smoke、Tag 和 GitHub Release 仍待验证。演进计划见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。
 
@@ -33,8 +34,9 @@ Host Session
 
 `cli_entrypoint.py` 组合两部分：
 
-- `cli.py`：`status`、`watch`、`latest`、`config` 和 Adapter 初始化；
-- `agent_cli.py`：ChangeRun 的创建、批准、执行、交互、恢复和交接。
+- `cli.py`：`status`、`explain`、`watch`、`latest`、`config` 和 Adapter 初始化；
+- `agent_change_cli.py`：`change` 日常入口，把选择、Planning、批准、Provider 和 Finish 串成一条路径；
+- `agent_cli.py`：`start`、`approve`、`run` 等高级 ChangeRun 命令，以及交互、恢复和交接。
 
 旧 Core CLI 不再注册。Core Runtime 仍被 ChangeRun 内部调用。
 
@@ -57,9 +59,10 @@ planning
 
 ### Planning Proposal
 
-`start --text` 在同一条 ChangeRun 中建立只读 Planning 阶段。Planner 绑定固定 Git revision，
-输出事实引用、假设、未决问题、建议范围和验证建议；Workspace 发生变化、引用失效或 Provider
-终态不可信时停止。Proposal 只是 Contract Compiler 的输入，不拥有批准或执行权限。
+`vega change <text>` 在同一条 ChangeRun 中建立只读 Planning 阶段；需要显式拆开阶段时仍可用
+高级 `start --text`。Planner 绑定固定 Git revision，输出事实引用、假设、未决问题、建议范围
+和验证建议；Workspace 发生变化、引用失效或 Provider 终态不可信时停止。Proposal 只是
+Contract Compiler 的输入，不拥有批准或执行权限。
 
 ### Contract Compiler
 
@@ -82,11 +85,18 @@ planning
 `agent_approval_policy.py` 负责纯判断，`agent_approval_runtime.py` 负责把结果接回现有
 ChangeRun。
 
-默认仍由 `vega approve` 记录人工批准。`vega run --approval bounded` 只有在仓库策略已启用，
-且范围、Verification、预算、副作用和风险都满足策略时，才写入带策略摘要的批准记录。拒绝时
-状态保持 `awaiting_approval`，Trace 和状态卡给出原因。
+默认仍由 `vega approve` 或交互式 `vega change` 记录人工批准。`vega run --approval bounded`
+和 `vega change --approval bounded` 只有在仓库策略已启用，且范围、Verification、预算、副作用
+和风险都满足策略时，才写入带策略摘要的批准记录。拒绝时状态保持 `awaiting_approval`，Trace
+和状态卡给出原因。
 
 批准后的每次可执行恢复都会重新检查策略和 Contract 绑定。失效的批准不能继续启动 Worker。
+
+`vega change` 在当前 TTY 展示批准摘要和 Provider 请求，但 Provider Session 只保留脱敏摘要；
+如果缺少足以证明目标、权限或上下文的完整原始信息，控制器会停止当前 attempt、关闭对应
+pending，再转 Recovery 或 Provider 原生会话接管。高级 `vega run` 仍持有活动 Turn 时，
+`vega respond` 才能写入响应；owner、Thread、Turn 和权限绑定全部重新校验。终端可见不等于
+自动批准；JSON 与非交互终端不会读取 stdin。
 
 ### Change Contract 与 Execution Plan
 
@@ -169,6 +179,11 @@ Provider 映射保持窄而明确：
 初始化时关闭正文和 Diff 增量通知；代码事实仍从 Worker 退出后的 Git Candidate 读取。未知
 notification 在 JSON-RPC 边界忽略，不会关闭 Observation 链。App Server 返回过载错误时只做
 三次有限退避；关键事件积压超过上限、请求超时或进程树终止未确认时直接失败。
+
+`vega change` 可以在当前终端显示待处理请求的安全摘要；命令或文件请求若缺少完整原始目标、
+权限上下文和策略信息，不以内联 `y/N` 代替授权，而是停止当前 attempt 并关闭待响应请求。
+需要结构化输入、敏感信息或无法分类的请求同样保持 fail-closed。只有高级入口仍维持活动
+App Server Turn 时，才允许另一终端用 `vega respond` 送回已经核对的响应。
 
 Codex CLI `0.149.1` 的真实 Shadow 表明，原生 `review/start` 能发现代码问题，但请求不能绑定
 Vega 的 Structured Output，响应也没有覆盖清单和风险披露。当前不替换 Reviewer，记录见
@@ -261,6 +276,12 @@ Core child 的 `finish-summary.json` 必须绑定当前 Candidate，且满足可
 
 累计 Diff 最多拆成 8 个有界批次。所有批次完成且必需风险披露齐全后才能 `approve`。
 
+Core Work Item Reviewer 明确 `timed_out` 时，只有在 Candidate、Workspace、Contract、Plan、
+Verification、Risk、预算、无外部副作用和执行终态都能重新证明的情况下，才由现有
+`VerificationRetry` 使用新的独立 Reviewer Session 自动恢复一次。恢复复用原 Candidate 和
+child，完整重跑 Verification、Risk 和 Reviewer，不启动新的 Coding Worker；第二次超时、
+`error`、`stopped`、终止未确认或最终集成 Reviewer 超时继续进入 `needs_human`。
+
 ### Repair 与 Replan
 
 Reviewer 或 Verification 的合同内问题生成 Fix Packet。Fix Packet 只包含 finding、门禁结果、
@@ -273,6 +294,11 @@ Repair 复用 Worker Thread，产生新的 Candidate。Replan 由新的 Executio
 
 `agent_status_projection.py` 从当前 State、Workspace、Checkpoint、Core Artifact 和 Provider
 Session 生成统一投影。文本状态卡和 JSON 状态共用该投影。
+
+`vega status` 与 `vega explain` 默认从当前 Git 仓库优先选择唯一未完成的 ChangeRun；没有活动
+任务时读取最近更新的终态 Run。选择依据是源仓库绑定和 `AgentState.updated_at`；多个候选、
+归属不一致或损坏记录时拒绝猜测。两条命令只读取已验证 Artifact，不调用模型、不重新运行验证、
+也不修改状态；`--run`、`--full` 和 `--json` 用于显式排障。
 
 `progress.jsonl` 只记录低频安全事件，例如：
 

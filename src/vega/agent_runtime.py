@@ -32,7 +32,7 @@ from .agent_planning_start import start_planning_run
 from .agent_plan_archive import archive_agent_plan_revision
 from .agent_run import AgentRun
 from .agent_routing import decide_next_action, transition_state
-from .agent_status_card import read_status_card
+from .agent_status_projection import read_status_card
 from .agent_runtime_logic import (
     apply_work_item_progress,
     invalidate_plan_for_steer,

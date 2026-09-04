@@ -1,19 +1,119 @@
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
+from typing import Literal
 
 import typer
 
+from .agent_change_driver import AgentChangeDriver, ChangeDriverResult
+from .agent_change_presentation import redact_change_message
 from .agent_change_contract import ChangeContract, ExecutionPlan
+from .agent_cli_interaction import InteractionPumpUpdate
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_recovery_request import AgentRecoveryRequest
 from .agent_provider import resolve_run_provider
+from .agent_run_selection import resolve_repository_root
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_side_effect_adjudication import SupervisorAgentSideEffectAdjudicator
 from .agent_verification_retry import SupervisorAgentVerificationRetry
 from .cli_support import report_execution_progress
 from .redaction import redact_text
 from .run_utils import resolve_run_dir
+
+
+def agent_change(
+    text: str | None = typer.Argument(
+        None,
+        help="自然语言变更目标；省略时继续当前仓库唯一未完成 ChangeRun。",
+    ),
+    run: str | None = typer.Option(
+        None,
+        "--run",
+        help="显式继续指定 ChangeRun。",
+    ),
+    task: Path | None = typer.Option(
+        None,
+        "--task",
+        help="从指定 Git Task Card 恢复。",
+    ),
+    provider: Literal["codex", "claude"] | None = typer.Option(
+        None,
+        "--provider",
+        help="Coding Agent Provider；已有 Run 默认沿用原 Provider。",
+    ),
+    approval: Literal["human", "bounded"] = typer.Option(
+        "human",
+        "--approval",
+        help="human 在当前终端确认；bounded 还要求仓库策略显式放行。",
+    ),
+    timeout_seconds: int = typer.Option(
+        900,
+        "--timeout",
+        min=60,
+        max=3600,
+        help="单次 Planning、Worker 或 Reviewer 外部进程超时秒数。",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="只输出一个稳定 JSON object，不读取 stdin。",
+    ),
+) -> None:
+    """创建或继续一个日常代码变更，直到完成或遇到授权边界。"""
+
+    try:
+        repo = resolve_repository_root(Path.cwd())
+        interactive = not json_output and _stream_is_tty(sys.stdin)
+        driver = AgentChangeDriver(
+            repo,
+            repo,
+            provider=provider,
+            approval=approval,
+            timeout_seconds=timeout_seconds,
+            interactive=interactive,
+            json_output=json_output,
+            confirm=_confirm if interactive else None,
+            event_reporter=(
+                None
+                if json_output
+                else lambda message: typer.echo(
+                    f"[vega] {message}",
+                    err=True,
+                )
+            ),
+            interaction_reporter=(
+                None if json_output else _render_interaction_update
+            ),
+            progress_reporter=(
+                None if json_output else report_execution_progress
+            ),
+        )
+        result = driver.change(text=text, run=run, task=task)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+        if json_output:
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "run_id": None,
+                        "phase": None,
+                        "outcome": "error",
+                        "reason_code": "change.request_failed",
+                        "message": redact_change_message(str(exc)),
+                        "safe_actions": [],
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            typer.echo(f"错误：{redact_change_message(str(exc))}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    _render_change_result(repo, result, json_output=json_output)
+    if result.exit_code:
+        raise typer.Exit(code=result.exit_code)
 
 
 def agent_replan(
@@ -143,3 +243,40 @@ def _load_execution_plan(path: Path) -> ExecutionPlan:
         return ExecutionPlan.model_validate_json(path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise typer.BadParameter(f"无法读取 Execution Plan：{path.name}") from exc
+
+
+def _render_change_result(
+    workspace: Path,
+    result: ChangeDriverResult,
+    *,
+    json_output: bool,
+) -> None:
+    if json_output:
+        typer.echo(
+            json.dumps(
+                result.as_payload(),
+                ensure_ascii=False,
+            )
+        )
+        return
+    typer.echo(result.message)
+    if result.run is None:
+        return
+    typer.echo("")
+    typer.echo(SupervisorAgentRuntime(workspace).status(result.run.run_dir.name))
+
+
+def _confirm(prompt: str) -> bool:
+    return typer.confirm(prompt, default=False)
+
+
+def _render_interaction_update(update: InteractionPumpUpdate) -> None:
+    if update.message is not None:
+        typer.echo(f"[vega] {update.message}", err=True)
+
+
+def _stream_is_tty(stream: object) -> bool:
+    try:
+        return bool(stream.isatty())  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        return False

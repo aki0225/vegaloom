@@ -150,6 +150,12 @@ def approve_change_run(
     assert context is not None
     if context.execution_plan.unresolved_decisions:
         raise ValueError("Execution Plan 仍有未解决决策，不能批准")
+    snapshot = capture_bound_workspace(run_dir)
+    if (
+        snapshot.fingerprint != state.workspace_fingerprint
+        or snapshot.head_sha != state.accepted_checkpoint_sha
+    ):
+        raise ValueError("批准前 Workspace 已漂移")
     work_item = current_change_work_item(plan, state)
     repo = bound_repo(run_dir)
     require_verification_commands_preflight(repo, work_item.verification)
@@ -167,7 +173,6 @@ def approve_change_run(
         current=plan,
     )
     prepare_verification_temp_root(repo)
-    snapshot = capture_bound_workspace(run_dir)
     ready_state = update_state(
         state,
         phase="ready",

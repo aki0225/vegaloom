@@ -52,7 +52,7 @@ CheckpointStatus = Literal["safe", "uncertain", "blocked"]
 GateStatus = Literal["not_run", "passed", "failed", "blocked", "stale"]
 TerminalStatus = Literal["ready_to_commit", "request_changes", "needs_human"]
 SupervisorEvidenceStatus = Literal["passed", "failed", "stale", "unverified"]
-
+ReviewerRunnerStatus = Literal["skipped", "success", "error", "timed_out", "stopped"]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 RelativePathText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 Sha256Text = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -240,6 +240,8 @@ class AgentObservation(StrictAgentModel):
     verification: GateStatus = "not_run"
     risk: GateStatus = "not_run"
     review: GateStatus = "not_run"
+    reviewer_runner_status: ReviewerRunnerStatus | None = None
+    reviewer_retry_attempt: int = Field(default=0, ge=0)
     all_work_items_completed: bool = False
 
     @field_validator("changed_files", "evidence_refs")
@@ -292,6 +294,7 @@ class AgentDecision(StrictAgentModel):
     observation_id: NonEmptyText
     allowed_actions: list[AgentAction] = Field(min_length=1)
     selected_action: AgentAction
+    reason_code: NonEmptyText | None = None
     reason: NonEmptyText
     source: Literal["deterministic", "supervisor", "human"]
     created_at: str = Field(default_factory=utc_now)

@@ -6,7 +6,7 @@
 
 | 目的 | 文档 | 权威范围 |
 |---|---|---|
-| 安装与日常使用 | [`../README.md`](../README.md) | 用户入口与常用命令 |
+| 安装与日常使用 | [`../README.md`](../README.md) | `vega change`、`vega status`、`vega explain` 与高级命令 |
 | 产品边界与成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | Core、Supervisor、证据和行为边界 |
 | 当前事项与下一项 | [`CURRENT.md`](CURRENT.md) | 由机器计划和事件账本生成的当前状态 |
 | 演进事项与验收 | [`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json) | 稳定事项、依赖和要求检查 |
@@ -15,7 +15,7 @@
 | 已完成的治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 三轮治理范围、Dogfood 和验收结果 |
 | 完整使用流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | ChangeRun、交互、恢复和交付 |
 | 调查和计划协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | 修改前调查、事实与假设、人工确认 |
-| Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | v0.4.0 ChangeRun、Provider Session、Core 与数据流 |
+| Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | v0.5.0 候选 ChangeRun、Provider Session、Core 与数据流 |
 | Supervisor 状态合同 | [`SUPERVISOR-AGENT-STATE-AUTHORITY.md`](SUPERVISOR-AGENT-STATE-AUTHORITY.md) | 状态、恢复和事实权威 |
 | v0.3.0 能力快照 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 已发布范围与当时明确不做的内容 |
 | v0.3.0 实施记录 | [`PERSISTENT-INTERACTIVE-AGENT-V1.md`](PERSISTENT-INTERACTIVE-AGENT-V1.md) | 持久交互式 Agent 的冻结决策 |
@@ -23,11 +23,17 @@
 
 ## 发布
 
-当前稳定版本为 [`v0.4.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.4.0)：
+当前发布候选为 `v0.5.0`（真实 Codex bounded 与 Claude Code human smoke 已完成；完整 CI、
+package smoke、Tag 和 GitHub Release 待验证）：
+
+- [`RELEASE-NOTES-0.5.0.md`](RELEASE-NOTES-0.5.0.md)
+- [`RELEASE-SUMMARY-0.5.0.md`](RELEASE-SUMMARY-0.5.0.md)
+- [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)
+
+上一个已发布稳定版本为 [`v0.4.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.4.0)：
 
 - [`RELEASE-NOTES-0.4.0.md`](RELEASE-NOTES-0.4.0.md)
 - [`RELEASE-SUMMARY-0.4.0.md`](RELEASE-SUMMARY-0.4.0.md)
-- [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)
 
 已发布版本的历史材料：
 

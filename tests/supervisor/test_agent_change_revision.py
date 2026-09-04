@@ -562,6 +562,7 @@ def test_repair_decision_respects_explicit_stop_budgets(
 
     assert guarded.selected_action == "human"
     assert guarded.allowed_actions == ["human"]
+    assert guarded.reason_code == "budget.automatic_repair_exhausted"
     assert label in guarded.reason
 
 

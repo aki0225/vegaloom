@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "event_id": "20260904T132002Z-UX-03-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "UX-03",
+  "transition": "completed",
+  "recorded_at": "2026-09-04T13:20:02Z",
+  "summary": "已为明确 timed_out 的 Core Work Item Reviewer 增加一次受限自动恢复：只有 Candidate、Workspace、合同、计划、验证、风险、预算和外部副作用均可重新证明时，才复用现有 VerificationRetry 完整重跑门禁并使用新的独立 Reviewer；真实 Codex bounded 与 Claude human 路径均完成验收。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "review-timeout-retry-tests",
+      "provider-role-tests",
+      "touch-evaluation",
+      "real-codex-smoke",
+      "real-claude-code-smoke",
+      "full-test-shards",
+      "architecture-growth",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "examples/evidence/v0.5.0-daily-ux-smoke.md",
+      "src/vega/agent_reviewer_timeout_retry.py",
+      "src/vega/agent_verification_retry.py",
+      "src/vega/agent_provider_factory.py",
+      "tests/supervisor/test_agent_reviewer_timeout_retry.py",
+      "tests/supervisor/test_agent_provider_adapter.py"
+    ]
+  }
+}

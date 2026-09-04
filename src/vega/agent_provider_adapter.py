@@ -38,6 +38,7 @@ from .agent_provider_factory import (
     runner_name,
     worker_runner,
 )
+from .agent_reviewer_timeout_retry import auto_retry_reviewer_timeout
 from .agent_provider_preparation import (
     next_attempt_context as _next_attempt_context,
     prepare_dispatch_binding,
@@ -99,6 +100,7 @@ class SupervisorAgentProviderAdapter:
 
     def run(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
         result = self._run_once(run, timeout_seconds=timeout_seconds)
+        result = auto_retry_reviewer_timeout(self, result)
         steps = 1
         while (
             getattr(getattr(result, "state", None), "run_kind", None) == "change"
@@ -113,6 +115,7 @@ class SupervisorAgentProviderAdapter:
                 result.run_dir.name,
                 timeout_seconds=timeout_seconds,
             )
+            result = auto_retry_reviewer_timeout(self, result)
         return result
 
     def _change_run_step_limit(self, run: str) -> int:

@@ -4,7 +4,13 @@ import json
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints, field_validator, model_validator
+from pydantic import (
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from .agent_change_contract import (
     ChangeAuthorityEnvelope,
@@ -174,6 +180,47 @@ class PlanningProposal(StrictAgentModel):
         return self
 
 
+def parse_planning_proposal_output(
+    output: str,
+) -> tuple[PlanningProposal, int]:
+    """解析 Planner 输出，并丢弃无法验证的单条来源引用。
+
+    Planner 的结构化输出仍是不可信输入。某条可选事实引用损坏时，不应让其余
+    已有合法来源的 Proposal 整体失效；这里仅删除坏引用及失去全部来源的事实，
+    不补写命令、路径或其他证据。
+    """
+
+    payload = json.loads(output)
+    if not isinstance(payload, dict):
+        return PlanningProposal.model_validate(payload), 0
+    raw_facts = payload.get("observed_facts")
+    if not isinstance(raw_facts, list):
+        return PlanningProposal.model_validate(payload), 0
+
+    normalized_facts: list[object] = []
+    dropped_refs = 0
+    for fact in raw_facts:
+        if not isinstance(fact, dict) or not isinstance(fact.get("refs"), list):
+            normalized_facts.append(fact)
+            continue
+        valid_refs: list[dict[str, object]] = []
+        for ref in fact["refs"]:
+            try:
+                parsed = PlanningSourceRef.model_validate(ref)
+            except ValidationError:
+                dropped_refs += 1
+                continue
+            valid_refs.append(parsed.model_dump(mode="json"))
+        if valid_refs:
+            normalized_fact = dict(fact)
+            normalized_fact["refs"] = valid_refs
+            normalized_facts.append(normalized_fact)
+
+    normalized = dict(payload)
+    normalized["observed_facts"] = normalized_facts
+    return PlanningProposal.model_validate(normalized), dropped_refs
+
+
 class PlanningRequest(StrictAgentModel):
     """自然语言入口冻结的最小任务身份。"""
 
@@ -293,6 +340,8 @@ def build_planning_prompt(
                 "- 确定候选文件前，先根据项目上下文中的 AGENTS.md 规则索引读取"
                 "该文件适用的根规则和目录规则；不要假设 Provider 已自动发现。",
                 "- command 引用只记录本轮实际执行的只读命令及结果摘要，不算验证通过证据。",
+                "- kind=command 时 command 必须逐字填写实际执行的命令，不能为 null；"
+                "未保留命令文本的观察不要写成 command 引用。",
                 "- verification_suggestions、每个 Work Item 的 verification 和 "
                 "additional_check_suggestions 只能逐字复制下方“显式验证命令”；"
                 "不要添加“运行”“检查”等前缀、Markdown 反引号或自然语言检查项。",

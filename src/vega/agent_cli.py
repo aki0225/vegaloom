@@ -8,6 +8,7 @@ import typer
 
 from .agent_change_cli import (
     agent_adjudicate,
+    agent_change,
     agent_recover,
     agent_replan,
     agent_retry,
@@ -35,6 +36,7 @@ from .run_utils import resolve_run_dir
 def register_agent_commands(app: typer.Typer) -> None:
     """把 Agent 命令直接注册到顶层，不保留 `vega agent` 包装。"""
 
+    app.command("change")(agent_change)
     app.command("start")(agent_start)
     app.command("approve")(agent_approve)
     app.command("run")(agent_run)
@@ -219,12 +221,22 @@ def agent_respond(
         ]
         if len(matches) != 1:
             raise ValueError("待响应请求不存在或已处理")
+        selected = matches[0]
+        handle = state.handles.get(selected.role_key)
+        if handle is None:
+            raise ValueError("待响应请求不再绑定当前 Provider Turn")
         response = _interaction_response(
-            matches[0].method,
+            selected.method,
             decision=decision,
             input_path=input_path,
         )
-        result = respond_to_interaction(run_dir, interaction, response)
+        result = respond_to_interaction(
+            run_dir,
+            interaction,
+            response,
+            expected=selected,
+            expected_provider=handle.provider,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"响应已记录：{result.interaction_id}")
@@ -293,7 +305,13 @@ def agent_capabilities() -> None:
     typer.echo(
         json.dumps(
             {
-                "schema_version": 3,
+                "schema_version": 4,
+                "daily_change_entry": True,
+                "repository_run_selection": True,
+                "deterministic_explain": True,
+                "reviewer_timeout_auto_retry_limit": 1,
+                "provider_interaction_visibility": "same-terminal-summary",
+                "provider_inline_approval": False,
                 "control_plane": "deterministic-state-machine",
                 "default_provider": "codex",
                 "providers": {

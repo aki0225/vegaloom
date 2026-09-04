@@ -732,6 +732,7 @@ for raw in sys.stdin:
                 "params": {
                     "threadId": thread_id,
                     "turnId": turn_id,
+                    "commandActions": [{"type": "read"}],
                     "reason": "测试审批",
                 },
             })

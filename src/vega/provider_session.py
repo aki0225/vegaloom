@@ -305,6 +305,9 @@ def respond_to_interaction(
     run_dir: Path,
     interaction_id: str,
     response: dict[str, object],
+    *,
+    expected: PendingInteraction | None = None,
+    expected_provider: str | None = None,
 ) -> PendingInteraction:
     selected: PendingInteraction | None = None
 
@@ -317,6 +320,27 @@ def respond_to_interaction(
         ]
         if len(matches) != 1 or matches[0].status != "pending":
             raise ValueError("待响应请求不存在、已关闭或已处理")
+        if expected is not None and _interaction_binding(matches[0]) != (
+            _interaction_binding(expected)
+        ):
+            raise ValueError("待响应请求已变化，拒绝使用旧提示结果")
+        handle = state.handles.get(matches[0].role_key)
+        if (
+            handle is None
+            or handle.role != matches[0].role_key
+            or (
+                expected_provider is not None
+                and handle.provider != expected_provider
+            )
+            or handle.owner != "vega"
+            or handle.lifecycle != "waiting_user"
+            or not handle.permissions_verified
+            or not matches[0].thread_id
+            or not matches[0].turn_id
+            or handle.thread_id != matches[0].thread_id
+            or handle.last_turn_id != matches[0].turn_id
+        ):
+            raise ValueError("待响应请求不再绑定当前 Provider Turn")
         matches[0].response = redact_value(response)
         matches[0].status = "responded"
         matches[0].resolved_at = utc_now()
@@ -325,6 +349,34 @@ def respond_to_interaction(
     mutate_provider_sessions(run_dir, "agent.respond", mutate)
     assert selected is not None
     return selected
+
+
+def close_pending_interactions(
+    run_dir: Path,
+    *,
+    interaction_id: str | None = None,
+) -> int:
+    """停止 Provider attempt 后关闭未发送的请求，避免留下可误响应的假 pending。"""
+
+    closed_count = 0
+
+    def mutate(state: ProviderSessionState) -> None:
+        nonlocal closed_count
+        for interaction in state.interactions:
+            if (
+                interaction.status != "pending"
+                or (
+                    interaction_id is not None
+                    and interaction.interaction_id != interaction_id
+                )
+            ):
+                continue
+            interaction.status = "closed"
+            interaction.resolved_at = utc_now()
+            closed_count += 1
+
+    mutate_provider_sessions(run_dir, "agent.session", mutate)
+    return closed_count
 
 
 def summarize_provider_interaction(
@@ -375,47 +427,6 @@ def set_session_owner(
     return selected
 
 
-def session_status_projection(
-    run_dir: Path,
-) -> tuple[list[dict[str, object]], str | None]:
-    """生成状态卡需要的白名单字段；损坏时不影响 Core 状态查询。"""
-
-    try:
-        state = load_provider_sessions(run_dir)
-    except ValueError:
-        return [], "Provider Session 协调状态无法验证；Core 证据不受影响。"
-    rows: list[dict[str, object]] = []
-    for key, handle in sorted(state.handles.items()):
-        rows.append(
-            {
-                "role": key,
-                "provider": handle.provider,
-                "owner": handle.owner,
-                "lifecycle": handle.lifecycle,
-                "thread_id": handle.thread_id,
-                "work_item_id": handle.work_item_id,
-                "sandbox": handle.sandbox,
-                "approval_policy": handle.approval_policy,
-                "permissions_verified": handle.permissions_verified,
-                "turn_count": handle.turn_count,
-                "compaction_count": handle.compaction_count,
-                "last_event": handle.last_event,
-                "total_tokens": handle.total_tokens,
-                "cached_input_tokens": handle.cached_input_tokens,
-                "context_window": handle.context_window,
-                "queued_steers": sum(
-                    item.role_key == key and item.status == "queued"
-                    for item in state.steers
-                ),
-                "pending_interactions": sum(
-                    item.role_key == key and item.status == "pending"
-                    for item in state.interactions
-                ),
-            }
-        )
-    return rows, None
-
-
 def _trim_history(state: ProviderSessionState) -> None:
     # 待发送指令和待响应请求不能为了控制文件大小而被历史裁剪。
     state.steers = _keep_active_and_recent(
@@ -440,21 +451,38 @@ def _keep_active_and_recent(items: list, *, active: Callable[[object], bool]) ->
 
 def _command_approval_summary(params: dict[str, object]) -> str:
     actions = params.get("commandActions")
-    if not isinstance(actions, list):
+    if not isinstance(actions, list) or not actions:
         return "命令执行"
     action_labels = {
         "read": "读取文件",
         "listFiles": "列出文件",
         "search": "搜索文件",
     }
+    action_types = [
+        item.get("type") if isinstance(item, dict) else None
+        for item in actions
+    ]
+    if any(
+        not isinstance(action_type, str) or action_type not in action_labels
+        for action_type in action_types
+    ):
+        return "未分类命令执行（请接管原生会话确认）"
     labels = [
         action_labels[action_type]
-        for action in actions[:5]
-        if isinstance(action, dict)
-        and isinstance((action_type := action.get("type")), str)
-        and action_type in action_labels
+        for action_type in action_types[:5]
+        if isinstance(action_type, str)
     ]
+    return "、".join(dict.fromkeys(labels))
+
+
+def _interaction_binding(interaction: PendingInteraction) -> tuple[object, ...]:
     return (
-        "、".join(dict.fromkeys(labels))
-        or "未分类命令执行（请接管原生会话确认）"
+        interaction.interaction_id,
+        interaction.role_key,
+        interaction.rpc_request_id,
+        interaction.method,
+        interaction.thread_id,
+        interaction.turn_id,
+        interaction.summary,
+        interaction.created_at,
     )

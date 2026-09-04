@@ -1,13 +1,30 @@
 # Vega 后续演进路线
 
-> 当前稳定版本：`v0.4.0`
+> 当前发布候选：`v0.5.0`（发布事实待验证）
 > 本文件保存路线决策和历史背景，不维护实时进度。
 > 当前事项与下一项：[`CURRENT.md`](CURRENT.md)
 > 机器可读计划：[`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json)
 
 ## 最近一次路线决策
 
-2026-09-02，AUTONOMY-05 真实验收完成后，后续顺序固定为：
+2026-09-04，`v0.5.0` 候选把已验证的 ChangeRun 能力整理为日常主路径，保持同一状态机、
+Candidate、门禁和人工 Git 边界：
+
+1. `vega change "..."` 负责创建或继续当前仓库唯一未完成的 ChangeRun；
+2. `vega status` 和 `vega explain` 默认优先按源仓库绑定与 `AgentState.updated_at` 选择唯一
+   未完成任务，没有活动任务时显示最近更新的终态 Run；两者只读投影当前可信状态，多个候选或
+   损坏记录时拒绝猜测；
+3. Codex 与 Claude Code 共用 Provider Session 合同。Provider 请求可以在当前终端显示脱敏
+   摘要，但缺少完整原始目标或权限上下文时必须 fail-closed，转到高级命令或原生会话，不把
+   同终端可见宣称为自动批准；
+4. Core Work Item Reviewer 明确 `timed_out` 且 Candidate、Workspace、Verification、Risk、
+   预算、无外部副作用和执行终态都可重新证明时，使用新的独立 Reviewer Session 自动恢复一次；
+   第二次超时、`error`、`stopped`、终止未确认或最终集成审查继续交还人工；
+5. `start`、`approve`、`run` 保留为需要显式控制阶段的高级路径。发布 Tag、GitHub Release、
+   完整 CI 和 package smoke 仍待验证；真实 Codex bounded 与 Claude Code human smoke 已完成。
+
+2026-09-02，AUTONOMY-05 真实验收完成后，曾固定以下顺序；2026-09-04 的候选实现见上文，
+发布事实仍以发布门禁为准：
 
 1. 发布 `v0.4.0`，把当前 Codex 有界自主执行作为稳定基线；
 2. 使用正式版本连续运行至少五个真实任务，记录完成、返修、人工介入、耗时和失败；
@@ -128,8 +145,8 @@ Verification/Risk/Reviewer/Finish 和确定性状态机推进有限 Work Item。
 产品行为以 [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) 为准，详细 Assurance 合同以
 [`ASSURANCE-CONTRACT-CANDIDATE.md`](ASSURANCE-CONTRACT-CANDIDATE.md) 为准，历史验证证据
 以 [`../eval/assurance-validation.md`](../eval/assurance-validation.md) 为准。本文不复制这些
-文档的完整内容。当前稳定版本见
-[`RELEASE-NOTES-0.3.1.md`](RELEASE-NOTES-0.3.1.md) 与
+文档的完整内容。当前候选版本见
+[`RELEASE-NOTES-0.5.0.md`](RELEASE-NOTES-0.5.0.md) 与
 [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)；V1 的历史实施计划见
 [`VEGA-SUPERVISOR-AGENT-V1-PLAN.md`](VEGA-SUPERVISOR-AGENT-V1-PLAN.md)，文档状态见
 [`README.md`](README.md)。

@@ -420,11 +420,11 @@ jobs:
           python -m build --wheel --outdir dist
           python -m venv .tmp/release-validation/windows-venv
           $venvPython = Resolve-Path .tmp/release-validation/windows-venv/Scripts/python.exe
-          & $venvPython -m pip install dist/vegaloom-0.4.0-py3-none-any.whl
+          & $venvPython -m pip install dist/vegaloom-0.5.0-py3-none-any.whl
           $vegaCli = Resolve-Path .tmp/release-validation/windows-venv/Scripts/vega.exe
           & $venvPython -m pip check
           $version = & $venvPython -I -c "import vega; print(vega.__version__)"
-          if ($version.Trim() -ne "0.4.0") {
+          if ($version.Trim() -ne "0.5.0") {
             throw "Windows wheel 版本不一致：$version"
           }
           & $venvPython -I -c "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
@@ -434,7 +434,13 @@ jobs:
             & $vegaCli --help | Out-Null
             $capabilities = (& $vegaCli capabilities) -join "`n" | ConvertFrom-Json
             if (
-              $capabilities.schema_version -ne 3 -or
+              $capabilities.schema_version -ne 4 -or
+              -not $capabilities.daily_change_entry -or
+              -not $capabilities.repository_run_selection -or
+              -not $capabilities.deterministic_explain -or
+              $capabilities.reviewer_timeout_auto_retry_limit -ne 1 -or
+              $capabilities.provider_interaction_visibility -ne "same-terminal-summary" -or
+              $capabilities.provider_inline_approval -ne $false -or
               $capabilities.default_provider -ne "codex" -or
               -not $capabilities.providers.codex.persistent_session -or
               -not $capabilities.providers.claude.persistent_session -or
@@ -442,7 +448,7 @@ jobs:
               $capabilities.reviewer_isolation -ne "per-work-item" -or
               $capabilities.automatic_commit_push_release
             ) {
-              throw "Windows wheel 的 Agent 能力声明不符合 v0.4.0 合同"
+              throw "Windows wheel 的 Agent 能力声明不符合 v0.5.0 合同"
             }
             $adapterRepo = Join-Path $env:RUNNER_TEMP "vega-adapter-smoke"
             New-Item -ItemType Directory -Force -Path $adapterRepo | Out-Null
@@ -523,29 +529,29 @@ jobs:
         run: |
           python -m pip install build twine
           python -m build --outdir dist
-          test -f dist/vegaloom-0.4.0-py3-none-any.whl
-          test -f dist/vegaloom-0.4.0.tar.gz
+          test -f dist/vegaloom-0.5.0-py3-none-any.whl
+          test -f dist/vegaloom-0.5.0.tar.gz
           python -m twine check dist/*
 
       - name: 在干净环境安装并验证 wheel
         shell: bash
         run: |
           python -m venv .tmp/release-validation/venv
-          .tmp/release-validation/venv/bin/python -m pip install dist/vegaloom-0.4.0-py3-none-any.whl
+          .tmp/release-validation/venv/bin/python -m pip install dist/vegaloom-0.5.0-py3-none-any.whl
           .tmp/release-validation/venv/bin/python -m pip check
           test "$(
             .tmp/release-validation/venv/bin/python -I -c \
               "from importlib.metadata import version; print(version('vegaloom'))"
-          )" = "0.4.0"
+          )" = "0.5.0"
           test "$(
             .tmp/release-validation/venv/bin/python -I -c \
               "import vega; print(vega.__version__)"
-          )" = "0.4.0"
+          )" = "0.5.0"
           .tmp/release-validation/venv/bin/python -I -c \
             "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
           .tmp/release-validation/venv/bin/python -I -c \
             "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); print(AdequacyResult.__name__)"
-          test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.4.0"
+          test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.5.0"
           .tmp/release-validation/venv/bin/vega --help >/dev/null
 
           vega_cli="${GITHUB_WORKSPACE}/.tmp/release-validation/venv/bin/vega"
@@ -560,7 +566,13 @@ jobs:
                   encoding="utf-8"
               )
           )
-          assert payload["schema_version"] == 3
+          assert payload["schema_version"] == 4
+          assert payload["daily_change_entry"] is True
+          assert payload["repository_run_selection"] is True
+          assert payload["deterministic_explain"] is True
+          assert payload["reviewer_timeout_auto_retry_limit"] == 1
+          assert payload["provider_interaction_visibility"] == "same-terminal-summary"
+          assert payload["provider_inline_approval"] is False
           assert payload["default_provider"] == "codex"
           assert set(payload["providers"]) == {"codex", "claude"}
           assert payload["providers"]["codex"]["persistent_session"] is True
@@ -598,12 +610,12 @@ jobs:
         run: |
           python -m venv .tmp/release-validation/sdist-venv
           .tmp/release-validation/sdist-venv/bin/python -m pip install \
-            dist/vegaloom-0.4.0.tar.gz
+            dist/vegaloom-0.5.0.tar.gz
           .tmp/release-validation/sdist-venv/bin/python -m pip check
           test "$(
             .tmp/release-validation/sdist-venv/bin/python -I -c \
               "import vega; print(vega.__version__)"
-          )" = "0.4.0"
+          )" = "0.5.0"
           .tmp/release-validation/sdist-venv/bin/python -I -c \
             "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
           .tmp/release-validation/sdist-venv/bin/python -I -c \

@@ -9,7 +9,7 @@ from .agent_change_run import (
     load_change_run_context,
 )
 from .agent_change_runtime import approve_change_run
-from .agent_contract import AgentPlan, AgentState
+from .agent_contract import AgentPlan, AgentState, canonical_digest
 from .agent_mutation import agent_mutation
 from .agent_persistence import append_agent_trace
 from .agent_run import AgentRun
@@ -23,7 +23,56 @@ from .project_config import load_project_config
 from .redaction import redact_text
 
 
+class ApprovalSnapshotChangedError(ValueError):
+    """用户确认期间批准对象发生变化。"""
+
+    def __init__(self, current: AgentRun) -> None:
+        super().__init__("确认期间 Contract、Execution Plan 或 Run 状态已变化")
+        self.current = current
+
+
 class BoundedApprovalRuntimeMixin:
+    @agent_mutation("agent.approve")
+    def approve_if_current(
+        self,
+        run: str,
+        *,
+        expected_state_version: int,
+        expected_contract_digest: str,
+        expected_execution_plan_revision: int,
+        expected_execution_plan_digest: str,
+        actor: str = "human",
+    ) -> AgentRun:
+        """在同一 Run 锁内核对用户看到的版本并批准。"""
+
+        run_dir, state, plan, metadata = self._load_run(run)
+        current = AgentRun(run_dir=run_dir, state=state, plan=plan)
+        context = load_change_run_context(run_dir, state, plan, metadata)
+        if context is None:
+            raise ValueError("条件批准只适用于 ChangeRun")
+        plan_digest = canonical_digest(
+            context.execution_plan.model_dump(mode="json")
+        )
+        workspace_snapshot = capture_bound_workspace(run_dir)
+        if (
+            state.state_version != expected_state_version
+            or context.contract.expected_approval_digest()
+            != expected_contract_digest
+            or context.execution_plan.plan_revision
+            != expected_execution_plan_revision
+            or plan_digest != expected_execution_plan_digest
+            or workspace_snapshot.fingerprint != state.workspace_fingerprint
+            or workspace_snapshot.head_sha != state.accepted_checkpoint_sha
+        ):
+            raise ApprovalSnapshotChangedError(current)
+        return approve_change_run(
+            run_dir,
+            state,
+            plan,
+            metadata,
+            actor=actor,
+        )
+
     @agent_mutation("agent.approve")
     def approve_bounded(self, run: str) -> AgentRun:
         run_dir, state, plan, metadata = self._load_run(run)

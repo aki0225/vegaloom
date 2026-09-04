@@ -53,7 +53,7 @@
       </a>
 
       <nav class="header-links" aria-label="站点链接">
-        <span class="version-chip">v0.4.0</span>
+        <span class="version-chip">v0.5.0 候选</span>
         <a href="#replay">发布验收</a>
         <a href="#cases">Reviewer 案例</a>
         <button
@@ -456,16 +456,17 @@
             <p class="section-number">03 / INSTALL</p>
             <h2 id="quickstart-title">安装</h2>
             <p>
-              安装 Vega，为目标仓库生成 Codex adapter，再进入目标仓库。主会话里运行
-              <code>$vega-agent</code>。
+              安装 Vega，为目标仓库生成 Codex adapter，再进入目标仓库。日常主路径是
+              <code>vega change</code>、<code>vega status</code>、<code>vega explain</code>；
+              Codex 主会话仍可运行 <code>$vega-agent</code>。
             </p>
             <p class="quickstart-boundary">
               Vega 不执行 commit、push、PR 或 release。验证失败时，Finish 不会返回
               <code>ready_to_commit</code>。
             </p>
             <p class="quickstart-boundary">
-              当前自动 Provider Adapter 先支持 Codex App Server；其他 Coding Agent
-              后续按同一 ChangeRun 合同接入。
+              Codex 和 Claude Code 共用同一 ChangeRun 合同。Provider 请求可在当前终端显示安全摘要；
+              缺少完整原始上下文时会停下转高级或原生处理，不会因为同终端可见而自动批准。
             </p>
           </div>
 
@@ -481,7 +482,10 @@ python -m pip install -e .
 $targetRepo = "&lt;target-repo&gt;"
 vega adapters init codex --repo $targetRepo
 Set-Location $targetRepo
-vega capabilities</code></pre>
+vega capabilities
+vega change "描述一个日常变更"
+vega status
+vega explain</code></pre>
             <div class="terminal-prompt">
               <span>Codex 主会话入口</span>
               <code>$vega-agent</code>
@@ -503,7 +507,7 @@ vega capabilities</code></pre>
       <nav aria-label="页脚链接">
         <a href="https://github.com/aki0225/vegaloom">GitHub</a>
         <a href="https://github.com/aki0225/vegaloom/blob/main/README.md">使用文档</a>
-        <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.4.0">v0.4.0</a>
+        <span>v0.5.0 候选</span>
         <a href="https://github.com/aki0225/vegaloom/blob/main/LICENSE">MIT License</a>
       </nav>
     </footer>

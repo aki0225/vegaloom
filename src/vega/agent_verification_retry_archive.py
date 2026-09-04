@@ -36,6 +36,26 @@ def archive_retry_source_finish(
     return relative
 
 
+def reviewer_timeout_finish_is_valid(finish: object) -> bool:
+    """确认 Finish 描述的是验证已过、Core Reviewer 明确超时。"""
+
+    if not isinstance(finish, dict):
+        return False
+    iterations = finish.get("iterations")
+    latest = iterations[-1] if isinstance(iterations, list) and iterations else None
+    first_screen = finish.get("first_screen")
+    gates = first_screen.get("gates") if isinstance(first_screen, dict) else None
+    return bool(
+        finish.get("finish_status") == "needs_human"
+        and finish.get("latest_verification_failed") is False
+        and isinstance(gates, dict)
+        and gates.get("verification") == "passed"
+        and isinstance(latest, dict)
+        and latest.get("reviewer_status") == "timed_out"
+        and latest.get("verdict") == "needs_human"
+    )
+
+
 def retry_source_finish_archive_issue(
     run_dir: Path,
     child_payload: dict[str, object],
@@ -62,11 +82,20 @@ def retry_source_finish_archive_issue(
         return "原始失败 Finish 归档缺失或无法解析"
     if hashlib.sha256(content).hexdigest() != expected_sha256:
         return "原始失败 Finish 归档哈希不匹配"
-    if (
-        not isinstance(finish, dict)
-        or finish.get("run_id") != child_payload.get("child_run")
-        or finish.get("finish_status") != "needs_fix"
-        or finish.get("latest_verification_failed") is not True
+    if not isinstance(finish, dict) or finish.get("run_id") != child_payload.get(
+        "child_run"
     ):
+        return "原始失败 Finish 归档身份或状态不一致"
+    retry_reason = child_payload.get("retry_reason", "verification_failure")
+    if retry_reason == "verification_failure":
+        valid_source = (
+            finish.get("finish_status") == "needs_fix"
+            and finish.get("latest_verification_failed") is True
+        )
+    elif retry_reason == "reviewer_timeout":
+        valid_source = reviewer_timeout_finish_is_valid(finish)
+    else:
+        valid_source = False
+    if not valid_source:
         return "原始失败 Finish 归档身份或状态不一致"
     return None

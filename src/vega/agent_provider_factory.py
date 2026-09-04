@@ -95,6 +95,7 @@ def ensure_reviewer_runner(
     state: AgentState | None,
     provider: AgentProvider,
     persistent_session: bool,
+    role_key: str | None = None,
 ) -> None:
     if not isinstance(loop_runtime, LoopAutomationRuntime):
         return
@@ -108,7 +109,7 @@ def ensure_reviewer_runner(
             raise ValueError("Claude Reviewer 缺少 Agent run 或当前 Work Item")
         loop_runtime.reviewer_runner = _claude_reviewer(
             agent_run_dir,
-            f"reviewer:{state.current_work_item}",
+            role_key or f"reviewer:{state.current_work_item}",
             state,
             config,
             persistent_session=persistent_session,
@@ -119,7 +120,7 @@ def ensure_reviewer_runner(
             raise ValueError("持久 Reviewer 缺少 Agent run 或当前 Work Item")
         loop_runtime.reviewer_runner = CodexAppServerRunner(
             agent_run_dir,
-            f"reviewer:{state.current_work_item}",
+            role_key or f"reviewer:{state.current_work_item}",
             work_item_id=state.current_work_item,
             contract_revision=state.contract_revision,
             plan_revision=state.execution_plan_revision,

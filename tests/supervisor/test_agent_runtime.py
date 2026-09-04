@@ -1587,6 +1587,15 @@ def test_agent_cli_status_card_and_capabilities(
     assert "阶段：等待批准" in started.output
     assert capabilities.exit_code == 0
     capability_payload = json.loads(capabilities.output)
+    assert capability_payload["schema_version"] == 4
+    assert capability_payload["daily_change_entry"] is True
+    assert capability_payload["repository_run_selection"] is True
+    assert capability_payload["deterministic_explain"] is True
+    assert capability_payload["reviewer_timeout_auto_retry_limit"] == 1
+    assert capability_payload["provider_interaction_visibility"] == (
+        "same-terminal-summary"
+    )
+    assert capability_payload["provider_inline_approval"] is False
     assert capability_payload["control_plane"] == "deterministic-state-machine"
     assert capability_payload["default_provider"] == "codex"
     assert set(capability_payload["providers"]) == {"codex", "claude"}
@@ -1661,11 +1670,13 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
 
     assert result.exit_code == 0, result.output
     for command in (
+        "change",
         "start",
         "approve",
         "run",
         "revise",
         "status",
+        "explain",
         "watch",
         "latest",
         "steer",

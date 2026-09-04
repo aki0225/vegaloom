@@ -3,18 +3,19 @@ from __future__ import annotations
 import json
 import os
 import stat
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 from .agent_contract import AgentObservation, AgentState, ObservationAuthority
 from .agent_persistence import AgentArtifactError, load_agent_state
+from .agent_repository_change_lock import (
+    AgentRepositoryGuardError,
+    _is_link_or_reparse,
+    _prepare_control_dir,
+    _prepare_plain_directory,
+)
 from .repository_identity import repository_scope
-
-
-class AgentRepositoryGuardError(ValueError):
-    """仓库级 Agent 所有权无法安全建立或释放。"""
 
 
 def acquire_writer_claim(
@@ -240,59 +241,6 @@ def _task_card_claim_path(repo: Path, digest: str) -> Path:
     return root / f"{digest}.json"
 
 
-def _prepare_control_dir(repo: Path) -> Path:
-    repo_root = repo.resolve(strict=True)
-    process = subprocess.run(
-        ["git", "rev-parse", "--git-common-dir"],
-        cwd=repo_root,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    raw = process.stdout.strip()
-    if process.returncode != 0 or not raw:
-        raise AgentRepositoryGuardError("无法定位 Git common dir")
-    common_dir = Path(raw)
-    if not common_dir.is_absolute():
-        common_dir = repo_root / common_dir
-    try:
-        common_dir = common_dir.resolve(strict=True)
-    except OSError as exc:
-        raise AgentRepositoryGuardError("Git common dir 无法解析") from exc
-    if not common_dir.is_dir():
-        raise AgentRepositoryGuardError("Git common dir 不是目录")
-    control_dir = common_dir / "vega"
-    _prepare_plain_directory(control_dir, common_dir)
-    return control_dir
-
-
-def _prepare_plain_directory(path: Path, expected_parent: Path) -> None:
-    if not os.path.lexists(path):
-        try:
-            path.mkdir()
-        except FileExistsError:
-            pass
-        except OSError as exc:
-            raise AgentRepositoryGuardError(
-                f"无法创建 Agent 仓库控制目录：{path.name}"
-            ) from exc
-    if _is_link_or_reparse(path):
-        raise AgentRepositoryGuardError(
-            f"Agent 仓库控制目录不能是链接或 reparse point：{path.name}"
-        )
-    try:
-        resolved = path.resolve(strict=True)
-    except OSError as exc:
-        raise AgentRepositoryGuardError(
-            f"Agent 仓库控制目录无法解析：{path.name}"
-        ) from exc
-    if not resolved.is_dir() or resolved.parent != expected_parent.resolve(strict=True):
-        raise AgentRepositoryGuardError(
-            f"Agent 仓库控制目录越过预期边界：{path.name}"
-        )
-
-
 def _write_exclusive_json(path: Path, payload: dict[str, object]) -> None:
     if os.path.lexists(path):
         if _is_link_or_reparse(path):
@@ -488,13 +436,3 @@ def _remove_released_writer_claim(path: Path) -> bool:
     ):
         return False
     return _unlink_if_same_file(path, identity)
-
-
-def _is_link_or_reparse(path: Path) -> bool:
-    try:
-        metadata = path.lstat()
-    except OSError:
-        return False
-    attributes = getattr(metadata, "st_file_attributes", 0)
-    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
-    return stat.S_ISLNK(metadata.st_mode) or bool(attributes & reparse_flag)

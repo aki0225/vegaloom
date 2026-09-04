@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from vega.agent_context import TaskBriefBudgetExceeded, compile_task_brief
 from vega.agent_contract import (
     AgentCheckpoint,
+    AgentDecision,
     AgentObservation,
     AgentPlan,
     AgentState,
@@ -74,7 +75,7 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
 
 
 @pytest.mark.parametrize(
-    ("observation", "expected_action"),
+    ("observation", "expected_action", "expected_reason_code"),
     [
         (
             AgentObservation(
@@ -91,6 +92,7 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
                 review="passed",
             ),
             "next",
+            "workflow.work_item_completed",
         ),
         (
             AgentObservation(
@@ -104,6 +106,7 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
                 work_item_completed=True,
             ),
             "human",
+            "gate.verification.incomplete",
         ),
         (
             AgentObservation(
@@ -118,6 +121,7 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
                 repairable_in_scope=True,
             ),
             "repair",
+            "gate.verification.failed_repairable",
         ),
         (
             AgentObservation(
@@ -131,6 +135,7 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
                 external_side_effects="unknown",
             ),
             "human",
+            "side_effects.unknown",
         ),
         (
             AgentObservation(
@@ -148,17 +153,41 @@ def test_plan_approval_digest_becomes_stale_after_plan_change() -> None:
                 all_work_items_completed=True,
             ),
             "finalize",
+            "workflow.all_work_items_completed",
         ),
     ],
 )
 def test_different_observations_produce_different_decisions(
     observation: AgentObservation,
     expected_action: str,
+    expected_reason_code: str,
 ) -> None:
     decision = decide_next_action(_approved_plan(), observation)
 
     assert decision.selected_action == expected_action
+    assert decision.reason_code == expected_reason_code
     assert decision.reason
+
+
+def test_agent_decision_without_reason_code_remains_readable() -> None:
+    decision = decide_next_action(
+        _approved_plan(),
+        AgentObservation(
+            observation_id="obs-legacy-decision",
+            work_item_id="W1",
+            child_run="attempt-01",
+            operation_id="operation-01",
+            machine_summary="旧版本 Decision",
+            workspace_fingerprint=FINGERPRINT,
+            authority="fake_worker",
+        ),
+    )
+    payload = decision.model_dump(mode="json", exclude={"reason_code"})
+
+    restored = AgentDecision.model_validate(payload)
+
+    assert restored.reason_code is None
+    assert restored.selected_action == decision.selected_action
 
 
 def test_finalize_is_rejected_when_verification_failed() -> None:

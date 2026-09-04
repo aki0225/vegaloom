@@ -123,6 +123,7 @@ def prepare_change_decision(
                 update={
                     "allowed_actions": ["human"],
                     "selected_action": "human",
+                    "reason_code": "repair.fix_packet_unavailable",
                     "reason": (
                         "无法生成可信 Fix Packet，自动 Repair 已停止："
                         f"{exc}"
@@ -251,6 +252,7 @@ def guard_change_decision_budget(
         update={
             "allowed_actions": ["human"],
             "selected_action": "human",
+            "reason_code": "budget.automatic_repair_exhausted",
             "reason": (
                 "当前 Work Item 已达到自动停止条件："
                 + "，".join(exhausted)
