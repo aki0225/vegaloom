@@ -7,7 +7,6 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TextIO
 
 from .agent_cli_interaction import InteractionPumpUpdate, ProviderInteractionPump
 from .agent_change_presentation import redact_change_message
@@ -15,6 +14,8 @@ from .agent_provider import AgentProvider
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_run import AgentRun
 from .agent_runtime_support import load_agent_bundle
+from .provider_session import close_pending_interactions
+from .run_utils import resolve_run_dir
 
 
 InteractionReporter = Callable[[InteractionPumpUpdate], None]
@@ -44,9 +45,6 @@ def run_provider_operation(
     provider: AgentProvider,
     operation: Callable[[], AgentRun],
     *,
-    interactive: bool,
-    json_output: bool,
-    input_stream: TextIO | None,
     interaction_reporter: InteractionReporter | None,
     event_reporter: EventReporter | None,
 ) -> AgentRun | ProviderOperationBoundary:
@@ -58,9 +56,6 @@ def run_provider_operation(
         workspace,
         current,
         operation,
-        interactive=interactive,
-        json_output=json_output,
-        input_stream=input_stream,
         interaction_reporter=interaction_reporter,
         event_reporter=event_reporter,
     )
@@ -71,9 +66,6 @@ def _run_codex_operation(
     current: AgentRun,
     operation: Callable[[], AgentRun],
     *,
-    interactive: bool,
-    json_output: bool,
-    input_stream: TextIO | None,
     interaction_reporter: InteractionReporter | None,
     event_reporter: EventReporter | None,
 ) -> AgentRun | ProviderOperationBoundary:
@@ -83,9 +75,6 @@ def _run_codex_operation(
     _start_operation_thread(current, operation, results)
     pump = ProviderInteractionPump(
         current.run_dir,
-        input_stream=input_stream,
-        interactive=interactive,
-        json_output=json_output,
     )
     boundary: InteractionPumpUpdate | None = None
     stop_deadline: float | None = None
@@ -105,12 +94,21 @@ def _run_codex_operation(
                 _report_interaction(update, interaction_reporter)
                 if update.status == "attention":
                     boundary = update
-                    _request_stop(
+                    stop_confirmed = _request_stop(
                         workspace,
                         current.run_dir.name,
                         update.message or "Provider 交互需要人工处理",
                         event_reporter,
+                        interaction_id=update.interaction_id,
                     )
+                    if not stop_confirmed:
+                        boundary = replace(
+                            boundary,
+                            message=(
+                                f"{boundary.message or 'Provider 交互需要人工处理'} "
+                                "停止请求未确认。"
+                            ),
+                        )
                     stop_deadline = time.monotonic() + 15
             elif stop_deadline is not None and time.monotonic() >= stop_deadline:
                 return _boundary(
@@ -166,13 +164,26 @@ def _request_stop(
     run: str,
     reason: str,
     event_reporter: EventReporter | None,
-) -> None:
+    *,
+    interaction_id: str | None = None,
+) -> bool:
     safe_reason = redact_change_message(reason)
     try:
         SupervisorAgentRecovery(workspace).stop(run, reason=safe_reason)
     except (FileNotFoundError, OSError, ValueError) as exc:
         if event_reporter is not None:
             event_reporter(redact_change_message(f"停止请求未确认：{exc}"))
+        return False
+    try:
+        close_pending_interactions(
+            resolve_run_dir(workspace, run),
+            interaction_id=interaction_id,
+        )
+    except (OSError, ValueError) as exc:
+        if event_reporter is not None:
+            event_reporter(redact_change_message(f"待响应请求关闭未确认：{exc}"))
+        return False
+    return True
 
 
 def _boundary(
@@ -205,7 +216,6 @@ def _redacted_update(update: InteractionPumpUpdate) -> InteractionPumpUpdate:
     return replace(
         update,
         summary=_redact_optional(update.summary),
-        prompt=_redact_optional(update.prompt),
         message=_redact_optional(update.message),
     )
 

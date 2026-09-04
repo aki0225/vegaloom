@@ -574,15 +574,81 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 def test_change_message_redaction_preserves_urls_and_api_routes() -> None:
     message = (
         "访问 https://example.test/api/v1 和 /v1/users/123；"
-        "日志位于 /tmp/vega/private.log"
+        "日志位于 /tmp/vega/private.log、/workspace/project/run.log、"
+        "/mnt/secret/cache、/opt/local/config"
     )
 
     safe = execution_module.redact_change_message(message)
 
     assert "https://example.test/api/v1" in safe
     assert "/v1/users/123" in safe
-    assert "/tmp/vega/private.log" not in safe
-    assert "<redacted-path>" in safe
+    for path in (
+        "/tmp/vega/private.log",
+        "/workspace/project/run.log",
+        "/mnt/secret/cache",
+        "/opt/local/config",
+    ):
+        assert path not in safe
+    assert safe.count("<redacted-path>") == 4
+
+
+def test_stop_request_closes_pending_provider_interactions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path
+    run_dir = workspace / "runs" / "agent-run"
+    run_dir.mkdir(parents=True)
+    save_provider_sessions(
+        run_dir,
+        ProviderSessionState(
+            run_id=run_dir.name,
+            handles={
+                "worker": ProviderSessionHandle(
+                    provider="codex",
+                    role="worker",
+                    thread_id="thread-1",
+                    owner="vega",
+                    lifecycle="waiting_user",
+                    permissions_verified=True,
+                    last_turn_id="turn-1",
+                )
+            },
+            interactions=[
+                PendingInteraction(
+                    interaction_id="request-1",
+                    role_key="worker",
+                    rpc_request_id="rpc-1",
+                    method="item/commandExecution/requestApproval",
+                    thread_id="thread-1",
+                    turn_id="turn-1",
+                    summary="命令执行",
+                )
+            ],
+        ),
+    )
+
+    class StaticRecovery:
+        def __init__(self, actual_workspace: Path) -> None:
+            assert actual_workspace == workspace
+
+        def stop(self, run: str, *, reason: str) -> None:
+            assert run == run_dir.name
+            assert reason
+
+    monkeypatch.setattr(
+        execution_module,
+        "SupervisorAgentRecovery",
+        StaticRecovery,
+    )
+
+    assert execution_module._request_stop(
+        workspace,
+        run_dir.name,
+        "Provider 请求缺少完整权限上下文",
+        None,
+    )
+    assert load_provider_sessions(run_dir).interactions[0].status == "closed"
 
 
 def test_change_json_never_reads_stdin_without_active_run(

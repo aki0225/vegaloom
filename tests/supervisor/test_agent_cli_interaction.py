@@ -9,24 +9,13 @@ from vega.provider_session import (
     PendingInteraction,
     ProviderSessionHandle,
     ProviderSessionState,
+    close_pending_interactions,
     load_provider_sessions,
     mutate_provider_sessions,
+    respond_to_interaction,
     save_provider_sessions,
     summarize_provider_interaction,
 )
-
-
-class _TtyInput:
-    def __init__(self, line: str) -> None:
-        self.line = line
-        self.read_count = 0
-
-    def isatty(self) -> bool:
-        return True
-
-    def readline(self) -> str:
-        self.read_count += 1
-        return self.line
 
 
 @pytest.mark.parametrize(
@@ -71,8 +60,7 @@ def test_interaction_pump_never_approves_from_redacted_friendly_summary(
         method=method,
         summary=summary,
     )
-    input_stream = _TtyInput("y\n")
-    pump = ProviderInteractionPump(run_dir, input_stream=input_stream)
+    pump = ProviderInteractionPump(run_dir)
 
     update = pump.poll()
 
@@ -82,7 +70,6 @@ def test_interaction_pump_never_approves_from_redacted_friendly_summary(
         == "provider.interaction_requires_advanced_response"
     )
     assert "原生会话" in (update.message or "")
-    assert input_stream.read_count == 0
     interaction = load_provider_sessions(run_dir).interactions[0]
     assert interaction.status == "pending"
     assert interaction.response is None
@@ -100,26 +87,13 @@ def test_interaction_pump_never_reads_non_tty_or_json_input(
         method="item/commandExecution/requestApproval",
         summary="读取文件；检查项目规则",
     )
-    input_stream = _TtyInput("y\n")
+    update = ProviderInteractionPump(run_dir).poll()
 
-    non_tty = ProviderInteractionPump(
-        run_dir,
-        input_stream=input_stream,
-        interactive=False,
-    ).poll()
-    json_output = ProviderInteractionPump(
-        run_dir,
-        input_stream=input_stream,
-        json_output=True,
-    ).poll()
-
-    assert non_tty.status == "attention"
+    assert update.status == "attention"
     assert (
-        non_tty.reason_code
+        update.reason_code
         == "provider.interaction_requires_advanced_response"
     )
-    assert json_output.status == "attention"
-    assert input_stream.read_count == 0
     assert load_provider_sessions(run_dir).interactions[0].status == "pending"
 
 
@@ -142,19 +116,13 @@ def test_interaction_pump_routes_unsafe_requests_to_advanced_path(
     summary: str,
 ) -> None:
     run_dir = _run_dir(tmp_path, method=method, summary=summary)
-    input_stream = _TtyInput("y\n")
-
-    update = ProviderInteractionPump(
-        run_dir,
-        input_stream=input_stream,
-    ).poll()
+    update = ProviderInteractionPump(run_dir).poll()
 
     assert update.status == "attention"
     assert (
         update.reason_code
         == "provider.interaction_requires_advanced_response"
     )
-    assert input_stream.read_count == 0
     assert load_provider_sessions(run_dir).interactions[0].status == "pending"
 
 
@@ -171,15 +139,59 @@ def test_interaction_pump_rejects_stale_turn_binding(
         state.handles["worker"].last_turn_id = "turn-replaced"
 
     mutate_provider_sessions(run_dir, "agent.session", change_turn)
-    final = ProviderInteractionPump(
-        run_dir,
-        input_stream=_TtyInput("y\n"),
-    ).poll()
+    final = ProviderInteractionPump(run_dir).poll()
 
     assert final.reason_code == "provider.interaction_binding_invalid"
     interaction = load_provider_sessions(run_dir).interactions[0]
     assert interaction.status == "pending"
     assert interaction.response is None
+
+
+def test_respond_to_interaction_rejects_unowned_handle_without_expected_provider(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(
+        tmp_path,
+        method="item/fileChange/requestApproval",
+        summary="文件修改；应用已批准范围内的补丁",
+    )
+
+    def handoff(state: ProviderSessionState) -> None:
+        state.handles["worker"].owner = "human"
+
+    mutate_provider_sessions(run_dir, "agent.takeover", handoff)
+
+    with pytest.raises(ValueError, match="当前 Provider Turn"):
+        respond_to_interaction(
+            run_dir,
+            "request-1",
+            {"decision": "accept"},
+        )
+
+    interaction = load_provider_sessions(run_dir).interactions[0]
+    assert interaction.status == "pending"
+    assert interaction.response is None
+
+
+def test_close_pending_interactions_removes_response_dead_end(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(
+        tmp_path,
+        method="item/fileChange/requestApproval",
+        summary="文件修改；应用已批准范围内的补丁",
+    )
+
+    assert close_pending_interactions(run_dir) == 1
+    interaction = load_provider_sessions(run_dir).interactions[0]
+    assert interaction.status == "closed"
+    assert interaction.response is None
+    with pytest.raises(ValueError, match="不存在"):
+        respond_to_interaction(
+            run_dir,
+            "request-1",
+            {"decision": "accept"},
+        )
 
 
 def test_command_summary_marks_mixed_unknown_actions_unclassified() -> None:

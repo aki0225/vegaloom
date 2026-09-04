@@ -16,8 +16,9 @@ _WINDOWS_ABSOLUTE_PATH = re.compile(
     r"[^\s`\"'<>|,;，；。!?！？)\]}]+"
 )
 _POSIX_ABSOLUTE_PATH = re.compile(
-    r"(?<![:\w])/(?:home|users|root|tmp|private/var|var/(?:folders|tmp))"
-    r"(?:/[^/\s`\"'<>|,;，；。!?！？)\]}]+)*",
+    r"(?<![:\w])/(?:home|users|root|tmp|workspace|mnt|opt|private/var|var/(?:folders|tmp))"
+    r"(?![\w-])"
+    r"(?:/[^/\s`\"'<>|,;，；、。!?！？)\]}]+)*",
     flags=re.IGNORECASE,
 )
 

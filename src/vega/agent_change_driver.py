@@ -252,9 +252,6 @@ class AgentChangeDriver:
                 current.run_dir.name,
                 timeout_seconds=self.timeout_seconds,
             ),
-            interactive=self.interactive,
-            json_output=self.json_output,
-            input_stream=self.input_stream,
             interaction_reporter=self.interaction_reporter,
             event_reporter=self.event_reporter,
         )
@@ -351,9 +348,6 @@ class AgentChangeDriver:
                 current.run_dir.name,
                 timeout_seconds=self.timeout_seconds,
             ),
-            interactive=self.interactive,
-            json_output=self.json_output,
-            input_stream=self.input_stream,
             interaction_reporter=self.interaction_reporter,
             event_reporter=self.event_reporter,
         )
@@ -364,7 +358,14 @@ class AgentChangeDriver:
     def _interaction_boundary(
         self, boundary: ProviderOperationBoundary
     ) -> ChangeDriverResult:
-        message = boundary.update.message or "Provider 请求需要人工处理。"
+        message = (
+            boundary.update.message
+            or "Provider 请求需要人工处理。"
+        )
+        message = (
+            f"{message} 当前 attempt 已中断；请使用 status、explain、recover "
+            "或 takeover 对账，确认后创建新 attempt。"
+        )
         if boundary.stop_unconfirmed:
             message = (
                 f"{message} 停止请求已发送，但 15 秒内未取得执行终态；"
@@ -374,7 +375,7 @@ class AgentChangeDriver:
             boundary.run,
             boundary.update.reason_code or "provider.interaction_required",
             message,
-            ("status", "explain", "recover"),
+            ("status", "explain", "recover", "takeover", "change <TEXT>"),
         )
 
     def _active_execution(

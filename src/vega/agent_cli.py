@@ -221,12 +221,22 @@ def agent_respond(
         ]
         if len(matches) != 1:
             raise ValueError("待响应请求不存在或已处理")
+        selected = matches[0]
+        handle = state.handles.get(selected.role_key)
+        if handle is None:
+            raise ValueError("待响应请求不再绑定当前 Provider Turn")
         response = _interaction_response(
-            matches[0].method,
+            selected.method,
             decision=decision,
             input_path=input_path,
         )
-        result = respond_to_interaction(run_dir, interaction, response)
+        result = respond_to_interaction(
+            run_dir,
+            interaction,
+            response,
+            expected=selected,
+            expected_provider=handle.provider,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"响应已记录：{result.interaction_id}")

@@ -75,7 +75,6 @@ def agent_change(
             interactive=interactive,
             json_output=json_output,
             confirm=_confirm if interactive else None,
-            input_stream=sys.stdin,
             event_reporter=(
                 None
                 if json_output
@@ -272,8 +271,6 @@ def _confirm(prompt: str) -> bool:
 
 
 def _render_interaction_update(update: InteractionPumpUpdate) -> None:
-    if update.prompt is not None:
-        typer.echo(update.prompt, nl=False, err=True)
     if update.message is not None:
         typer.echo(f"[vega] {update.message}", err=True)
 

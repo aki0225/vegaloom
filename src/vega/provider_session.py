@@ -324,21 +324,23 @@ def respond_to_interaction(
             _interaction_binding(expected)
         ):
             raise ValueError("待响应请求已变化，拒绝使用旧提示结果")
-        if expected_provider is not None:
-            handle = state.handles.get(matches[0].role_key)
-            if (
-                handle is None
-                or handle.provider != expected_provider
-                or handle.owner != "vega"
-                or handle.lifecycle != "waiting_user"
-                or not handle.permissions_verified
-                or handle.thread_id != matches[0].thread_id
-                or (
-                    matches[0].turn_id is not None
-                    and handle.last_turn_id != matches[0].turn_id
-                )
-            ):
-                raise ValueError("待响应请求不再绑定当前 Provider Turn")
+        handle = state.handles.get(matches[0].role_key)
+        if (
+            handle is None
+            or handle.role != matches[0].role_key
+            or (
+                expected_provider is not None
+                and handle.provider != expected_provider
+            )
+            or handle.owner != "vega"
+            or handle.lifecycle != "waiting_user"
+            or not handle.permissions_verified
+            or not matches[0].thread_id
+            or not matches[0].turn_id
+            or handle.thread_id != matches[0].thread_id
+            or handle.last_turn_id != matches[0].turn_id
+        ):
+            raise ValueError("待响应请求不再绑定当前 Provider Turn")
         matches[0].response = redact_value(response)
         matches[0].status = "responded"
         matches[0].resolved_at = utc_now()
@@ -347,6 +349,34 @@ def respond_to_interaction(
     mutate_provider_sessions(run_dir, "agent.respond", mutate)
     assert selected is not None
     return selected
+
+
+def close_pending_interactions(
+    run_dir: Path,
+    *,
+    interaction_id: str | None = None,
+) -> int:
+    """停止 Provider attempt 后关闭未发送的请求，避免留下可误响应的假 pending。"""
+
+    closed_count = 0
+
+    def mutate(state: ProviderSessionState) -> None:
+        nonlocal closed_count
+        for interaction in state.interactions:
+            if (
+                interaction.status != "pending"
+                or (
+                    interaction_id is not None
+                    and interaction.interaction_id != interaction_id
+                )
+            ):
+                continue
+            interaction.status = "closed"
+            interaction.resolved_at = utc_now()
+            closed_count += 1
+
+    mutate_provider_sessions(run_dir, "agent.session", mutate)
+    return closed_count
 
 
 def summarize_provider_interaction(
