@@ -177,8 +177,13 @@ def write_task_brief(
     )
     if work_item is None:
         raise ValueError("当前 Work Item 不属于已批准 Plan")
+    repo = validate_run_repository_binding(
+        run_dir,
+        state,
+        _load_run_metadata(run_dir),
+    )
     agents_instructions = load_agents_instructions(
-        bound_repo(run_dir),
+        repo,
         work_item.allowed_paths,
         tracked_only=True,
         tracked_revision=state.accepted_checkpoint_sha or "HEAD",
