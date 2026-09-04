@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "event_id": "20260904T132000Z-UX-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "UX-01",
+  "transition": "completed",
+  "recorded_at": "2026-09-04T13:20:00Z",
+  "summary": "已完成仓库感知的 ChangeRun 选择、稳定原因代码以及 status/explain 的统一只读投影。唯一活动 Run 可以从仓库子目录直接选择；多个候选、损坏记录或证据冲突时拒绝猜测；旧 Artifact 保持可读，状态与解释不调用模型也不修改运行状态。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "run-selection-tests",
+      "explain-projection-tests",
+      "supervisor-tests",
+      "security-tests",
+      "architecture-growth",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_run_selection.py",
+      "src/vega/agent_explain.py",
+      "src/vega/agent_explain_codes.py",
+      "src/vega/agent_cli_snapshot.py",
+      "src/vega/agent_status_projection.py",
+      "tests/supervisor/test_agent_run_selection.py",
+      "tests/supervisor/test_agent_explain.py",
+      "tests/supervisor/test_agent_cli_status_explain.py"
+    ]
+  }
+}

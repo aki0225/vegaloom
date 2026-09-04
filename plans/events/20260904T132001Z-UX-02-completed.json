@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "event_id": "20260904T132001Z-UX-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "UX-02",
+  "transition": "completed",
+  "recorded_at": "2026-09-04T13:20:01Z",
+  "summary": "已增加 vega change 日常入口，在不新增 Runtime 或成功语义的前提下组合现有 Planning、批准、Provider 和 Finish。人工批准在当前终端完成，bounded 模式继续受仓库策略约束；非交互模式不读取 stdin；任务可从唯一有效 Task Card 恢复，仓库级锁阻止重复创建或推进。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "change-driver-tests",
+      "provider-interaction-tests",
+      "task-card-resume-tests",
+      "supervisor-tests",
+      "security-tests",
+      "architecture-growth",
+      "repository-hygiene",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "src/vega/agent_change_cli.py",
+      "src/vega/agent_change_driver.py",
+      "src/vega/agent_cli_interaction.py",
+      "src/vega/agent_repository_change_lock.py",
+      "src/vega/agent_change_task_card.py",
+      "tests/supervisor/test_agent_change_driver.py",
+      "tests/supervisor/test_agent_cli_interaction.py",
+      "tests/supervisor/test_agent_task_card.py"
+    ]
+  }
+}

@@ -1,7 +1,8 @@
 # Vega v0.5.0 发布说明（候选）
 
-> 状态：发布候选，日期：2026-09-04。Tag、GitHub Release、完整 CI、package smoke
-> 和真实 Provider smoke 均待验证；本文不把候选文档当作已发布事实。
+> 状态：发布候选，日期：2026-09-04。真实 Codex bounded 与 Claude Code human smoke
+> 已完成；Tag、GitHub Release、完整 CI 和 package smoke 仍待验证。本文不把候选文档
+> 当作已发布事实。
 
 v0.5.0 继续复用既有 ChangeRun、Git Candidate、Verification、Risk、Reviewer 和 Finish，
 重点是让日常任务少记一个 Run ID、少切换几条命令，同时保留人工授权和
@@ -63,6 +64,10 @@ Verification、Risk、预算、无外部副作用和执行终态都能重新证�
 
 ## 候选验证状态
 
-本候选的完整测试、跨平台 CI、打包制品、真实 Codex/Claude Code smoke、annotated Tag 和
-GitHub Release 尚未在本文中确认。逐项状态见
+真实 Codex bounded 与 Claude Code human 路径已完成固定临时仓库验收；Reviewer timeout
+使用确定性故障注入验证，没有冒充真实 Provider timeout。脱敏结果见
+[`v0.5.0-daily-ux-smoke.md`](../examples/evidence/v0.5.0-daily-ux-smoke.md)。
+
+本候选的完整测试、跨平台 CI、打包制品、annotated Tag 和 GitHub Release 尚未在本文中确认。
+逐项状态见
 [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)；发布前不得把“待验证”改写为通过。

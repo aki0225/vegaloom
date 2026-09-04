@@ -23,5 +23,7 @@ vega explain
 `start`、`approve`、`run` 仍是高级路径；Candidate、Verification、Risk、Reviewer、Finish
 和人工 Git 交付边界没有改变。
 
-完整 CI、package smoke、真实 Provider smoke、Tag 和 GitHub Release 均待验证，不能从本摘要
-推断已发布。
+真实 Codex bounded 与 Claude Code human 路径已完成候选验收；Reviewer timeout 使用
+确定性故障注入验证。完整 CI、package smoke、Tag 和 GitHub Release 仍待验证，不能从本摘要
+推断已发布。脱敏记录见
+[`v0.5.0-daily-ux-smoke.md`](../examples/evidence/v0.5.0-daily-ux-smoke.md)。

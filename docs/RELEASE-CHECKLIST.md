@@ -2,8 +2,9 @@
 
 发布版本：`v0.5.0` 候选。
 
-> 状态：候选清单，日期：2026-09-04。真实 Provider smoke、完整 CI、package smoke、Tag
-> 和 GitHub Release 均待验证；本清单不把本地文档检查或计划状态写成发布通过。
+> 状态：候选清单，日期：2026-09-04。真实 Codex bounded 与 Claude Code human smoke
+> 已完成；完整 CI、package smoke、Tag 和 GitHub Release 仍待验证。本清单不把本地文档
+> 检查或计划状态写成发布通过。
 
 ## 1. 候选范围
 
@@ -68,16 +69,18 @@ python -m twine check dist/*
 
 候选发布前需要固定仓库、固定预算和脱敏记录证明：
 
-- `vega change` 的 Codex bounded 与人工路径；
-- `vega change --provider claude` 的 Claude Code Worker / Reviewer 路径；
+- `vega change` 的 Codex bounded 路径：**已验证**；
+- `vega change --provider claude` 的 Claude Code human、Worker / Reviewer 路径：**已验证**；
 - Provider 请求在当前终端可见；缺少完整原始上下文时停止 attempt 并关闭 pending，未发生
-  同终端自动批准或停止后的假响应；
+  同终端自动批准或停止后的假响应：**自动化契约测试已验证，真实 smoke 未主动制造审批请求**；
 - Core Work Item Reviewer 明确 `timed_out` 时最多自动恢复一次，第二次和不符合前提的情况
-  保持 `needs_human`；
+  保持 `needs_human`：**确定性故障注入已验证，未冒充真实 Provider timeout**；
 - `vega status` / `vega explain` 的唯一 Run 选择、损坏记录拒绝和只读投影。
 
-以上真实 smoke 与恢复证据：**待验证**。不得以历史 `eval/` 结果或单元测试替代本候选
-Provider 验收。
+脱敏记录见
+[`v0.5.0-daily-ux-smoke.md`](../examples/evidence/v0.5.0-daily-ux-smoke.md)。
+真实 Provider 主路径：**已验证**；状态、交互与 timeout 恢复合同：**自动化验证已完成**。
+不得用 timeout 夹具冒充真实 Provider timeout，也不得用历史 `eval/` 结果替代本候选验收。
 
 ## 7. PR 与 CI
 
@@ -107,7 +110,7 @@ Vega Runtime 不执行这些 Git 交付动作；本清单只记录仓库维护�
 - [ ] 版本文件与公共入口输出 `0.5.0`；
 - [ ] 本地最小检查和完整基线均有退出码与计数；
 - [ ] wheel、sdist、`twine check` 和干净环境安装 smoke 通过；
-- [ ] Codex、Claude Code 和 Reviewer timeout 恢复真实证据完整；
+- [x] Codex、Claude Code 真实主路径与 Reviewer timeout 确定性恢复证据完整；
 - [ ] PR required checks 与合并后 `main` CI 通过；
 - [ ] annotated Tag `v0.5.0` 指向通过验证的 `main` 提交；
 - [ ] GitHub Release 已创建且制品来自同一提交；

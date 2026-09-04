@@ -5,32 +5,33 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：28 / 32
-- 最近事件：`20260903T072520Z-PROVIDER-01-completed`
+- 已完成：31 / 32
+- 最近事件：`20260904T132002Z-UX-03-completed`
 
 ## 当前事项
 
-### 下一项：`UX-01` 让运行状态可以直接看懂
+### 下一项：`RELEASE-05` 发布 Vega v0.5.0
 
-按当前仓库自动选择唯一未完成的 ChangeRun，并用稳定原因代码解释任务为什么继续、停止或等待人工。
+把日常变更入口、状态解释和受限 Reviewer 超时恢复作为同一稳定版本发布，版本、制品、文档、Tag 与 GitHub Release 绑定同一主线提交。
 
 验收条件：
 
-- status 和 explain 可以从仓库子目录选择当前仓库唯一未完成的 ChangeRun，多个候选或损坏记录时拒绝猜测
-- 运行选择使用源仓库绑定和 AgentState.updated_at，不复用目录 mtime 或受管 Worktree repository_id
-- 新的确定性 Decision 写入稳定 reason_code，旧版本 Artifact 仍可读取，block category 由静态规则映射
-- explain 只投影当前可信 Artifact，不调用模型、不重新验证、不修改状态
-- status 默认展示简洁第一屏，full 和 json 保留完整排障信息
+- pyproject、vega.__version__、README、Capabilities、CI 版本断言和发布材料统一为 0.5.0
+- Codex bounded 与 Claude human 两条真实路径完成固定仓库验收，自动 Reviewer timeout 使用确定性夹具验证
+- 完整测试、package smoke、PR CI 与合并后 main CI 均有明确通过结果
+- 注解 Tag v0.5.0 与 GitHub Release 绑定通过验证的 main 提交，wheel 与 sdist 来自该提交
+- 发布后追加 RELEASE-05 完成事件并生成当前计划视图
 
 要求检查：
 
-- `run-selection-tests`
-- `explain-projection-tests`
-- `supervisor-tests`
-- `security-tests`
-- `architecture-growth`
+- `real-provider-smoke`
+- `full-test-shards`
+- `package-smoke`
 - `repository-hygiene`
 - `pr-ci`
+- `main-ci`
+- `annotated-tag`
+- `github-release`
 
 ## 全部事项
 
@@ -64,9 +65,9 @@
 | 已完成 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
 | 已完成 | `USAGE-02` | 修复真实使用中的高频摩擦 | `USAGE-01` |
 | 已完成 | `PROVIDER-01` | 接入 Claude Code Provider | `USAGE-02` |
-| 待开始 | `UX-01` | 让运行状态可以直接看懂 | `PROVIDER-01` |
-| 待开始 | `UX-02` | 增加日常变更入口 | `UX-01` |
-| 待开始 | `UX-03` | 自动恢复一次 Reviewer 超时 | `UX-02` |
+| 已完成 | `UX-01` | 让运行状态可以直接看懂 | `PROVIDER-01` |
+| 已完成 | `UX-02` | 增加日常变更入口 | `UX-01` |
+| 已完成 | `UX-03` | 自动恢复一次 Reviewer 超时 | `UX-02` |
 | 待开始 | `RELEASE-05` | 发布 Vega v0.5.0 | `UX-03` |
 
 ## 状态规则
