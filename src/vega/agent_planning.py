@@ -290,6 +290,8 @@ def build_planning_prompt(
                 "- proposal_revision 固定填写 1；重试次数不是 Proposal revision，"
                 "不得随 Planning attempt 增长。",
                 "- 已确认事实与根因假设分开写；每条事实至少附一个可追查来源。",
+                "- 确定候选文件前，先根据项目上下文中的 AGENTS.md 规则索引读取"
+                "该文件适用的根规则和目录规则；不要假设 Provider 已自动发现。",
                 "- command 引用只记录本轮实际执行的只读命令及结果摘要，不算验证通过证据。",
                 "- verification_suggestions、每个 Work Item 的 verification 和 "
                 "additional_check_suggestions 只能逐字复制下方“显式验证命令”；"

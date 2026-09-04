@@ -15,6 +15,7 @@ from .repository_identity import (
     repository_scope,
     resolve_git_revision,
 )
+from .scope_path_matching import select_scoped_rule_paths
 
 IGNORED_DIRS = {
     ".git",
@@ -31,7 +32,7 @@ IGNORED_DIRS = {
     ".ruff_cache",
     ".local-validation",
 }
-ROOT_IGNORED_DIRS = {"runs", "memory"}
+ROOT_IGNORED_DIRS = {"runs", "memory", ".vega-worktrees"}
 IGNORED_DIR_PREFIXES = (
     "pytest-",
     ".tmp-pytest",
@@ -138,37 +139,19 @@ def load_agents_instructions(
             revision.commit,
         )
 
-    discovered: list[Path] = []
-
-    root_agents = repo / "AGENTS.md"
-    if _is_safe_worktree_agents_file(repo, root_agents):
-        discovered.append(root_agents)
-
-    # 相关路径的父目录 AGENTS.md 优先，避免在大仓库里盲目读取无关规则。
-    for relative in related_paths or []:
-        normalized = _normalize_repo_relative_path(relative)
-        if normalized is None or _is_ignored_repo_path(PurePosixPath(normalized)):
-            continue
-        candidate = (repo / normalized).resolve()
-        if not _path_stays_within_repo(repo, candidate):
-            continue
-        if candidate.is_file():
-            parents = list(candidate.parents)
-        else:
-            parents = [candidate, *candidate.parents]
-        for parent in parents:
-            if parent == repo or repo in parent.parents:
-                agents = parent / "AGENTS.md"
-                if _is_safe_worktree_agents_file(repo, agents):
-                    discovered.append(agents)
-            if parent == repo:
-                break
-
-    for agents in _iter_agents_files(repo):
-        discovered.append(agents)
+    available = {
+        _repo_relative(repo, path): path
+        for path in _iter_agents_files(repo)
+    }
+    selected = _select_applicable_agents_paths(
+        list(available),
+        related_paths or [],
+    )
+    _require_agents_file_limit(selected, purpose="当前路径规则编译")
 
     results: list[AgentsInstruction] = []
-    for path in _dedupe_paths(discovered)[:MAX_AGENTS_FILES]:
+    for relative_path in selected:
+        path = available[relative_path]
         if not _is_safe_worktree_agents_file(repo, path):
             continue
         try:
@@ -183,6 +166,33 @@ def load_agents_instructions(
             )
         )
     return results
+
+
+def list_agents_instruction_paths(
+    repo_path: Path,
+    *,
+    tracked_only: bool = False,
+    tracked_revision: str | ResolvedGitRevision | None = None,
+) -> list[str]:
+    """列出可用目录规则，供路径尚未确定的 Planning 阶段做轻量索引。"""
+
+    repo = repo_path.resolve()
+    if not tracked_only:
+        paths = [
+            _repo_relative(repo, path)
+            for path in _iter_agents_files(repo)
+        ]
+        _require_agents_file_limit(paths, purpose="Planning 规则索引")
+        return paths
+    try:
+        revision = resolve_git_revision(repo, tracked_revision or "HEAD")
+    except RuntimeError:
+        return []
+    if revision is None:
+        return []
+    paths = _tracked_agents_paths(repo, revision.commit)
+    _require_agents_file_limit(paths, purpose="Planning 规则索引")
+    return paths
 
 
 def search_related_memory(
@@ -308,31 +318,10 @@ def _load_tracked_agents_instructions(
     revision: str,
 ) -> list[AgentsInstruction]:
     tracked_paths = _tracked_agents_paths(repo_path, revision)
-    discovered: list[str] = []
-    if "AGENTS.md" in tracked_paths:
-        discovered.append("AGENTS.md")
-
-    for related_path in related_paths:
-        normalized = _normalize_repo_relative_path(related_path)
-        if normalized is None or _is_ignored_repo_path(PurePosixPath(normalized)):
-            continue
-        related_parts = PurePosixPath(normalized).parts
-        applicable = [
-            agents_path
-            for agents_path in tracked_paths
-            if _agents_scope_applies(PurePosixPath(agents_path), related_parts)
-        ]
-        discovered.extend(
-            sorted(
-                applicable,
-                key=lambda item: len(PurePosixPath(item).parts),
-                reverse=True,
-            )
-        )
-
-    discovered.extend(tracked_paths)
+    selected = _select_applicable_agents_paths(tracked_paths, related_paths)
+    _require_agents_file_limit(selected, purpose="当前路径规则编译")
     results: list[AgentsInstruction] = []
-    for relative_path in _dedupe_strings(discovered)[:MAX_AGENTS_FILES]:
+    for relative_path in selected:
         try:
             content = _read_git_blob(repo_path, revision, relative_path)
         except RuntimeError:
@@ -346,6 +335,31 @@ def _load_tracked_agents_instructions(
             )
         )
     return results
+
+
+def _require_agents_file_limit(paths: list[str], *, purpose: str) -> None:
+    if len(paths) > MAX_AGENTS_FILES:
+        raise ValueError(
+            f"{purpose}需要处理 {len(paths)} 个 AGENTS.md，超过 "
+            f"{MAX_AGENTS_FILES} 个上限；请缩小任务范围或整理规则层级。"
+        )
+
+
+def _select_applicable_agents_paths(
+    available_paths: list[str],
+    related_paths: list[str],
+) -> list[str]:
+    normalized_paths: list[str] = []
+    for related_path in related_paths:
+        normalized = _normalize_repo_relative_path(related_path)
+        if normalized is None or _is_ignored_repo_path(PurePosixPath(normalized)):
+            continue
+        normalized_paths.append(normalized)
+    return select_scoped_rule_paths(
+        available_paths,
+        normalized_paths,
+        root_rule_path="AGENTS.md",
+    )
 
 
 def _tracked_agents_paths(repo_path: Path, revision: str) -> list[str]:
@@ -369,15 +383,11 @@ def _tracked_agents_paths(repo_path: Path, revision: str) -> list[str]:
             if PurePosixPath(path).name == "AGENTS.md"
             and not _is_ignored_repo_path(PurePosixPath(path))
         ],
-        key=lambda item: len(PurePosixPath(item).parts),
+        key=lambda item: (
+            len(PurePosixPath(item).parts),
+            item.casefold(),
+        ),
     )
-
-
-def _agents_scope_applies(agents_path: PurePosixPath, related_parts: tuple[str, ...]) -> bool:
-    scope_parts = agents_path.parent.parts
-    if scope_parts == ():
-        return True
-    return related_parts[: len(scope_parts)] == scope_parts
 
 
 def _normalize_repo_relative_path(path: str) -> str | None:
@@ -471,17 +481,6 @@ def _scope_for_agents_file(repo_path: Path, agents_path: Path) -> str:
 
 def _repo_relative(repo_path: Path, path: Path) -> str:
     return path.resolve().relative_to(repo_path.resolve()).as_posix()
-
-
-def _dedupe_paths(paths: list[Path]) -> list[Path]:
-    seen: set[Path] = set()
-    result: list[Path] = []
-    for path in paths:
-        resolved = path.resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            result.append(resolved)
-    return result
 
 
 def _dedupe_strings(items: list[str]) -> list[str]:

@@ -122,7 +122,20 @@ def render_project_context(
 
     lines.extend(["", "## Runtime 策略", "", project_policy or "- 使用默认 Vega 策略。"])
 
-    lines.extend(["", "## AGENTS.md 规则", ""])
+    lines.extend(["", "## AGENTS.md 规则索引", ""])
+    if profile.agents_files:
+        lines.extend(f"- `{path}`" for path in profile.agents_files)
+        lines.extend(
+            [
+                "",
+                "- 路径尚未确定时这里只提供索引；调查或修改具体文件前，"
+                "必须再读取根规则和该文件各级父目录中的规则。",
+            ]
+        )
+    else:
+        lines.append("- 未发现目标仓库 `AGENTS.md`。")
+
+    lines.extend(["", "## 当前适用的 AGENTS.md 规则", ""])
     if knowledge.agents_instructions:
         for item in knowledge.agents_instructions:
             lines.extend(
@@ -138,7 +151,7 @@ def render_project_context(
                 ]
             )
     else:
-        lines.extend(["- 未发现目标仓库 `AGENTS.md`。", ""])
+        lines.extend(["- 当前阶段尚未确定可装载的目录规则。", ""])
 
     if knowledge.memory_hits:
         lines.extend(["## 可选的已接受经验", ""])

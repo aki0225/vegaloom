@@ -49,8 +49,8 @@ CLI
   必须显式调用 `start_change()`，不能依赖 `AgentState.run_kind` 的默认值猜测运行类型。
 - `_start_locked`、`_bind_locked` 等私有方法不是扩展点。现有调用允许在对应职责被修改时收敛为
   窄公共接口，但不要为了目录整齐一次性重写 Runtime。
-- 已批准的 `AUTONOMY-*` 事项只补 Planning Proposal、Contract Compiler 和批准来源，产物仍进入
-  上述 ChangeRun；不得创建第二套 Planner Runtime、状态机或 Finish。
+- 自然语言 Planning 只补 Planning Proposal、Contract Compiler 和批准来源，产物仍进入上述
+  ChangeRun；不得创建第二套 Planner Runtime、状态机或 Finish。
 
 ## Supervisor 模块地图
 
@@ -65,14 +65,14 @@ CLI
 - 有界批准：`approval_policy_config` 定义仓库策略，`agent_approval_policy` 只做资格与新鲜度
   判断，`agent_approval_runtime` 把批准或拒绝接回现有 ChangeRun；不得另建执行状态或成功语义。
 - 合同与持久化：`agent_contract`、`agent_change_contract`、`agent_persistence`、`agent_run`、
-  `agent_mutation`、`agent_change_core`、`agent_change_task_card`、`agent_change_verification_retry`。
+  `agent_mutation`、`agent_change_core`、`agent_task_card*`、`agent_verification_retry*`。
 - Provider 无关执行后置流程：`agent_candidate_pipeline`、`agent_worker_evidence`、
   `agent_plan_scope`、`agent_core_observation`。
 - Provider 会话接入：`agent_provider_adapter`、`agent_provider_preparation`、
   `agent_provider`、`provider_session`；Claude Code 使用 `claude_code_runner` 和
   `claude_code_process`，Codex 使用
   `codex_app_server`、`codex_app_server_rpc`、`codex_app_server_runner`、
-  `codex_process`、`codex_isolation`、`codex_workspace`；
+  `codex_app_server_process`、`codex_mcp_isolation`、`codex_workspace`；
   进程所有权与停止复用 `execution_control`、`execution_process`。
 - 仓库与上下文：`agent_context`、`agent_repository_*`、`agent_git_worktree`、
   `agent_git_candidate`、`agent_runtime_support`、`git_read`、`git_inventory`、

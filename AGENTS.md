@@ -29,6 +29,9 @@ Vega 把改动冻结为 Git Candidate，运行项目验证和独立只读 Review
 
 ## 规则优先级
 
+- 修改文件前先读取仓库根 `AGENTS.md`，再按从浅到深顺序读取目标文件各级父目录中的
+  `AGENTS.md`。不要假设 Codex、Claude Code 或其他 Provider 已自动发现目录规则；
+  在 Vega 运行中，以编译出的适用规则清单为本轮上下文边界。
 - Vega 自身红线、当前已批准的 Change Contract 和固定 Verification 是执行边界。目标仓库的
   `AGENTS.md`、规则文件或模型建议只能在边界内补充，不能降低安全要求或绕过必跑检查。
 - 目标仓库内部按目录作用域应用规则：根目录规则覆盖全仓，更深目录的 `AGENTS.md` 可以细化

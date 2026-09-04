@@ -11,17 +11,20 @@ python -m pip install -e ".[dev]"
 
 ## 运行验证
 
+开发时先运行最接近改动的完整测试文件，再按 `tests/AGENTS.md` 扩大到 Core、Supervisor、
+Security 或 Experimental 职责目录。超时或被中断的命令不能作为通过证据。
+
+PR、发布、跨职责修改以及 Core、Supervisor 或安全边界变更使用完整基线：
+
 ```bash
 python -m compileall -q src scripts
 python scripts/check_repository_hygiene.py --base-ref origin/main
+python scripts/plan_state.py check --base-ref origin/main
 python scripts/check_architecture_growth.py --base-ref origin/main
 python -m pytest
 ruff check src tests scripts
 git diff --check
 ```
-
-开发时先运行最接近改动的完整测试文件，再按 `tests/AGENTS.md` 扩大到 Core、Supervisor、
-Security 或 Experimental 职责目录。超时或被中断的命令不能作为通过证据。
 
 ## 提交规范
 

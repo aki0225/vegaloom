@@ -4,7 +4,7 @@ import re
 import unicodedata
 from fnmatch import fnmatchcase
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .redaction import redact_text
 
@@ -98,6 +98,61 @@ def path_matches_pattern(
         return matches(path_index + 1, pattern_index + 1)
 
     return matches(0, 0)
+
+
+def path_pattern_intersects_prefix(
+    pattern: str,
+    prefix: str,
+    *,
+    case_sensitive: bool = True,
+) -> bool:
+    """判断 glob 是否可能匹配给定目录前缀中的路径。"""
+
+    pattern_segments = tuple(pattern.split("/"))
+    prefix_segments = tuple(prefix.split("/")) if prefix else ()
+    if not case_sensitive:
+        pattern_segments = tuple(segment.casefold() for segment in pattern_segments)
+        prefix_segments = tuple(segment.casefold() for segment in prefix_segments)
+
+    @lru_cache(maxsize=None)
+    def intersects(prefix_index: int, pattern_index: int) -> bool:
+        if prefix_index == len(prefix_segments):
+            return True
+        if pattern_index == len(pattern_segments):
+            return False
+        current_pattern = pattern_segments[pattern_index]
+        if current_pattern == "**":
+            return intersects(prefix_index, pattern_index + 1) or intersects(
+                prefix_index + 1,
+                pattern_index,
+            )
+        return fnmatchcase(prefix_segments[prefix_index], current_pattern) and intersects(
+            prefix_index + 1,
+            pattern_index + 1,
+        )
+
+    return intersects(0, 0)
+
+
+def select_scoped_rule_paths(
+    rule_paths: list[str],
+    path_patterns: list[str],
+    *,
+    root_rule_path: str,
+) -> list[str]:
+    """按目标路径模式选择根规则及可能适用的目录规则。"""
+
+    selected = {root_rule_path} if root_rule_path in rule_paths else set()
+    for pattern in path_patterns:
+        for rule_path in rule_paths:
+            parent = PurePosixPath(rule_path).parent
+            prefix = "" if parent == PurePosixPath(".") else parent.as_posix()
+            if path_pattern_intersects_prefix(pattern, prefix):
+                selected.add(rule_path)
+    return sorted(
+        selected,
+        key=lambda item: (len(PurePosixPath(item).parts), item.casefold()),
+    )
 
 
 def scope_paths_are_case_insensitive(repo_path: Path) -> bool:
