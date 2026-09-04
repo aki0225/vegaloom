@@ -5,11 +5,12 @@ import shutil
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TextIO
 
 from .agent_cli_interaction import InteractionPumpUpdate, ProviderInteractionPump
+from .agent_change_presentation import redact_change_message
 from .agent_provider import AgentProvider
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_run import AgentRun
@@ -100,7 +101,7 @@ def _run_codex_operation(
                 assert result is not None
                 return result
             if boundary is None:
-                update = pump.poll()
+                update = _redacted_update(pump.poll())
                 _report_interaction(update, interaction_reporter)
                 if update.status == "attention":
                     boundary = update
@@ -166,11 +167,12 @@ def _request_stop(
     reason: str,
     event_reporter: EventReporter | None,
 ) -> None:
+    safe_reason = redact_change_message(reason)
     try:
-        SupervisorAgentRecovery(workspace).stop(run, reason=reason)
+        SupervisorAgentRecovery(workspace).stop(run, reason=safe_reason)
     except (FileNotFoundError, OSError, ValueError) as exc:
         if event_reporter is not None:
-            event_reporter(f"停止请求未确认：{exc}")
+            event_reporter(redact_change_message(f"停止请求未确认：{exc}"))
 
 
 def _boundary(
@@ -186,7 +188,7 @@ def _boundary(
     )
     return ProviderOperationBoundary(
         run=AgentRun(run_dir=run_dir, state=state, plan=plan),
-        update=update,
+        update=_redacted_update(update),
         stop_unconfirmed=stop_unconfirmed,
     )
 
@@ -196,4 +198,17 @@ def _report_interaction(
     reporter: InteractionReporter | None,
 ) -> None:
     if reporter is not None and update.status != "idle":
-        reporter(update)
+        reporter(_redacted_update(update))
+
+
+def _redacted_update(update: InteractionPumpUpdate) -> InteractionPumpUpdate:
+    return replace(
+        update,
+        summary=_redact_optional(update.summary),
+        prompt=_redact_optional(update.prompt),
+        message=_redact_optional(update.message),
+    )
+
+
+def _redact_optional(value: str | None) -> str | None:
+    return redact_change_message(value) if value is not None else None

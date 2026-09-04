@@ -8,6 +8,7 @@ from typing import Literal
 import typer
 
 from .agent_change_driver import AgentChangeDriver, ChangeDriverResult
+from .agent_change_presentation import redact_change_message
 from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_cli_interaction import InteractionPumpUpdate
 from .agent_recovery import SupervisorAgentRecovery
@@ -101,14 +102,14 @@ def agent_change(
                         "phase": None,
                         "outcome": "error",
                         "reason_code": "change.request_failed",
-                        "message": redact_text(str(exc)),
+                        "message": redact_change_message(str(exc)),
                         "safe_actions": [],
                     },
                     ensure_ascii=False,
                 )
             )
         else:
-            typer.echo(f"错误：{redact_text(str(exc))}", err=True)
+            typer.echo(f"错误：{redact_change_message(str(exc))}", err=True)
         raise typer.Exit(code=1) from exc
 
     _render_change_result(repo, result, json_output=json_output)

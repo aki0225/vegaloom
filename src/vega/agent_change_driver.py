@@ -10,7 +10,11 @@ from .agent_change_execution import (
     ensure_change_provider_ready,
     run_provider_operation,
 )
-from .agent_change_presentation import render_change_approval_prompt
+from .agent_change_presentation import (
+    build_change_approval_snapshot,
+    redact_change_message,
+)
+from .agent_approval_runtime import ApprovalSnapshotChangedError
 from .agent_cli_interaction import InteractionPumpUpdate
 from .agent_planning import PLANNING_PROPOSAL_ARTIFACT
 from .agent_planning_runtime import PlanningProposalRunner
@@ -281,17 +285,30 @@ class AgentChangeDriver:
                 "当前 Contract 等待人工批准；JSON 或非交互终端不会读取 stdin。",
                 ("approve", "revise", "stop"),
             )
-        if not self.confirm(render_change_approval_prompt(current)):
+        snapshot = build_change_approval_snapshot(current)
+        if not self.confirm(snapshot.prompt):
             return self._attention(
                 current,
                 "approval.declined",
                 "当前 Contract 未获批准，Worker 未启动。",
                 ("approve", "revise", "stop"),
             )
-        approved = self.runtime.approve(
-            current.run_dir.name,
-            actor="human:vega-change",
-        )
+        try:
+            approved = self.runtime.approve_if_current(
+                current.run_dir.name,
+                expected_state_version=snapshot.state_version,
+                expected_contract_digest=snapshot.contract_digest,
+                expected_execution_plan_revision=snapshot.execution_plan_revision,
+                expected_execution_plan_digest=snapshot.execution_plan_digest,
+                actor="human:vega-change",
+            )
+        except ApprovalSnapshotChangedError as exc:
+            return self._attention(
+                exc.current,
+                "approval.snapshot_changed",
+                "确认期间 Contract、Execution Plan 或 Run 状态已变化；请重新查看并批准。",
+                ("change", "status", "explain"),
+            )
         self._event("当前 Contract 已由人工批准")
         return approved
 
@@ -457,10 +474,10 @@ class AgentChangeDriver:
             run=run,
             outcome="attention_required",
             reason_code=reason_code,
-            message=message,
+            message=redact_change_message(message),
             safe_actions=safe_actions,
         )
 
     def _event(self, message: str) -> None:
         if self.event_reporter is not None:
-            self.event_reporter(message)
+            self.event_reporter(redact_change_message(message))

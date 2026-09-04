@@ -8,15 +8,19 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import vega.agent_change_cli as change_cli_module
 import vega.agent_change_driver as driver_module
 import vega.agent_change_execution as execution_module
 from vega.agent_change_contract import (
     ChangeAuthorityEnvelope,
     ChangeContract,
+    ChangeSideEffectPolicy,
     ExecutionPlan,
     ExecutionWorkItem,
 )
 from vega.agent_change_driver import AgentChangeDriver
+from vega.agent_change_presentation import build_change_approval_snapshot
+from vega.agent_cli_interaction import InteractionPumpUpdate
 from vega.agent_contract import AgentState
 from vega.agent_planning import (
     PlanningContractProposal,
@@ -28,7 +32,7 @@ from vega.agent_planning import (
 from vega.agent_planning_runtime import PlanningProposalRunner
 from vega.agent_run import AgentRun
 from vega.agent_runtime import SupervisorAgentRuntime
-from vega.agent_runtime_support import load_agent_bundle
+from vega.agent_runtime_support import bound_repo, load_agent_bundle
 from vega.cli_entrypoint import app
 from vega.provider_session import (
     PendingInteraction,
@@ -160,6 +164,189 @@ def test_change_continues_unique_run_through_existing_approval_path(
         assert contract["approval_source"] == "bounded"
 
 
+def test_change_rejects_approval_when_prompted_revision_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(
+        repo,
+        contract=_contract(),
+        execution_plan=_execution_plan(),
+    )
+
+    def revise_after_prompt(prompt: str) -> bool:
+        assert "Contract revision：1" in prompt
+        revised_contract = ChangeContract.model_validate(
+            {
+                **_contract().model_dump(mode="json"),
+                "contract_revision": 2,
+                "acceptance": ["示例函数返回 3"],
+            }
+        )
+        revised_plan = ExecutionPlan.model_validate(
+            {
+                **_execution_plan().model_dump(mode="json"),
+                "contract_revision": 2,
+                "plan_revision": 2,
+                "work_items": [
+                    {
+                        **_execution_plan().work_items[0].model_dump(mode="json"),
+                        "objective": "修改实现使示例函数返回 3",
+                    }
+                ],
+            }
+        )
+        runtime.revise_change(
+            started.run_dir.name,
+            proposed_contract=revised_contract,
+            proposed_execution_plan=revised_plan,
+        )
+        return True
+
+    monkeypatch.setattr(
+        driver_module,
+        "ensure_change_provider_ready",
+        lambda _: pytest.fail("版本变化后不得启动 Worker"),
+    )
+    result = AgentChangeDriver(
+        repo,
+        repo,
+        provider="claude",
+        interactive=True,
+        confirm=revise_after_prompt,
+        timeout_seconds=60,
+    ).change()
+
+    assert result.reason_code == "approval.snapshot_changed"
+    assert result.run is not None
+    assert result.run.state.phase == "awaiting_approval"
+    contract = ChangeContract.model_validate_json(
+        (started.run_dir / "change-contract.json").read_text(encoding="utf-8")
+    )
+    assert contract.contract_revision == 2
+    assert not contract.approved
+
+
+def test_change_rejects_approval_when_workspace_changes_during_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(
+        repo,
+        contract=_contract(),
+        execution_plan=_execution_plan(),
+    )
+
+    def change_workspace_after_prompt(_: str) -> bool:
+        (bound_repo(started.run_dir) / "src" / "example.py").write_text(
+            "def value():\n    return 999\n",
+            encoding="utf-8",
+        )
+        return True
+
+    monkeypatch.setattr(
+        driver_module,
+        "ensure_change_provider_ready",
+        lambda _: pytest.fail("Workspace 变化后不得启动 Worker"),
+    )
+    result = AgentChangeDriver(
+        repo,
+        repo,
+        provider="claude",
+        interactive=True,
+        confirm=change_workspace_after_prompt,
+        timeout_seconds=60,
+    ).change()
+
+    assert result.reason_code == "approval.snapshot_changed"
+    assert result.run is not None
+    assert result.run.state.phase == "awaiting_approval"
+    with pytest.raises(ValueError, match="Workspace 已漂移"):
+        runtime.approve(started.run_dir.name)
+    contract = ChangeContract.model_validate_json(
+        (started.run_dir / "change-contract.json").read_text(encoding="utf-8")
+    )
+    assert not contract.approved
+
+
+def test_change_approval_prompt_includes_non_default_authority_and_plan_fields(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    private_path = "Q:" + "\\Users\\example\\private\\request.txt"  # repo-path-policy: allow-test-fixture
+    contract = ChangeContract(
+        task_id="task-detailed",
+        goal=f"根据 {private_path} 修改支付重试",
+        acceptance=["重复请求只产生一次扣款"],
+        invariants=["账本记录保持唯一"],
+        non_goals=["不更换支付 SDK"],
+        authorized_risk_reviews=["payment"],
+        side_effect_policy=ChangeSideEffectPolicy(
+            database_schema_change=True,
+            payment_or_funds_change=True,
+        ),
+        required_verification=["python -m pytest tests/payment"],
+        authority_envelope=ChangeAuthorityEnvelope(
+            allowed_paths=["src/payments/**", "tests/payment/**"],
+            forbidden_paths=["src/payments/legacy/**"],
+            max_changed_files=7,
+            max_repair_rounds=2,
+            max_auto_replans=1,
+            max_review_rounds=3,
+            max_verification_retries=2,
+        ),
+    )
+    plan = ExecutionPlan(
+        task_id="task-detailed",
+        contract_revision=1,
+        observed_facts=["支付重试当前生成新幂等键"],
+        hypotheses=["重复扣款来自幂等键漂移"],
+        implementation_strategy=["先固定幂等键，再补回归测试"],
+        additional_checks=["git diff --check"],
+        work_items=[
+            ExecutionWorkItem(
+                work_item_id="WI-01",
+                objective="修复幂等键复用",
+                likely_files=["src/payments/service.py"],
+                verification=["python -m pytest tests/payment/test_retry.py"],
+                risk_notes=["核对并发重试"],
+            )
+        ],
+    )
+    started = SupervisorAgentRuntime(repo).start_change(
+        repo,
+        contract=contract,
+        execution_plan=plan,
+    )
+
+    prompt = build_change_approval_snapshot(started).prompt
+
+    assert private_path not in prompt
+    assert "目标：根据 <redacted-path> 修改支付重试" in prompt
+    for expected in (
+        "必须保持：\n- 账本记录保持唯一",
+        "不在本次范围：\n- 不更换支付 SDK",
+        "最多修改文件数：7",
+        "verification retry：2",
+        "database_schema_change：允许",
+        "public_api_change：禁止",
+        "风险复核：\n- payment",
+        "已确认事实：\n- 支付重试当前生成新幂等键",
+        "待验证假设：\n- 重复扣款来自幂等键漂移",
+        "实现策略：\n- 先固定幂等键，再补回归测试",
+        "额外检查：\n- git diff --check",
+        "候选文件：src/payments/service.py",
+        "验证：python -m pytest tests/payment/test_retry.py",
+        "风险说明：核对并发重试",
+        "Execution Plan digest：",
+    ):
+        assert expected in prompt
+
+
 def test_change_rejects_new_text_when_repository_has_active_run(
     tmp_path: Path,
 ) -> None:
@@ -196,8 +383,11 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
     )
     runtime.approve(started.run_dir.name)
     stop_requested = threading.Event()
-    updates: list[str] = []
+    updates: list[InteractionPumpUpdate] = []
+    events: list[str] = []
     input_stream = _TtyInput("y\n")
+    fake_path = "Q:" + "\\Users\\example\\private\\config.json"  # repo-path-policy: allow-test-fixture
+    fake_secret = "sk-change-fake-secret-123456"
 
     class InteractiveAdapter:
         def __init__(self, workspace: Path, **_: object) -> None:
@@ -230,7 +420,10 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
                             method="item/commandExecution/requestApproval",
                             thread_id="thread-1",
                             turn_id="turn-1",
-                            summary="执行命令；需要在原生会话核对完整请求",
+                            summary=(
+                                "执行命令；需要核对 "
+                                f"{fake_path} api_key={fake_secret}"
+                            ),
                         )
                     ],
                 ),
@@ -256,6 +449,9 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
             assert run == started.run_dir.name
             assert reason
             stop_requested.set()
+            raise ValueError(
+                f"停止失败：{fake_path} token={fake_secret}"
+            )
 
     monkeypatch.setattr(
         driver_module,
@@ -279,7 +475,8 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
         provider="codex",
         interactive=True,
         input_stream=input_stream,
-        interaction_reporter=lambda update: updates.append(update.status),
+        interaction_reporter=updates.append,
+        event_reporter=events.append,
         timeout_seconds=60,
     ).change()
 
@@ -287,7 +484,26 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
     assert result.run is not None
     assert input_stream.read_count == 0
     assert load_provider_sessions(result.run.run_dir).interactions[0].status == "pending"
-    assert updates == ["attention"]
+    assert [update.status for update in updates] == ["attention"]
+    visible = repr([result.message, updates, events])
+    assert fake_path not in visible
+    assert fake_secret not in visible
+    assert "<redacted-path>" in visible
+    assert "[REDACTED]" in visible
+
+
+def test_change_message_redaction_preserves_urls_and_api_routes() -> None:
+    message = (
+        "访问 https://example.test/api/v1 和 /v1/users/123；"
+        "日志位于 /tmp/vega/private.log"
+    )
+
+    safe = execution_module.redact_change_message(message)
+
+    assert "https://example.test/api/v1" in safe
+    assert "/v1/users/123" in safe
+    assert "/tmp/vega/private.log" not in safe
+    assert "<redacted-path>" in safe
 
 
 def test_change_json_never_reads_stdin_without_active_run(
@@ -310,6 +526,20 @@ def test_change_json_never_reads_stdin_without_active_run(
         "message": "当前仓库没有未完成 ChangeRun，也没有可恢复的 Task Card。",
         "safe_actions": ["change <TEXT>", "start"],
     }
+
+    fake_path = "Q:" + "\\Users\\example\\private\\error.log"  # repo-path-policy: allow-test-fixture
+    fake_secret = "sk-change-json-fake-secret-123456"
+
+    def fail_change(*_: object, **__: object) -> None:
+        raise ValueError(f"读取 {fake_path} 失败，api_key={fake_secret}")
+
+    monkeypatch.setattr(change_cli_module.AgentChangeDriver, "change", fail_change)
+    failed = CliRunner().invoke(app, ["change", "--json"])
+    assert failed.exit_code == 1
+    error_payload = json.loads(failed.output)
+    assert fake_path not in failed.output
+    assert fake_secret not in failed.output
+    assert error_payload["message"] == "读取 <redacted-path> 失败，api_key=[REDACTED]"
 
 
 def test_change_implicit_task_card_requires_confirmation_before_resume(
