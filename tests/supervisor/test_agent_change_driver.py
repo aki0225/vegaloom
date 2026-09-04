@@ -464,7 +464,6 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
     stop_requested = threading.Event()
     updates: list[InteractionPumpUpdate] = []
     events: list[str] = []
-    input_stream = _TtyInput("y\n")
     fake_path = "Q:" + "\\Users\\example\\private\\config.json"  # repo-path-policy: allow-test-fixture
     fake_secret = "sk-change-fake-secret-123456"
 
@@ -553,7 +552,6 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
         repo,
         provider="codex",
         interactive=True,
-        input_stream=input_stream,
         interaction_reporter=updates.append,
         event_reporter=events.append,
         timeout_seconds=60,
@@ -561,7 +559,6 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
     assert result.reason_code == "provider.interaction_requires_advanced_response"
     assert result.run is not None
-    assert input_stream.read_count == 0
     assert load_provider_sessions(result.run.run_dir).interactions[0].status == "pending"
     assert [update.status for update in updates] == ["attention"]
     visible = repr([result.message, updates, events])
@@ -721,19 +718,6 @@ class _StaticRunner:
 
     def run(self, *_: object, **__: object) -> RunnerResult:
         return RunnerResult(status="success", output=self.output)
-
-
-class _TtyInput:
-    def __init__(self, line: str) -> None:
-        self.line = line
-        self.read_count = 0
-
-    def isatty(self) -> bool:
-        return True
-
-    def readline(self) -> str:
-        self.read_count += 1
-        return self.line
 
 
 def _proposal_for_run(run_dir: Path) -> PlanningProposal:

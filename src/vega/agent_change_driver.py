@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TextIO
+from typing import Literal
 
 from .agent_change_execution import (
     ProviderOperationBoundary,
@@ -83,7 +83,6 @@ class AgentChangeDriver:
         interactive: bool = False,
         json_output: bool = False,
         confirm: ConfirmCallback | None = None,
-        input_stream: TextIO | None = None,
         event_reporter: EventReporter | None = None,
         interaction_reporter: InteractionReporter | None = None,
         progress_reporter: ProgressReporter | None = None,
@@ -96,7 +95,6 @@ class AgentChangeDriver:
         self.interactive = interactive and not json_output
         self.json_output = json_output
         self.confirm = confirm
-        self.input_stream = input_stream
         self.event_reporter = event_reporter
         self.interaction_reporter = interaction_reporter
         self.progress_reporter = progress_reporter

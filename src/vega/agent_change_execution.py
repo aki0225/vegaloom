@@ -48,7 +48,7 @@ def run_provider_operation(
     interaction_reporter: InteractionReporter | None,
     event_reporter: EventReporter | None,
 ) -> AgentRun | ProviderOperationBoundary:
-    """运行 Provider，并在 Codex 等待授权时由当前终端接管展示。"""
+    """运行 Provider；Codex 等待授权时只展示边界并停止当前 attempt。"""
 
     if provider == "claude":
         return operation()
