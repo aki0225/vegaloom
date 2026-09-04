@@ -15,6 +15,7 @@ from .repository_identity import (
     repository_scope,
     resolve_git_revision,
 )
+from .scope_path_matching import select_scoped_rule_paths
 
 IGNORED_DIRS = {
     ".git",
@@ -146,9 +147,10 @@ def load_agents_instructions(
         list(available),
         related_paths or [],
     )
+    _require_agents_file_limit(selected, purpose="当前路径规则编译")
 
     results: list[AgentsInstruction] = []
-    for relative_path in selected[:MAX_AGENTS_FILES]:
+    for relative_path in selected:
         path = available[relative_path]
         if not _is_safe_worktree_agents_file(repo, path):
             continue
@@ -176,17 +178,21 @@ def list_agents_instruction_paths(
 
     repo = repo_path.resolve()
     if not tracked_only:
-        return [
+        paths = [
             _repo_relative(repo, path)
-            for path in _iter_agents_files(repo)[:MAX_AGENTS_FILES]
+            for path in _iter_agents_files(repo)
         ]
+        _require_agents_file_limit(paths, purpose="Planning 规则索引")
+        return paths
     try:
         revision = resolve_git_revision(repo, tracked_revision or "HEAD")
     except RuntimeError:
         return []
     if revision is None:
         return []
-    return _tracked_agents_paths(repo, revision.commit)[:MAX_AGENTS_FILES]
+    paths = _tracked_agents_paths(repo, revision.commit)
+    _require_agents_file_limit(paths, purpose="Planning 规则索引")
+    return paths
 
 
 def search_related_memory(
@@ -313,8 +319,9 @@ def _load_tracked_agents_instructions(
 ) -> list[AgentsInstruction]:
     tracked_paths = _tracked_agents_paths(repo_path, revision)
     selected = _select_applicable_agents_paths(tracked_paths, related_paths)
+    _require_agents_file_limit(selected, purpose="当前路径规则编译")
     results: list[AgentsInstruction] = []
-    for relative_path in selected[:MAX_AGENTS_FILES]:
+    for relative_path in selected:
         try:
             content = _read_git_blob(repo_path, revision, relative_path)
         except RuntimeError:
@@ -330,29 +337,28 @@ def _load_tracked_agents_instructions(
     return results
 
 
+def _require_agents_file_limit(paths: list[str], *, purpose: str) -> None:
+    if len(paths) > MAX_AGENTS_FILES:
+        raise ValueError(
+            f"{purpose}需要处理 {len(paths)} 个 AGENTS.md，超过 "
+            f"{MAX_AGENTS_FILES} 个上限；请缩小任务范围或整理规则层级。"
+        )
+
+
 def _select_applicable_agents_paths(
     available_paths: list[str],
     related_paths: list[str],
 ) -> list[str]:
-    selected: set[str] = set()
-    if "AGENTS.md" in available_paths:
-        selected.add("AGENTS.md")
+    normalized_paths: list[str] = []
     for related_path in related_paths:
         normalized = _normalize_repo_relative_path(related_path)
         if normalized is None or _is_ignored_repo_path(PurePosixPath(normalized)):
             continue
-        related_parts = PurePosixPath(normalized).parts
-        selected.update(
-            agents_path
-            for agents_path in available_paths
-            if _agents_scope_applies(PurePosixPath(agents_path), related_parts)
-        )
-    return sorted(
-        selected,
-        key=lambda item: (
-            len(PurePosixPath(item).parts),
-            item.casefold(),
-        ),
+        normalized_paths.append(normalized)
+    return select_scoped_rule_paths(
+        available_paths,
+        normalized_paths,
+        root_rule_path="AGENTS.md",
     )
 
 
@@ -382,13 +388,6 @@ def _tracked_agents_paths(repo_path: Path, revision: str) -> list[str]:
             item.casefold(),
         ),
     )
-
-
-def _agents_scope_applies(agents_path: PurePosixPath, related_parts: tuple[str, ...]) -> bool:
-    scope_parts = agents_path.parent.parts
-    if scope_parts == ():
-        return True
-    return related_parts[: len(scope_parts)] == scope_parts
 
 
 def _normalize_repo_relative_path(path: str) -> str | None:

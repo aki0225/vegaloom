@@ -11,7 +11,11 @@ from vega.experimental.memory import MemoryLedgerStore, install_memory_backend
 from vega.gate_runtime import evaluate_risk
 from vega.models import MemoryProposal
 from vega.project_context import build_project_context
-from vega.project_knowledge import load_agents_instructions, search_related_memory
+from vega.project_knowledge import (
+    list_agents_instruction_paths,
+    load_agents_instructions,
+    search_related_memory,
+)
 from vega.project_profile import build_project_profile
 from vega.reflect_runtime import ReflectRuntime
 from vega.repository_identity import repository_scope
@@ -225,6 +229,77 @@ def test_agents_instructions_only_load_applicable_ancestors(
         "src/feature/AGENTS.md",
     ]
     assert all("Docs" not in item.content for item in instructions)
+
+
+@pytest.mark.parametrize("tracked_only", [False, True])
+@pytest.mark.parametrize(
+    ("related_path", "expected"),
+    [
+        (
+            "src/**",
+            ["AGENTS.md", "src/AGENTS.md", "src/feature/AGENTS.md"],
+        ),
+        (
+            "src/**/*.py",
+            ["AGENTS.md", "src/AGENTS.md", "src/feature/AGENTS.md"],
+        ),
+        (
+            "src/*.py",
+            ["AGENTS.md", "src/AGENTS.md"],
+        ),
+    ],
+)
+def test_agents_instructions_match_glob_scope_intersections(
+    tmp_path: Path,
+    tracked_only: bool,
+    related_path: str,
+    expected: list[str],
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            "AGENTS.md": "# Root\n",
+            "src/AGENTS.md": "# Source\n",
+            "src/feature/AGENTS.md": "# Feature\n",
+            "docs/AGENTS.md": "# Docs\n",
+        },
+    )
+
+    instructions = load_agents_instructions(
+        repo,
+        [related_path],
+        tracked_only=tracked_only,
+    )
+
+    assert [item.path for item in instructions] == expected
+
+
+@pytest.mark.parametrize("tracked_only", [False, True])
+def test_agents_instruction_limit_fails_closed(
+    tmp_path: Path,
+    tracked_only: bool,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            f"scope-{index:02d}/AGENTS.md": f"# Rule {index}\n"
+            for index in range(21)
+        },
+    )
+
+    with pytest.raises(ValueError, match="超过 20 个上限"):
+        load_agents_instructions(
+            repo,
+            ["**/*.py"],
+            tracked_only=tracked_only,
+        )
+    with pytest.raises(ValueError, match="超过 20 个上限"):
+        list_agents_instruction_paths(
+            repo,
+            tracked_only=tracked_only,
+        )
 
 
 def test_project_context_indexes_scoped_rules_without_loading_unrelated_content(
