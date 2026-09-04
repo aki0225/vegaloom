@@ -26,7 +26,10 @@ from .agent_run_selection import (
     select_named_repository_change_run,
     select_repository_change_run,
 )
-from .agent_repository_guard import RepositoryChangeLock
+from .agent_repository_guard import (
+    AgentRepositoryGuardBusyError,
+    RepositoryChangeLock,
+)
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
 from .agent_task_card import discover_handoff_task_cards
@@ -112,13 +115,21 @@ class AgentChangeDriver:
         selected_modes = sum(value is not None for value in (normalized_text, run, task))
         if selected_modes > 1:
             raise ValueError("TEXT、--run 与 --task 必须且只能选择一种输入方式")
-        if normalized_text is not None:
-            return self._start_new(normalized_text)
-        if run is not None:
-            return self._drive(self._explicit_run(run))
-        if task is not None:
-            return self._resume_explicit_task(task)
-        return self._continue_default()
+        try:
+            if normalized_text is not None:
+                return self._start_new(normalized_text)
+            if run is not None:
+                return self._drive(self._explicit_run(run))
+            if task is not None:
+                return self._resume_explicit_task(task)
+            return self._continue_default()
+        except AgentRepositoryGuardBusyError as exc:
+            return self._attention(
+                None,
+                "change.repository_busy",
+                str(exc),
+                ("status", "explain", "change"),
+            )
 
     def _start_new(self, text: str) -> ChangeDriverResult:
         with RepositoryChangeLock.acquire(self.repo):

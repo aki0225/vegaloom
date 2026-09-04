@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
@@ -15,8 +16,20 @@ from .agent_persistence import AgentArtifactError, load_agent_state
 from .repository_identity import repository_scope
 
 
+_BUSY_ERRNOS = {
+    errno.EACCES,
+    errno.EAGAIN,
+    getattr(errno, "EDEADLK", errno.EACCES),
+}
+_BUSY_WINERRORS = {32, 33}
+
+
 class AgentRepositoryGuardError(ValueError):
     """仓库级 Agent 所有权无法安全建立或释放。"""
+
+
+class AgentRepositoryGuardBusyError(AgentRepositoryGuardError):
+    """仓库级 ChangeRun 创建或恢复正在由另一个调用处理。"""
 
 
 class RepositoryChangeLock:
@@ -45,12 +58,22 @@ class RepositoryChangeLock:
         lock_path = control_dir / "change-start.lock"
         canonical_lock_path = lock_path.resolve(strict=False)
         local_lock = cls._local_lock_for(canonical_lock_path)
-        local_lock.acquire()
+        if not local_lock.acquire(blocking=False):
+            raise AgentRepositoryGuardBusyError(
+                "当前仓库正在创建或恢复另一个 ChangeRun，请稍后重试。"
+            )
         stream: BinaryIO | None = None
         locked = False
         try:
             stream = _open_repository_lock_file(lock_path)
-            _lock_repository_stream(stream)
+            try:
+                _lock_repository_stream(stream)
+            except OSError as exc:
+                if _is_repository_lock_busy(exc):
+                    raise AgentRepositoryGuardBusyError(
+                        "当前仓库正在创建或恢复另一个 ChangeRun，请稍后重试。"
+                    ) from exc
+                raise
             locked = True
             return cls(
                 lock_path=lock_path,
@@ -438,11 +461,15 @@ def _lock_repository_stream(stream: BinaryIO) -> None:
     if os.name == "nt":
         import msvcrt
 
-        msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         return
     import fcntl
 
-    fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _is_repository_lock_busy(exc: OSError) -> bool:
+    return exc.errno in _BUSY_ERRNOS or getattr(exc, "winerror", None) in _BUSY_WINERRORS
 
 
 def _unlock_repository_stream(stream: BinaryIO) -> None:

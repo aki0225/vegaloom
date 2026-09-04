@@ -1,20 +1,72 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from vega import agent_repository_guard
 from vega.agent_repository_guard import (
+    AgentRepositoryGuardBusyError,
     AgentRepositoryGuardError,
+    RepositoryChangeLock,
     acquire_writer_claim,
     mark_writer_claim_releasing,
 )
 from vega.agent_contract import AgentState
 from vega.agent_persistence import save_agent_state
 from vega.repository_identity import repository_scope
+
+
+def test_repository_change_lock_fails_fast_across_processes(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    ready = tmp_path / "ready"
+    release = tmp_path / "release"
+    script = (
+        "import sys,time\n"
+        "from pathlib import Path\n"
+        "from vega.agent_repository_guard import RepositoryChangeLock\n"
+        "repo,ready,release=map(Path,sys.argv[1:4])\n"
+        "with RepositoryChangeLock.acquire(repo):\n"
+        "    ready.write_text('ready',encoding='utf-8')\n"
+        "    deadline=time.monotonic()+10\n"
+        "    while not release.exists() and time.monotonic()<deadline:\n"
+        "        time.sleep(0.02)\n"
+    )
+    env = os.environ.copy()
+    source_root = str(Path(agent_repository_guard.__file__).resolve().parents[1])
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (source_root, env.get("PYTHONPATH")) if part
+    )
+    holder = subprocess.Popen(
+        [sys.executable, "-c", script, str(repo), str(ready), str(release)],
+        env=env,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists()
+
+        started = time.monotonic()
+        with pytest.raises(AgentRepositoryGuardBusyError, match="稍后重试"):
+            RepositoryChangeLock.acquire(repo)
+        assert time.monotonic() - started < 2
+    finally:
+        release.touch()
+        holder.wait(timeout=10)
+
+    assert holder.returncode == 0
+    with RepositoryChangeLock.acquire(repo):
+        pass
 
 
 def test_writer_claim_race_does_not_remove_actual_owner(

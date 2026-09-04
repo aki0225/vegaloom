@@ -434,16 +434,16 @@ def test_concurrent_new_text_creates_one_run_and_rechecks_active_state(
     assert first_entered.wait(timeout=5)
     second = threading.Thread(target=invoke, args=("第二个任务",))
     second.start()
+    second.join(timeout=5)
+    assert not second.is_alive()
     release_first.set()
     first.join(timeout=10)
-    second.join(timeout=10)
 
     assert not first.is_alive()
-    assert not second.is_alive()
     assert errors == []
     assert calls == ["第一个任务"]
     assert sorted(result.reason_code for result in results) == [
-        "change.active_run_exists",
+        "change.repository_busy",
         "test.created",
     ]
     assert len(list((repo / "runs").iterdir())) == 1
