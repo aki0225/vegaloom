@@ -1666,6 +1666,7 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
         "run",
         "revise",
         "status",
+        "explain",
         "watch",
         "latest",
         "steer",
