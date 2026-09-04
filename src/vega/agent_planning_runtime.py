@@ -18,6 +18,7 @@ from .agent_planning import (
     PlanningProposal,
     PlanningRequest,
     build_planning_prompt,
+    parse_planning_proposal_output,
     validate_planning_proposal,
 )
 from .agent_planning_execution import (
@@ -305,7 +306,7 @@ class PlanningProposalRunner:
                 evidence_refs=evidence_refs,
             )
         try:
-            proposal = PlanningProposal.model_validate_json(result.output)
+            proposal = _parse_planning_output(result.output, self._event)
             validate_planning_proposal(
                 prepared.repo,
                 proposal,
@@ -456,6 +457,19 @@ def _load_planning_request(
     if request.task_id != state.task_id:
         raise ValueError("Planning Request 与 Agent State 身份不一致")
     return request
+
+
+def _parse_planning_output(
+    output: str,
+    report: Callable[[str], None],
+) -> PlanningProposal:
+    proposal, dropped_refs = parse_planning_proposal_output(output)
+    if dropped_refs:
+        report(
+            "Planning Proposal 已忽略 "
+            f"{dropped_refs} 条无法验证的来源引用"
+        )
+    return proposal
 
 
 def _planning_prompt(

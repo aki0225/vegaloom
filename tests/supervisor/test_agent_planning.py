@@ -22,6 +22,7 @@ from vega.agent_planning import (
     PlanningProposal,
     PlanningSourceRef,
     build_planning_prompt,
+    parse_planning_proposal_output,
     validate_planning_proposal,
 )
 from vega.agent_planning_runtime import PlanningProposalRunner
@@ -53,6 +54,44 @@ def test_planning_prompt_requires_exact_registered_verification_commands() -> No
     assert "max_review_rounds 至少应为 N+1" in prompt
     assert "unresolved_questions 只填写会阻止合同成立" in prompt
     assert "不能仅因尚未验证就阻止批准" in prompt
+    assert "kind=command 时 command 必须逐字填写" in prompt
+
+
+def test_planning_output_discards_invalid_optional_source_ref(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    payload = _proposal(
+        repo,
+        task_id="task-1",
+        goal="修复示例函数",
+    ).model_dump(mode="json")
+    payload["observed_facts"].insert(
+        0,
+        {
+            "statement": "当前工作区无未提交修改",
+            "refs": [
+                {
+                    "kind": "command",
+                    "path": None,
+                    "line_start": None,
+                    "line_end": None,
+                    "symbol": None,
+                    "command": None,
+                    "summary": "只保留了结果，没有保留实际命令",
+                }
+            ],
+        },
+    )
+
+    proposal, dropped_refs = parse_planning_proposal_output(
+        json.dumps(payload, ensure_ascii=False)
+    )
+
+    assert dropped_refs == 1
+    assert [fact.statement for fact in proposal.observed_facts] == [
+        "示例函数当前返回 1"
+    ]
 
 
 def test_planning_proposal_binds_source_refs_to_fixed_revision(
