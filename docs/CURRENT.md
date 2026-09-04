@@ -5,12 +5,32 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：28 / 28
+- 已完成：28 / 32
 - 最近事件：`20260903T072520Z-PROVIDER-01-completed`
 
 ## 当前事项
 
-当前没有可执行事项；计划已经完成，或剩余事项处于阻塞/已替代状态。
+### 下一项：`UX-01` 让运行状态可以直接看懂
+
+按当前仓库自动选择唯一未完成的 ChangeRun，并用稳定原因代码解释任务为什么继续、停止或等待人工。
+
+验收条件：
+
+- status 和 explain 可以从仓库子目录选择当前仓库唯一未完成的 ChangeRun，多个候选或损坏记录时拒绝猜测
+- 运行选择使用源仓库绑定和 AgentState.updated_at，不复用目录 mtime 或受管 Worktree repository_id
+- 新的确定性 Decision 写入稳定 reason_code，旧版本 Artifact 仍可读取，block category 由静态规则映射
+- explain 只投影当前可信 Artifact，不调用模型、不重新验证、不修改状态
+- status 默认展示简洁第一屏，full 和 json 保留完整排障信息
+
+要求检查：
+
+- `run-selection-tests`
+- `explain-projection-tests`
+- `supervisor-tests`
+- `security-tests`
+- `architecture-growth`
+- `repository-hygiene`
+- `pr-ci`
 
 ## 全部事项
 
@@ -44,6 +64,10 @@
 | 已完成 | `USAGE-01` | 连续运行五个真实任务 | `RELEASE-04` |
 | 已完成 | `USAGE-02` | 修复真实使用中的高频摩擦 | `USAGE-01` |
 | 已完成 | `PROVIDER-01` | 接入 Claude Code Provider | `USAGE-02` |
+| 待开始 | `UX-01` | 让运行状态可以直接看懂 | `PROVIDER-01` |
+| 待开始 | `UX-02` | 增加日常变更入口 | `UX-01` |
+| 待开始 | `UX-03` | 自动恢复一次 Reviewer 超时 | `UX-02` |
+| 待开始 | `RELEASE-05` | 发布 Vega v0.5.0 | `UX-03` |
 
 ## 状态规则
 
