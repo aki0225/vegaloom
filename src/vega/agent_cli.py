@@ -295,7 +295,13 @@ def agent_capabilities() -> None:
     typer.echo(
         json.dumps(
             {
-                "schema_version": 3,
+                "schema_version": 4,
+                "daily_change_entry": True,
+                "repository_run_selection": True,
+                "deterministic_explain": True,
+                "reviewer_timeout_auto_retry_limit": 1,
+                "provider_interaction_visibility": "same-terminal-summary",
+                "provider_inline_approval": False,
                 "control_plane": "deterministic-state-machine",
                 "default_provider": "codex",
                 "providers": {
