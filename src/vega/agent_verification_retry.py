@@ -10,49 +10,41 @@ from .agent_worker_evidence import (
     load_finish_summary,
     observation_from_child,
     require_child_quiescent,
-    require_single_executable_work_item,
 )
 from .agent_provider import AgentProvider
 from . import agent_provider_preparation as provider_preparation
-from .agent_provider_factory import ensure_reviewer_runner
+from .agent_provider_factory import runner_name
 from .agent_plan_scope import (
-    capture_plan_scope_baseline,
     evaluate_plan_scope,
     plan_scope_failure,
     write_plan_scope_evidence,
 )
 from .agent_contract import AgentObservation
-from .agent_change_control import require_change_verification_retry_budget
 from .agent_operation import operation_ref, reserve_operation_identity
 from .agent_persistence import (
     append_agent_trace,
-    load_agent_checkpoint,
     save_agent_state,
 )
 from .agent_repository_guard import acquire_writer_claim, release_writer_claim
 from .agent_run import AgentRun
-from .agent_run_status import latest_worker_dispatch_binding
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_logic import update_state
 from .agent_runtime_support import (
-    bound_repo,
     capture_bound_workspace,
-    load_agent_bundle,
-    validate_dispatch_artifacts,
+    save_agent_plan,
     write_status_card,
 )
 from .agent_verification_retry_archive import archive_retry_source_finish
 from .agent_verification_retry_evidence import (
     PreparedVerificationRetry,
-    capture_verification_retry_baseline,
     load_optional_child_state,
     load_optional_finish,
-    load_source_observation,
-    matching_source_plans,
     same_tracked_workspace,
-    select_source_plan,
-    validate_retry_source,
     write_retry_child_summary,
+)
+from .agent_verification_retry_preparation import (
+    VerificationRetryReason,
+    prepare_verification_retry,
 )
 from .finish_runtime import FinishRuntime
 from .loop_runtime import LoopAutomationRuntime
@@ -62,7 +54,6 @@ from .redaction import redact_text
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 from .scope_gate import ScopeGateResult
-from .verification_command_preflight import require_verification_commands_preflight
 
 class SupervisorAgentVerificationRetry:
     """在同一 Diff 上重跑 Core 门禁，不再次启动 Coding Worker。"""
@@ -88,128 +79,56 @@ class SupervisorAgentVerificationRetry:
         self.provider = provider
         self.persistent_sessions = persistent_sessions
         self.runtime = SupervisorAgentRuntime(self.workspace)
-    def run(self, run: str) -> AgentRun:
-        prepared, operation_id, bound = self._prepare_and_bind(run)
+    def run(
+        self,
+        run: str,
+        *,
+        retry_reason: VerificationRetryReason = "verification_failure",
+    ) -> AgentRun:
+        prepared, operation_id, bound = self._prepare_and_bind(
+            run,
+            retry_reason=retry_reason,
+        )
+        return self._run_core(prepared, operation_id, bound)
+    def run_reviewer_timeout_if_eligible(self, run: str) -> AgentRun | None:
+        """资格不足时保留原 needs_human，资格通过后才发布恢复 operation。"""
+
+        run_dir = resolve_run_dir(self.workspace, run)
+        with RunMutationLock.acquire(run_dir, "agent.retry-verification"):
+            try:
+                prepared = prepare_verification_retry(
+                    self.workspace,
+                    run,
+                    loop_runtime=self.loop_runtime,
+                    provider=self.provider,
+                    persistent_sessions=self.persistent_sessions,
+                    retry_reason="reviewer_timeout",
+                )
+            except ValueError:
+                return None
+            operation_id = uuid4().hex
+            bound = self._bind(prepared, operation_id)
+        self._event("Core Reviewer 明确超时；正在自动恢复一次")
         return self._run_core(prepared, operation_id, bound)
     def _prepare_and_bind(
         self,
         run: str,
+        *,
+        retry_reason: VerificationRetryReason,
     ) -> tuple[PreparedVerificationRetry, str, AgentRun]:
         run_dir = resolve_run_dir(self.workspace, run)
         with RunMutationLock.acquire(run_dir, "agent.retry-verification"):
-            prepared = self._prepare(run)
+            prepared = prepare_verification_retry(
+                self.workspace,
+                run,
+                loop_runtime=self.loop_runtime,
+                provider=self.provider,
+                persistent_sessions=self.persistent_sessions,
+                retry_reason=retry_reason,
+            )
             operation_id = uuid4().hex
             bound = self._bind(prepared, operation_id)
         return prepared, operation_id, bound
-    def _prepare(self, run: str) -> PreparedVerificationRetry:
-        run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
-        if state.phase != "ready" or state.active_child_run or state.active_operation_id:
-            raise ValueError("当前 Agent 状态不允许验证专用恢复")
-        validate_dispatch_artifacts(run_dir, state, plan)
-        require_change_verification_retry_budget(run_dir, state, plan, metadata)
-        work_item = require_single_executable_work_item(plan, state)
-        if work_item.external_side_effects != "none":
-            raise ValueError("验证专用恢复只接受 external_side_effects=none 的 Work Item")
-        repo = bound_repo(run_dir)
-        require_verification_commands_preflight(repo, work_item.verification)
-        before = capture_bound_workspace(run_dir)
-        if before.fingerprint != state.workspace_fingerprint:
-            raise ValueError("验证恢复前 Workspace 已漂移，必须先重新对账")
-        checkpoint = load_agent_checkpoint(
-            run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
-        )
-        if len(checkpoint.failed_attempts) != 1:
-            raise ValueError("当前 Checkpoint 没有唯一失败 child，不能执行验证专用恢复")
-        child_dir = resolve_run_dir(self.workspace, checkpoint.failed_attempts[0])
-        child_state = load_child_state(child_dir, repo)
-        require_child_quiescent(child_dir)
-        if (
-            child_state.status != "needs_human"
-            or not child_state.iterations
-            or child_state.current_iteration >= child_state.max_iterations
-        ):
-            raise ValueError("失败 child 没有可追加的 Core iteration")
-        worker_binding = latest_worker_dispatch_binding(run_dir, state)
-        if worker_binding is None or worker_binding[0] != child_dir.name:
-            raise ValueError("无法把失败 child 绑定到原始真实 Worker")
-        source_operation_id = worker_binding[1]
-        source_observation = load_source_observation(
-            run_dir,
-            child_dir.name,
-            source_operation_id,
-        )
-        source_plans = matching_source_plans(run_dir, plan)
-        source_plan = select_source_plan(
-            run_dir,
-            state,
-            source_plans,
-            source_observation,
-        )
-        source_summary_ref, source_claim, source_finish_sha256 = validate_retry_source(
-            run_dir,
-            state,
-            source_plan,
-            source_observation,
-            child_dir,
-            before,
-        )
-        core_workspace_baseline = capture_verification_retry_baseline(
-            self.workspace,
-            repo,
-            before,
-        )
-        comparison_base_sha, comparison_paths = provider_preparation.comparison_binding_from_metadata(
-            metadata
-        )
-        next_iteration = child_state.current_iteration + 1
-        plan_scope_baseline = capture_plan_scope_baseline(
-            repo,
-            plan,
-            work_item,
-            expected_head_sha=before.head_sha,
-            iteration=next_iteration,
-            comparison_base_sha=comparison_base_sha,
-            comparison_paths=comparison_paths,
-        )
-        pre_core_scope = evaluate_plan_scope(
-            repo,
-            plan_scope_baseline,
-            expected_head_sha=before.head_sha,
-            iteration=next_iteration,
-            comparison_base_sha=comparison_base_sha,
-            comparison_paths=comparison_paths,
-        )
-        if pre_core_scope.status == "failed":
-            raise ValueError(plan_scope_failure(pre_core_scope))
-        ensure_reviewer_runner(
-            self.loop_runtime,
-            load_project_config(repo),
-            agent_run_dir=run_dir,
-            state=state,
-            provider=self.provider,
-            persistent_session=self.persistent_sessions,
-        )
-        return PreparedVerificationRetry(
-            run_dir=run_dir,
-            state=state,
-            plan=plan,
-            work_item=work_item,
-            repo=repo,
-            before=before,
-            child_dir=child_dir,
-            child_state=child_state,
-            source_plan=source_plan,
-            source_observation=source_observation,
-            source_claim=source_claim,
-            source_summary_ref=source_summary_ref,
-            source_operation_id=source_operation_id,
-            source_finish_sha256=source_finish_sha256,
-            core_workspace_baseline=core_workspace_baseline,
-            plan_scope_baseline=plan_scope_baseline,
-            pre_core_scope=pre_core_scope,
-            comparison_base_sha=comparison_base_sha,
-            comparison_paths=comparison_paths,
-        )
     def _bind(
         self,
         prepared: PreparedVerificationRetry,
@@ -232,17 +151,22 @@ class SupervisorAgentVerificationRetry:
                 operation_id,
                 prepared.source_finish_sha256,
             )
+            details = {
+                "source_operation_id": prepared.source_operation_id,
+                "source_finish_ref": source_finish_ref,
+                "source_finish_sha256": prepared.source_finish_sha256,
+                "retry_reason": prepared.retry_reason,
+                "reviewer_retry_attempt": prepared.reviewer_retry_attempt,
+            }
+            if prepared.candidate_sha is not None:
+                details["candidate_sha"] = prepared.candidate_sha
             operation_relative = reserve_operation_identity(
                 prepared.run_dir,
                 state,
                 child_run=prepared.child_dir.name,
                 operation_id=operation_id,
                 operation_kind="verification_retry",
-                details={
-                    "source_operation_id": prepared.source_operation_id,
-                    "source_finish_ref": source_finish_ref,
-                    "source_finish_sha256": prepared.source_finish_sha256,
-                },
+                details=details,
             )
             observing = update_state(
                 state,
@@ -253,6 +177,8 @@ class SupervisorAgentVerificationRetry:
                 operation_started=True,
                 allowed_actions=["human"],
             )
+            if prepared.retry_reason == "reviewer_timeout":
+                save_agent_plan(prepared.run_dir, prepared.plan)
             save_agent_state(prepared.run_dir / "agent-state.json", observing)
             state_committed = True
             append_agent_trace(
@@ -260,7 +186,13 @@ class SupervisorAgentVerificationRetry:
                 event="verification_retry_committed",
                 state=observing,
                 observation_summary=(
-                    "已绑定验证专用恢复；复用原 child 与 Diff，不启动新的 Coding Worker"
+                    "已绑定 Reviewer timeout 自动恢复；"
+                    "复用原 child 与 Candidate，不启动新的 Coding Worker"
+                    if prepared.retry_reason == "reviewer_timeout"
+                    else (
+                        "已绑定验证专用恢复；"
+                        "复用原 child 与 Diff，不启动新的 Coding Worker"
+                    )
                 ),
                 artifact_refs=[
                     operation_relative,
@@ -272,9 +204,20 @@ class SupervisorAgentVerificationRetry:
                 prepared.run_dir,
                 observing,
                 prepared.plan,
-                next_step="正在同一 child 上重跑验证、风险门禁与独立 Reviewer",
+                next_step=(
+                    "正在同一 Candidate 上重跑验证、风险门禁与新的独立 Reviewer"
+                    if prepared.retry_reason == "reviewer_timeout"
+                    else "正在同一 child 上重跑验证、风险门禁与独立 Reviewer"
+                ),
             )
-            self._event(f"验证专用恢复已启动：{prepared.child_dir.name}")
+            self._event(
+                (
+                    "Reviewer timeout 自动恢复已启动："
+                    if prepared.retry_reason == "reviewer_timeout"
+                    else "验证专用恢复已启动："
+                )
+                + prepared.child_dir.name
+            )
             return AgentRun(
                 run_dir=prepared.run_dir,
                 state=observing,
@@ -296,11 +239,15 @@ class SupervisorAgentVerificationRetry:
     ) -> AgentRun:
         child_run = prepared.child_dir.name
         try:
+            provider_runner = runner_name(
+                self.provider,
+                persistent_session=self.persistent_sessions,
+            )
             self.loop_runtime.continue_assist(
                 child_run,
                 prepared.repo,
-                worker_name="codex-app-server" if self.persistent_sessions else "codex-exec",
-                reviewer_name="codex-app-server" if self.persistent_sessions else "codex-exec",
+                worker_name=provider_runner,
+                reviewer_name=provider_runner,
                 verify=True,
                 verification_commands=list(prepared.work_item.verification),
                 verification_retry_baseline=prepared.core_workspace_baseline,
@@ -385,6 +332,7 @@ class SupervisorAgentVerificationRetry:
             finish_summary,
             evidence_refs=evidence_refs,
             external_side_effects="none",
+            reviewer_retry_attempt=prepared.reviewer_retry_attempt,
         )
         if observation.all_work_items_completed:
             observation = provider_preparation.review_final_candidate(
@@ -403,10 +351,43 @@ class SupervisorAgentVerificationRetry:
         self._event("验证恢复后的 Workspace 与 Core Artifact 已完成对账")
         routed = self.runtime.observe_machine(prepared.run_dir.name, observation)
         self._event(f"Supervisor 选择：{decision_label(routed, observation)}")
+        routed = self._settle_candidate(prepared, routed, observation)
         if routed.state.phase == "finalizing":
             routed = self.runtime.finalize(routed.run_dir.name)
             self._event("Supervisor 已完成：ready_to_commit")
         return routed
+    def _settle_candidate(
+        self,
+        prepared: PreparedVerificationRetry,
+        routed: AgentRun,
+        observation: AgentObservation,
+    ) -> AgentRun:
+        if prepared.candidate_ref is None:
+            return routed
+        outcome = None
+        if observation.work_item_completed and routed.state.phase in {
+            "ready",
+            "finalizing",
+        }:
+            outcome = "accept"
+        elif (
+            routed.state.phase == "ready"
+            and "repair" in routed.state.allowed_actions
+        ):
+            outcome = "repair"
+        if outcome is None:
+            return routed
+        settled = self.runtime.settle_candidate(
+            routed.run_dir.name,
+            candidate_ref=prepared.candidate_ref,
+            outcome=outcome,
+        )
+        self._event(
+            "Reviewer timeout Candidate 已接受"
+            if outcome == "accept"
+            else "Reviewer timeout Candidate 已还原为待修复 WIP"
+        )
+        return settled
     def _observe_failure(
         self,
         prepared: PreparedVerificationRetry,

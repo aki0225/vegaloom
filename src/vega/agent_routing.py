@@ -172,6 +172,29 @@ def _route(
     )
 
 
+def _reviewer_timeout_route(
+    observation: AgentObservation,
+) -> tuple[list[AgentAction], AgentAction, str, str] | None:
+    if (
+        observation.review != "blocked"
+        or observation.reviewer_runner_status != "timed_out"
+    ):
+        return None
+    if observation.reviewer_retry_attempt:
+        return (
+            ["human"],
+            "human",
+            "review.retry_exhausted",
+            "Reviewer 自动恢复后再次超时，已停止自动重试",
+        )
+    return (
+        ["human"],
+        "human",
+        "review.runner_timed_out",
+        "Core Work Item Reviewer 明确超时，等待受控恢复或人工处理",
+    )
+
+
 def _precondition_route(
     plan: AgentPlan,
     observation: AgentObservation,
@@ -250,7 +273,8 @@ def _precondition_route(
             ),
         ),
     )
-    return next((route for matched, route in checks if matched), None)
+    matched_route = next((route for matched, route in checks if matched), None)
+    return matched_route or _reviewer_timeout_route(observation)
 
 
 def _finalization_claim_matches_plan(

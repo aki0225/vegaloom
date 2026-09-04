@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from pydantic import ValidationError
 
@@ -63,6 +64,13 @@ class PreparedVerificationRetry:
     pre_core_scope: ScopeGateResult
     comparison_base_sha: str | None
     comparison_paths: tuple[str, ...]
+    retry_reason: Literal["verification_failure", "reviewer_timeout"] = (
+        "verification_failure"
+    )
+    candidate_sha: str | None = None
+    candidate_ref: str | None = None
+    reviewer_retry_attempt: int = 0
+    reviewer_role_key: str | None = None
 
 
 def load_source_observation(
@@ -191,7 +199,7 @@ def validate_retry_source(
         claim = WorkerClaim.model_validate(claim_payload)
     except ValidationError as exc:
         raise ValueError("原始 Worker Claim 无法验证") from exc
-    finish, finish_sha256 = _load_bound_failed_finish(source_summary, child_dir)
+    finish, finish_sha256 = load_bound_source_finish(source_summary, child_dir)
     if claim.claimed_status != "completed":
         raise ValueError("原始 child 的失败原因不属于验证专用恢复")
     if observation.workspace_fingerprint != snapshot.fingerprint:
@@ -206,7 +214,7 @@ def validate_retry_source(
     return source_summary_ref, claim, finish_sha256
 
 
-def _load_bound_failed_finish(
+def load_bound_source_finish(
     source_summary: object,
     child_dir: Path,
 ) -> tuple[dict[str, object], str]:
@@ -405,6 +413,9 @@ def write_retry_child_summary(
             "schema_version": 1,
             "authority": "child_binding_summary",
             "operation_kind": "verification_retry",
+            "retry_reason": prepared.retry_reason,
+            "candidate_sha": prepared.candidate_sha,
+            "reviewer_retry_attempt": prepared.reviewer_retry_attempt,
             "agent_run_id": prepared.state.run_id,
             "work_item_id": prepared.state.current_work_item,
             "child_run": prepared.child_dir.name,

@@ -337,6 +337,7 @@ def observation_from_child(
     *,
     evidence_refs: list[str],
     external_side_effects: Literal["none", "known", "unknown"],
+    reviewer_retry_attempt: int = 0,
 ) -> AgentObservation:
     latest = child_state.iterations[-1] if child_state.iterations else None
     finish_status = finish_summary.get("finish_status")
@@ -389,6 +390,10 @@ def observation_from_child(
         verification=verification,
         risk=risk,
         review=review,
+        reviewer_runner_status=(
+            latest.reviewer_status if latest is not None else None
+        ),
+        reviewer_retry_attempt=reviewer_retry_attempt,
         work_item_completed=work_item_completed,
         all_work_items_completed=all_work_items_completed,
     )
