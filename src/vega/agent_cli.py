@@ -8,6 +8,7 @@ import typer
 
 from .agent_change_cli import (
     agent_adjudicate,
+    agent_change,
     agent_recover,
     agent_replan,
     agent_retry,
@@ -35,6 +36,7 @@ from .run_utils import resolve_run_dir
 def register_agent_commands(app: typer.Typer) -> None:
     """把 Agent 命令直接注册到顶层，不保留 `vega agent` 包装。"""
 
+    app.command("change")(agent_change)
     app.command("start")(agent_start)
     app.command("approve")(agent_approve)
     app.command("run")(agent_run)

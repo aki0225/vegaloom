@@ -1661,6 +1661,7 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
 
     assert result.exit_code == 0, result.output
     for command in (
+        "change",
         "start",
         "approve",
         "run",

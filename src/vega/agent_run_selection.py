@@ -111,6 +111,36 @@ def select_repository_change_run(
     return candidates[0] if candidates else None
 
 
+def select_named_repository_change_run(
+    location: Path,
+    run: str,
+) -> RepositoryChangeRun:
+    """显式选择当前仓库中的一个 ChangeRun，不接受任意路径。"""
+
+    run_path = Path(run.strip())
+    if (
+        not run.strip()
+        or run_path.is_absolute()
+        or any(part == ".." for part in run_path.parts)
+        or not (
+            len(run_path.parts) == 1
+            or len(run_path.parts) == 2
+            and run_path.parts[0] == "runs"
+        )
+    ):
+        raise ChangeRunSelectionError("--run 必须是 run_id 或 runs/<run_id>")
+    matches = [
+        item
+        for item in list_repository_change_runs(location)
+        if item.run_dir.name == run_path.name
+    ]
+    if len(matches) != 1:
+        raise ChangeRunSelectionError(
+            "指定 Run 不属于当前仓库的可验证 ChangeRun"
+        )
+    return matches[0]
+
+
 def _safe_agent_run_dirs(runs_root: Path) -> tuple[Path, ...]:
     try:
         entries = tuple(runs_root.iterdir())

@@ -14,6 +14,7 @@ from vega.agent_run_selection import (
     ChangeRunSelectionError,
     list_repository_change_runs,
     resolve_repository_root,
+    select_named_repository_change_run,
     select_repository_change_run,
 )
 from vega.agent_runtime_logic import update_state
@@ -107,6 +108,27 @@ def test_selector_uses_state_timestamp_for_terminal_runs(tmp_path: Path) -> None
 
     assert selected is not None
     assert selected.run_dir == newer
+
+
+def test_named_selector_accepts_run_id_or_runs_relative_path(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    run_dir = _change_run(
+        repo,
+        "run-active",
+        source_repo=repo,
+        phase="ready",
+        updated_at="2026-09-04T09:00:00+00:00",
+    )
+
+    assert select_named_repository_change_run(repo, "run-active").run_dir == run_dir
+    assert (
+        select_named_repository_change_run(repo, "runs/run-active").run_dir
+        == run_dir
+    )
+    with pytest.raises(ChangeRunSelectionError, match="必须是 run_id"):
+        select_named_repository_change_run(repo, "../run-active")
 
 
 def test_selector_fails_closed_for_matching_corrupt_change_run(
