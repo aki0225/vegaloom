@@ -305,6 +305,9 @@ def respond_to_interaction(
     run_dir: Path,
     interaction_id: str,
     response: dict[str, object],
+    *,
+    expected: PendingInteraction | None = None,
+    expected_provider: str | None = None,
 ) -> PendingInteraction:
     selected: PendingInteraction | None = None
 
@@ -317,6 +320,25 @@ def respond_to_interaction(
         ]
         if len(matches) != 1 or matches[0].status != "pending":
             raise ValueError("待响应请求不存在、已关闭或已处理")
+        if expected is not None and _interaction_binding(matches[0]) != (
+            _interaction_binding(expected)
+        ):
+            raise ValueError("待响应请求已变化，拒绝使用旧提示结果")
+        if expected_provider is not None:
+            handle = state.handles.get(matches[0].role_key)
+            if (
+                handle is None
+                or handle.provider != expected_provider
+                or handle.owner != "vega"
+                or handle.lifecycle != "waiting_user"
+                or not handle.permissions_verified
+                or handle.thread_id != matches[0].thread_id
+                or (
+                    matches[0].turn_id is not None
+                    and handle.last_turn_id != matches[0].turn_id
+                )
+            ):
+                raise ValueError("待响应请求不再绑定当前 Provider Turn")
         matches[0].response = redact_value(response)
         matches[0].status = "responded"
         matches[0].resolved_at = utc_now()
@@ -440,21 +462,38 @@ def _keep_active_and_recent(items: list, *, active: Callable[[object], bool]) ->
 
 def _command_approval_summary(params: dict[str, object]) -> str:
     actions = params.get("commandActions")
-    if not isinstance(actions, list):
+    if not isinstance(actions, list) or not actions:
         return "命令执行"
     action_labels = {
         "read": "读取文件",
         "listFiles": "列出文件",
         "search": "搜索文件",
     }
+    action_types = [
+        item.get("type") if isinstance(item, dict) else None
+        for item in actions
+    ]
+    if any(
+        not isinstance(action_type, str) or action_type not in action_labels
+        for action_type in action_types
+    ):
+        return "未分类命令执行（请接管原生会话确认）"
     labels = [
         action_labels[action_type]
-        for action in actions[:5]
-        if isinstance(action, dict)
-        and isinstance((action_type := action.get("type")), str)
-        and action_type in action_labels
+        for action_type in action_types[:5]
+        if isinstance(action_type, str)
     ]
+    return "、".join(dict.fromkeys(labels))
+
+
+def _interaction_binding(interaction: PendingInteraction) -> tuple[object, ...]:
     return (
-        "、".join(dict.fromkeys(labels))
-        or "未分类命令执行（请接管原生会话确认）"
+        interaction.interaction_id,
+        interaction.role_key,
+        interaction.rpc_request_id,
+        interaction.method,
+        interaction.thread_id,
+        interaction.turn_id,
+        interaction.summary,
+        interaction.created_at,
     )
