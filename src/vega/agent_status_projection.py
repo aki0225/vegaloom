@@ -1,13 +1,184 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .agent_contract import AgentDecision
+from .agent_contract import (
+    AgentCheckpoint,
+    AgentDecision,
+    AgentObservation,
+    AgentPlan,
+    AgentState,
+    AgentStatusCard,
+)
+from .agent_provider_explain import provider_interaction_projection
 from .agent_persistence import AgentArtifactError, load_agent_state
 from .agent_runtime_support import load_agent_bundle
-from .agent_status_card import AgentStatusProjection, build_agent_status_projection
+from .agent_status_card import _build_status_card, render_status_card
+from .agent_status_sources import (
+    capture_live_workspace,
+    load_provider_sessions_for_display,
+    load_status_checkpoint_for_display,
+    load_status_decision_for_display,
+    load_status_observation_for_display,
+)
+from .agent_status_artifacts import load_bounded_decision
 from .decision import DecisionStore
+from .provider_session import PendingInteraction, ProviderSessionState
+from .provider_session_projection import session_status_projection_from_state
+from .workspace_snapshot import ReviewWorkspaceSnapshot
+
+
+@dataclass(frozen=True)
+class AgentStatusProjection:
+    """一次状态查询共享的只读证据视图。"""
+
+    state: AgentState
+    plan: AgentPlan
+    card: AgentStatusCard
+    payload: dict[str, object]
+    checkpoint: AgentCheckpoint | None
+    decision: AgentDecision | None
+    decision_history: tuple[dict[str, Any], ...]
+    decision_issue: str | None
+    observation: AgentObservation | None
+    workspace: ReviewWorkspaceSnapshot | None
+    workspace_issue: str | None
+    provider_sessions: ProviderSessionState | None
+    provider_interactions: tuple[PendingInteraction, ...]
+    provider_warnings: tuple[str, ...]
+    repo_path: str | None = None
+
+
+def capture_status_workspace(
+    run_dir: Path,
+) -> tuple[ReviewWorkspaceSnapshot | None, str | None]:
+    """采集一次状态展示所需的 Workspace 视图。"""
+
+    return capture_live_workspace(run_dir)
+
+
+def build_agent_status_projection(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+    *,
+    workspace_capture: tuple[ReviewWorkspaceSnapshot | None, str | None] | None = None,
+    repo_path: str | None = None,
+) -> AgentStatusProjection:
+    """一次性读取并构建 Agent 状态及解释需要的共享证据。"""
+
+    checkpoint, checkpoint_issue = load_status_checkpoint_for_display(
+        run_dir,
+        state,
+    )
+    observation, observation_issue = load_status_observation_for_display(
+        run_dir,
+        state,
+        checkpoint,
+    )
+    live_workspace, workspace_issue = (
+        capture_live_workspace(run_dir)
+        if workspace_capture is None
+        else workspace_capture
+    )
+    provider_state, provider_issue = load_provider_sessions_for_display(run_dir)
+    session_rows = (
+        []
+        if provider_state is None
+        else session_status_projection_from_state(provider_state)[0]
+    )
+    provider_interactions, provider_warnings = provider_interaction_projection(
+        run_dir,
+        state,
+        provider_sessions=provider_state,
+        provider_issue=provider_issue,
+    )
+    agent_decisions = tuple(_agent_decisions(run_dir))
+    decision, decision_issue = load_status_decision_for_display(
+        run_dir,
+        checkpoint,
+        decisions=agent_decisions,
+    )
+    if checkpoint_issue is not None and decision_issue is None:
+        decision_issue = checkpoint_issue
+    card = _build_status_card(
+        run_dir,
+        state,
+        plan,
+        observation=observation,
+        checkpoint=checkpoint,
+        live_workspace=live_workspace,
+        workspace_checked=True,
+        workspace_issue=workspace_issue,
+        checkpoint_issue=checkpoint_issue,
+        observation_issue=observation_issue,
+        provider_rows=session_rows,
+        provider_warning=provider_issue,
+        next_step=(
+            checkpoint.reason
+            if checkpoint is not None and state.phase in {"ready", "needs_human"}
+            else None
+        ),
+    )
+    payload = card.model_dump(mode="json")
+    payload.update(
+        {
+            "recorded_phase": state.phase,
+            "recorded_terminal_status": state.terminal_status,
+            "effective_phase": card.phase,
+            "effective_terminal_status": card.terminal_status,
+        }
+    )
+    return AgentStatusProjection(
+        state=state,
+        plan=plan,
+        card=card,
+        payload=payload,
+        checkpoint=checkpoint,
+        decision=decision,
+        decision_history=tuple(
+            _combined_decision_entries(run_dir, agent_decisions)
+        ),
+        decision_issue=decision_issue,
+        observation=observation,
+        workspace=live_workspace,
+        workspace_issue=workspace_issue,
+        provider_sessions=provider_state,
+        provider_interactions=tuple(provider_interactions),
+        provider_warnings=tuple(provider_warnings),
+        repo_path=repo_path,
+    )
+
+
+def read_status_card(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+    *,
+    status_projection: AgentStatusProjection | None = None,
+) -> str:
+    """按当前 Artifact 渲染状态卡，或复用调用方已构建的共享投影。"""
+
+    projection = status_projection or build_agent_status_projection(
+        run_dir,
+        state,
+        plan,
+    )
+    if projection.state != state or projection.plan != plan:
+        raise ValueError("状态卡投影与 Agent State/Plan 身份不一致。")
+    return render_status_card(projection.card)
+
+
+def build_agent_status_payload(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+) -> dict[str, object]:
+    """生成文本与 JSON 共用的经验证状态投影。"""
+
+    return build_agent_status_projection(run_dir, state, plan).payload
 
 
 def apply_agent_projection(
@@ -76,15 +247,22 @@ def combined_decisions(
     *,
     include_agent: bool,
 ) -> list[dict[str, Any]]:
+    agent_decisions = tuple(_agent_decisions(run_dir)) if include_agent else ()
+    return _combined_decision_entries(run_dir, agent_decisions)
+
+
+def _combined_decision_entries(
+    run_dir: Path,
+    agent_decisions: tuple[AgentDecision, ...],
+) -> list[dict[str, Any]]:
     entries = [
         entry.model_dump(mode="json")
         for entry in DecisionStore(run_dir).list()
     ]
-    if include_agent:
-        entries.extend(
-            entry.model_dump(mode="json")
-            for entry in _agent_decisions(run_dir)
-        )
+    entries.extend(
+        entry.model_dump(mode="json")
+        for entry in agent_decisions
+    )
     entries.sort(key=lambda entry: str(entry.get("created_at", "")))
     return entries
 
@@ -140,10 +318,11 @@ def _agent_decisions(run_dir: Path) -> list[AgentDecision]:
     result: list[AgentDecision] = []
     for path in sorted(decisions_dir.glob("decision-*.json")):
         try:
-            decision = AgentDecision.model_validate_json(
-                path.read_text(encoding="utf-8")
+            decision, _ = load_bounded_decision(
+                run_dir,
+                path.relative_to(run_dir).as_posix(),
             )
-        except (OSError, UnicodeError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             raise ValueError(
                 f"Agent Decision 无法验证：{path.name}"
             ) from exc

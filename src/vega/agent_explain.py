@@ -1,21 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from .agent_contract import AgentCheckpoint, AgentDecision, AgentPhase, AgentPlan, AgentState
-from .agent_persistence import AgentArtifactError, load_agent_checkpoint
+from .agent_explain_codes import BlockCategory, block_category_for_reason_code
 from .agent_provider_explain import (
     provider_interaction_projection,
     with_provider_warnings,
 )
-from .agent_status_card import AgentStatusProjection, build_agent_status_payload
+from .agent_status_projection import (
+    AgentStatusProjection,
+    build_agent_status_payload,
+)
+from .agent_status_sources import (
+    load_status_checkpoint_for_display,
+    load_status_decision_for_display,
+)
+from .provider_session import PendingInteraction
 from .provider_session import PROVIDER_SESSIONS_ARTIFACT
 
 
-BlockCategory = Literal["authorization", "transient", "configuration", "evidence", "budget"]
 ExplanationOutcome = Literal["in_progress", "ready", "attention_required", "completed", "stopped", "unknown"]
 ExplanationSource = Literal["evidence", "provider", "runtime", "phase", "decision", "checkpoint", "legacy"]
 
@@ -39,44 +47,14 @@ class AgentExplanation(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
-_BLOCK_CATEGORIES: dict[str, BlockCategory] = {
-    "approval.contract_required": "authorization",
-    "approval.plan_contradicted": "authorization",
-    "approval.plan_stale": "authorization",
-    "budget.automatic_repair_exhausted": "budget",
-    "evidence.decision_unverified": "evidence",
-    "evidence.external_claim_only": "evidence",
-    "evidence.integrity_unverified": "evidence",
-    "evidence.no_trusted_progress": "evidence",
-    "evidence.plan_completion_mismatch": "evidence",
-    "evidence.status_projection_unverified": "evidence",
-    "execution.writer_still_active": "transient",
-    "gate.review.blocked": "evidence",
-    "gate.review.incomplete": "evidence",
-    "gate.risk.blocked": "authorization",
-    "gate.risk.incomplete": "evidence",
-    "gate.verification.blocked": "configuration",
-    "gate.verification.incomplete": "evidence",
-    "provider.interaction_required": "authorization",
-    "provider.session_unverified": "evidence",
-    "repair.fix_packet_unavailable": "evidence",
-    "review.retry_exhausted": "transient",
-    "review.runner_timed_out": "transient",
-    "side_effects.declared": "authorization",
-    "side_effects.unknown": "authorization",
-    "workspace.snapshot_stale": "evidence",
-    "workspace.unexplained_change": "evidence",
-}
-
-
-def block_category_for_reason_code(reason_code: str | None) -> BlockCategory | None:
-    """使用稳定代码做静态分类，不解析人类可读 reason。"""
-
-    if reason_code is None:
-        return None
-    if reason_code.startswith("budget."):
-        return "budget"
-    return _BLOCK_CATEGORIES.get(reason_code)
+@dataclass(frozen=True)
+class _ExplanationInputs:
+    status: dict[str, object]
+    sessions: tuple[PendingInteraction, ...]
+    provider_warnings: tuple[str, ...]
+    checkpoint: AgentCheckpoint | None
+    decision: AgentDecision | None
+    decision_issue: str | None
 
 
 def build_agent_explanation(
@@ -93,37 +71,20 @@ def build_agent_explanation(
     Run 的直接 Python 调用方；新入口应始终传入共享投影。
     """
 
-    if status_projection is None:
-        try:
-            status = build_agent_status_payload(run_dir, state, plan)
-        except (OSError, RuntimeError, ValueError):
-            return _explanation(
-                state,
-                phase="needs_human",
-                outcome="attention_required",
-                reason_code="evidence.status_projection_unverified",
-                source="evidence",
-                actor="当前证据投影",
-                reason="当前状态证据无法安全投影。",
-                facts=[f"持久化阶段为 {state.phase}"],
-                unknowns=["当前 Workspace 与运行 Artifact 是否仍属于同一可信现场"],
-                safe_actions=["status_full", "inspect_artifacts", "human"],
-                evidence_refs=_base_refs(state),
-            )
-        sessions, provider_warnings = provider_interaction_projection(
-            run_dir,
-            state,
-        )
-        checkpoint, decision, decision_issue = _checkpoint_decision(run_dir, state)
-    else:
-        if status_projection.state != state or status_projection.plan != plan:
-            raise ValueError("Explain 投影与 Agent State/Plan 身份不一致。")
-        status = status_projection.payload
-        sessions = list(status_projection.provider_interactions)
-        provider_warnings = list(status_projection.provider_warnings)
-        checkpoint = status_projection.checkpoint
-        decision = status_projection.decision
-        decision_issue = status_projection.decision_issue
+    inputs = _load_explanation_inputs(
+        run_dir,
+        state,
+        plan,
+        status_projection=status_projection,
+    )
+    if inputs is None:
+        return _unverified_projection_explanation(state)
+    status = inputs.status
+    sessions = inputs.sessions
+    provider_warnings = inputs.provider_warnings
+    checkpoint = inputs.checkpoint
+    decision = inputs.decision
+    decision_issue = inputs.decision_issue
 
     effective_phase = cast(AgentPhase, status["effective_phase"])
     if (
@@ -226,6 +187,70 @@ def build_agent_explanation(
         safe_actions=_safe_actions(status, fallback=["status_full"]),
         evidence_refs=_base_refs(state),
     ), provider_warnings)
+
+
+def _load_explanation_inputs(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+    *,
+    status_projection: AgentStatusProjection | None,
+) -> _ExplanationInputs | None:
+    if status_projection is not None:
+        if status_projection.state != state or status_projection.plan != plan:
+            raise ValueError("Explain 投影与 Agent State/Plan 身份不一致。")
+        return _ExplanationInputs(
+            status=status_projection.payload,
+            sessions=status_projection.provider_interactions,
+            provider_warnings=status_projection.provider_warnings,
+            checkpoint=status_projection.checkpoint,
+            decision=status_projection.decision,
+            decision_issue=status_projection.decision_issue,
+        )
+    try:
+        status = build_agent_status_payload(run_dir, state, plan)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    sessions, provider_warnings = provider_interaction_projection(run_dir, state)
+    checkpoint, checkpoint_issue = load_status_checkpoint_for_display(
+        run_dir,
+        state,
+    )
+    decision, decision_issue = load_status_decision_for_display(
+        run_dir,
+        checkpoint,
+    )
+    return _ExplanationInputs(
+        status=status,
+        sessions=tuple(sessions),
+        provider_warnings=tuple(provider_warnings),
+        checkpoint=checkpoint,
+        decision=decision,
+        decision_issue=(
+            decision_issue
+            or (
+                checkpoint_issue
+                if state.latest_checkpoint_id is not None
+                else None
+            )
+        ),
+    )
+
+
+def _unverified_projection_explanation(state: AgentState) -> AgentExplanation:
+    return _explanation(
+        state,
+        phase="needs_human",
+        outcome="attention_required",
+        reason_code="evidence.status_projection_unverified",
+        source="evidence",
+        actor="当前证据投影",
+        reason="当前状态证据无法安全投影。",
+        facts=[f"持久化阶段为 {state.phase}"],
+        unknowns=["当前 Workspace 与运行 Artifact 是否仍属于同一可信现场"],
+        safe_actions=["status_full", "inspect_artifacts", "human"],
+        evidence_refs=_base_refs(state),
+    )
 
 
 def _active_execution_explanation(
@@ -404,54 +429,6 @@ def _checkpoint_explanation(
         safe_actions=_safe_actions(status, fallback=list(checkpoint.pending_actions)),
         evidence_refs=_checkpoint_refs(state, checkpoint),
     )
-
-
-def _checkpoint_decision(
-    run_dir: Path, state: AgentState
-) -> tuple[AgentCheckpoint | None, AgentDecision | None, str | None]:
-    if state.latest_checkpoint_id is None:
-        return None, None, None
-    checkpoint_ref = f"checkpoints/{state.latest_checkpoint_id}.json"
-    try:
-        checkpoint = load_agent_checkpoint(run_dir / checkpoint_ref)
-    except AgentArtifactError:
-        return None, None, "最近 Checkpoint 无法验证。"
-    if (
-        checkpoint.run_id != state.run_id
-        or checkpoint.checkpoint_id != state.latest_checkpoint_id
-        or checkpoint.current_work_item != state.current_work_item
-    ):
-        return None, None, "最近 Checkpoint 与 Agent State 绑定不一致。"
-
-    decision_refs = [
-        ref for ref in checkpoint.evidence_refs if ref.startswith("decisions/")
-    ]
-    if not decision_refs:
-        return checkpoint, None, None
-    if len(decision_refs) != 1:
-        return checkpoint, None, "最近 Checkpoint 无法唯一定位 Decision。"
-    decision_ref = decision_refs[0]
-    try:
-        root = run_dir.resolve(strict=True)
-        path = (root / decision_ref).resolve(strict=True)
-    except OSError:
-        return checkpoint, None, "最近 Decision 不存在或无法读取。"
-    if not path.is_relative_to(root / "decisions"):
-        return checkpoint, None, "最近 Decision 引用越过允许目录。"
-    try:
-        decision = AgentDecision.model_validate_json(
-            path.read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, ValidationError):
-        return checkpoint, None, "最近 Decision 无法验证。"
-    observation_ref = f"observations/{decision.observation_id}.json"
-    if (
-        path.name != f"{decision.decision_id}.json"
-        or observation_ref not in checkpoint.evidence_refs
-        or decision.selected_action not in checkpoint.pending_actions
-    ):
-        return checkpoint, None, "最近 Decision 与 Checkpoint 的身份或动作绑定不一致。"
-    return checkpoint, decision, None
 
 
 def _safe_actions(status: dict[str, object], *, fallback: list[str]) -> list[str]:

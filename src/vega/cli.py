@@ -7,12 +7,14 @@ from pathlib import Path
 import typer
 
 from . import __version__
-from .agent_cli_status import (
+from .agent_cli_snapshot import (
     build_agent_cli_snapshot,
+    resolve_agent_cli_run,
+)
+from .agent_cli_status import (
     explanation_json_payload,
     render_agent_explanation,
     render_status_snapshot,
-    resolve_agent_cli_run,
 )
 from .agent_run_selection import ChangeRunSelectionError
 from .cli_support import require_repo_directory

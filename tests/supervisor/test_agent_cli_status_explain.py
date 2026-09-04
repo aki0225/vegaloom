@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-import vega.agent_cli_status as cli_status_module
+import vega.agent_cli_snapshot as cli_snapshot_module
+import vega.agent_status_card as status_card_module
+from vega.agent_cli_snapshot import (
+    build_agent_cli_snapshot,
+    resolve_agent_cli_run,
+)
+from vega.agent_contract import AgentCheckpoint, canonical_digest
 from vega.agent_persistence import load_agent_state, save_agent_state
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_runtime_logic import update_state
@@ -116,7 +122,7 @@ def test_status_snapshot_retries_once_then_fails_closed_on_continuous_change(
         goal="修复状态竞态",
     )
     monkeypatch.chdir(repo)
-    original = cli_status_module.build_agent_explanation
+    original = cli_snapshot_module.build_agent_explanation
     calls = 0
 
     def mutate_after_explanation(*args, **kwargs):
@@ -136,7 +142,7 @@ def test_status_snapshot_retries_once_then_fails_closed_on_continuous_change(
         return result
 
     monkeypatch.setattr(
-        cli_status_module,
+        cli_snapshot_module,
         "build_agent_explanation",
         mutate_after_explanation,
     )
@@ -171,7 +177,7 @@ def test_status_snapshot_binds_provider_session_revision(
         ProviderSessionState(run_id=run.run_dir.name),
     )
     monkeypatch.chdir(repo)
-    original = cli_status_module.build_agent_explanation
+    original = cli_snapshot_module.build_agent_explanation
     calls = 0
 
     def mutate_after_explanation(*args, **kwargs):
@@ -186,7 +192,7 @@ def test_status_snapshot_binds_provider_session_revision(
         return result
 
     monkeypatch.setattr(
-        cli_status_module,
+        cli_snapshot_module,
         "build_agent_explanation",
         mutate_after_explanation,
     )
@@ -199,6 +205,107 @@ def test_status_snapshot_binds_provider_session_revision(
         assert "# Vega Status" in result.output
     else:
         assert "状态快照构建期间持续变化" in result.output
+
+
+def test_status_snapshot_reuses_one_live_child_stage_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    run = SupervisorAgentRuntime(repo).start_planning(
+        repo,
+        goal="验证同一状态快照",
+    )
+    stages = iter(["verify", "review"])
+    calls = 0
+
+    def next_stage(*_args, **_kwargs) -> str:
+        nonlocal calls
+        calls += 1
+        return next(stages)
+
+    monkeypatch.setattr(
+        status_card_module,
+        "read_live_child_stage",
+        next_stage,
+    )
+
+    snapshot = build_agent_cli_snapshot(
+        resolve_agent_cli_run(repo, run.run_dir.name),
+        include_full=True,
+    )
+
+    assert calls == 1
+    assert snapshot.status["live_child_stage"] == "verify"
+    assert snapshot.full_status is not None
+    assert "Core 子流程：`verify`" in snapshot.full_status
+    assert "Core 子流程：`review`" not in snapshot.full_status
+
+
+def test_status_snapshot_does_not_follow_unverified_decision_traversal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    run = SupervisorAgentRuntime(repo).start_planning(
+        repo,
+        goal="验证 Decision 引用边界",
+    )
+    state_path = run.run_dir / "agent-state.json"
+    state = load_agent_state(state_path)
+    checkpoint = AgentCheckpoint(
+        checkpoint_id="checkpoint-escape",
+        run_id=state.run_id,
+        state_version=state.state_version + 1,
+        reason="检查损坏引用",
+        status="uncertain",
+        phase="planning",
+        workspace_fingerprint=state.workspace_fingerprint,
+    )
+    data = checkpoint.model_dump(mode="json")
+    data["evidence_refs"] = ["decisions/../../outside.json"]
+    checkpoint_path = run.run_dir / "checkpoints" / "checkpoint-escape.json"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_path.write_text(
+        json.dumps(
+            {
+                "kind": "agent_checkpoint",
+                "data": data,
+                "digest": canonical_digest(data),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    save_agent_state(
+        state_path,
+        update_state(
+            state,
+            state_version=state.state_version + 1,
+            latest_checkpoint_id=checkpoint.checkpoint_id,
+        ),
+    )
+    outside = run.run_dir.parent / "outside.json"
+    outside.write_text('{"secret":"do-not-read"}\n', encoding="utf-8")
+    original_open = Path.open
+
+    def guarded_open(path: Path, *args, **kwargs):
+        if path.resolve(strict=False) == outside.resolve(strict=True):
+            pytest.fail("状态快照读取了越界 Decision")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", guarded_open)
+
+    snapshot = build_agent_cli_snapshot(
+        resolve_agent_cli_run(repo, run.run_dir.name),
+    )
+
+    assert snapshot.status["agent_phase"] == "needs_human"
+    assert snapshot.explanation is not None
+    assert snapshot.explanation.block_category == "evidence"
 
 
 def _repo(path: Path) -> Path:
