@@ -114,7 +114,7 @@ class SupervisorAgentVerificationRetry:
         self,
         run: str,
         *,
-        retry_reason: VerificationRetryReason,
+        retry_reason: VerificationRetryReason = "verification_failure",
     ) -> tuple[PreparedVerificationRetry, str, AgentRun]:
         run_dir = resolve_run_dir(self.workspace, run)
         with RunMutationLock.acquire(run_dir, "agent.retry-verification"):
@@ -335,13 +335,18 @@ class SupervisorAgentVerificationRetry:
             reviewer_retry_attempt=prepared.reviewer_retry_attempt,
         )
         if observation.all_work_items_completed:
+            attempt_number = (
+                prepared.child_state.current_iteration
+                if prepared.retry_reason == "reviewer_timeout"
+                else 2
+            )
             observation = provider_preparation.review_final_candidate(
                 self.workspace,
                 prepared.run_dir,
                 observation,
                 load_project_config(prepared.repo),
                 persistent_session=self.persistent_sessions,
-                attempt_number=2,
+                attempt_number=attempt_number,
                 timeout_seconds=900,
                 progress_reporter=self.progress_reporter,
                 event_reporter=self._event,

@@ -145,7 +145,7 @@ def test_timeout_retries_once(
     assert result.state.phase == "completed"
     assert result.state.terminal_status == "ready_to_commit"
     assert worker.calls == 1
-    assert reviewer.calls == 3
+    assert reviewer.calls == 2
     trace = read_agent_trace(result.run_dir / "trace.jsonl")
     retry_events = [
         item for item in trace if item["event"] == "verification_retry_committed"

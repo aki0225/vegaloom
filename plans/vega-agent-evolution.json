@@ -609,7 +609,7 @@
     {
       "id": "UX-02",
       "title": "增加日常变更入口",
-      "summary": "用 vega change 驾驶现有 Planning、批准、Provider 和 Finish 流程，减少复制 Run ID、切换命令和另开终端响应权限请求的操作。",
+      "summary": "用 vega change 驾驶现有 Planning、批准、Provider 和 Finish 流程，减少复制 Run ID 和手工选择下一条推进命令的操作。",
       "depends_on": [
         "UX-01"
       ],
@@ -617,7 +617,7 @@
         "vega change 可以创建新任务或继续当前仓库唯一未完成的 ChangeRun，不新增 Runtime、核心 phase 或成功语义",
         "人工批准在当前 TTY 显示合同摘要并默认拒绝，bounded 只在显式选择且仓库策略允许时自动继续",
         "JSON 和非 TTY 模式不读取 stdin，在需要授权时返回结构化边界结果",
-        "Codex 的安全命令和文件请求可以在同一终端响应，复杂、敏感或无法分类的请求继续 fail-closed",
+        "Provider 请求在同一终端及时显示；协调状态缺少原始命令、路径或权限上下文时禁止简化批准，并明确转入高级或原生会话处理",
         "没有本机 Run 时可以从唯一有效 Task Card 恢复，多个 Task Card 时拒绝猜测",
         "普通路径不再要求用户复制 Run ID 或手工选择下一条推进命令"
       ],
