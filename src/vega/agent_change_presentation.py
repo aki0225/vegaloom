@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 from .agent_change_contract import ExecutionWorkItem
 from .agent_change_run import load_change_run_context
@@ -21,6 +22,35 @@ _POSIX_ABSOLUTE_PATH = re.compile(
     r"(?:/[^/\s`\"'<>|,;，；、。!?！？)\]}]+)*",
     flags=re.IGNORECASE,
 )
+
+
+ChangeOutcome = Literal["completed", "attention_required"]
+
+
+@dataclass(frozen=True)
+class ChangeDriverResult:
+    """`vega change` 的稳定结果；不创造新的运行状态或成功语义。"""
+
+    run: AgentRun | None
+    outcome: ChangeOutcome
+    reason_code: str
+    message: str
+    safe_actions: tuple[str, ...] = ()
+
+    @property
+    def exit_code(self) -> int:
+        return 0 if self.outcome == "completed" else 2
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "run_id": self.run.run_dir.name if self.run is not None else None,
+            "phase": self.run.state.phase if self.run is not None else None,
+            "outcome": self.outcome,
+            "reason_code": self.reason_code,
+            "message": self.message,
+            "safe_actions": list(self.safe_actions),
+        }
 
 
 @dataclass(frozen=True)

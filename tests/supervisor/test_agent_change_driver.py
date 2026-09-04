@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 import vega.agent_change_cli as change_cli_module
 import vega.agent_change_driver as driver_module
 import vega.agent_change_execution as execution_module
+import vega.agent_change_task_card as task_card_module
 from vega.agent_change_contract import (
     ChangeAuthorityEnvelope,
     ChangeContract,
@@ -559,6 +560,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
     assert result.reason_code == "provider.interaction_requires_advanced_response"
     assert result.run is not None
+    assert result.safe_actions == ("status", "explain", "recover", "takeover")
     assert load_provider_sessions(result.run.run_dir).interactions[0].status == "closed"
     assert [update.status for update in updates] == ["attention"]
     visible = repr([result.message, updates, events])
@@ -693,7 +695,7 @@ def test_change_implicit_task_card_requires_confirmation_before_resume(
     task.parent.mkdir(parents=True)
     task.write_text("测试占位\n", encoding="utf-8")
     monkeypatch.setattr(
-        driver_module,
+        task_card_module,
         "discover_handoff_task_cards",
         lambda _: [task],
     )

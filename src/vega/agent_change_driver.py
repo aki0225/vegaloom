@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -10,7 +9,13 @@ from .agent_change_execution import (
     ensure_change_provider_ready,
     run_provider_operation,
 )
+from .agent_change_task_card import (
+    TaskCardSelection,
+    confirm_task_card_selection,
+    select_unique_task_card,
+)
 from .agent_change_presentation import (
+    ChangeDriverResult,
     build_change_approval_snapshot,
     redact_change_message,
 )
@@ -20,54 +25,25 @@ from .agent_planning import PLANNING_PROPOSAL_ARTIFACT
 from .agent_planning_runtime import PlanningProposalRunner
 from .agent_provider import AgentProvider, resolve_run_provider
 from .agent_provider_adapter import SupervisorAgentProviderAdapter
+from .agent_repository_change_lock import (
+    AgentRepositoryGuardBusyError,
+    RepositoryChangeLock,
+)
 from .agent_run import AgentRun
 from .agent_run_selection import (
     ChangeRunSelectionError,
     select_named_repository_change_run,
     select_repository_change_run,
 )
-from .agent_repository_guard import (
-    AgentRepositoryGuardBusyError,
-    RepositoryChangeLock,
-)
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
-from .agent_task_card import discover_handoff_task_cards
 
 
-ChangeOutcome = Literal["completed", "attention_required"]
 ApprovalMode = Literal["human", "bounded"]
 ConfirmCallback = Callable[[str], bool]
 EventReporter = Callable[[str], None]
 InteractionReporter = Callable[[InteractionPumpUpdate], None]
 ProgressReporter = Callable[[str, int], None]
-
-
-@dataclass(frozen=True)
-class ChangeDriverResult:
-    """`vega change` 的稳定结果；不创造新的运行状态或成功语义。"""
-
-    run: AgentRun | None
-    outcome: ChangeOutcome
-    reason_code: str
-    message: str
-    safe_actions: tuple[str, ...] = ()
-
-    @property
-    def exit_code(self) -> int:
-        return 0 if self.outcome == "completed" else 2
-
-    def as_payload(self) -> dict[str, object]:
-        return {
-            "schema_version": 1,
-            "run_id": self.run.run_dir.name if self.run is not None else None,
-            "phase": self.run.state.phase if self.run is not None else None,
-            "outcome": self.outcome,
-            "reason_code": self.reason_code,
-            "message": self.message,
-            "safe_actions": list(self.safe_actions),
-        }
-
 
 class AgentChangeDriver:
     """把已有 ChangeRun 阶段串成日常主路径，不接管 Core 裁决。"""
@@ -373,7 +349,7 @@ class AgentChangeDriver:
             boundary.run,
             boundary.update.reason_code or "provider.interaction_required",
             message,
-            ("status", "explain", "recover", "takeover", "change <TEXT>"),
+            ("status", "explain", "recover", "takeover"),
         )
 
     def _active_execution(
@@ -407,36 +383,26 @@ class AgentChangeDriver:
         )
 
     def _resume_implicit_task_card(self) -> ChangeDriverResult:
-        cards = discover_handoff_task_cards(self.repo)
-        if not cards:
-            return self._attention(
-                None,
-                "change.no_active_run",
-                "当前仓库没有未完成 ChangeRun，也没有可恢复的 Task Card。",
-                ("change <TEXT>", "start"),
-            )
-        if len(cards) > 1:
-            choices = "、".join(
-                path.relative_to(self.repo).as_posix() for path in cards
-            )
-            return self._attention(
-                None,
-                "handoff.multiple_task_cards",
-                f"当前分支有多个可恢复 Task Card，拒绝猜测：{choices}",
-                ("change --task <path>",),
-            )
-        task = cards[0]
-        relative = task.relative_to(self.repo).as_posix()
+        selection = select_unique_task_card(self.repo)
+        if not selection.selected:
+            return self._task_card_attention(selection)
+        assert selection.task is not None
+        assert selection.relative_path is not None
         if (
             not self.interactive
             or self.confirm is None
-            or not self.confirm(f"从 Task Card 恢复 `{relative}`？")
+            or not self.confirm(
+                f"从 Task Card 恢复 `{selection.relative_path}`？"
+            )
         ):
             return self._attention(
                 None,
                 "handoff.confirmation_required",
-                f"检测到可恢复 Task Card：{relative}；确认后再创建本机 ChangeRun。",
-                (f"change --task {relative}",),
+                (
+                    f"检测到可恢复 Task Card：{selection.relative_path}；"
+                    "确认后再创建本机 ChangeRun。"
+                ),
+                (f"change --task {selection.relative_path}",),
             )
         with RepositoryChangeLock.acquire(self.repo):
             active = self._implicit_active_run()
@@ -449,40 +415,26 @@ class AgentChangeDriver:
                     "当前仓库已有未完成 ChangeRun，拒绝恢复第二个 Writer。",
                     ("change", "status", "explain"),
                 )
-            current_cards = discover_handoff_task_cards(self.repo)
-            if not current_cards:
-                return self._attention(
-                    None,
-                    "change.no_active_run",
-                    "当前仓库没有未完成 ChangeRun，也没有可恢复的 Task Card。",
-                    ("change <TEXT>", "start"),
-                )
-            if len(current_cards) > 1:
-                choices = "、".join(
-                    path.relative_to(self.repo).as_posix()
-                    for path in current_cards
-                )
-                return self._attention(
-                    None,
-                    "handoff.multiple_task_cards",
-                    f"当前分支有多个可恢复 Task Card，拒绝猜测：{choices}",
-                    ("change --task <path>",),
-                )
-            current_task = current_cards[0]
-            if current_task.resolve() != task.resolve():
-                current_relative = current_task.relative_to(self.repo).as_posix()
-                return self._attention(
-                    None,
-                    "handoff.confirmation_required",
-                    (
-                        f"可恢复 Task Card 已变化：{current_relative}；"
-                        "请重新确认后再创建本机 ChangeRun。"
-                    ),
-                    (f"change --task {current_relative}",),
-                )
-            restored = self.runtime.resume_task_card(self.repo, current_task)
+            current = confirm_task_card_selection(self.repo, selection)
+            if not current.selected:
+                return self._task_card_attention(current)
+            assert current.task is not None
+            restored = self.runtime.resume_task_card(self.repo, current.task)
         self._event(f"已从 Task Card 恢复：{restored.run_dir.name}")
         return self._drive(restored)
+
+    def _task_card_attention(
+        self,
+        selection: TaskCardSelection,
+    ) -> ChangeDriverResult:
+        assert selection.reason_code is not None
+        assert selection.message is not None
+        return self._attention(
+            None,
+            selection.reason_code,
+            selection.message,
+            selection.safe_actions,
+        )
 
     def _explicit_run(self, run: str) -> AgentRun:
         selected = select_named_repository_change_run(self.repo, run)

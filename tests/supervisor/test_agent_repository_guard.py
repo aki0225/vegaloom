@@ -10,10 +10,12 @@ from pathlib import Path
 import pytest
 
 from vega import agent_repository_guard
-from vega.agent_repository_guard import (
+from vega.agent_repository_change_lock import (
     AgentRepositoryGuardBusyError,
-    AgentRepositoryGuardError,
     RepositoryChangeLock,
+)
+from vega.agent_repository_guard import (
+    AgentRepositoryGuardError,
     acquire_writer_claim,
     mark_writer_claim_releasing,
 )
@@ -33,7 +35,7 @@ def test_repository_change_lock_fails_fast_across_processes(
     script = (
         "import sys,time\n"
         "from pathlib import Path\n"
-        "from vega.agent_repository_guard import RepositoryChangeLock\n"
+        "from vega.agent_repository_change_lock import RepositoryChangeLock\n"
         "repo,ready,release=map(Path,sys.argv[1:4])\n"
         "with RepositoryChangeLock.acquire(repo):\n"
         "    ready.write_text('ready',encoding='utf-8')\n"
