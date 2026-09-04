@@ -559,7 +559,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
     assert result.reason_code == "provider.interaction_requires_advanced_response"
     assert result.run is not None
-    assert load_provider_sessions(result.run.run_dir).interactions[0].status == "pending"
+    assert load_provider_sessions(result.run.run_dir).interactions[0].status == "closed"
     assert [update.status for update in updates] == ["attention"]
     visible = repr([result.message, updates, events])
     assert fake_path not in visible

@@ -168,22 +168,23 @@ def _request_stop(
     interaction_id: str | None = None,
 ) -> bool:
     safe_reason = redact_change_message(reason)
+    stop_confirmed = True
     try:
         SupervisorAgentRecovery(workspace).stop(run, reason=safe_reason)
     except (FileNotFoundError, OSError, ValueError) as exc:
+        stop_confirmed = False
         if event_reporter is not None:
             event_reporter(redact_change_message(f"停止请求未确认：{exc}"))
-        return False
     try:
         close_pending_interactions(
             resolve_run_dir(workspace, run),
             interaction_id=interaction_id,
         )
     except (OSError, ValueError) as exc:
+        stop_confirmed = False
         if event_reporter is not None:
             event_reporter(redact_change_message(f"待响应请求关闭未确认：{exc}"))
-        return False
-    return True
+    return stop_confirmed
 
 
 def _boundary(
