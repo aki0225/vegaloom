@@ -14,6 +14,7 @@ from vega.agent_contract import (
 )
 from vega.agent_explain import build_agent_explanation
 from vega.agent_persistence import save_agent_checkpoint
+from vega.agent_status_sources import load_status_decision_for_display
 from vega.provider_session import (
     PendingInteraction,
     ProviderSessionHandle,
@@ -193,6 +194,45 @@ def test_invalid_checkpoint_decision_fails_closed(
     assert result.reason_code == "evidence.decision_unverified"
     assert result.block_category == "evidence"
     assert result.outcome == "attention_required"
+
+
+def test_completed_checkpoint_accepts_bound_finalize_decision(
+    tmp_path: Path,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    decision = AgentDecision(
+        decision_id="decision-finalize",
+        observation_id="observation-finalize",
+        allowed_actions=["finalize"],
+        selected_action="finalize",
+        reason_code="workflow.all_work_items_completed",
+        reason="全部 Work Item 与门禁已完成",
+        source="deterministic",
+    )
+    checkpoint = AgentCheckpoint(
+        checkpoint_id="checkpoint-completed",
+        run_id=run_dir.name,
+        state_version=1,
+        reason="已采用可信 Core Finish ready_to_commit 终态",
+        status="safe",
+        phase="completed",
+        current_work_item="W1",
+        workspace_fingerprint="0" * 64,
+        pending_actions=[],
+        evidence_refs=[
+            "observations/observation-finalize.json",
+            "decisions/decision-finalize.json",
+        ],
+    )
+
+    loaded, issue = load_status_decision_for_display(
+        run_dir,
+        checkpoint,
+        decisions=(decision,),
+    )
+
+    assert loaded == decision
+    assert issue is None
 
 
 def _write_checkpoint_decision(

@@ -67,10 +67,24 @@ def load_status_decision_for_display(
     if (
         decision_ref != f"decisions/{decision.decision_id}.json"
         or observation_ref not in checkpoint.evidence_refs
-        or decision.selected_action not in checkpoint.pending_actions
+        or not _decision_action_matches_checkpoint(checkpoint, decision)
     ):
         return None, "最近 Decision 与 Checkpoint 的身份或动作绑定不一致。"
     return decision, None
+
+
+def _decision_action_matches_checkpoint(
+    checkpoint: AgentCheckpoint,
+    decision: AgentDecision,
+) -> bool:
+    if decision.selected_action in checkpoint.pending_actions:
+        return True
+    return (
+        checkpoint.phase == "completed"
+        and checkpoint.status == "safe"
+        and not checkpoint.pending_actions
+        and decision.selected_action == "finalize"
+    )
 
 
 def capture_live_workspace(
