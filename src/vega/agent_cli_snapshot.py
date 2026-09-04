@@ -20,6 +20,7 @@ from .agent_status_projection import (
     read_status_card,
 )
 from .run_status import run_status_payload
+from .run_utils import resolve_run_dir
 
 
 _PHASE_STATUS = {
@@ -65,10 +66,14 @@ def resolve_agent_cli_run(
     """解析显式 Run，或按当前 Git 仓库选择唯一 ChangeRun。"""
 
     if run is not None:
-        selected = select_named_repository_change_run(location, run)
+        try:
+            run_dir = resolve_run_dir(location, run)
+        except FileNotFoundError:
+            selected = select_named_repository_change_run(location, run)
+            run_dir = selected.run_dir
         return AgentCliRun(
-            workspace=selected.run_dir.parent.parent,
-            run_dir=selected.run_dir,
+            workspace=run_dir.parent.parent,
+            run_dir=run_dir,
             selection_source="explicit",
         )
     selected = select_repository_change_run(location)

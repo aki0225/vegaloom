@@ -6,8 +6,8 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import agent_explain_codes as explain_codes
 from .agent_contract import AgentCheckpoint, AgentDecision, AgentPhase, AgentPlan, AgentState
-from .agent_explain_codes import BlockCategory, block_category_for_reason_code
 from .agent_planning_handoff import can_offer_handoff
 from .agent_provider_explain import (
     provider_interaction_projection,
@@ -32,13 +32,13 @@ class AgentExplanation(BaseModel):
     phase: AgentPhase
     outcome: ExplanationOutcome
     reason_code: str
-    block_category: BlockCategory | None = None
+    block_category: explain_codes.BlockCategory | None = None
     source: ExplanationSource
     actor: str
     reason: str
     facts: list[str] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
-    safe_actions: list[str] = Field(default_factory=list)
+    safe_actions: list[explain_codes.PublicActionId] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
 
 
@@ -106,7 +106,7 @@ def build_agent_explanation(
                 f"证据健康状态为 {status.get('evidence_health')}",
             ],
             unknowns=["原状态是否仍能由当前 Workspace 和 Artifact 重新证明"],
-            safe_actions=_safe_actions(status, fallback=["human"]),
+            safe_actions=_safe_actions(state, status, fallback=["human"]),
             evidence_refs=_base_refs(state),
         )
 
@@ -125,12 +125,13 @@ def build_agent_explanation(
                 else f"存在 {len(sessions)} 个待响应 Provider 请求；最早请求：{first.summary}"
             ),
             facts=[
+                f"请求 ID 为 {first.interaction_id}",
                 f"请求角色为 {first.role_key}",
                 f"请求类型为 {first.method}",
                 f"请求状态为 {first.status}",
             ],
             unknowns=["该请求尚未由人工接受或拒绝"],
-            safe_actions=["respond", "takeover", "stop"],
+            safe_actions=explain_codes.provider_interaction_actions(first.method),
             evidence_refs=[PROVIDER_SESSIONS_ARTIFACT],
         ), provider_warnings)
 
@@ -176,7 +177,7 @@ def build_agent_explanation(
         reason=str(status.get("next_step") or "当前运行缺少更具体的解释材料。"),
         facts=[f"当前阶段为 {state.phase}"],
         unknowns=["旧版本运行没有稳定 reason_code"],
-        safe_actions=_safe_actions(status, fallback=["status_full"]),
+        safe_actions=_safe_actions(state, status, fallback=["status_full"]),
         evidence_refs=_base_refs(state),
     )
     return with_provider_warnings(fallback, provider_warnings)
@@ -264,7 +265,7 @@ def _active_execution_explanation(
     elif state.phase == "finalizing":
         code = "execution.finalization_active"
         reason = "Vega 正在采用可信 Core Finish 生成最终结论。"
-        safe_actions = ["status", "stop"]
+        safe_actions = ["run", "stop"]
     else:
         return None
     facts = [f"当前阶段为 {state.phase}"]
@@ -366,7 +367,7 @@ def _phase_explanation(
                 else "当前任务仍需完成只读调查和合同编译。"
             ),
             facts=[f"Plan revision 为 {state.plan_revision}"],
-            safe_actions=_safe_actions(status, fallback=["run", "stop"]),
+            safe_actions=["run", "stop"],
             evidence_refs=_checkpoint_refs(state, checkpoint),
         )
     return None
@@ -379,7 +380,7 @@ def _decision_explanation(
     decision: AgentDecision,
 ) -> AgentExplanation:
     reason_code = decision.reason_code or "decision.legacy"
-    category = block_category_for_reason_code(reason_code)
+    category = explain_codes.block_category_for_reason_code(reason_code)
     outcome: ExplanationOutcome = (
         "attention_required"
         if decision.selected_action in {"human", "replan"}
@@ -416,7 +417,7 @@ def _decision_explanation(
             f"绑定 Checkpoint 为 {checkpoint.checkpoint_id}",
         ],
         unknowns=unknowns,
-        safe_actions=_safe_actions(status, fallback=list(decision.allowed_actions)),
+        safe_actions=_safe_actions(state, status, fallback=list(decision.allowed_actions)),
         evidence_refs=_checkpoint_refs(state, checkpoint),
     )
 
@@ -443,16 +444,16 @@ def _checkpoint_explanation(
             f"Checkpoint 状态为 {checkpoint.status}",
             f"外部副作用为 {checkpoint.external_side_effects}",
         ],
-        safe_actions=_safe_actions(status, fallback=list(checkpoint.pending_actions)),
+        safe_actions=_safe_actions(state, status, fallback=list(checkpoint.pending_actions)),
         evidence_refs=_checkpoint_refs(state, checkpoint),
     )
 
 
-def _safe_actions(status: dict[str, object], *, fallback: list[str]) -> list[str]:
+def _safe_actions(state: AgentState, status: dict[str, object], *, fallback: list[str]) -> list[str]:
     actions = status.get("allowed_actions")
-    if isinstance(actions, list) and all(isinstance(item, str) for item in actions):
-        return list(dict.fromkeys(actions)) or fallback
-    return fallback
+    valid = actions if isinstance(actions, list) and all(isinstance(item, str) for item in actions) else []
+    replan = "run.continue" if state.phase == "planning" else "plan.revise"
+    return explain_codes.public_action_ids(valid, fallback=fallback, replan_action=replan)
 
 
 def _base_refs(state: AgentState) -> list[str]:
@@ -488,12 +489,12 @@ def _explanation(
         phase=phase,
         outcome=outcome,
         reason_code=reason_code,
-        block_category=block_category_for_reason_code(reason_code),
+        block_category=explain_codes.block_category_for_reason_code(reason_code),
         source=source,
         actor=actor,
         reason=reason,
         facts=list(dict.fromkeys(facts or [])),
         unknowns=list(dict.fromkeys(unknowns or [])),
-        safe_actions=list(dict.fromkeys(safe_actions or [])),
+        safe_actions=explain_codes.public_action_ids(safe_actions or []),
         evidence_refs=list(dict.fromkeys(evidence_refs or [])),
     )

@@ -13,6 +13,7 @@ from vega.agent_contract import (
     AgentWorkItem,
 )
 from vega.agent_explain import build_agent_explanation
+from vega.agent_explain_codes import public_action_ids
 from vega.agent_persistence import save_agent_checkpoint
 from vega.agent_status_sources import load_status_decision_for_display
 from vega.provider_session import (
@@ -74,6 +75,45 @@ def test_pending_interaction_precedes_active_execution(
     assert result.reason_code == "provider.interaction_required"
     assert result.block_category == "authorization"
     assert result.source == "provider"
+    assert result.safe_actions == [
+        "provider.respond_decision",
+        "provider.takeover",
+        "run.stop",
+    ]
+    assert "请求 ID 为 interaction-001" in result.facts
+
+
+@pytest.mark.parametrize(
+    ("method", "expected_response"),
+    [
+        ("item/permissions/requestApproval", "provider.respond_input"),
+        ("item/unknown/request", None),
+    ],
+)
+def test_provider_interaction_actions_match_request_method(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    expected_response: str | None,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="acting", active=True)
+    save_provider_sessions(
+        run_dir,
+        ProviderSessionState(
+            run_id=run_dir.name,
+            handles={"worker": _provider_handle()},
+            interactions=[_interaction(method=method)],
+        ),
+    )
+    _stub_status(monkeypatch, state)
+
+    actions = build_agent_explanation(run_dir, state, _plan()).safe_actions
+
+    assert actions[-2:] == ["provider.takeover", "run.stop"]
+    assert [item for item in actions if item.startswith("provider.respond")] == (
+        [expected_response] if expected_response is not None else []
+    )
 
 
 def test_active_worker_only_lists_supported_actions(
@@ -87,7 +127,35 @@ def test_active_worker_only_lists_supported_actions(
     result = build_agent_explanation(run_dir, state, _plan())
 
     assert result.reason_code == "execution.worker_active"
-    assert result.safe_actions == ["status", "steer", "stop"]
+    assert result.safe_actions == [
+        "status.view",
+        "provider.steer",
+        "run.stop",
+    ]
+
+
+def test_finalizing_offers_idempotent_continue(tmp_path: Path, monkeypatch) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="finalizing")
+    _stub_status(monkeypatch, state, allowed_actions=["finalize"])
+
+    result = build_agent_explanation(run_dir, state, _plan())
+
+    assert result.safe_actions == ["run.continue", "run.stop"]
+
+
+def test_awaiting_approval_keeps_explicit_revise(tmp_path: Path, monkeypatch) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="awaiting_approval")
+    _stub_status(monkeypatch, state)
+
+    result = build_agent_explanation(run_dir, state, _plan())
+
+    assert result.safe_actions == [
+        "plan.approve",
+        "plan.revise",
+        "run.stop",
+    ]
 
 
 def test_invalid_provider_state_is_warning_not_core_phase_override(
@@ -178,16 +246,17 @@ def test_checkpoint_reason_is_used_when_no_decision_exists(
         phase="needs_human",
         current_work_item="W1",
         workspace_fingerprint="0" * 64,
-        pending_actions=["human"],
+        pending_actions=["replan", "human"],
     )
     save_agent_checkpoint(run_dir / "checkpoints/checkpoint-001.json", checkpoint)
-    _stub_status(monkeypatch, state, allowed_actions=["human"])
+    _stub_status(monkeypatch, state, allowed_actions=["replan", "human"])
 
     result = build_agent_explanation(run_dir, state, _plan())
 
     assert result.reason_code == "checkpoint.needs_human"
     assert result.source == "checkpoint"
     assert result.reason == checkpoint.reason
+    assert result.safe_actions == ["plan.revise", "human.review"]
 
 
 def test_stopped_explanation_uses_checkpoint_reason(
@@ -215,9 +284,8 @@ def test_stopped_explanation_uses_checkpoint_reason(
     assert result.reason_code == "run.stopped"
     assert result.source == "checkpoint"
     assert result.reason == checkpoint.reason
-    assert "resume" not in result.safe_actions
-    assert "handoff" not in result.safe_actions
-    assert "change" in result.safe_actions
+    assert "handoff.create" not in result.safe_actions
+    assert "change.start" in result.safe_actions
 
 
 def test_stopped_explanation_does_not_offer_duplicate_handoff(
@@ -252,8 +320,22 @@ def test_stopped_explanation_does_not_offer_duplicate_handoff(
 
     result = build_agent_explanation(run_dir, state, _plan())
 
-    assert "handoff" not in result.safe_actions
-    assert "change" in result.safe_actions
+    assert "handoff.create" not in result.safe_actions
+    assert "change.start" in result.safe_actions
+
+
+def test_public_action_ids_hide_internal_route_actions() -> None:
+    assert public_action_ids(
+        ["next", "repair", "finalize", "replan", "human", "unknown"]
+    ) == [
+        "run.continue",
+        "plan.revise",
+        "human.review",
+    ]
+    assert public_action_ids(
+        ["replan", "human"],
+        replan_action="run.continue",
+    ) == ["run.continue", "human.review"]
 
 
 def test_invalid_checkpoint_decision_fails_closed(
@@ -418,12 +500,15 @@ def _plan() -> AgentPlan:
     )
 
 
-def _interaction() -> PendingInteraction:
+def _interaction(
+    *,
+    method: str = "item/commandExecution/requestApproval",
+) -> PendingInteraction:
     return PendingInteraction(
         interaction_id="interaction-001",
         role_key="worker",
         rpc_request_id="rpc-001",
-        method="item/commandExecution/requestApproval",
+        method=method,
         thread_id="thread-001",
         turn_id="turn-001",
         summary="执行项目测试",

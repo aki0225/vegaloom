@@ -134,12 +134,44 @@ def test_status_default_full_and_explain_share_read_only_snapshot(
     assert "原因：当前任务仍需完成只读调查和合同编译。" in compact.output
     assert "# Vega Agent" in full.output
     assert "## 为什么停在这里" in explanation.output
+    assert "## 下一步" in explanation.output
+    assert "## 安全动作" not in explanation.output
+    assert f"vega change --run {run.run_dir.name}" in explanation.output
+    assert f"Run Workspace `{repo}`" in explanation.output
     assert "原因代码：`planning.required`" in explanation.output
     json_payload = json.loads(explanation_json.output)
     assert json_payload["selected_run"]["run_id"] == run.run_dir.name
     assert json_payload["explanation"]["reason_code"] == "planning.required"
+    assert json_payload["explanation"]["safe_actions"] == [
+        "run.continue",
+        "run.stop",
+    ]
     assert "status" not in json_payload
     assert _artifact_snapshot(run.run_dir) == before
+
+
+def test_explain_uses_run_command_for_separate_workspace(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    repo = _repo(tmp_path / "repo")
+    run = SupervisorAgentRuntime(workspace).start_planning(
+        repo,
+        goal="验证独立 Workspace 的继续命令",
+    )
+    monkeypatch.chdir(workspace)
+
+    result = CliRunner().invoke(
+        app,
+        ["explain", "--run", run.run_dir.name],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert f"Run Workspace `{workspace}`" in result.output
+    assert f"vega run --run {run.run_dir.name}" in result.output
+    assert f"vega change --run {run.run_dir.name}" not in result.output
 
 
 @pytest.mark.parametrize(

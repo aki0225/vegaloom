@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from .agent_cli_snapshot import AgentCliSnapshot
-from .agent_explain import AgentExplanation
+from .agent_explain_codes import PublicActionId
+from .agent_repository_binding import load_run_metadata
 from .run_status import render_run_status_payload
 
 
@@ -31,6 +34,62 @@ _OUTCOME_LABELS = {
     "stopped": "已停止",
     "unknown": "无法确认",
 }
+_ACTION_TEXT: dict[PublicActionId, str] = {
+    "change.start": (
+        "在源仓库 `{source_repo}` 目录执行 "
+        "`vega change \"<新的变更目标>\"` 创建 ChangeRun。"
+    ),
+    "diff.inspect": "人工检查 Candidate Diff；以完整状态卡中的 Candidate SHA 为准。",
+    "evidence.inspect": "人工检查下方“证据引用”列出的 Artifact。",
+    "handoff.create": (
+        "在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega handoff --run {run_id} --reason \"<交接原因>\"` 生成交接材料。"
+    ),
+    "human.review": "人工检查当前状态、证据和风险，再决定是否调整授权边界或停止。",
+    "plan.approve": (
+        "在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega approve --run {run_id} --actor human` 批准当前合同。"
+    ),
+    "plan.revise": (
+        "准备修订后的合同和计划，再在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega revise --run {run_id} --contract <contract.json> "
+        "--execution-plan <execution-plan.json>`。"
+    ),
+    "provider.respond_decision": (
+        "人工确认请求内容后，在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega respond --run {run_id} --interaction {interaction_id} "
+        "--decision <accept|decline>`。"
+    ),
+    "provider.respond_input": (
+        "准备不含敏感信息的响应 JSON 后，在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega respond --run {run_id} --interaction {interaction_id} "
+        "--input <response.json>`。"
+    ),
+    "provider.steer": (
+        "在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega steer --run {run_id} --role <worker|reviewer> --text \"<补充指令>\"`。"
+    ),
+    "provider.takeover": (
+        "在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega takeover --run {run_id} --role <worker|reviewer>` 接管会话。"
+    ),
+    "run.continue": (
+        "在 Run Workspace `{run_workspace}` 目录执行 `{continue_command}` "
+        "继续当前 ChangeRun。"
+    ),
+    "run.stop": (
+        "在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega stop --run {run_id} --reason \"<停止原因>\"` 停止并保留现场。"
+    ),
+    "status.view": (
+        "在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega status --run {run_id}` 查看当前状态。"
+    ),
+    "status.view_full": (
+        "在 Run Workspace `{run_workspace}` 目录执行 "
+        "`vega status --run {run_id} --full` 查看完整状态卡。"
+    ),
+}
 
 
 def render_status_snapshot(
@@ -45,20 +104,20 @@ def render_status_snapshot(
             raise ValueError("当前 CLI 快照未包含完整状态卡。")
         return snapshot.full_status
     assert snapshot.explanation is not None
-    return render_compact_agent_status(snapshot.status, snapshot.explanation)
+    return render_compact_agent_status(snapshot)
 
 
-def render_compact_agent_status(
-    status: dict[str, object],
-    explanation: AgentExplanation,
-) -> str:
+def render_compact_agent_status(snapshot: AgentCliSnapshot) -> str:
+    status = snapshot.status
+    assert snapshot.explanation is not None
+    explanation = snapshot.explanation
     phase = str(status.get("agent_phase") or "unknown")
     changed_files = _string_list(status.get("changed_files"))
     next_steps = _string_list(status.get("next_steps"))
     next_step = (
         next_steps[0]
         if next_steps
-        else _action_list(explanation.safe_actions)
+        else _action_list(explanation.safe_actions, snapshot)
     )
     lines = [
         "# Vega Status",
@@ -108,9 +167,12 @@ def render_agent_explanation(
         "",
         *_bullet_lines(explanation.unknowns, empty="无。"),
         "",
-        "## 安全动作",
+        "## 下一步",
         "",
-        *_bullet_lines(explanation.safe_actions, empty="暂无自动动作。"),
+        *_bullet_lines(
+            _action_texts(explanation.safe_actions, snapshot),
+            empty="暂无可执行的下一步。",
+        ),
         "",
         "## 证据引用",
         "",
@@ -189,8 +251,55 @@ def _gate(value: object) -> str:
     return _GATE_LABELS.get(normalized, normalized)
 
 
-def _action_list(actions: list[str]) -> str:
-    return "、".join(actions) if actions else "等待人工检查当前状态"
+def _action_list(actions: list[PublicActionId], snapshot: AgentCliSnapshot) -> str:
+    rendered = _action_texts(actions, snapshot)
+    return "；".join(rendered) if rendered else "等待人工检查当前状态"
+
+
+def _action_texts(
+    actions: list[PublicActionId],
+    snapshot: AgentCliSnapshot,
+) -> list[str]:
+    values = _action_values(snapshot)
+    return [_ACTION_TEXT[action].format(**values) for action in actions]
+
+
+def _action_values(snapshot: AgentCliSnapshot) -> dict[str, str]:
+    run_workspace = snapshot.target.workspace.resolve()
+    source_repo = _source_repo(snapshot)
+    interactions = (
+        snapshot.status_projection.provider_interactions
+        if snapshot.status_projection is not None
+        else ()
+    )
+    continue_command = (
+        f"vega change --run {snapshot.target.run_dir.name}"
+        if source_repo == run_workspace
+        else f"vega run --run {snapshot.target.run_dir.name}"
+    )
+    return {
+        "run_id": snapshot.target.run_dir.name,
+        "run_workspace": str(run_workspace),
+        "source_repo": str(source_repo or "<target-repo>"),
+        "interaction_id": (
+            interactions[0].interaction_id if interactions else "<request-id>"
+        ),
+        "continue_command": continue_command,
+    }
+
+
+def _source_repo(snapshot: AgentCliSnapshot) -> Path | None:
+    try:
+        metadata = load_run_metadata(snapshot.target.run_dir)
+    except ValueError:
+        return None
+    change_run = metadata.get("change_run")
+    source = (
+        change_run.get("source_repo_path")
+        if isinstance(change_run, dict)
+        else None
+    )
+    return Path(source).resolve() if isinstance(source, str) and source else None
 
 
 def _string_list(value: object) -> list[str]:
