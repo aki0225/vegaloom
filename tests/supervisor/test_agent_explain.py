@@ -76,6 +76,20 @@ def test_pending_interaction_precedes_active_execution(
     assert result.source == "provider"
 
 
+def test_active_worker_only_lists_supported_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="acting", active=True)
+    _stub_status(monkeypatch, state)
+
+    result = build_agent_explanation(run_dir, state, _plan())
+
+    assert result.reason_code == "execution.worker_active"
+    assert result.safe_actions == ["status", "steer", "stop"]
+
+
 def test_invalid_provider_state_is_warning_not_core_phase_override(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -174,6 +188,72 @@ def test_checkpoint_reason_is_used_when_no_decision_exists(
     assert result.reason_code == "checkpoint.needs_human"
     assert result.source == "checkpoint"
     assert result.reason == checkpoint.reason
+
+
+def test_stopped_explanation_uses_checkpoint_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="stopped", checkpoint_id="checkpoint-001")
+    checkpoint = AgentCheckpoint(
+        checkpoint_id="checkpoint-001",
+        run_id=state.run_id,
+        state_version=state.state_version,
+        reason="用户决定暂不继续这个变更",
+        status="safe",
+        phase="stopped",
+        current_work_item="W1",
+        workspace_fingerprint="0" * 64,
+        pending_actions=[],
+    )
+    save_agent_checkpoint(run_dir / "checkpoints/checkpoint-001.json", checkpoint)
+    _stub_status(monkeypatch, state)
+
+    result = build_agent_explanation(run_dir, state, _plan())
+
+    assert result.reason_code == "run.stopped"
+    assert result.source == "checkpoint"
+    assert result.reason == checkpoint.reason
+    assert "resume" not in result.safe_actions
+    assert "handoff" not in result.safe_actions
+    assert "change" in result.safe_actions
+
+
+def test_stopped_explanation_does_not_offer_duplicate_handoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(
+        phase="stopped",
+        checkpoint_id="checkpoint-001",
+    ).model_copy(update={"handoff_status": "handoff_ready"})
+    checkpoint = AgentCheckpoint(
+        checkpoint_id="checkpoint-001",
+        run_id=state.run_id,
+        state_version=state.state_version,
+        reason="跨机交接已经生成",
+        status="safe",
+        phase="stopped",
+        current_work_item="W1",
+        workspace_fingerprint="0" * 64,
+        pending_actions=[],
+        evidence_refs=["planning-proposal.json", "planning-report.md"],
+    )
+    save_agent_checkpoint(run_dir / "checkpoints/checkpoint-001.json", checkpoint)
+    for name in (
+        "planning-request.json",
+        "planning-proposal.json",
+        "planning-report.md",
+    ):
+        (run_dir / name).write_text("{}\n", encoding="utf-8")
+    _stub_status(monkeypatch, state)
+
+    result = build_agent_explanation(run_dir, state, _plan())
+
+    assert "handoff" not in result.safe_actions
+    assert "change" in result.safe_actions
 
 
 def test_invalid_checkpoint_decision_fails_closed(

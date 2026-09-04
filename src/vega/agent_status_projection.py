@@ -161,7 +161,8 @@ def build_agent_status_projection(
         live_child_checked=True,
         next_step=(
             checkpoint.reason
-            if checkpoint is not None and state.phase in {"ready", "needs_human"}
+            if checkpoint is not None
+            and state.phase in {"planning", "ready", "needs_human"}
             else None
         ),
     )

@@ -21,7 +21,7 @@ Candidate、门禁和人工 Git 边界：
    预算、无外部副作用和执行终态都可重新证明时，使用新的独立 Reviewer Session 自动恢复一次；
    第二次超时、`error`、`stopped`、终止未确认或最终集成审查继续交还人工；
 5. `start`、`approve`、`run` 保留为需要显式控制阶段的高级路径。发布 Tag、GitHub Release、
-   完整 CI、package smoke 和真实 Provider smoke 均待验证。
+   完整 CI 和 package smoke 仍待验证；真实 Codex bounded 与 Claude Code human smoke 已完成。
 
 2026-09-02，AUTONOMY-05 真实验收完成后，曾固定以下顺序；2026-09-04 的候选实现见上文，
 发布事实仍以发布门禁为准：

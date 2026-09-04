@@ -23,7 +23,8 @@
 
 ## 发布
 
-当前发布候选为 `v0.5.0`（Tag、GitHub Release、完整 CI 和真实 Provider smoke 待验证）：
+当前发布候选为 `v0.5.0`（真实 Codex bounded 与 Claude Code human smoke 已完成；完整 CI、
+package smoke、Tag 和 GitHub Release 待验证）：
 
 - [`RELEASE-NOTES-0.5.0.md`](RELEASE-NOTES-0.5.0.md)
 - [`RELEASE-SUMMARY-0.5.0.md`](RELEASE-SUMMARY-0.5.0.md)

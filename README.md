@@ -28,8 +28,8 @@ Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言
 实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。合同内问题可以自动回到
 Worker；越出批准、授权或证据边界时停下来问人。
 
-> 当前最新候选版本：`v0.5.0`；Tag、GitHub Release、完整 CI 和真实 Provider smoke
-> 仍待验证。上一个已发布稳定版本为
+> 当前最新候选版本：`v0.5.0`；真实 Codex bounded 与 Claude Code human smoke 已完成，
+> 完整 CI、package smoke、Tag 和 GitHub Release 仍待验证。上一个已发布稳定版本为
 > [v0.4.0](https://github.com/aki0225/vegaloom/releases/tag/v0.4.0)。
 
 <p align="center">

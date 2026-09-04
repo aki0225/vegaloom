@@ -341,7 +341,19 @@ def test_adapter_serializes_child_creation_before_writer_binding(
         "_execute_worker",
         lambda *args, **kwargs: SimpleNamespace(),
     )
-    monkeypatch.setattr(adapter, "_reconcile_attempt", lambda executed: executed)
+    reconciled = SimpleNamespace(
+        state=SimpleNamespace(
+            run_kind="change",
+            phase="completed",
+            active_candidate_sha=None,
+            allowed_actions=[],
+        )
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_reconcile_attempt",
+        lambda executed: reconciled,
+    )
 
     def invoke() -> str:
         try:

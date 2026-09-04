@@ -64,6 +64,30 @@ def test_status_selects_unique_change_run_from_repository_subdirectory(
     assert "execution" in payload
 
 
+def test_status_selects_explicit_change_run_from_repository_subdirectory(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    run = SupervisorAgentRuntime(repo).start_planning(
+        repo,
+        goal="显式查看指定任务",
+    )
+    subdirectory = repo / "src" / "settings"
+    subdirectory.mkdir(parents=True)
+    monkeypatch.chdir(subdirectory)
+
+    result = CliRunner().invoke(
+        app,
+        ["status", "--run", run.run_dir.name, "--json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["run_id"] == run.run_dir.name
+    assert payload["selected_run"]["selection_source"] == "explicit"
+
+
 def test_status_rejects_multiple_active_change_runs(
     tmp_path: Path,
     monkeypatch,

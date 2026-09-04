@@ -42,6 +42,38 @@ def planning_handoff_checkpoint_refs(
     return []
 
 
+def can_offer_handoff(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+    checkpoint: AgentCheckpoint | None,
+) -> bool:
+    """判断状态展示是否可以把 Handoff 列为安全动作。
+
+    这里只检查当前 State、Checkpoint 和必要 Artifact 的最低前提；真正生成
+    Task Card 时仍会重新校验仓库、Proposal、Workspace 和敏感路径。
+    """
+
+    if (
+        state.handoff_status != "none"
+        or not state.current_work_item
+        or checkpoint is None
+        or checkpoint.run_id != state.run_id
+        or checkpoint.checkpoint_id != state.latest_checkpoint_id
+    ):
+        return False
+    if state.contract_revision is not None:
+        return (
+            state.phase in {"ready", "needs_human", "stopped"}
+            and plan.approval_is_current()
+        )
+    if state.phase not in {"planning", "needs_human", "stopped"}:
+        return False
+    refs = planning_handoff_checkpoint_refs(state, checkpoint)
+    required = [PLANNING_REQUEST_ARTIFACT, *refs]
+    return bool(refs) and all((run_dir / name).is_file() for name in required)
+
+
 def planning_stop_trace_event(state: AgentState) -> str:
     if state.run_kind == "change" and state.contract_revision is None:
         return "planning_stopped"

@@ -4,16 +4,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from .agent_change_execution import (
-    ProviderOperationBoundary,
-    ensure_change_provider_ready,
-    run_provider_operation,
-)
-from .agent_change_task_card import (
-    TaskCardSelection,
-    confirm_task_card_selection,
-    select_unique_task_card,
-)
+from .agent_change_execution import ProviderOperationBoundary, ensure_change_provider_ready
+from .agent_change_execution import run_provider_operation
+from .agent_change_task_card import TaskCardSelection, confirm_task_card_selection
+from .agent_change_task_card import select_unique_task_card
 from .agent_change_presentation import (
     ChangeDriverResult,
     build_change_approval_snapshot,
@@ -22,6 +16,7 @@ from .agent_change_presentation import (
 from .agent_approval_runtime import ApprovalSnapshotChangedError
 from .agent_cli_interaction import InteractionPumpUpdate
 from .agent_planning import PLANNING_PROPOSAL_ARTIFACT
+from .agent_planning_handoff import can_offer_handoff
 from .agent_planning_runtime import PlanningProposalRunner
 from .agent_provider import AgentProvider, resolve_run_provider
 from .agent_provider_adapter import SupervisorAgentProviderAdapter
@@ -37,6 +32,7 @@ from .agent_run_selection import (
 )
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
+from .agent_status_sources import load_status_checkpoint_for_display
 
 
 ApprovalMode = Literal["human", "bounded"]
@@ -375,11 +371,24 @@ class AgentChangeDriver:
     def _stopped(
         self, current: AgentRun, _provider: AgentProvider
     ) -> ChangeDriverResult:
+        checkpoint, _ = load_status_checkpoint_for_display(
+            current.run_dir,
+            current.state,
+        )
+        actions = ["status", "explain"]
+        if can_offer_handoff(
+            current.run_dir,
+            current.state,
+            current.plan,
+            checkpoint,
+        ):
+            actions.append("handoff")
+        actions.append("change <goal>")
         return self._attention(
             current,
             "workflow.stopped",
             "ChangeRun 已停止，现场保持不变。",
-            ("status", "explain", "resume"),
+            tuple(actions),
         )
 
     def _resume_implicit_task_card(self) -> ChangeDriverResult:

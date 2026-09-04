@@ -1,7 +1,8 @@
 # 架构
 
 > 本文描述当前主线架构。`v0.5.0` 是日常入口候选；它在同一 ChangeRun 合同内同时支持
-> Codex 和 Claude Code。Tag、GitHub Release、完整 CI 和真实 Provider smoke 仍待验证。演进计划见
+> Codex 和 Claude Code。真实 Codex bounded 与 Claude Code human smoke 已完成；完整 CI、
+> package smoke、Tag 和 GitHub Release 仍待验证。演进计划见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。
 

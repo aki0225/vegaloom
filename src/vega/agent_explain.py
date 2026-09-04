@@ -8,20 +8,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .agent_contract import AgentCheckpoint, AgentDecision, AgentPhase, AgentPlan, AgentState
 from .agent_explain_codes import BlockCategory, block_category_for_reason_code
+from .agent_planning_handoff import can_offer_handoff
 from .agent_provider_explain import (
     provider_interaction_projection,
     with_provider_warnings,
 )
-from .agent_status_projection import (
-    AgentStatusProjection,
-    build_agent_status_payload,
-)
-from .agent_status_sources import (
-    load_status_checkpoint_for_display,
-    load_status_decision_for_display,
-)
-from .provider_session import PendingInteraction
-from .provider_session import PROVIDER_SESSIONS_ARTIFACT
+from .agent_status_projection import AgentStatusProjection, build_agent_status_payload
+from .agent_status_sources import load_status_checkpoint_for_display
+from .agent_status_sources import load_status_decision_for_display
+from .provider_session import PROVIDER_SESSIONS_ARTIFACT, PendingInteraction
 
 
 ExplanationOutcome = Literal["in_progress", "ready", "attention_required", "completed", "stopped", "unknown"]
@@ -72,10 +67,7 @@ def build_agent_explanation(
     """
 
     inputs = _load_explanation_inputs(
-        run_dir,
-        state,
-        plan,
-        status_projection=status_projection,
+        run_dir, state, plan, status_projection=status_projection
     )
     if inputs is None:
         return _unverified_projection_explanation(state)
@@ -161,7 +153,7 @@ def build_agent_explanation(
             evidence_refs=_base_refs(state),
         ), provider_warnings)
 
-    phase = _phase_explanation(state, status, checkpoint, decision)
+    phase = _phase_explanation(run_dir, state, plan, status, checkpoint, decision)
     if phase is not None:
         return with_provider_warnings(phase, provider_warnings)
     if decision is not None and checkpoint is not None:
@@ -174,7 +166,7 @@ def build_agent_explanation(
             _checkpoint_explanation(state, status, checkpoint),
             provider_warnings,
         )
-    return with_provider_warnings(_explanation(
+    fallback = _explanation(
         state,
         phase=state.phase,
         outcome="unknown",
@@ -186,7 +178,8 @@ def build_agent_explanation(
         unknowns=["旧版本运行没有稳定 reason_code"],
         safe_actions=_safe_actions(status, fallback=["status_full"]),
         evidence_refs=_base_refs(state),
-    ), provider_warnings)
+    )
+    return with_provider_warnings(fallback, provider_warnings)
 
 
 def _load_explanation_inputs(
@@ -259,15 +252,19 @@ def _active_execution_explanation(
     if state.active_planning_execution_id is not None:
         code = "planning.execution_active"
         reason = "只读调查仍在运行。"
+        safe_actions = ["status", "stop"]
     elif state.phase == "acting":
         code = "execution.worker_active"
         reason = "Worker 正在执行当前 Work Item。"
+        safe_actions = ["status", "steer", "stop"]
     elif state.phase == "observing":
         code = "execution.observation_active"
         reason = "Vega 正在对账 Candidate 与 Core 证据。"
+        safe_actions = ["status", "stop"]
     elif state.phase == "finalizing":
         code = "execution.finalization_active"
         reason = "Vega 正在采用可信 Core Finish 生成最终结论。"
+        safe_actions = ["status", "stop"]
     else:
         return None
     facts = [f"当前阶段为 {state.phase}"]
@@ -284,13 +281,15 @@ def _active_execution_explanation(
         actor="Vega Runtime",
         reason=reason,
         facts=facts,
-        safe_actions=["status", "steer", "pause", "stop"],
+        safe_actions=safe_actions,
         evidence_refs=_base_refs(state),
     )
 
 
 def _phase_explanation(
+    run_dir: Path,
     state: AgentState,
+    plan: AgentPlan,
     status: dict[str, object],
     checkpoint: AgentCheckpoint | None,
     decision: AgentDecision | None,
@@ -324,16 +323,34 @@ def _phase_explanation(
             evidence_refs=_base_refs(state),
         )
     if state.phase == "stopped":
+        reason = (
+            checkpoint.reason
+            if checkpoint is not None
+            else "当前 ChangeRun 已停止，现场保持不变。"
+        )
+        facts = ["代码、计划和运行现场未自动回滚"]
+        if checkpoint is not None:
+            facts.extend(
+                [
+                    f"Checkpoint 状态为 {checkpoint.status}",
+                    f"外部副作用为 {checkpoint.external_side_effects}",
+                ]
+            )
+        safe_actions = ["status_full"]
+        if can_offer_handoff(run_dir, state, plan, checkpoint):
+            safe_actions.append("handoff")
+        safe_actions.append("change")
         return _explanation(
             state,
             phase=state.phase,
             outcome="stopped",
             reason_code="run.stopped",
-            source="phase",
-            actor="Vega Runtime",
-            reason="当前 ChangeRun 已停止，现场保持不变。",
-            safe_actions=["status_full", "handoff", "start_new_change"],
-            evidence_refs=_base_refs(state),
+            source="checkpoint" if checkpoint is not None else "phase",
+            actor="运行 Checkpoint" if checkpoint is not None else "Vega Runtime",
+            reason=reason,
+            facts=facts,
+            safe_actions=safe_actions,
+            evidence_refs=_checkpoint_refs(state, checkpoint),
         )
     if state.phase == "planning" and decision is None:
         return _explanation(
