@@ -10,7 +10,10 @@ from .agent_contract import (
     AgentStatusCard,
     ProviderSessionStatus,
 )
-from .agent_run_status import read_live_child_stage, trusted_worker_label
+from .agent_child_status import read_live_child_stage
+from .agent_run_status import (
+    trusted_worker_label as build_trusted_worker_label,
+)
 from .agent_status_evidence import build_supervisor_evidence
 from .agent_status_history import status_history_note
 from .agent_status_sources import load_status_checkpoint
@@ -74,6 +77,9 @@ def _build_status_card(
     observation_issue: str | None = None,
     provider_rows: list[dict[str, object]] | None = None,
     provider_warning: str | None = None,
+    worker_label: str | None = None,
+    live_child_stage: str | None = None,
+    live_child_checked: bool = False,
 ) -> AgentStatusCard:
     current_index = next(
         (
@@ -91,11 +97,15 @@ def _build_status_card(
         ),
         None,
     )
-    worker_label = trusted_worker_label(
-        run_dir,
-        state,
-        observation=observation,
-        checkpoint_status=checkpoint.status if checkpoint else None,
+    effective_worker_label = (
+        worker_label
+        if worker_label is not None
+        else build_trusted_worker_label(
+            run_dir,
+            state,
+            observation=observation,
+            checkpoint_status=checkpoint.status if checkpoint else None,
+        )
     )
     supervisor_evidence = build_supervisor_evidence(
         run_dir,
@@ -186,8 +196,12 @@ def _build_status_card(
             if state.current_work_item
             else "尚未选择"
         ),
-        worker_label=worker_label,
-        live_child_stage=read_live_child_stage(run_dir, state),
+        worker_label=effective_worker_label,
+        live_child_stage=(
+            live_child_stage
+            if live_child_checked
+            else read_live_child_stage(run_dir, state)
+        ),
         changed_files=(
             list(live_workspace.changed_files)
             if workspace_checked and live_workspace is not None

@@ -8,11 +8,12 @@ import pytest
 from typer.testing import CliRunner
 
 import vega.agent_cli_snapshot as cli_snapshot_module
-import vega.agent_status_card as status_card_module
+import vega.agent_status_projection as status_projection_module
 from vega.agent_cli_snapshot import (
     build_agent_cli_snapshot,
     resolve_agent_cli_run,
 )
+from vega.agent_child_status import AgentChildStatusSnapshot
 from vega.agent_contract import AgentCheckpoint, canonical_digest
 from vega.agent_persistence import load_agent_state, save_agent_state
 from vega.agent_runtime import SupervisorAgentRuntime
@@ -50,6 +51,17 @@ def test_status_selects_unique_change_run_from_repository_subdirectory(
     }
     assert payload["explanation"]["reason_code"] == "planning.required"
     assert payload["persisted_agent_state"]["run_id"] == run.run_dir.name
+    assert len(payload["next_steps"]) == 3
+    assert {
+        Path(item).name for item in payload["key_artifacts"]
+    } >= {
+        "status-card.md",
+        "trace.jsonl",
+        "planning-request.json",
+        "project-context.md",
+    }
+    assert payload["review_queue_status"] == "not_used"
+    assert "execution" in payload
 
 
 def test_status_rejects_multiple_active_change_runs(
@@ -219,14 +231,19 @@ def test_status_snapshot_reuses_one_live_child_stage_capture(
     stages = iter(["verify", "review"])
     calls = 0
 
-    def next_stage(*_args, **_kwargs) -> str:
+    def next_stage(*_args, **_kwargs) -> AgentChildStatusSnapshot:
         nonlocal calls
         calls += 1
-        return next(stages)
+        return AgentChildStatusSnapshot(
+            child_run=None,
+            child_dir=None,
+            child_state=None,
+            live_stage=next(stages),
+        )
 
     monkeypatch.setattr(
-        status_card_module,
-        "read_live_child_stage",
+        status_projection_module,
+        "capture_trusted_child_status",
         next_stage,
     )
 

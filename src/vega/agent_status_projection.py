@@ -14,8 +14,16 @@ from .agent_contract import (
 )
 from .agent_provider_explain import provider_interaction_projection
 from .agent_persistence import AgentArtifactError, load_agent_state
+from .agent_child_status import (
+    AgentChildStatusSnapshot,
+    capture_trusted_child_status,
+)
+from .agent_run_status import (
+    trusted_worker_status,
+)
 from .agent_runtime_support import load_agent_bundle
 from .agent_status_card import _build_status_card, render_status_card
+from .agent_status_guidance import agent_artifact_names, agent_next_steps
 from .agent_status_sources import (
     capture_live_workspace,
     load_provider_sessions_for_display,
@@ -25,9 +33,25 @@ from .agent_status_sources import (
 )
 from .agent_status_artifacts import load_bounded_decision
 from .decision import DecisionStore
+from .models import LoopAutomationState
 from .provider_session import PendingInteraction, ProviderSessionState
 from .provider_session_projection import session_status_projection_from_state
+from .review_queue_contract import review_queue_status_payload
+from .run_execution_status import latest_execution_payload
 from .workspace_snapshot import ReviewWorkspaceSnapshot
+
+
+_PHASE_STATUS = {
+    "planning": "created",
+    "awaiting_approval": "paused",
+    "ready": "paused",
+    "acting": "running",
+    "observing": "running",
+    "needs_human": "needs_human",
+    "finalizing": "running",
+    "completed": "success",
+    "stopped": "stopped",
+}
 
 
 @dataclass(frozen=True)
@@ -48,6 +72,11 @@ class AgentStatusProjection:
     provider_sessions: ProviderSessionState | None
     provider_interactions: tuple[PendingInteraction, ...]
     provider_warnings: tuple[str, ...]
+    last_child_run: str | None
+    execution: dict[str, Any] | None
+    review_queue: dict[str, object]
+    next_steps: tuple[str, ...]
+    key_artifacts: tuple[str, ...]
     repo_path: str | None = None
 
 
@@ -103,6 +132,17 @@ def build_agent_status_projection(
     )
     if checkpoint_issue is not None and decision_issue is None:
         decision_issue = checkpoint_issue
+    worker_label, last_child_run = trusted_worker_status(
+        run_dir,
+        state,
+        observation=observation,
+        checkpoint_status=checkpoint.status if checkpoint else None,
+    )
+    child_status = capture_trusted_child_status(
+        run_dir,
+        state,
+        last_child_run,
+    )
     card = _build_status_card(
         run_dir,
         state,
@@ -116,11 +156,28 @@ def build_agent_status_projection(
         observation_issue=observation_issue,
         provider_rows=session_rows,
         provider_warning=provider_issue,
+        worker_label=worker_label,
+        live_child_stage=child_status.live_stage,
+        live_child_checked=True,
         next_step=(
             checkpoint.reason
             if checkpoint is not None and state.phase in {"ready", "needs_human"}
             else None
         ),
+    )
+    guidance_state = _guidance_state(
+        state,
+        card,
+        last_child_run=last_child_run,
+    )
+    execution = latest_execution_payload(
+        run_dir,
+        _PHASE_STATUS[card.phase],
+    )
+    review_queue = _review_queue_projection(run_dir, child_status)
+    next_steps = tuple(agent_next_steps(run_dir, guidance_state))
+    key_artifacts = tuple(
+        _existing_agent_artifacts(run_dir, guidance_state)
     )
     payload = card.model_dump(mode="json")
     payload.update(
@@ -129,6 +186,11 @@ def build_agent_status_projection(
             "recorded_terminal_status": state.terminal_status,
             "effective_phase": card.phase,
             "effective_terminal_status": card.terminal_status,
+            "last_child_run": last_child_run,
+            "execution": execution,
+            "next_steps": list(next_steps),
+            "key_artifacts": list(key_artifacts),
+            **review_queue,
         }
     )
     return AgentStatusProjection(
@@ -148,8 +210,76 @@ def build_agent_status_projection(
         provider_sessions=provider_state,
         provider_interactions=tuple(provider_interactions),
         provider_warnings=tuple(provider_warnings),
+        last_child_run=last_child_run,
+        execution=execution,
+        review_queue=review_queue,
+        next_steps=next_steps,
+        key_artifacts=key_artifacts,
         repo_path=repo_path,
     )
+
+
+def _guidance_state(
+    state: AgentState,
+    card: AgentStatusCard,
+    *,
+    last_child_run: str | None,
+) -> dict[str, Any]:
+    return {
+        "agent_phase": card.phase,
+        "agent_run_kind": state.run_kind,
+        "current_work_item": state.current_work_item,
+        "latest_checkpoint_id": state.latest_checkpoint_id,
+        "last_child_run": last_child_run,
+        "persisted_agent_state": state.model_dump(mode="json"),
+    }
+
+
+def _review_queue_projection(
+    run_dir: Path,
+    child_status: AgentChildStatusSnapshot,
+) -> dict[str, object]:
+    if child_status.child_dir is None:
+        return review_queue_status_payload(run_dir)
+    if child_status.child_state is None:
+        return {
+            "review_queue_status": "invalid",
+            "review_queue_completed": 0,
+            "review_queue_total": 0,
+        }
+    return review_queue_status_payload(
+        child_status.child_dir,
+        iteration_number=_latest_iteration_number(child_status.child_state),
+    )
+
+
+def _latest_iteration_number(
+    state: LoopAutomationState,
+) -> int | None:
+    candidates = [
+        item.iteration
+        for item in state.iterations
+        if item.iteration > 0
+    ]
+    if state.current_iteration > 0:
+        candidates.append(state.current_iteration)
+    return max(candidates) if candidates else None
+
+
+def _existing_agent_artifacts(
+    run_dir: Path,
+    state: dict[str, Any],
+) -> list[str]:
+    root = run_dir.resolve()
+    result: list[str] = []
+    for name in agent_artifact_names(state):
+        path = (run_dir / name).resolve()
+        if path.is_relative_to(root) and path.exists():
+            result.append(str(path))
+    decisions = (run_dir / "decisions.jsonl").resolve()
+    if decisions.is_relative_to(root) and decisions.exists():
+        result.append(str(decisions))
+    return list(dict.fromkeys(result))
 
 
 def read_status_card(
@@ -188,7 +318,7 @@ def apply_agent_projection(
     state: dict[str, Any],
     *,
     projection: AgentStatusProjection | None = None,
-) -> dict[str, Any]:
+) -> AgentStatusProjection:
     """把 Agent 的实时证据投影合并到通用 status payload。"""
 
     if projection is None:
@@ -231,6 +361,13 @@ def apply_agent_projection(
             "provider_session_warning": projection.payload[
                 "provider_session_warning"
             ],
+            "last_child_run": projection.last_child_run,
+            "brief_run": projection.last_child_run,
+            "live_child_stage": projection.card.live_child_stage,
+            "execution": projection.execution,
+            "next_steps": list(projection.next_steps),
+            "key_artifacts": list(projection.key_artifacts),
+            **projection.review_queue,
         }
     )
     if (
@@ -239,7 +376,7 @@ def apply_agent_projection(
     ):
         state["status"] = "needs_human"
         state["current_step"] = "evidence_invalid"
-    return projection.payload
+    return projection
 
 
 def combined_decisions(

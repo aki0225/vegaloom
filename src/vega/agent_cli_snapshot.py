@@ -18,8 +18,6 @@ from .agent_status_projection import (
     capture_status_workspace,
     read_status_card,
 )
-from .review_queue_contract import projected_review_queue_status_payload
-from .run_execution_status import latest_execution_payload
 from .run_status import run_status_payload
 from .run_utils import resolve_run_dir
 
@@ -92,7 +90,12 @@ def build_agent_cli_snapshot(
     *,
     include_full: bool = False,
 ) -> AgentCliSnapshot:
-    """构建版本绑定的只读快照；持续变化时拒绝拼接跨版本结论。"""
+    """构建父控制面版本绑定的只读快照。
+
+    父 State、Plan、Provider、Checkpoint 和 Workspace 持续变化时重试；
+    child、execution 与 review queue 是只读实时提示，在共享投影中各捕获一次，
+    允许短暂陈旧，但不参与成功裁决。
+    """
 
     if not (target.run_dir / "agent-state.json").exists():
         payload = run_status_payload(target.workspace, target.run_dir.name)
@@ -172,16 +175,7 @@ def _agent_status_payload(
     state = projection.state
     card = projection.card
     decisions = list(projection.decision_history)
-    last_child_run = state.active_child_run
-    if last_child_run is None and projection.observation is not None:
-        last_child_run = projection.observation.child_run
     run_status = _PHASE_STATUS[card.phase]
-    review_queue = projected_review_queue_status_payload(
-        target.workspace,
-        target.run_dir,
-        {"last_child_run": last_child_run},
-        "agent",
-    )
     payload = dict(projection.payload)
     payload.update(
         {
@@ -197,14 +191,11 @@ def _agent_status_payload(
             "repo_path": projection.repo_path,
             "recommendation": None,
             "active_child_run": state.active_child_run,
-            "last_child_run": last_child_run,
+            "last_child_run": projection.last_child_run,
             "last_child_status": None,
             "decision_count": len(decisions),
             "latest_decisions": decisions[-3:],
-            "execution": latest_execution_payload(
-                target.run_dir,
-                run_status,
-            ),
+            "execution": projection.execution,
             "agent_phase": card.phase,
             "current_work_item": state.current_work_item,
             "latest_checkpoint_id": state.latest_checkpoint_id,
@@ -218,25 +209,12 @@ def _agent_status_payload(
             "recorded_agent_phase": state.phase,
             "recorded_terminal_status": state.terminal_status,
             "live_child_stage": card.live_child_stage,
-            "next_steps": [card.next_step],
-            "key_artifacts": _projection_artifact_refs(projection),
-            **review_queue,
+            "next_steps": list(projection.next_steps),
+            "key_artifacts": list(projection.key_artifacts),
+            **projection.review_queue,
         }
     )
     return payload
-
-
-def _projection_artifact_refs(
-    projection: AgentStatusProjection,
-) -> list[str]:
-    refs = ["agent-state.json", "agent-plan.json"]
-    checkpoint = projection.checkpoint
-    if checkpoint is not None:
-        refs.append(f"checkpoints/{checkpoint.checkpoint_id}.json")
-        refs.extend(checkpoint.evidence_refs)
-    if projection.provider_sessions is not None:
-        refs.append("provider-sessions.json")
-    return list(dict.fromkeys(refs))
 
 
 def selected_run_payload(
