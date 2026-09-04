@@ -5,33 +5,12 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：31 / 32
-- 最近事件：`20260904T132002Z-UX-03-completed`
+- 已完成：32 / 32
+- 最近事件：`20260904T181539Z-RELEASE-05-completed`
 
 ## 当前事项
 
-### 下一项：`RELEASE-05` 发布 Vega v0.5.0
-
-把日常变更入口、状态解释和受限 Reviewer 超时恢复作为同一稳定版本发布，版本、制品、文档、Tag 与 GitHub Release 绑定同一主线提交。
-
-验收条件：
-
-- pyproject、vega.__version__、README、Capabilities、CI 版本断言和发布材料统一为 0.5.0
-- Codex bounded 与 Claude human 两条真实路径完成固定仓库验收，自动 Reviewer timeout 使用确定性夹具验证
-- 完整测试、package smoke、PR CI 与合并后 main CI 均有明确通过结果
-- 注解 Tag v0.5.0 与 GitHub Release 绑定通过验证的 main 提交，wheel 与 sdist 来自该提交
-- 发布后追加 RELEASE-05 完成事件并生成当前计划视图
-
-要求检查：
-
-- `real-provider-smoke`
-- `full-test-shards`
-- `package-smoke`
-- `repository-hygiene`
-- `pr-ci`
-- `main-ci`
-- `annotated-tag`
-- `github-release`
+当前没有可执行事项；计划已经完成，或剩余事项处于阻塞/已替代状态。
 
 ## 全部事项
 
@@ -68,7 +47,7 @@
 | 已完成 | `UX-01` | 让运行状态可以直接看懂 | `PROVIDER-01` |
 | 已完成 | `UX-02` | 增加日常变更入口 | `UX-01` |
 | 已完成 | `UX-03` | 自动恢复一次 Reviewer 超时 | `UX-02` |
-| 待开始 | `RELEASE-05` | 发布 Vega v0.5.0 | `UX-03` |
+| 已完成 | `RELEASE-05` | 发布 Vega v0.5.0 | `UX-03` |
 
 ## 状态规则
 
