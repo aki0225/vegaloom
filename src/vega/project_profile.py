@@ -16,7 +16,7 @@ from .project_config import (
     load_project_config,
     render_project_config_check,
 )
-from .project_knowledge import load_agents_instructions
+from .project_knowledge import list_agents_instruction_paths
 from .redaction import filter_sensitive_memory_entries, redact_text, redact_value
 from .repository_identity import ResolvedGitRevision, repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
@@ -147,7 +147,7 @@ def build_project_profile(
         tracked_only=tracked_only,
         tracked_revision=resolved_revision,
     )
-    agents = load_agents_instructions(
+    agents_files = list_agents_instruction_paths(
         repo,
         tracked_only=tracked_only,
         tracked_revision=resolved_revision,
@@ -191,7 +191,7 @@ def build_project_profile(
         ),
         key_directories=_existing_dirs(repo, KEY_DIRS, tracked_files=tracked_files),
         config_files=config_files,
-        agents_files=[item.path for item in agents],
+        agents_files=agents_files,
         memory_hit_count=len(memory_hits),
     )
 

@@ -126,6 +126,33 @@ def test_change_run_ids_are_unique_across_workspaces_in_same_second(
     assert first.run_dir.name != second.run_dir.name
 
 
+def test_change_run_task_brief_lists_only_applicable_agents_rules(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    (repo / "AGENTS.md").write_text("# Root\n", encoding="utf-8")
+    (repo / "src" / "AGENTS.md").write_text("# Source\n", encoding="utf-8")
+    (repo / "tests" / "AGENTS.md").write_text("# Tests\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "增加目录规则")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+
+    started = runtime.start_change(
+        repo,
+        contract=_contract(),
+        execution_plan=_execution_plan(),
+    )
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    task_brief = (approved.run_dir / "task-brief.md").read_text(encoding="utf-8")
+
+    assert "## 适用项目规则" in task_brief
+    assert "`AGENTS.md`（作用域 `.`）" in task_brief
+    assert "`src/AGENTS.md`（作用域 `src`）" in task_brief
+    assert "tests/AGENTS.md" not in task_brief
+
+
 def test_agent_start_cli_requires_change_contract_and_execution_plan(
     tmp_path: Path,
     monkeypatch,

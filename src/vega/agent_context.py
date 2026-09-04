@@ -11,6 +11,7 @@ from .agent_contract import (
     AgentState,
     canonical_digest,
 )
+from .models import AgentsInstruction
 from .redaction import redact_text
 
 
@@ -39,6 +40,7 @@ def compile_task_brief(
     gate_summary: Mapping[str, str] | None = None,
     artifact_refs: Sequence[str] = (),
     worker_verification: Sequence[str] | None = None,
+    agents_instructions: Sequence[AgentsInstruction] = (),
     max_bytes: int = DEFAULT_TASK_BRIEF_MAX_BYTES,
 ) -> TaskBrief:
     if max_bytes < 1:
@@ -92,6 +94,7 @@ def compile_task_brief(
         ),
         ("允许范围", work_item.allowed_paths or ["未声明"]),
         ("禁止范围", work_item.forbidden_paths or ["未声明"]),
+        ("适用项目规则", _render_agents_instruction_refs(agents_instructions)),
         (
             "最终合同条件（全部 Work Item 完成后判断）",
             plan.success_conditions or ["未声明"],
@@ -191,6 +194,21 @@ def _render_gate_summary(gate_summary: Mapping[str, str] | None) -> list[str]:
     if not gate_summary:
         return ["尚无当前门禁结果"]
     return [f"{key}: {value}" for key, value in sorted(gate_summary.items())]
+
+
+def _render_agents_instruction_refs(
+    instructions: Sequence[AgentsInstruction],
+) -> list[str]:
+    if not instructions:
+        return ["未发现适用于当前允许范围的 AGENTS.md。"]
+    return [
+        "开始修改前按顺序读取这些文件；目录规则只约束各自作用域，"
+        "不要只依赖 Provider 自动发现。",
+        *[
+            f"`{item.path}`（作用域 `{item.scope}`）"
+            for item in instructions
+        ],
+    ]
 
 
 def _verification_sections(

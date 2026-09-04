@@ -58,6 +58,7 @@ def _symlink_or_skip(link: Path, target: Path) -> None:
     "directory",
     [
         ".tmp",
+        ".vega-worktrees",
         "runs",
         "memory",
         ".local-validation",
@@ -82,7 +83,7 @@ def test_generated_directories_never_contribute_agents_instructions(
     generated.mkdir(parents=True)
     generated.joinpath("AGENTS.md").write_text("# Polluted\n", encoding="utf-8")
 
-    instructions = load_agents_instructions(repo)
+    instructions = load_agents_instructions(repo, ["src/example.py"])
 
     assert [item.path for item in instructions] == ["AGENTS.md", "src/AGENTS.md"]
     assert all("Polluted" not in item.content for item in instructions)
@@ -118,7 +119,7 @@ def test_nested_source_memory_directory_can_define_real_project_rules(
     nested.mkdir(parents=True)
     nested.joinpath("AGENTS.md").write_text("# Real memory module rules\n", encoding="utf-8")
 
-    instructions = load_agents_instructions(repo)
+    instructions = load_agents_instructions(repo, ["src/memory/example.py"])
 
     assert [item.path for item in instructions] == ["src/memory/AGENTS.md"]
 
@@ -133,7 +134,13 @@ def test_generated_prefixes_only_apply_at_repository_root(tmp_path: Path) -> Non
         path.parent.mkdir(parents=True)
         path.write_text(f"# Real rules {index}\n", encoding="utf-8")
 
-    instructions = load_agents_instructions(repo)
+    instructions = load_agents_instructions(
+        repo,
+        [
+            "plugins/pytest-vega/example.py",
+            "src/validation-engine/example.py",
+        ],
+    )
 
     assert [item.path for item in instructions] == [
         "plugins/pytest-vega/AGENTS.md",
@@ -181,9 +188,76 @@ def test_tracked_generated_agents_files_are_ignored(tmp_path: Path) -> None:
         },
     )
 
-    instructions = load_agents_instructions(repo, tracked_only=True)
+    instructions = load_agents_instructions(
+        repo,
+        ["src/example.py"],
+        tracked_only=True,
+    )
 
     assert [item.path for item in instructions] == ["AGENTS.md", "src/AGENTS.md"]
+
+
+@pytest.mark.parametrize("tracked_only", [False, True])
+def test_agents_instructions_only_load_applicable_ancestors(
+    tmp_path: Path,
+    tracked_only: bool,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            "AGENTS.md": "# Root\n",
+            "src/AGENTS.md": "# Source\n",
+            "src/feature/AGENTS.md": "# Feature\n",
+            "docs/AGENTS.md": "# Docs\n",
+        },
+    )
+
+    instructions = load_agents_instructions(
+        repo,
+        ["src/feature/example.py"],
+        tracked_only=tracked_only,
+    )
+
+    assert [item.path for item in instructions] == [
+        "AGENTS.md",
+        "src/AGENTS.md",
+        "src/feature/AGENTS.md",
+    ]
+    assert all("Docs" not in item.content for item in instructions)
+
+
+def test_project_context_indexes_scoped_rules_without_loading_unrelated_content(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(
+        repo,
+        {
+            "AGENTS.md": "# Root\n\n- ROOT_RULE\n",
+            "src/AGENTS.md": "# Source\n\n- SOURCE_RULE\n",
+            "docs/AGENTS.md": "# Docs\n\n- DOCS_RULE\n",
+            ".vega-worktrees/run/AGENTS.md": "# Generated\n\n- WORKTREE_RULE\n",
+        },
+    )
+    revision = _git(repo, "rev-parse", "HEAD").strip()
+
+    context = build_project_context(
+        tmp_path,
+        repo,
+        "调查示例问题",
+        tracked_only=True,
+        tracked_revision=revision,
+    )
+
+    assert "## AGENTS.md 规则索引" in context
+    assert "`src/AGENTS.md`" in context
+    assert "`docs/AGENTS.md`" in context
+    assert "ROOT_RULE" in context
+    assert "SOURCE_RULE" not in context
+    assert "DOCS_RULE" not in context
+    assert ".vega-worktrees" not in context
+    assert "WORKTREE_RULE" not in context
 
 
 def test_tracked_agents_symlink_is_rejected(tmp_path: Path) -> None:

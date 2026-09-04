@@ -37,6 +37,7 @@ from .agent_persistence import (
 from .agent_resume_validation import (
     current_branch as current_branch,
 )
+from .project_knowledge import load_agents_instructions
 from .agent_repository_binding import (
     bound_repo as _bound_repo,
     capture_bound_workspace as _capture_bound_workspace,
@@ -166,6 +167,22 @@ def write_task_brief(
 ) -> TaskBrief:
     if not state.current_work_item:
         raise ValueError("当前 run 没有可编译的 Work Item")
+    work_item = next(
+        (
+            item
+            for item in plan.work_items
+            if item.work_item_id == state.current_work_item
+        ),
+        None,
+    )
+    if work_item is None:
+        raise ValueError("当前 Work Item 不属于已批准 Plan")
+    agents_instructions = load_agents_instructions(
+        bound_repo(run_dir),
+        work_item.allowed_paths,
+        tracked_only=True,
+        tracked_revision=state.accepted_checkpoint_sha or "HEAD",
+    )
     brief = compile_task_brief(
         plan=plan,
         work_item_id=state.current_work_item,
@@ -177,6 +194,7 @@ def write_task_brief(
             run_dir,
             state,
         ),
+        agents_instructions=agents_instructions,
         max_bytes=DEFAULT_TASK_BRIEF_MAX_BYTES,
     )
     write_redacted_text(run_dir / "task-brief.md", brief.content)
