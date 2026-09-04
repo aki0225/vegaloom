@@ -11,7 +11,7 @@ from .agent_provider_explain import (
     provider_interaction_projection,
     with_provider_warnings,
 )
-from .agent_status_card import build_agent_status_payload
+from .agent_status_card import AgentStatusProjection, build_agent_status_payload
 from .provider_session import PROVIDER_SESSIONS_ARTIFACT
 
 
@@ -79,25 +79,51 @@ def block_category_for_reason_code(reason_code: str | None) -> BlockCategory | N
     return _BLOCK_CATEGORIES.get(reason_code)
 
 
-def build_agent_explanation(run_dir: Path, state: AgentState, plan: AgentPlan) -> AgentExplanation:
-    """解释当前 ChangeRun，不调用模型、不运行门禁也不写入任何状态。"""
+def build_agent_explanation(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+    *,
+    status_projection: AgentStatusProjection | None = None,
+) -> AgentExplanation:
+    """解释当前 ChangeRun，并优先复用调用方已构建的只读投影。
 
-    try:
-        status = build_agent_status_payload(run_dir, state, plan)
-    except (OSError, RuntimeError, ValueError):
-        return _explanation(
+    CLI 传入 ``status_projection`` 后，本函数不会再次构建 status、读取
+    Workspace、Provider Session 或 Checkpoint。保留无投影调用是为了兼容旧
+    Run 的直接 Python 调用方；新入口应始终传入共享投影。
+    """
+
+    if status_projection is None:
+        try:
+            status = build_agent_status_payload(run_dir, state, plan)
+        except (OSError, RuntimeError, ValueError):
+            return _explanation(
+                state,
+                phase="needs_human",
+                outcome="attention_required",
+                reason_code="evidence.status_projection_unverified",
+                source="evidence",
+                actor="当前证据投影",
+                reason="当前状态证据无法安全投影。",
+                facts=[f"持久化阶段为 {state.phase}"],
+                unknowns=["当前 Workspace 与运行 Artifact 是否仍属于同一可信现场"],
+                safe_actions=["status_full", "inspect_artifacts", "human"],
+                evidence_refs=_base_refs(state),
+            )
+        sessions, provider_warnings = provider_interaction_projection(
+            run_dir,
             state,
-            phase="needs_human",
-            outcome="attention_required",
-            reason_code="evidence.status_projection_unverified",
-            source="evidence",
-            actor="当前证据投影",
-            reason="当前状态证据无法安全投影。",
-            facts=[f"持久化阶段为 {state.phase}"],
-            unknowns=["当前 Workspace 与运行 Artifact 是否仍属于同一可信现场"],
-            safe_actions=["status_full", "inspect_artifacts", "human"],
-            evidence_refs=_base_refs(state),
         )
+        checkpoint, decision, decision_issue = _checkpoint_decision(run_dir, state)
+    else:
+        if status_projection.state != state or status_projection.plan != plan:
+            raise ValueError("Explain 投影与 Agent State/Plan 身份不一致。")
+        status = status_projection.payload
+        sessions = list(status_projection.provider_interactions)
+        provider_warnings = list(status_projection.provider_warnings)
+        checkpoint = status_projection.checkpoint
+        decision = status_projection.decision
+        decision_issue = status_projection.decision_issue
 
     effective_phase = cast(AgentPhase, status["effective_phase"])
     if (
@@ -131,7 +157,6 @@ def build_agent_explanation(run_dir: Path, state: AgentState, plan: AgentPlan) -
             evidence_refs=_base_refs(state),
         )
 
-    sessions, provider_warnings = provider_interaction_projection(run_dir, state)
     if sessions:
         first = sessions[0]
         return with_provider_warnings(_explanation(
@@ -160,7 +185,6 @@ def build_agent_explanation(run_dir: Path, state: AgentState, plan: AgentPlan) -
     if active is not None:
         return with_provider_warnings(active, provider_warnings)
 
-    checkpoint, decision, decision_issue = _checkpoint_decision(run_dir, state)
     if decision_issue is not None:
         return with_provider_warnings(_explanation(
             state,

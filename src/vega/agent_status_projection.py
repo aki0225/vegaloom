@@ -6,7 +6,7 @@ from typing import Any
 from .agent_contract import AgentDecision
 from .agent_persistence import AgentArtifactError, load_agent_state
 from .agent_runtime_support import load_agent_bundle
-from .agent_status_card import build_agent_status_payload
+from .agent_status_card import AgentStatusProjection, build_agent_status_projection
 from .decision import DecisionStore
 
 
@@ -15,41 +15,60 @@ def apply_agent_projection(
     run: str,
     run_dir: Path,
     state: dict[str, Any],
+    *,
+    projection: AgentStatusProjection | None = None,
 ) -> dict[str, Any]:
     """把 Agent 的实时证据投影合并到通用 status payload。"""
 
-    _, agent_state, agent_plan, metadata = load_agent_bundle(workspace, run)
-    projection = build_agent_status_payload(run_dir, agent_state, agent_plan)
-    state["repo_path"] = metadata["repo_path"]
-    state["persisted_agent_state"] = agent_state.model_dump(mode="json")
+    if projection is None:
+        _, agent_state, agent_plan, metadata = load_agent_bundle(workspace, run)
+        projection = build_agent_status_projection(
+            run_dir,
+            agent_state,
+            agent_plan,
+            repo_path=(
+                metadata.get("repo_path")
+                if isinstance(metadata.get("repo_path"), str)
+                else None
+            ),
+        )
+    elif projection.state.run_id != run_dir.name:
+        raise ValueError("Agent 状态投影与 run 目录身份不一致。")
+    state["repo_path"] = projection.repo_path
+    state["persisted_agent_state"] = projection.state.model_dump(mode="json")
     state.update(
         {
-            "recorded_agent_phase": projection["recorded_phase"],
-            "recorded_terminal_status": projection["recorded_terminal_status"],
-            "agent_phase": projection["effective_phase"],
-            "terminal_status": projection["effective_terminal_status"],
-            "allowed_actions": projection["allowed_actions"],
-            "verification": projection["verification"],
-            "risk": projection["risk"],
-            "review": projection["review"],
-            "changed_files": projection["changed_files"],
-            "unknown_file_count": projection["unknown_file_count"],
-            "evidence_health": projection["evidence_health"],
-            "workspace_current": projection["workspace_current"],
-            "commit_recommended": projection["commit_recommended"],
-            "supervisor_evidence": projection["supervisor_evidence"],
-            "integrity_warning": projection["integrity_warning"],
-            "history_note": projection["history_note"],
-            "provider_sessions": projection["provider_sessions"],
-            "provider_session_warning": projection[
+            "recorded_agent_phase": projection.payload["recorded_phase"],
+            "recorded_terminal_status": projection.payload[
+                "recorded_terminal_status"
+            ],
+            "agent_phase": projection.payload["effective_phase"],
+            "terminal_status": projection.payload["effective_terminal_status"],
+            "allowed_actions": projection.payload["allowed_actions"],
+            "verification": projection.payload["verification"],
+            "risk": projection.payload["risk"],
+            "review": projection.payload["review"],
+            "changed_files": projection.payload["changed_files"],
+            "unknown_file_count": projection.payload["unknown_file_count"],
+            "evidence_health": projection.payload["evidence_health"],
+            "workspace_current": projection.payload["workspace_current"],
+            "commit_recommended": projection.payload["commit_recommended"],
+            "supervisor_evidence": projection.payload["supervisor_evidence"],
+            "integrity_warning": projection.payload["integrity_warning"],
+            "history_note": projection.payload["history_note"],
+            "provider_sessions": projection.payload["provider_sessions"],
+            "provider_session_warning": projection.payload[
                 "provider_session_warning"
             ],
         }
     )
-    if projection["effective_phase"] != projection["recorded_phase"]:
+    if (
+        projection.payload["effective_phase"]
+        != projection.payload["recorded_phase"]
+    ):
         state["status"] = "needs_human"
         state["current_step"] = "evidence_invalid"
-    return projection
+    return projection.payload
 
 
 def combined_decisions(

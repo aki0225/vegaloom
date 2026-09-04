@@ -25,13 +25,21 @@ ExplanationT = TypeVar("ExplanationT", bound=_ExplanationView)
 def provider_interaction_projection(
     run_dir: Path,
     state: AgentState,
+    *,
+    provider_sessions: ProviderSessionState | None = None,
+    provider_issue: str | None = None,
 ) -> tuple[list[PendingInteraction], list[str]]:
     """只把绑定当前活动 Turn 的请求投影成待授权事项。"""
 
-    try:
-        sessions = load_provider_sessions(run_dir)
-    except ValueError:
-        return [], ["Provider Session 协调状态无法验证，已忽略其运行提示。"]
+    if provider_sessions is not None:
+        sessions = provider_sessions
+    elif provider_issue is not None:
+        return [], [provider_issue]
+    else:
+        try:
+            sessions = load_provider_sessions(run_dir)
+        except ValueError:
+            return [], ["Provider Session 协调状态无法验证，已忽略其运行提示。"]
     pending = sorted(
         (
             item

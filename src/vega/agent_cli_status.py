@@ -8,16 +8,26 @@ from typing import Literal
 
 from pydantic import ValidationError
 
-from .agent_contract import AgentPlan, AgentState, canonical_digest
+from .agent_contract import AgentState, canonical_digest
 from .agent_explain import AgentExplanation, build_agent_explanation
+from .agent_runtime_support import load_agent_bundle
 from .agent_run_selection import (
     ACTIVE_CHANGE_PHASES,
     ChangeRunSelectionError,
     select_repository_change_run,
 )
-from .agent_status_card import read_status_card
-from .run_status import render_run_status, run_status_payload
+from .agent_status_card import (
+    AgentStatusProjection,
+    build_agent_status_projection,
+    capture_status_workspace,
+    read_status_card,
+)
+from .run_status import (
+    render_run_status_payload,
+    run_status_payload,
+)
 from .run_utils import resolve_run_dir
+from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
 RunSelectionSource = Literal[
@@ -67,13 +77,21 @@ class AgentCliSnapshot:
     status: dict[str, object]
     explanation: AgentExplanation | None
     full_status: str | None = None
+    status_projection: AgentStatusProjection | None = None
 
 
 @dataclass(frozen=True)
-class _AgentStateToken:
-    content_sha256: str
+class _AgentSnapshotToken:
+    state_sha256: str
     plan_sha256: str
     state_version: int
+    provider_sha256: str | None
+    provider_revision: int | None
+    checkpoint_ref: str | None
+    checkpoint_sha256: str | None
+    decision_refs: tuple[str, ...]
+    decision_sha256: tuple[str | None, ...]
+    workspace_identity: tuple[str, ...]
 
 
 def resolve_agent_cli_run(
@@ -122,18 +140,54 @@ def build_agent_cli_snapshot(
         )
 
     for _ in range(2):
-        token_before = _read_agent_state_token(target.run_dir)
-        payload = run_status_payload(target.workspace, target.run_dir.name)
-        state, plan = _models_from_status(target.run_dir, payload)
+        workspace_capture = capture_status_workspace(target.run_dir)
+        token_before = _read_agent_snapshot_token(
+            target.run_dir,
+            workspace_capture=workspace_capture,
+        )
+        _, state, plan, metadata = load_agent_bundle(
+            target.workspace,
+            target.run_dir.name,
+        )
         if state.state_version != token_before.state_version:
             continue
-        explanation = build_agent_explanation(target.run_dir, state, plan)
+        projection = build_agent_status_projection(
+            target.run_dir,
+            state,
+            plan,
+            workspace_capture=workspace_capture,
+            repo_path=(
+                metadata.get("repo_path")
+                if isinstance(metadata.get("repo_path"), str)
+                else None
+            ),
+        )
+        status_payload = run_status_payload(
+            target.workspace,
+            target.run_dir.name,
+            agent_projection=projection,
+        )
+        # 通用状态字段和 Agent 专属投影写入同一个 payload，compact/JSON/explain
+        # 后续均引用该对象，避免再次从文件拼接出另一份状态。
+        projection.payload.update(status_payload)
+        payload = projection.payload
+        explanation = build_agent_explanation(
+            target.run_dir,
+            state,
+            plan,
+            status_projection=projection,
+        )
         full_status = (
-            read_status_card(target.run_dir, state, plan)
+            read_status_card(
+                target.run_dir,
+                state,
+                plan,
+                status_projection=projection,
+            )
             if include_full
             else None
         )
-        token_after = _read_agent_state_token(target.run_dir)
+        token_after = _read_agent_snapshot_token(target.run_dir)
         if token_before != token_after:
             continue
         payload["selected_run"] = selected_run_payload(target, payload)
@@ -143,6 +197,7 @@ def build_agent_cli_snapshot(
             status=payload,
             explanation=explanation,
             full_status=full_status,
+            status_projection=projection,
         )
     raise ValueError(
         "Agent State 在状态快照构建期间持续变化；"
@@ -150,10 +205,14 @@ def build_agent_cli_snapshot(
     )
 
 
-def _read_agent_state_token(run_dir: Path) -> _AgentStateToken:
-    path = run_dir / "agent-state.json"
+def _read_agent_snapshot_token(
+    run_dir: Path,
+    *,
+    workspace_capture: tuple[ReviewWorkspaceSnapshot | None, str | None] | None = None,
+) -> _AgentSnapshotToken:
+    state_path = run_dir / "agent-state.json"
     try:
-        content = path.read_bytes()
+        content = state_path.read_bytes()
         plan_content = (run_dir / "agent-plan.json").read_bytes()
         envelope = json.loads(content.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -170,40 +229,113 @@ def _read_agent_state_token(run_dir: Path) -> _AgentStateToken:
         state = AgentState.model_validate(envelope["data"])
     except ValidationError as exc:
         raise ValueError("Agent State 快照 schema 无法验证。") from exc
-    return _AgentStateToken(
-        content_sha256=hashlib.sha256(content).hexdigest(),
+    provider_path = run_dir / "provider-sessions.json"
+    try:
+        provider_content = (
+            provider_path.read_bytes() if provider_path.exists() else None
+        )
+    except OSError as exc:
+        raise ValueError("Provider Session 快照无法读取。") from exc
+    provider_revision = _provider_revision(provider_content)
+    checkpoint_ref, checkpoint_sha256, decision_refs, decision_sha256 = (
+        _checkpoint_token(run_dir, state)
+    )
+    capture = workspace_capture
+    if capture is None:
+        capture = capture_status_workspace(run_dir)
+    live_workspace, workspace_issue = capture
+    return _AgentSnapshotToken(
+        state_sha256=hashlib.sha256(content).hexdigest(),
         plan_sha256=hashlib.sha256(plan_content).hexdigest(),
         state_version=state.state_version,
+        provider_sha256=(
+            hashlib.sha256(provider_content).hexdigest()
+            if provider_content is not None
+            else None
+        ),
+        provider_revision=provider_revision,
+        checkpoint_ref=checkpoint_ref,
+        checkpoint_sha256=checkpoint_sha256,
+        decision_refs=decision_refs,
+        decision_sha256=decision_sha256,
+        workspace_identity=_workspace_identity(
+            live_workspace,
+            workspace_issue,
+        ),
     )
 
 
-def _models_from_status(
-    run_dir: Path,
-    payload: dict[str, object],
-) -> tuple[AgentState, AgentPlan]:
-    raw_state = payload.get("persisted_agent_state")
-    if not isinstance(raw_state, dict):
-        raise ValueError("ChangeRun 状态投影缺少持久化 Agent State。")
+def _provider_revision(content: bytes | None) -> int | None:
+    if content is None:
+        return None
     try:
-        state = AgentState.model_validate(raw_state)
-        plan = AgentPlan.model_validate_json(
-            (run_dir / "agent-plan.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, ValidationError) as exc:
-        raise ValueError("ChangeRun 状态快照无法验证。") from exc
-    if state.run_id != run_dir.name or plan.task_id != state.task_id:
-        raise ValueError("ChangeRun 状态快照身份绑定不一致。")
-    if (
-        state.run_kind == "legacy" or state.contract_revision is not None
-    ) and state.phase not in {"planning", "awaiting_approval"}:
-        if (
-            state.goal_revision != plan.goal_revision
-            or state.plan_revision != plan.plan_revision
-            or state.approved_plan_digest != plan.approved_digest
-            or not plan.approval_is_current()
-        ):
-            raise ValueError("ChangeRun 状态快照与当前批准 Plan 不一致。")
-    return state, plan
+        envelope = json.loads(content.decode("utf-8"))
+        data = envelope.get("data") if isinstance(envelope, dict) else None
+        revision = data.get("revision") if isinstance(data, dict) else None
+        return revision if isinstance(revision, int) else None
+    except (UnicodeError, json.JSONDecodeError):
+        return None
+
+
+def _checkpoint_token(
+    run_dir: Path,
+    state: AgentState,
+) -> tuple[str | None, str | None, tuple[str, ...], tuple[str | None, ...]]:
+    if state.latest_checkpoint_id is None:
+        return None, None, (), ()
+    checkpoint_ref = f"checkpoints/{state.latest_checkpoint_id}.json"
+    checkpoint_path = run_dir / checkpoint_ref
+    try:
+        content = checkpoint_path.read_bytes()
+    except OSError:
+        return checkpoint_ref, None, (), ()
+    decision_refs: tuple[str, ...] = ()
+    try:
+        raw = json.loads(content.decode("utf-8"))
+        data = raw.get("data") if isinstance(raw, dict) else raw
+        if isinstance(data, dict):
+            evidence_refs = data.get("evidence_refs")
+            if isinstance(evidence_refs, list):
+                decision_refs = tuple(
+                    item
+                    for item in evidence_refs
+                    if isinstance(item, str) and item.startswith("decisions/")
+                )
+    except (UnicodeError, json.JSONDecodeError):
+        pass
+    decision_hashes: list[str | None] = []
+    for ref in decision_refs:
+        try:
+            decision_hashes.append(hashlib.sha256((run_dir / ref).read_bytes()).hexdigest())
+        except OSError:
+            decision_hashes.append(None)
+    return (
+        checkpoint_ref,
+        hashlib.sha256(content).hexdigest(),
+        decision_refs,
+        tuple(decision_hashes),
+    )
+
+
+def _workspace_identity(
+    snapshot: ReviewWorkspaceSnapshot | None,
+    issue: str | None,
+) -> tuple[str, ...]:
+    if snapshot is None:
+        return ("unavailable", issue or "unknown")
+    return (
+        snapshot.fingerprint,
+        snapshot.head_sha,
+        snapshot.status_sha256,
+        snapshot.staged_diff_sha256,
+        snapshot.unstaged_diff_sha256,
+        snapshot.untracked_manifest_sha256,
+        snapshot.ignored_manifest_sha256,
+        snapshot.index_flags_sha256,
+        snapshot.git_control_sha256,
+        snapshot.comparison_base_sha or "",
+        snapshot.committed_diff_sha256,
+    )
 
 
 def selected_run_payload(
@@ -228,10 +360,7 @@ def render_status_snapshot(
     full: bool,
 ) -> str:
     if snapshot.status.get("kind") != "agent":
-        return render_run_status(
-            snapshot.target.workspace,
-            snapshot.target.run_dir.name,
-        )
+        return render_run_status_payload(snapshot.status)
     if full:
         if snapshot.full_status is None:
             raise ValueError("当前 CLI 快照未包含完整状态卡。")

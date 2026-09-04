@@ -436,6 +436,14 @@ def session_status_projection(
         state = load_provider_sessions(run_dir)
     except ValueError:
         return [], "Provider Session 协调状态无法验证；Core 证据不受影响。"
+    return session_status_projection_from_state(state)
+
+
+def session_status_projection_from_state(
+    state: ProviderSessionState,
+) -> tuple[list[dict[str, object]], str | None]:
+    """从已读取的 Provider Session 生成展示摘要，避免同一快照重复读取文件。"""
+
     rows: list[dict[str, object]] = []
     for key, handle in sorted(state.handles.items()):
         rows.append(

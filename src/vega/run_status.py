@@ -11,6 +11,7 @@ from .agent_run_status import (
 )
 from .agent_status_guidance import agent_artifact_names, agent_next_steps
 from . import agent_status_projection as asp
+from .agent_status_card import AgentStatusProjection
 from .execution_control import (
     ACTIVE_EXECUTION_STATUSES,
     ExecutionRecord,
@@ -50,14 +51,25 @@ def render_run_status(workspace: Path, run: str) -> str:
     return render_run_status_payload(run_status_payload(workspace, run))
 
 
-def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
+def run_status_payload(
+    workspace: Path,
+    run: str,
+    *,
+    agent_projection: AgentStatusProjection | None = None,
+) -> dict[str, Any]:
     run_dir = resolve_run_dir(workspace, run)
     state = _read_state(run_dir)
     kind = _infer_kind(run_dir, state)
     if kind != "agent":
         state = _classify_init(workspace, run_dir, state)
     else:
-        asp.apply_agent_projection(workspace, run, run_dir, state)
+        asp.apply_agent_projection(
+            workspace,
+            run,
+            run_dir,
+            state,
+            projection=agent_projection,
+        )
     decisions = asp.combined_decisions(run_dir, include_agent=kind == "agent")
     return {
         "run_id": run_dir.name,

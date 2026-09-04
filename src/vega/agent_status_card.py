@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -7,19 +8,27 @@ from pydantic import ValidationError
 from .agent_candidate_evidence import matches_accepted_candidate_transition
 from .agent_contract import (
     AgentCheckpoint,
+    AgentDecision,
     AgentObservation,
     AgentPlan,
     AgentState,
     AgentStatusCard,
     ProviderSessionStatus,
 )
+from .agent_provider_explain import provider_interaction_projection
 from .agent_persistence import load_agent_checkpoint
 from .agent_repository_binding import capture_bound_workspace
 from .agent_run_status import read_live_child_stage, trusted_worker_label
 from .agent_status_evidence import build_supervisor_evidence
 from .agent_status_history import status_history_note
 from .agent_visibility import render_agent_status_card
-from .provider_session import session_status_projection
+from .provider_session import (
+    PendingInteraction,
+    ProviderSessionState,
+    load_provider_sessions,
+    session_status_projection,
+    session_status_projection_from_state,
+)
 from .redaction import redact_text, write_redacted_text
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
@@ -27,6 +36,26 @@ from .workspace_snapshot import ReviewWorkspaceSnapshot
 _SNAPSHOT_NOTICE = (
     "> 这是生成时快照；实时状态请使用 `vega status --run <run-id>` 查看。\n\n"
 )
+
+
+@dataclass(frozen=True)
+class AgentStatusProjection:
+    """一次状态投影读取的共享视图。"""
+
+    state: AgentState
+    plan: AgentPlan
+    card: AgentStatusCard
+    payload: dict[str, object]
+    checkpoint: AgentCheckpoint | None
+    decision: AgentDecision | None
+    decision_issue: str | None
+    observation: AgentObservation | None
+    workspace: ReviewWorkspaceSnapshot | None
+    workspace_issue: str | None
+    provider_sessions: ProviderSessionState | None
+    provider_interactions: tuple[PendingInteraction, ...]
+    provider_warnings: tuple[str, ...]
+    repo_path: str | None = None
 
 
 def write_status_card(
@@ -59,8 +88,38 @@ def read_status_card(
     run_dir: Path,
     state: AgentState,
     plan: AgentPlan,
+    *,
+    status_projection: AgentStatusProjection | None = None,
 ) -> str:
-    """按当前 Artifact 重新渲染状态卡，避免重复旧的通过结论。"""
+    """按当前 Artifact 重新渲染状态卡，或复用调用方已构建的只读投影。"""
+
+    projection = status_projection or build_agent_status_projection(
+        run_dir,
+        state,
+        plan,
+    )
+    if projection.state != state or projection.plan != plan:
+        raise ValueError("状态卡投影与 Agent State/Plan 身份不一致。")
+    return redact_text(render_agent_status_card(projection.card))
+
+
+def capture_status_workspace(
+    run_dir: Path,
+) -> tuple[ReviewWorkspaceSnapshot | None, str | None]:
+    """采集一次状态展示所需的 Workspace 视图。"""
+
+    return _capture_live_workspace(run_dir)
+
+
+def build_agent_status_projection(
+    run_dir: Path,
+    state: AgentState,
+    plan: AgentPlan,
+    *,
+    workspace_capture: tuple[ReviewWorkspaceSnapshot | None, str | None] | None = None,
+    repo_path: str | None = None,
+) -> AgentStatusProjection:
+    """一次性读取并构建 Agent 状态投影及其共享证据视图。"""
 
     checkpoint, checkpoint_issue = _load_status_checkpoint_for_display(
         run_dir,
@@ -71,7 +130,28 @@ def read_status_card(
         state,
         checkpoint,
     )
-    live_workspace, workspace_issue = _capture_live_workspace(run_dir)
+    if workspace_capture is None:
+        live_workspace, workspace_issue = _capture_live_workspace(run_dir)
+    else:
+        live_workspace, workspace_issue = workspace_capture
+    provider_state, provider_issue = _load_provider_sessions_for_display(run_dir)
+    session_rows = (
+        []
+        if provider_state is None
+        else session_status_projection_from_state(provider_state)[0]
+    )
+    provider_interactions, provider_warnings = provider_interaction_projection(
+        run_dir,
+        state,
+        provider_sessions=provider_state,
+        provider_issue=provider_issue,
+    )
+    decision, decision_issue = _load_status_decision_for_display(
+        run_dir,
+        checkpoint,
+    )
+    if checkpoint_issue is not None and decision_issue is None:
+        decision_issue = checkpoint_issue
     card = _build_status_card(
         run_dir,
         state,
@@ -83,14 +163,39 @@ def read_status_card(
         workspace_issue=workspace_issue,
         checkpoint_issue=checkpoint_issue,
         observation_issue=observation_issue,
+        provider_rows=session_rows,
+        provider_warning=provider_issue,
         next_step=(
             checkpoint.reason
-            if checkpoint is not None
-            and state.phase in {"planning", "ready", "needs_human"}
+            if checkpoint is not None and state.phase in {"ready", "needs_human"}
             else None
         ),
     )
-    return redact_text(render_agent_status_card(card))
+    payload = card.model_dump(mode="json")
+    payload.update(
+        {
+            "recorded_phase": state.phase,
+            "recorded_terminal_status": state.terminal_status,
+            "effective_phase": card.phase,
+            "effective_terminal_status": card.terminal_status,
+        }
+    )
+    return AgentStatusProjection(
+        state=state,
+        plan=plan,
+        card=card,
+        payload=payload,
+        checkpoint=checkpoint,
+        decision=decision,
+        decision_issue=decision_issue,
+        observation=observation,
+        workspace=live_workspace,
+        workspace_issue=workspace_issue,
+        provider_sessions=provider_state,
+        provider_interactions=tuple(provider_interactions),
+        provider_warnings=tuple(provider_warnings),
+        repo_path=repo_path,
+    )
 
 
 def _build_status_card(
@@ -106,6 +211,8 @@ def _build_status_card(
     workspace_issue: str | None = None,
     checkpoint_issue: str | None = None,
     observation_issue: str | None = None,
+    provider_rows: list[dict[str, object]] | None = None,
+    provider_warning: str | None = None,
 ) -> AgentStatusCard:
     current_index = next(
         (
@@ -204,7 +311,10 @@ def _build_status_card(
         workspace_issue=workspace_issue,
         evidence_issue=evidence_issue,
     )
-    session_rows, provider_session_warning = session_status_projection(run_dir)
+    if provider_rows is None:
+        provider_rows, provider_session_warning = session_status_projection(run_dir)
+    else:
+        provider_session_warning = provider_warning
     return AgentStatusCard(
         run_id=state.run_id,
         task_id=state.task_id,
@@ -258,8 +368,7 @@ def _build_status_card(
         plan_risk_notes=list(current_item.risk_notes) if current_item else [],
         supervisor_evidence=supervisor_evidence,
         provider_sessions=[
-            ProviderSessionStatus.model_validate(row)
-            for row in session_rows
+            ProviderSessionStatus.model_validate(row) for row in provider_rows
         ],
         provider_session_warning=provider_session_warning,
     )
@@ -272,43 +381,57 @@ def build_agent_status_payload(
 ) -> dict[str, object]:
     """生成文本与 JSON 共用的经验证状态投影。"""
 
-    checkpoint, checkpoint_issue = _load_status_checkpoint_for_display(
-        run_dir,
-        state,
-    )
-    observation, observation_issue = _load_status_observation_for_display(
-        run_dir,
-        state,
-        checkpoint,
-    )
-    live_workspace, workspace_issue = _capture_live_workspace(run_dir)
-    card = _build_status_card(
-        run_dir,
-        state,
-        plan,
-        observation=observation,
-        checkpoint=checkpoint,
-        live_workspace=live_workspace,
-        workspace_checked=True,
-        workspace_issue=workspace_issue,
-        checkpoint_issue=checkpoint_issue,
-        observation_issue=observation_issue,
-        next_step=(
-            checkpoint.reason
-            if checkpoint is not None and state.phase in {"ready", "needs_human"}
-            else None
-        ),
-    )
-    payload = card.model_dump(mode="json")
-    payload.update(
-        {
-            "recorded_phase": state.phase,
-            "recorded_terminal_status": state.terminal_status,
-            "effective_phase": card.phase,
-            "effective_terminal_status": card.terminal_status,
-        }
-    )
-    return payload
+    return build_agent_status_projection(run_dir, state, plan).payload
+
+
+def _load_provider_sessions_for_display(
+    run_dir: Path,
+) -> tuple[ProviderSessionState | None, str | None]:
+    try:
+        return load_provider_sessions(run_dir), None
+    except ValueError:
+        return None, "Provider Session 协调状态无法验证；Core 证据不受影响。"
+
+
+def _load_status_decision_for_display(
+    run_dir: Path,
+    checkpoint: AgentCheckpoint | None,
+) -> tuple[AgentDecision | None, str | None]:
+    """读取与最近 Checkpoint 绑定的 Decision，供 explain 复用。"""
+
+    if checkpoint is None:
+        return None, None
+    decision_refs = [
+        ref
+        for ref in checkpoint.evidence_refs
+        if ref.startswith("decisions/")
+    ]
+    if not decision_refs:
+        return None, None
+    if len(decision_refs) != 1:
+        return None, "最近 Checkpoint 无法唯一定位 Decision。"
+    decision_ref = decision_refs[0]
+    try:
+        root = run_dir.resolve(strict=True)
+        path = (root / decision_ref).resolve(strict=True)
+    except OSError:
+        return None, "最近 Decision 不存在或无法读取。"
+    if not path.is_relative_to(root / "decisions"):
+        return None, "最近 Decision 引用越过允许目录。"
+    try:
+        decision = AgentDecision.model_validate_json(
+            path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, ValidationError):
+        return None, "最近 Decision 无法验证。"
+    observation_ref = f"observations/{decision.observation_id}.json"
+    if (
+        path.name != f"{decision.decision_id}.json"
+        or observation_ref not in checkpoint.evidence_refs
+        or decision.selected_action not in checkpoint.pending_actions
+    ):
+        return None, "最近 Decision 与 Checkpoint 的身份或动作绑定不一致。"
+    return decision, None
 
 
 def _evidence_health(

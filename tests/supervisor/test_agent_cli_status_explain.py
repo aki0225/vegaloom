@@ -12,6 +12,11 @@ from vega.agent_persistence import load_agent_state, save_agent_state
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_runtime_logic import update_state
 from vega.cli_entrypoint import app
+from vega.provider_session import (
+    ProviderSessionState,
+    load_provider_sessions,
+    save_provider_sessions,
+)
 
 
 def test_status_selects_unique_change_run_from_repository_subdirectory(
@@ -128,6 +133,56 @@ def test_status_snapshot_retries_once_then_fails_closed_on_continuous_change(
                     state_version=state.state_version + 1,
                 ),
             )
+        return result
+
+    monkeypatch.setattr(
+        cli_status_module,
+        "build_agent_explanation",
+        mutate_after_explanation,
+    )
+
+    result = CliRunner().invoke(app, ["status"])
+
+    assert result.exit_code == expected_exit, result.output
+    assert calls == (2 if mutations else 1)
+    if expected_exit == 0:
+        assert "# Vega Status" in result.output
+    else:
+        assert "状态快照构建期间持续变化" in result.output
+
+
+@pytest.mark.parametrize(
+    ("mutations", "expected_exit"),
+    [(1, 0), (2, 2)],
+)
+def test_status_snapshot_binds_provider_session_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutations: int,
+    expected_exit: int,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    run = SupervisorAgentRuntime(repo).start_planning(
+        repo,
+        goal="绑定 Provider Session 快照",
+    )
+    save_provider_sessions(
+        run.run_dir,
+        ProviderSessionState(run_id=run.run_dir.name),
+    )
+    monkeypatch.chdir(repo)
+    original = cli_status_module.build_agent_explanation
+    calls = 0
+
+    def mutate_after_explanation(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        if calls <= mutations:
+            path = run.run_dir / "provider-sessions.json"
+            provider_state = load_provider_sessions(run.run_dir)
+            provider_state.revision += 1
+            save_provider_sessions(path.parent, provider_state)
         return result
 
     monkeypatch.setattr(
