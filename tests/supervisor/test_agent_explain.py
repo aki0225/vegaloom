@@ -16,6 +16,7 @@ from vega.agent_explain import build_agent_explanation
 from vega.agent_persistence import save_agent_checkpoint
 from vega.provider_session import (
     PendingInteraction,
+    ProviderSessionHandle,
     ProviderSessionState,
     save_provider_sessions,
 )
@@ -31,6 +32,7 @@ def test_evidence_override_precedes_provider_and_recorded_phase(
         run_dir,
         ProviderSessionState(
             run_id=run_dir.name,
+            handles={"worker": _provider_handle()},
             interactions=[_interaction()],
         ),
     )
@@ -60,6 +62,7 @@ def test_pending_interaction_precedes_active_execution(
         run_dir,
         ProviderSessionState(
             run_id=run_dir.name,
+            handles={"worker": _provider_handle()},
             interactions=[_interaction()],
         ),
     )
@@ -70,6 +73,48 @@ def test_pending_interaction_precedes_active_execution(
     assert result.reason_code == "provider.interaction_required"
     assert result.block_category == "authorization"
     assert result.source == "provider"
+
+
+def test_invalid_provider_state_is_warning_not_core_phase_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="planning")
+    (run_dir / "provider-sessions.json").write_text(
+        '{"kind":"provider_sessions","data":{},"digest":"invalid"}\n',
+        encoding="utf-8",
+    )
+    _stub_status(monkeypatch, state)
+
+    result = build_agent_explanation(run_dir, state, _plan())
+
+    assert result.reason_code == "planning.required"
+    assert result.phase == "planning"
+    assert any("Provider 协调告警" in item for item in result.unknowns)
+
+
+def test_completed_core_ignores_stale_pending_interaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="completed")
+    save_provider_sessions(
+        run_dir,
+        ProviderSessionState(
+            run_id=run_dir.name,
+            handles={"worker": _provider_handle()},
+            interactions=[_interaction()],
+        ),
+    )
+    _stub_status(monkeypatch, state)
+
+    result = build_agent_explanation(run_dir, state, _plan())
+
+    assert result.reason_code == "run.completed.ready_to_commit"
+    assert result.outcome == "completed"
+    assert any("陈旧 Provider 请求" in item for item in result.unknowns)
 
 
 @pytest.mark.parametrize(
@@ -233,6 +278,9 @@ def _state(
         operation_started=active,
         latest_checkpoint_id=checkpoint_id,
         allowed_actions=["human"] if phase == "needs_human" else [],
+        terminal_status=(
+            "ready_to_commit" if phase == "completed" else None
+        ),
     )
 
 
@@ -259,4 +307,17 @@ def _interaction() -> PendingInteraction:
         thread_id="thread-001",
         turn_id="turn-001",
         summary="执行项目测试",
+    )
+
+
+def _provider_handle() -> ProviderSessionHandle:
+    return ProviderSessionHandle(
+        provider="codex",
+        role="worker",
+        thread_id="thread-001",
+        owner="vega",
+        lifecycle="waiting_user",
+        work_item_id="W1",
+        permissions_verified=True,
+        last_turn_id="turn-001",
     )

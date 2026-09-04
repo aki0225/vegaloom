@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -31,48 +29,67 @@ class _TtyInput:
         return self.line
 
 
-class _BlockingTtyInput:
-    def __init__(self) -> None:
-        self.release = threading.Event()
-
-    def isatty(self) -> bool:
-        return True
-
-    def readline(self) -> str:
-        self.release.wait(timeout=5)
-        return "y\n"
-
-
 @pytest.mark.parametrize(
-    ("answer", "expected"),
-    [("y\n", "accept"), ("\n", "decline")],
+    ("method", "params"),
+    [
+        (
+            "item/commandExecution/requestApproval",
+            {
+                "command": "rg TODO",
+                "cwd": "managed-worktree",
+                "commandActions": [{"type": "search"}],
+            },
+        ),
+        (
+            "item/commandExecution/requestApproval",
+            {
+                "command": "rg TODO",
+                "cwd": "managed-worktree",
+                "commandActions": [{"type": "search"}],
+                "networkApprovalContext": {"host": "example.invalid"},
+                "proposedExecpolicyAmendment": ["rg"],
+                "additionalPermissions": {"network": {"enabled": True}},
+            },
+        ),
+        (
+            "item/fileChange/requestApproval",
+            {
+                "grantRoot": "requested-root",
+                "reason": "需要扩大写入范围",
+            },
+        ),
+    ],
 )
-def test_interaction_pump_responds_to_safe_command_in_background(
+def test_interaction_pump_never_approves_from_redacted_friendly_summary(
     tmp_path: Path,
-    answer: str,
-    expected: str,
+    method: str,
+    params: dict[str, object],
 ) -> None:
+    summary = summarize_provider_interaction(method, params)
     run_dir = _run_dir(
         tmp_path,
-        method="item/commandExecution/requestApproval",
-        summary="读取文件、搜索文件；检查当前配置",
+        method=method,
+        summary=summary,
     )
-    input_stream = _TtyInput(answer)
+    input_stream = _TtyInput("y\n")
     pump = ProviderInteractionPump(run_dir, input_stream=input_stream)
 
-    first = pump.poll()
-    final = _poll_until_resolved(pump)
+    update = pump.poll()
 
-    assert first.status == "prompting"
-    assert first.prompt is not None
-    assert "[y/N]" in first.prompt
-    assert "accept-session" not in first.prompt
-    assert final.status == "responded"
-    assert final.decision == expected
-    assert input_stream.read_count == 1
+    assert update.status == "attention"
+    assert (
+        update.reason_code
+        == "provider.interaction_requires_advanced_response"
+    )
+    assert "原生会话" in (update.message or "")
+    assert input_stream.read_count == 0
     interaction = load_provider_sessions(run_dir).interactions[0]
-    assert interaction.status == "responded"
-    assert interaction.response == {"decision": expected}
+    assert interaction.status == "pending"
+    assert interaction.response is None
+    serialized = (run_dir / "provider-sessions.json").read_text(encoding="utf-8")
+    assert "rg TODO" not in serialized
+    assert "example.invalid" not in serialized
+    assert "requested-root" not in serialized
 
 
 def test_interaction_pump_never_reads_non_tty_or_json_input(
@@ -97,7 +114,10 @@ def test_interaction_pump_never_reads_non_tty_or_json_input(
     ).poll()
 
     assert non_tty.status == "attention"
-    assert non_tty.reason_code == "provider.interaction_requires_tty"
+    assert (
+        non_tty.reason_code
+        == "provider.interaction_requires_advanced_response"
+    )
     assert json_output.status == "attention"
     assert input_stream.read_count == 0
     assert load_provider_sessions(run_dir).interactions[0].status == "pending"
@@ -138,7 +158,7 @@ def test_interaction_pump_routes_unsafe_requests_to_advanced_path(
     assert load_provider_sessions(run_dir).interactions[0].status == "pending"
 
 
-def test_interaction_pump_revalidates_turn_before_response(
+def test_interaction_pump_rejects_stale_turn_binding(
     tmp_path: Path,
 ) -> None:
     run_dir = _run_dir(
@@ -146,19 +166,17 @@ def test_interaction_pump_revalidates_turn_before_response(
         method="item/fileChange/requestApproval",
         summary="文件修改；应用已批准范围内的补丁",
     )
-    input_stream = _BlockingTtyInput()
-    pump = ProviderInteractionPump(run_dir, input_stream=input_stream)
-
-    assert pump.poll().status == "prompting"
 
     def change_turn(state: ProviderSessionState) -> None:
         state.handles["worker"].last_turn_id = "turn-replaced"
 
     mutate_provider_sessions(run_dir, "agent.session", change_turn)
-    input_stream.release.set()
-    final = _poll_until_status(pump, "attention")
+    final = ProviderInteractionPump(
+        run_dir,
+        input_stream=_TtyInput("y\n"),
+    ).poll()
 
-    assert final.reason_code == "provider.interaction_changed"
+    assert final.reason_code == "provider.interaction_binding_invalid"
     interaction = load_provider_sessions(run_dir).interactions[0]
     assert interaction.status == "pending"
     assert interaction.response is None
@@ -210,22 +228,3 @@ def _run_dir(tmp_path: Path, *, method: str, summary: str) -> Path:
     )
     save_provider_sessions(run_dir, state)
     return run_dir
-
-
-def _poll_until_resolved(
-    pump: ProviderInteractionPump,
-) -> object:
-    return _poll_until_status(pump, "responded")
-
-
-def _poll_until_status(
-    pump: ProviderInteractionPump,
-    status: str,
-):
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        update = pump.poll()
-        if update.status == status:
-            return update
-        time.sleep(0.01)
-    raise AssertionError(f"Interaction Pump 未进入 {status}")

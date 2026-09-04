@@ -4,9 +4,13 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
+import vega.agent_cli_status as cli_status_module
+from vega.agent_persistence import load_agent_state, save_agent_state
 from vega.agent_runtime import SupervisorAgentRuntime
+from vega.agent_runtime_logic import update_state
 from vega.cli_entrypoint import app
 
 
@@ -89,6 +93,57 @@ def test_status_default_full_and_explain_share_read_only_snapshot(
     assert json_payload["explanation"]["reason_code"] == "planning.required"
     assert "status" not in json_payload
     assert _artifact_snapshot(run.run_dir) == before
+
+
+@pytest.mark.parametrize(
+    ("mutations", "expected_exit"),
+    [(1, 0), (2, 2)],
+)
+def test_status_snapshot_retries_once_then_fails_closed_on_continuous_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutations: int,
+    expected_exit: int,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    run = SupervisorAgentRuntime(repo).start_planning(
+        repo,
+        goal="修复状态竞态",
+    )
+    monkeypatch.chdir(repo)
+    original = cli_status_module.build_agent_explanation
+    calls = 0
+
+    def mutate_after_explanation(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        if calls <= mutations:
+            path = run.run_dir / "agent-state.json"
+            state = load_agent_state(path)
+            save_agent_state(
+                path,
+                update_state(
+                    state,
+                    state_version=state.state_version + 1,
+                ),
+            )
+        return result
+
+    monkeypatch.setattr(
+        cli_status_module,
+        "build_agent_explanation",
+        mutate_after_explanation,
+    )
+
+    result = CliRunner().invoke(app, ["status"])
+
+    assert result.exit_code == expected_exit, result.output
+    assert calls == (2 if mutations else 1)
+    if expected_exit == 0:
+        assert "# Vega Status" in result.output
+    else:
+        assert "状态快照构建期间持续变化" in result.output
 
 
 def _repo(path: Path) -> Path:

@@ -26,9 +26,6 @@ _ADVANCED_METHODS = {
     "item/tool/requestUserInput",
     "mcpServer/elicitation/request",
 }
-_SAFE_COMMAND_LABELS = {"读取文件", "列出文件", "搜索文件"}
-
-
 @dataclass(frozen=True)
 class InteractionPumpUpdate:
     """供 CLI 渲染的低频交互状态，不包含原始 Provider 参数。"""
@@ -250,22 +247,14 @@ def _binding_error(
 def _inline_eligibility_error(
     interaction: PendingInteraction,
 ) -> str | None:
-    if interaction.method == _COMMAND_APPROVAL:
-        command_summary = interaction.summary.split("；", maxsplit=1)[0]
-        labels = command_summary.split("、")
-        if not labels or any(label not in _SAFE_COMMAND_LABELS for label in labels):
-            return (
-                "命令请求缺少可安全展示的分类；请接管原生会话确认，"
-                "简化交互不会猜测原始命令。"
-            )
-        return None
-    if interaction.method == _FILE_APPROVAL:
-        if not interaction.summary.startswith("文件修改；"):
-            return (
-                "文件修改请求缺少脱敏原因；请接管原生会话确认，"
-                "简化交互不会重新保存原始路径或参数。"
-            )
-        return None
+    if interaction.method in {_COMMAND_APPROVAL, _FILE_APPROVAL}:
+        # Provider Session 只保存脱敏摘要，无法重新证明 cwd、目标路径、
+        # 网络上下文或策略增量。基于 friendly display 标签批准会把展示提示
+        # 错当成权限事实，因此简化终端只能提示接管，不能内联 accept。
+        return (
+            "简化状态没有保存知情授权所需的完整目标与权限上下文；"
+            "请接管原生会话核对请求，Vega 不会仅凭脱敏摘要批准。"
+        )
     if interaction.method in _ADVANCED_METHODS:
         return "权限、工具输入和 MCP 请求需要结构化或敏感响应。"
     return "当前 Provider 请求类型不受简化交互支持，请接管原生会话处理。"

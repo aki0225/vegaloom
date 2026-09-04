@@ -112,7 +112,10 @@ def status(
 
     try:
         target = resolve_agent_cli_run(Path.cwd(), run)
-        snapshot = build_agent_cli_snapshot(target)
+        snapshot = build_agent_cli_snapshot(
+            target,
+            include_full=full and not json_output,
+        )
         if json_output:
             typer.echo(
                 json.dumps(
@@ -148,7 +151,10 @@ def explain(
 
     try:
         target = resolve_agent_cli_run(Path.cwd(), run)
-        snapshot = build_agent_cli_snapshot(target)
+        snapshot = build_agent_cli_snapshot(
+            target,
+            include_full=full and not json_output,
+        )
         if json_output:
             typer.echo(
                 json.dumps(

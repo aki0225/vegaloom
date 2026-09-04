@@ -7,8 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .agent_contract import AgentCheckpoint, AgentDecision, AgentPhase, AgentPlan, AgentState
 from .agent_persistence import AgentArtifactError, load_agent_checkpoint
+from .agent_provider_explain import (
+    provider_interaction_projection,
+    with_provider_warnings,
+)
 from .agent_status_card import build_agent_status_payload
-from .provider_session import PROVIDER_SESSIONS_ARTIFACT, PendingInteraction, load_provider_sessions
+from .provider_session import PROVIDER_SESSIONS_ARTIFACT
 
 
 BlockCategory = Literal["authorization", "transient", "configuration", "evidence", "budget"]
@@ -127,24 +131,10 @@ def build_agent_explanation(run_dir: Path, state: AgentState, plan: AgentPlan) -
             evidence_refs=_base_refs(state),
         )
 
-    sessions, session_issue = _provider_interactions(run_dir)
-    if session_issue is not None:
-        return _explanation(
-            state,
-            phase="needs_human",
-            outcome="attention_required",
-            reason_code="provider.session_unverified",
-            source="evidence",
-            actor="Provider Session 投影",
-            reason=session_issue,
-            facts=["Core 运行证据未因此改写"],
-            unknowns=["是否存在尚未响应的 Provider 请求"],
-            safe_actions=["status_full", "takeover", "human"],
-            evidence_refs=[*_base_refs(state), PROVIDER_SESSIONS_ARTIFACT],
-        )
+    sessions, provider_warnings = provider_interaction_projection(run_dir, state)
     if sessions:
         first = sessions[0]
-        return _explanation(
+        return with_provider_warnings(_explanation(
             state,
             phase=state.phase,
             outcome="attention_required",
@@ -164,15 +154,15 @@ def build_agent_explanation(run_dir: Path, state: AgentState, plan: AgentPlan) -
             unknowns=["该请求尚未由人工接受或拒绝"],
             safe_actions=["respond", "takeover", "stop"],
             evidence_refs=[PROVIDER_SESSIONS_ARTIFACT],
-        )
+        ), provider_warnings)
 
     active = _active_execution_explanation(state, status)
     if active is not None:
-        return active
+        return with_provider_warnings(active, provider_warnings)
 
     checkpoint, decision, decision_issue = _checkpoint_decision(run_dir, state)
     if decision_issue is not None:
-        return _explanation(
+        return with_provider_warnings(_explanation(
             state,
             phase="needs_human",
             outcome="attention_required",
@@ -184,16 +174,22 @@ def build_agent_explanation(run_dir: Path, state: AgentState, plan: AgentPlan) -
             unknowns=["最近 Checkpoint 的路由依据是否完整且绑定正确"],
             safe_actions=["status_full", "inspect_artifacts", "human"],
             evidence_refs=_base_refs(state),
-        )
+        ), provider_warnings)
 
     phase = _phase_explanation(state, status, checkpoint, decision)
     if phase is not None:
-        return phase
+        return with_provider_warnings(phase, provider_warnings)
     if decision is not None and checkpoint is not None:
-        return _decision_explanation(state, status, checkpoint, decision)
+        return with_provider_warnings(
+            _decision_explanation(state, status, checkpoint, decision),
+            provider_warnings,
+        )
     if checkpoint is not None:
-        return _checkpoint_explanation(state, status, checkpoint)
-    return _explanation(
+        return with_provider_warnings(
+            _checkpoint_explanation(state, status, checkpoint),
+            provider_warnings,
+        )
+    return with_provider_warnings(_explanation(
         state,
         phase=state.phase,
         outcome="unknown",
@@ -205,7 +201,7 @@ def build_agent_explanation(run_dir: Path, state: AgentState, plan: AgentPlan) -
         unknowns=["旧版本运行没有稳定 reason_code"],
         safe_actions=_safe_actions(status, fallback=["status_full"]),
         evidence_refs=_base_refs(state),
-    )
+    ), provider_warnings)
 
 
 def _active_execution_explanation(
@@ -384,16 +380,6 @@ def _checkpoint_explanation(
         safe_actions=_safe_actions(status, fallback=list(checkpoint.pending_actions)),
         evidence_refs=_checkpoint_refs(state, checkpoint),
     )
-
-
-def _provider_interactions(run_dir: Path) -> tuple[list[PendingInteraction], str | None]:
-    try:
-        sessions = load_provider_sessions(run_dir)
-    except ValueError:
-        return [], "Provider Session 协调状态无法验证。"
-    pending = [item for item in sessions.interactions if item.status == "pending"]
-    pending.sort(key=lambda item: item.created_at)
-    return pending, None
 
 
 def _checkpoint_decision(

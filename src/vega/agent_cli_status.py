@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from pydantic import ValidationError
+
+from .agent_contract import AgentPlan, AgentState, canonical_digest
 from .agent_explain import AgentExplanation, build_agent_explanation
 from .agent_run_selection import (
     ACTIVE_CHANGE_PHASES,
     ChangeRunSelectionError,
     select_repository_change_run,
 )
-from .agent_runtime import SupervisorAgentRuntime
-from .agent_runtime_support import load_agent_bundle
+from .agent_status_card import read_status_card
 from .run_status import render_run_status, run_status_payload
 from .run_utils import resolve_run_dir
 
@@ -62,6 +66,14 @@ class AgentCliSnapshot:
     target: AgentCliRun
     status: dict[str, object]
     explanation: AgentExplanation | None
+    full_status: str | None = None
+
+
+@dataclass(frozen=True)
+class _AgentStateToken:
+    content_sha256: str
+    plan_sha256: str
+    state_version: int
 
 
 def resolve_agent_cli_run(
@@ -92,28 +104,106 @@ def resolve_agent_cli_run(
     )
 
 
-def build_agent_cli_snapshot(target: AgentCliRun) -> AgentCliSnapshot:
-    """构建一次只读状态快照；展示层不能借查询改写运行状态。"""
+def build_agent_cli_snapshot(
+    target: AgentCliRun,
+    *,
+    include_full: bool = False,
+) -> AgentCliSnapshot:
+    """构建版本绑定的只读快照；状态持续变化时拒绝拼接跨版本结论。"""
 
-    payload = run_status_payload(target.workspace, target.run_dir.name)
-    explanation: AgentExplanation | None = None
-    if payload.get("kind") == "agent":
-        run_dir, state, plan, _ = load_agent_bundle(
-            target.workspace,
-            target.run_dir.name,
+    if not (target.run_dir / "agent-state.json").exists():
+        payload = run_status_payload(target.workspace, target.run_dir.name)
+        payload["selected_run"] = selected_run_payload(target, payload)
+        payload["explanation"] = None
+        return AgentCliSnapshot(
+            target=target,
+            status=payload,
+            explanation=None,
         )
-        explanation = build_agent_explanation(run_dir, state, plan)
-    payload["selected_run"] = selected_run_payload(target, payload)
-    payload["explanation"] = (
-        explanation.model_dump(mode="json")
-        if explanation is not None
-        else None
+
+    for _ in range(2):
+        token_before = _read_agent_state_token(target.run_dir)
+        payload = run_status_payload(target.workspace, target.run_dir.name)
+        state, plan = _models_from_status(target.run_dir, payload)
+        if state.state_version != token_before.state_version:
+            continue
+        explanation = build_agent_explanation(target.run_dir, state, plan)
+        full_status = (
+            read_status_card(target.run_dir, state, plan)
+            if include_full
+            else None
+        )
+        token_after = _read_agent_state_token(target.run_dir)
+        if token_before != token_after:
+            continue
+        payload["selected_run"] = selected_run_payload(target, payload)
+        payload["explanation"] = explanation.model_dump(mode="json")
+        return AgentCliSnapshot(
+            target=target,
+            status=payload,
+            explanation=explanation,
+            full_status=full_status,
+        )
+    raise ValueError(
+        "Agent State 在状态快照构建期间持续变化；"
+        "已拒绝拼接不同版本的 status 与 explain，请稍后重试。"
     )
-    return AgentCliSnapshot(
-        target=target,
-        status=payload,
-        explanation=explanation,
+
+
+def _read_agent_state_token(run_dir: Path) -> _AgentStateToken:
+    path = run_dir / "agent-state.json"
+    try:
+        content = path.read_bytes()
+        plan_content = (run_dir / "agent-plan.json").read_bytes()
+        envelope = json.loads(content.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Agent State 快照无法读取。") from exc
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != {"kind", "data", "digest"}
+        or envelope.get("kind") != "agent_state"
+        or not isinstance(envelope.get("data"), dict)
+        or envelope.get("digest") != canonical_digest(envelope["data"])
+    ):
+        raise ValueError("Agent State 快照 envelope 无法验证。")
+    try:
+        state = AgentState.model_validate(envelope["data"])
+    except ValidationError as exc:
+        raise ValueError("Agent State 快照 schema 无法验证。") from exc
+    return _AgentStateToken(
+        content_sha256=hashlib.sha256(content).hexdigest(),
+        plan_sha256=hashlib.sha256(plan_content).hexdigest(),
+        state_version=state.state_version,
     )
+
+
+def _models_from_status(
+    run_dir: Path,
+    payload: dict[str, object],
+) -> tuple[AgentState, AgentPlan]:
+    raw_state = payload.get("persisted_agent_state")
+    if not isinstance(raw_state, dict):
+        raise ValueError("ChangeRun 状态投影缺少持久化 Agent State。")
+    try:
+        state = AgentState.model_validate(raw_state)
+        plan = AgentPlan.model_validate_json(
+            (run_dir / "agent-plan.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, ValidationError) as exc:
+        raise ValueError("ChangeRun 状态快照无法验证。") from exc
+    if state.run_id != run_dir.name or plan.task_id != state.task_id:
+        raise ValueError("ChangeRun 状态快照身份绑定不一致。")
+    if (
+        state.run_kind == "legacy" or state.contract_revision is not None
+    ) and state.phase not in {"planning", "awaiting_approval"}:
+        if (
+            state.goal_revision != plan.goal_revision
+            or state.plan_revision != plan.plan_revision
+            or state.approved_plan_digest != plan.approved_digest
+            or not plan.approval_is_current()
+        ):
+            raise ValueError("ChangeRun 状态快照与当前批准 Plan 不一致。")
+    return state, plan
 
 
 def selected_run_payload(
@@ -143,9 +233,9 @@ def render_status_snapshot(
             snapshot.target.run_dir.name,
         )
     if full:
-        return SupervisorAgentRuntime(snapshot.target.workspace).status(
-            snapshot.target.run_dir.name
-        )
+        if snapshot.full_status is None:
+            raise ValueError("当前 CLI 快照未包含完整状态卡。")
+        return snapshot.full_status
     assert snapshot.explanation is not None
     return render_compact_agent_status(snapshot.status, snapshot.explanation)
 
@@ -219,12 +309,14 @@ def render_agent_explanation(
         *_bullet_lines(explanation.evidence_refs, empty="暂无。", code=True),
     ]
     if full:
+        if snapshot.full_status is None:
+            raise ValueError("当前 CLI 快照未包含完整状态卡。")
         lines.extend(
             [
                 "",
                 "## 完整状态卡",
                 "",
-                render_status_snapshot(snapshot, full=True).rstrip(),
+                snapshot.full_status.rstrip(),
             ]
         )
     return "\n".join(lines).rstrip() + "\n"

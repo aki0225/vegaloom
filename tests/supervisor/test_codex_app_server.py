@@ -13,7 +13,6 @@ from types import SimpleNamespace
 import pytest
 
 from vega import codex_app_server_process
-from vega.agent_cli_interaction import ProviderInteractionPump
 from vega.codex_app_server import (
     _AppServerClient,
     _app_server_command,
@@ -330,45 +329,6 @@ def test_app_server_waits_for_explicit_approval_response(
     assert fake_state["approval_response"] == {"decision": "accept"}
 
 
-def test_interaction_pump_resumes_waiting_app_server_turn(
-    tmp_path: Path,
-) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _write_fake_app_server(repo)
-    run_dir = tmp_path / "runs" / "agent-run"
-    run_dir.mkdir(parents=True)
-    runner = _runner(run_dir)
-    pump = ProviderInteractionPump(
-        run_dir,
-        input_stream=_AcceptingTtyInput(),
-    )
-
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(
-            runner.run,
-            "ASK_APPROVAL",
-            repo,
-            sandbox="workspace-write",
-            timeout_seconds=30,
-            execution_context=_execution_context(run_dir, "approval-pump", []),
-        )
-        deadline = time.monotonic() + 20
-        while not future.done() and time.monotonic() < deadline:
-            update = pump.poll()
-            assert update.status != "attention", update.message
-            time.sleep(0.02)
-        result = future.result(timeout=5)
-
-    assert result.status == "success"
-    state = load_provider_sessions(run_dir)
-    assert state.interactions[-1].status == "closed"
-    fake_state = json.loads(
-        (repo / ".fake-app-server-state.json").read_text(encoding="utf-8")
-    )
-    assert fake_state["approval_response"] == {"decision": "accept"}
-
-
 def test_app_server_preserves_safe_turn_error(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -632,14 +592,6 @@ def _wait_for_interaction(run_dir: Path) -> str:
             return pending[0].interaction_id
         time.sleep(0.05)
     raise AssertionError("App Server 没有发布待响应请求")
-
-
-class _AcceptingTtyInput:
-    def isatty(self) -> bool:
-        return True
-
-    def readline(self) -> str:
-        return "y\n"
 
 
 def _write_fake_app_server(repo: Path) -> None:
