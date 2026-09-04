@@ -292,6 +292,7 @@ class AgentDecision(StrictAgentModel):
     observation_id: NonEmptyText
     allowed_actions: list[AgentAction] = Field(min_length=1)
     selected_action: AgentAction
+    reason_code: NonEmptyText | None = None
     reason: NonEmptyText
     source: Literal["deterministic", "supervisor", "human"]
     created_at: str = Field(default_factory=utc_now)

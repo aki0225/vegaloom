@@ -24,12 +24,13 @@ _TRANSITION_PHASES: dict[AgentAction, AgentPhase] = {
 
 
 def decide_next_action(plan: AgentPlan, observation: AgentObservation) -> AgentDecision:
-    allowed_actions, selected_action, reason = _route(plan, observation)
+    allowed_actions, selected_action, reason_code, reason = _route(plan, observation)
     return AgentDecision(
         decision_id=f"decision-{uuid4().hex[:12]}",
         observation_id=observation.observation_id,
         allowed_actions=allowed_actions,
         selected_action=selected_action,
+        reason_code=reason_code,
         reason=reason,
         source="deterministic",
     )
@@ -89,79 +90,110 @@ def transition_state(
 def _route(
     plan: AgentPlan,
     observation: AgentObservation,
-) -> tuple[list[AgentAction], AgentAction, str]:
+) -> tuple[list[AgentAction], AgentAction, str, str]:
     precondition = _precondition_route(plan, observation)
     if precondition is not None:
         return precondition
 
     blocked_gate = _human_blocked_gate(observation)
     if blocked_gate is not None:
+        label, code = blocked_gate
         return (
             ["human"],
             "human",
-            f"{blocked_gate} 明确要求人工处理，不能自动 repair 或 replan",
+            f"gate.{code}.blocked",
+            f"{label} 明确要求人工处理，不能自动 repair 或 replan",
         )
 
     blocking_gate = _failed_gate(observation)
     if blocking_gate is not None:
+        label, code = blocking_gate
         if observation.repairable_in_scope:
             return (
                 ["repair", "replan", "human"],
                 "repair",
-                f"{blocking_gate} 未通过，但问题可在批准范围内修复",
+                f"gate.{code}.failed_repairable",
+                f"{label} 未通过，但问题可在批准范围内修复",
             )
         return (
             ["replan", "human"],
             "replan",
-            f"{blocking_gate} 未通过，当前范围不足以直接修复",
+            f"gate.{code}.failed_replan",
+            f"{label} 未通过，当前范围不足以直接修复",
         )
 
     if observation.all_work_items_completed:
         incomplete_gate = _incomplete_final_gate(observation)
         if incomplete_gate is not None:
+            label, code = incomplete_gate
             return (
                 ["human"],
                 "human",
-                f"全部 Work Item 已完成，但 {incomplete_gate} 证据不足或过期",
+                f"gate.{code}.incomplete",
+                f"全部 Work Item 已完成，但 {label} 证据不足或过期",
             )
-        return ["finalize"], "finalize", "全部 Work Item 与完成门禁均已通过"
+        return (
+            ["finalize"],
+            "finalize",
+            "workflow.all_work_items_completed",
+            "全部 Work Item 与完成门禁均已通过",
+        )
 
     if observation.work_item_completed:
         incomplete_gate = _incomplete_final_gate(observation)
         if incomplete_gate is not None:
+            label, code = incomplete_gate
             return (
                 ["human"],
                 "human",
-                f"当前 Work Item 已完成，但 {incomplete_gate} 证据不足或过期",
+                f"gate.{code}.incomplete",
+                f"当前 Work Item 已完成，但 {label} 证据不足或过期",
             )
-        return ["next", "replan", "human"], "next", "当前 Work Item 已完成，可进入下一项"
+        return (
+            ["next", "replan", "human"],
+            "next",
+            "workflow.work_item_completed",
+            "当前 Work Item 已完成，可进入下一项",
+        )
 
     if observation.repairable_in_scope:
         return (
             ["repair", "replan", "human"],
             "repair",
+            "workflow.repairable_in_scope",
             "当前 Work Item 尚未完成，问题仍可在批准范围内修复",
         )
 
-    return ["human"], "human", "当前 Work Item 没有可信完成或可修复证据"
+    return (
+        ["human"],
+        "human",
+        "evidence.no_trusted_progress",
+        "当前 Work Item 没有可信完成或可修复证据",
+    )
 
 
 def _precondition_route(
     plan: AgentPlan,
     observation: AgentObservation,
-) -> tuple[list[AgentAction], AgentAction, str] | None:
+) -> tuple[list[AgentAction], AgentAction, str, str] | None:
     checks = (
         (
             observation.authority == "external_claim",
             (
                 ["human"],
                 "human",
+                "evidence.external_claim_only",
                 "外部 Observation 只作为 Claim 记录，不能授予进度或门禁通过资格",
             ),
         ),
         (
             not plan.approval_is_current(),
-            (["replan", "human"], "replan", "Plan 未批准或批准摘要已过期"),
+            (
+                ["replan", "human"],
+                "replan",
+                "approval.plan_stale",
+                "Plan 未批准或批准摘要已过期",
+            ),
         ),
         (
             observation.all_work_items_completed
@@ -169,22 +201,38 @@ def _precondition_route(
             (
                 ["human"],
                 "human",
+                "evidence.plan_completion_mismatch",
                 "Observation 声称全部完成，但 Plan 仍有未完成 Work Item",
             ),
         ),
         (
             observation.worker_alive,
-            (["human"], "human", "旧 Worker 仍存活，禁止启动第二 Writer"),
+            (
+                ["human"],
+                "human",
+                "execution.writer_still_active",
+                "旧 Worker 仍存活，禁止启动第二 Writer",
+            ),
         ),
         (
             not observation.workspace_explained,
-            (["human"], "human", "Workspace 变化尚未完成机器对账"),
+            (
+                ["human"],
+                "human",
+                "workspace.unexplained_change",
+                "Workspace 变化尚未完成机器对账",
+            ),
         ),
         (
             observation.external_side_effects != "none",
             (
                 ["human"],
                 "human",
+                (
+                    "side_effects.unknown"
+                    if observation.external_side_effects == "unknown"
+                    else "side_effects.declared"
+                ),
                 (
                     "外部副作用未知，禁止自动重试"
                     if observation.external_side_effects == "unknown"
@@ -194,7 +242,12 @@ def _precondition_route(
         ),
         (
             observation.plan_contradicted,
-            (["replan", "human"], "replan", "新证据推翻已批准 Plan"),
+            (
+                ["replan", "human"],
+                "replan",
+                "approval.plan_contradicted",
+                "新证据推翻已批准 Plan",
+            ),
         ),
     )
     return next((route for matched, route in checks if matched), None)
@@ -213,36 +266,40 @@ def _finalization_claim_matches_plan(
     )
 
 
-def _human_blocked_gate(observation: AgentObservation) -> str | None:
-    for label, status in (
-        ("Verification", observation.verification),
-        ("Risk Gate", observation.risk),
-        ("Reviewer", observation.review),
+def _human_blocked_gate(
+    observation: AgentObservation,
+) -> tuple[str, str] | None:
+    for label, code, status in (
+        ("Verification", "verification", observation.verification),
+        ("Risk Gate", "risk", observation.risk),
+        ("Reviewer", "review", observation.review),
     ):
         if status == "blocked":
-            return label
+            return label, code
     return None
 
 
-def _failed_gate(observation: AgentObservation) -> str | None:
-    for label, status in (
-        ("Verification", observation.verification),
-        ("Risk Gate", observation.risk),
-        ("Reviewer", observation.review),
+def _failed_gate(observation: AgentObservation) -> tuple[str, str] | None:
+    for label, code, status in (
+        ("Verification", "verification", observation.verification),
+        ("Risk Gate", "risk", observation.risk),
+        ("Reviewer", "review", observation.review),
     ):
         if status == "failed":
-            return label
+            return label, code
     return None
 
 
-def _incomplete_final_gate(observation: AgentObservation) -> str | None:
-    for label, status in (
-        ("Verification", observation.verification),
-        ("Risk Gate", observation.risk),
-        ("Reviewer", observation.review),
+def _incomplete_final_gate(
+    observation: AgentObservation,
+) -> tuple[str, str] | None:
+    for label, code, status in (
+        ("Verification", "verification", observation.verification),
+        ("Risk Gate", "risk", observation.risk),
+        ("Reviewer", "review", observation.review),
     ):
         if status != "passed":
-            return label
+            return label, code
     return None
 
 
