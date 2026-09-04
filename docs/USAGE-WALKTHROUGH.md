@@ -14,7 +14,29 @@ Python import、行尾和验证命令 warning。
 
 Adapter 只写入 `.agents/skills/vega-agent/SKILL.md`。目标仓库已有同名文件时默认不覆盖。
 
-## 2. 调查
+## 2. 日常主路径
+
+进入目标 Git 仓库后，直接用一条命令创建或继续当前仓库唯一未完成的 ChangeRun：
+
+```powershell
+vega change "导出按钮点击后没有反应"
+vega status
+vega explain
+```
+
+`vega change` 会自动串起 Planning、Contract、人工批准、Provider、Verification、Risk、
+Reviewer 和 Finish。省略文本时，它继续当前仓库唯一未完成的 ChangeRun；没有活动任务时，
+如果只有一个有效 Task Card，会先请求确认再恢复。多个未完成任务、多个 Task Card、损坏记录
+或无法证明归属时拒绝猜测。`status` 展示当前阶段、会话、Diff、门禁和下一步，`explain`
+只读解释当前决定、已确认事实、未知项和安全动作；两者都可用 `--run`、`--full` 或 `--json`
+进行显式排障，不调用模型、不重新验证、不修改状态。
+
+`change` 默认在交互式终端请求人工批准。Provider 请求的脱敏摘要会显示在同一终端；如果
+协调状态没有足够的完整原始目标或权限上下文来安全判断，Vega 会 fail-closed，停止自动推进
+并转到高级命令或 Provider 原生会话。**同终端可见不等于同终端自动批准**；复杂、敏感或无法
+分类的请求不能只凭摘要接受。
+
+### 2.1 高级：拆开调查、批准和执行
 
 在 Codex 主会话中调用 `$vega-agent`，或从 Codex、Claude Code、普通终端直接使用 CLI。
 只要根因、范围或验收仍有一项不明确，就先建立只读 Planning ChangeRun：
@@ -146,6 +168,22 @@ vega run --run <run_id> --timeout 900 --fresh-session
 ## 5. 看进度
 
 ```powershell
+vega status
+vega explain
+```
+
+日常入口省略 `--run` 时优先按当前 Git 仓库选择唯一未完成 ChangeRun；没有活动任务时显示最近
+更新的终态 Run。需要完整状态或脚本消费时：
+
+```powershell
+vega status --run <run_id> --full
+vega explain --run <run_id> --full
+vega status --run <run_id> --json
+```
+
+高级排障还可以持续观察安全事件：
+
+```powershell
 vega watch --run <run_id> --follow
 vega latest
 ```
@@ -178,6 +216,10 @@ Claude Code V1 只支持后一种方式：排队后在下一 Turn 发送，状�
 Steer 超过 8 KiB、目标由人工接管或 Session 不存在时拒绝。
 
 ## 7. 响应 Codex App Server 请求
+
+`vega change` 会在当前终端显示待处理请求的脱敏摘要，但不会把摘要当成完整授权事实。
+命令或文件请求缺少目标路径、权限上下文或策略增量时，简化交互直接 fail-closed；请先在
+Provider 原生会话核对，再使用高级响应命令。终端可见不等于自动批准。
 
 命令或文件审批：
 
@@ -277,6 +319,17 @@ vega retry --run <run_id>
 
 该命令复用当前 Diff 和原 Worker 证据，只重跑 Verification、Risk 和 Reviewer。源码、未跟踪
 文件、Git 控制状态或 Candidate 变化时拒绝。
+
+### 10.1 Reviewer 超时自动恢复一次
+
+Core Work Item Reviewer 明确返回 `timed_out`，且当前 Candidate、Workspace、Contract、Plan、
+Verification、Risk、预算、无外部副作用和 Reviewer 进程终态都能重新证明时，`vega change`
+主路径会调用现有验证恢复流程一次。恢复使用新的独立 Reviewer Session，复用原 Candidate 和
+child，完整重跑 Verification、Risk 和 Reviewer，不启动新的 Coding Worker。
+
+以下情况不会自动恢复，直接保持 `needs_human`：第二次 Reviewer timeout、`error`、`stopped`、
+终止未确认、最终集成 Reviewer，或任一绑定、证据、预算和 Workspace 前提不一致。用
+`vega status` / `vega explain` 查看原因代码和安全下一步。
 
 ## 11. Worker 异常
 

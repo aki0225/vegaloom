@@ -17,8 +17,9 @@ Vega 是软件工程 Agent 的控制层。它不重新实现 Coding Agent，而�
   -> 最终人工 PR 判断
 ```
 
-v0.3.0 只有这一条公开 ChangeRun 流程。旧 `do`、`loop`、`agent`、`goal` 和 inspection
-命令不再作为公共入口；ChangeRun 仍复用其中经过验证的 Core Runtime。
+当前 `v0.5.0` 候选把日常入口收敛为 `vega change`、`vega status` 和 `vega explain`。
+`start`、`approve`、`run` 仍保留为需要显式控制阶段的高级入口；旧 `do`、`loop`、`agent`、
+`goal` 和 inspection 命令不再作为公共入口。所有入口继续复用同一 ChangeRun Core Runtime。
 
 ## 权威关系
 
@@ -36,10 +37,16 @@ v0.3.0 只有这一条公开 ChangeRun 流程。旧 `do`、`loop`、`agent`、`g
 
 Trace、状态卡、Task Brief 和最终报告都是这些事实的投影，不能反向创造成功证据。
 
+`vega status` 和 `vega explain` 省略 `--run` 时，优先从当前 Git 仓库绑定的 ChangeRun 中选择
+唯一未完成任务；没有活动任务时显示最近更新的终态 Run，并按 `AgentState.updated_at` 处理并列
+顺序。多个候选、身份不一致或损坏记录时拒绝猜测。两条命令只读投影当前可信 Artifact，不调用
+模型、不重新运行验证、不修改状态。
+
 ## Planning Proposal
 
-`start --text` 先把自然语言目标绑定到固定 Git revision，并在只读 Worktree 中生成
-Planning Proposal。Proposal 保存事实引用、假设、未决问题、建议范围和验证建议。
+`vega change <text>` 先把自然语言目标绑定到固定 Git revision，并在只读 Worktree 中生成
+Planning Proposal；需要拆开阶段时可使用高级 `start --text`。Proposal 保存事实引用、假设、
+未决问题、建议范围和验证建议。
 
 它不是 Approved Contract。Planner 提出的路径、命令、风险和 Work Item 只能作为编译输入；
 在 Contract Compiler 与人工批准完成前，Vega 不启动 Worker。
@@ -110,7 +117,8 @@ model 和 effort。Vega 固定 Claude Code 的 safe-mode、工具白名单和权
 `Edit / Write`；项目验证仍由 Vega 执行。
 
 Provider Session 只保存本机会话协调信息：Session ID、owner、生命周期、Turn、压缩次数、Token
-用量、待发送 Steer 和待响应请求。它不参与 Verification、Risk、Reviewer 或 Finish 裁决。
+用量、待发送 Steer 和待响应请求。待响应请求只保留脱敏摘要，不保存可以替代原生 Provider
+授权判断的完整目标、权限或网络上下文；它不参与 Verification、Risk、Reviewer 或 Finish 裁决。
 
 ## Candidate 与门禁
 
@@ -140,8 +148,11 @@ LLM 只返回结构化结果。代码选择下一动作：
 
 普通 Repair 返回同一个 Worker Thread，不需要人工转贴 Reviewer finding。预算耗尽、同一问题反复
 出现、Worker 没有形成有效 Diff、验证超时或终止未确认、未知外部副作用或审查未完成时进入
-`needs_human`。普通测试断言失败仍可按批准范围进入 Repair；基础设施或执行中断不会伪装成
-“修改范围不足”的 Replan。
+`needs_human`。Core Work Item Reviewer 明确 `timed_out` 且所有现场、Candidate、Verification、
+Risk、预算和副作用证据都可重新证明时，现有 `VerificationRetry` 最多自动恢复一次；恢复使用
+新的独立 Reviewer Session，复用原 Candidate 和 child，完整重跑 Verification、Risk 和 Reviewer。
+第二次超时、`error`、`stopped`、终止未确认或最终集成审查不会自动恢复。普通测试断言失败仍可按
+批准范围进入 Repair；基础设施或执行中断不会伪装成“修改范围不足”的 Replan。
 
 ## Steer、响应和接管
 
@@ -157,6 +168,10 @@ Steer 不能修改冻结合同。敏感输入不得写入 Vega Artifact；需要
 应接管原生会话。只有空闲 Session、没有 active Writer binding 且 Workspace 未变化时才允许
 直接 `reclaim`。活动 attempt 被接管时会先中断执行；人工处理后必须走 Recovery 或 Handoff，
 不能把旧 attempt 直接接回自动循环。
+
+`vega change` 会在当前 TTY 展示 Provider 待处理请求的脱敏摘要。若当前协调状态缺少足以安全
+判断的完整原始目标或权限上下文，简化交互必须 fail-closed，转到高级 `vega respond` 或
+Provider 原生会话；终端可见不等于自动批准。JSON 和非交互终端不读取 stdin。
 
 Codex 支持在当前 Turn 的安全事件边界发送 Steer。Claude Code V1 没有等价的受控中途发送接口，
 因此只在下一次 Turn 输入中附加排队指令；状态卡会明确显示这一差异。
@@ -208,10 +223,13 @@ vega capabilities
 vega config check
 vega adapters init codex
 
+vega change [text]
+vega status
+vega explain
+
 vega start
 vega approve
 vega run [--provider codex|claude]
-vega status
 vega watch
 vega latest
 

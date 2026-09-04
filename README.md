@@ -11,7 +11,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.4.0"><img src="https://img.shields.io/badge/Release-v0.4.0-4fb8d8?style=for-the-badge" alt="Vega v0.4.0"></a>
+  <a href="docs/RELEASE-NOTES-0.5.0.md"><img src="https://img.shields.io/badge/Release-v0.5.0%20candidate-4fb8d8?style=for-the-badge" alt="Vega v0.5.0 候选"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -25,10 +25,12 @@
 
 Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言目标，Vega 把调查结果编译成
 待批准的 Change Contract；批准后，Vega 在隔离 Worktree 中复用一个 Coding Agent 会话完成
-实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。普通问题自动回到 Worker，
-越出批准边界才停下来问人。
+实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。合同内问题可以自动回到
+Worker；越出批准、授权或证据边界时停下来问人。
 
-> 最新稳定版本：[v0.4.0](https://github.com/aki0225/vegaloom/releases/tag/v0.4.0)。
+> 当前最新候选版本：`v0.5.0`；Tag、GitHub Release、完整 CI 和真实 Provider smoke
+> 仍待验证。上一个已发布稳定版本为
+> [v0.4.0](https://github.com/aki0225/vegaloom/releases/tag/v0.4.0)。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega ChangeRun：计划批准、Worker、验证、独立 Reviewer 和最终报告">
@@ -53,7 +55,31 @@ vega adapters init codex --repo .  # 在 Codex 宿主中使用时
 最后一条命令写入仓库级 `$vega-agent` Skill。它不会安装 Hook，也不会修改 Codex 全局配置。
 直接从终端运行 Vega 时可以跳过。
 
-如果只有 Bug 现象，先让 Vega 做只读调查：
+## 日常主路径
+
+进入目标 Git 仓库后，日常任务不需要复制 Run ID 或手工串起多个阶段：
+
+```powershell
+vega change "导出按钮点击后没有反应"
+vega status
+vega explain
+```
+
+`vega change` 会从当前仓库选择唯一未完成的 ChangeRun；没有活动任务时创建新的只读
+Planning，已有任务时继续推进。多个未完成任务、损坏记录或无法证明归属时拒绝猜测。
+`vega status` 显示当前阶段、会话、Diff、门禁和下一步，`vega explain` 只读解释决定、
+已确认事实、未知项和安全动作；两者默认优先选择当前仓库唯一未完成的 Run，没有活动任务时
+显示最近更新的终态 Run，也可以用 `--run` 显式指定。
+
+`change` 默认在当前 TTY 请求人工批准。Provider 请求会在同一终端显示脱敏摘要；如果协调
+状态没有保存足以安全判断的完整原始目标或权限上下文，Vega 会 fail-closed，停止自动推进并
+转到高级命令或 Provider 原生会话处理。**同终端可见不等于同终端自动批准**，复杂、敏感或
+无法分类的请求不能只凭摘要接受。
+
+## 高级路径：拆开调查、批准和执行
+
+需要显式控制阶段、传入已有 Contract，或使用脚本化流程时，保留 `start`、`approve` 和
+`run`：
 
 ```powershell
 vega start --repo . --text "导出按钮点击后没有反应"
@@ -117,8 +143,17 @@ vega run --run <run_id> --provider claude --timeout 900
 
 ### 看进度
 
+日常查询优先使用不带 Run ID 的短命令：
+
+```powershell
+vega status
+vega explain
+```
+
 ```powershell
 vega status --run <run_id>
+vega status --run <run_id> --full
+vega explain --run <run_id> --full
 vega watch --run <run_id> --follow
 vega latest
 ```
@@ -154,6 +189,11 @@ vega revise --run <run_id> `
 - 代码没变，只是验证环境或命令需要重跑：`vega retry --run <run_id>`。
 - Worker 失去可信终态：准备 Recovery Request，再运行
   `vega recover --run <run_id> --input <recovery.json>`。
+- Core Work Item Reviewer 明确 `timed_out`，且 Candidate、Workspace、Verification、Risk、
+  副作用和预算均可重新证明时，Vega 会使用新的独立 Reviewer Session 自动恢复一次；
+  它复用原 Candidate 和 child，完整重跑 Verification、Risk 和 Reviewer，不启动新的
+  Coding Worker。第二次超时、`error`、`stopped`、终止未确认、最终集成审查或任一前提不一致
+  时保持 `needs_human`。
 - 原生会话必须由人处理：`vega takeover --run <run_id> --role worker`。
 - 空闲会话接管后且 Workspace 未变化时，可用
   `vega reclaim --run <run_id> --role worker` 交还控制权；活动 attempt 被中断后先做
@@ -224,6 +264,8 @@ LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`re
 - 自动 Provider Adapter 支持 Codex 和 Claude Code；两者共用同一套成功语义。
 - Claude Code 使用 safe-mode、固定工具白名单和 Vega Worktree。这里没有额外宣称
   OS 或容器级沙箱。
+- Provider 请求即使在当前终端可见，也不会因为缺少完整原始上下文而简化为自动批准；
+  无法安全分类时必须转高级或原生会话处理。
 - Reviewer 会话隔离用于切断 Worker 聊天上下文，不等于系统安全边界。
 - 项目没有可靠验证命令时，Vega 也无法凭空证明代码可交付。
 - 数据库迁移、支付、权限、部署和外部写入仍需要明确风险配置与人工判断。
@@ -240,7 +282,10 @@ LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`re
 | 修改前调查与计划 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 当前事项 | [CURRENT](docs/CURRENT.md) |
 | 文档导航 | [docs/README](docs/README.md) |
-| v0.4.0 发布说明 | [RELEASE-NOTES-0.4.0](docs/RELEASE-NOTES-0.4.0.md) |
+| v0.5.0 候选发布说明 | [RELEASE-NOTES-0.5.0](docs/RELEASE-NOTES-0.5.0.md) |
+| v0.5.0 候选摘要 | [RELEASE-SUMMARY-0.5.0](docs/RELEASE-SUMMARY-0.5.0.md) |
+| 发布检查清单 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
+| v0.4.0 历史发布说明 | [RELEASE-NOTES-0.4.0](docs/RELEASE-NOTES-0.4.0.md) |
 | v0.3.1 历史说明 | [RELEASE-NOTES-0.3.1](docs/RELEASE-NOTES-0.3.1.md) |
 | v0.3.0 历史说明 | [RELEASE-NOTES-0.3.0](docs/RELEASE-NOTES-0.3.0.md) |
 | 真实运行记录 | [real-world-runs](eval/real-world-runs.md) |
