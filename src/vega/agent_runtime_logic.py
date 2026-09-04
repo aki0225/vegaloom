@@ -11,6 +11,7 @@ from .agent_contract import (
     AgentWorkItem,
     ObservationAuthority,
 )
+from .agent_contract_support import utc_now
 from .agent_run_status import latest_trusted_child_run
 from .workspace_check import ReviewWorkspaceSnapshot
 
@@ -206,4 +207,5 @@ def invalidate_plan_for_steer(plan: AgentPlan, instruction: str) -> AgentPlan:
 def update_state(state: AgentState, **changes: object) -> AgentState:
     payload = state.model_dump(mode="json")
     payload.update(changes)
+    payload["updated_at"] = utc_now()
     return AgentState.model_validate(payload)
