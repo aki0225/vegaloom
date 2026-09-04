@@ -1,19 +1,19 @@
 # 发布检查
 
-发布版本：`v0.5.0` 候选。
+发布版本：`v0.5.0`。
 
-> 状态：候选清单，日期：2026-09-04。真实 Codex bounded 与 Claude Code human smoke
-> 已完成；完整 CI、package smoke、Tag 和 GitHub Release 仍待验证。本清单不把本地文档
-> 检查或计划状态写成发布通过。
+> 状态：已发布，日期：2026-09-04。注解 Tag、GitHub Release、主线 CI 和制品均绑定
+> `1a2ad71929805485ac44d30fba322b15cd150519`。本文件记录实际结果，不以 PASS 文案替代
+> 命令终态或远端状态。
 
-## 1. 候选范围
+## 1. 发布范围
 
-- `pyproject.toml`、`vega.__version__`、Capabilities、CI 版本断言与发布材料统一为 `0.5.0`：**待验证**；
-- README、站点、架构、产品契约、使用说明和路线文档切换到 `v0.5.0` 候选：**待复核**；
+- `pyproject.toml`、`vega.__version__`、Capabilities、CI 版本断言与发布材料统一为 `0.5.0`：**已验证**；
+- README、站点、架构、产品契约、使用说明和路线文档已切换到 `v0.5.0`：**已复核**；
 - 日常入口 `vega change`、`vega status`、`vega explain` 与高级 `start` / `approve` / `run`
-  的边界在文档中保持一致：**待复核**；
-- `eval/` 历史记录保持不变：**待复核**；
-- 工作区不包含绝对本机路径、凭据、`.env`、数据库、Office 文件或运行缓存：**待验证**。
+  的边界在文档中保持一致：**已复核**；
+- `eval/` 历史记录保持不变：**已复核**；
+- 工作区不包含绝对本机路径、凭据、`.env`、数据库、Office 文件或运行缓存：**已验证**。
 
 ## 2. 公共入口
 
@@ -27,8 +27,8 @@ vega status --help
 vega explain --help
 ```
 
-版本必须输出 `0.5.0`；日常入口应显示 `change`、`status`、`explain`，旧的 `do`、`loop`、
-`agent`、`goal`、`inspection` 不得重新注册：**待验证**。
+版本输出 `0.5.0`；日常入口显示 `change`、`status`、`explain`，旧的 `do`、`loop`、
+`agent`、`goal`、`inspection` 未重新注册：**已验证**。
 
 ## 3. 本地最小检查
 
@@ -41,7 +41,7 @@ ruff check src tests scripts
 git diff --check
 ```
 
-每条命令的退出码、工作区状态和候选提交均需在发布记录中保存：**待验证**。
+发布提交和发布后文档均完成编译、仓库卫生、Ruff 与 diff check，命令正常结束：**已验证**。
 
 ## 4. 完整基线
 
@@ -51,8 +51,18 @@ python scripts/check_architecture_growth.py --base-ref origin/main
 python -m pytest
 ```
 
-完整 pytest、计划检查和架构检查必须报告计数、跳过数、退出码和候选提交。超时、pending、
-skipped job 或环境阻塞不能写成通过：**待验证**。
+发布提交的 main CI 运行 `33904159484` 共 10 个 job，全部结束并通过：
+
+- Python 3.12 Core：`312 passed`；
+- Python 3.12 Core Heavy：`126 passed`；
+- Python 3.12 Supervisor：`441 passed`；
+- Python 3.12 Security：`434 passed, 7 skipped`；
+- Python 3.12 Experimental：`279 passed`；
+- Python 3.11 兼容：`1592 passed, 7 skipped`；
+- Windows 专项、POSIX 专项、静态检查与 package job 同时通过。
+
+计划检查在发布提交上为 `31/32`，当前事项为 `RELEASE-05`；本次发布后事件进入主线后变为
+`32/32`。架构增长检查保持 C901 `31 -> 31`：**已验证**。
 
 ## 5. Package smoke
 
@@ -61,9 +71,17 @@ python -m build
 python -m twine check dist/*
 ```
 
-从干净构建目录分别安装 wheel 和 sdist，检查 distribution metadata、`vega.__version__`、
-`vega --version`、`vega --help`、`vega capabilities`、`pip check`、Skill 资源和源码目录外
-启动：**待验证**。
+CI 在 Python 3.12 干净环境分别安装 wheel 和 sdist，并检查 distribution metadata、
+`vega.__version__`、`vega --version`、`vega --help`、`vega capabilities`、`pip check`、
+Skill 资源和源码目录外启动。发布维护机另以 Python 3.14 重复 wheel 与 sdist 安装 smoke：
+**已验证**。
+
+上传制品：
+
+| 文件 | 大小 | SHA-256 |
+|---|---:|---|
+| `vegaloom-0.5.0-py3-none-any.whl` | 673430 bytes | `c4af770bc245757038e8c98fc9781178c7038ba9270cb0dcfcc9f27405f332d5` |
+| `vegaloom-0.5.0.tar.gz` | 540662 bytes | `34b48dda23a52ce2e128b5ed02921e92f1b9600382d3ce1a4a2f6f7a4231fb39` |
 
 ## 6. 真实 Provider 与恢复证据
 
@@ -84,37 +102,40 @@ python -m twine check dist/*
 
 ## 7. PR 与 CI
 
-1. 候选分支只包含 UX-01/02/03 实现、必要测试、版本、文档、站点和发布材料：**待验证**；
-2. PR required checks 全部结束且通过：**待验证**；
-3. 合并前核对 PR HEAD、本地候选提交和实际 Diff：**待验证**；
-4. 使用 Squash Merge，提交信息使用简体中文：**待验证**；
-5. 合并后删除候选分支：**待验证**；
-6. `main` 合并提交的 CI 再次全部通过：**待验证**。
+1. 候选分支只包含 UX-01/02/03 实现、必要测试、版本、文档、站点和发布材料：**已验证**；
+2. PR #108 的 10 个 CI job 全部结束且通过：**已验证**；
+3. 合并前核对 PR HEAD `783e1beabedfba34ea558ac0af21beb2f283d736`、本地候选和实际 Diff：**已验证**；
+4. 使用 Squash Merge，主线提交为 `1a2ad71929805485ac44d30fba322b15cd150519`：**已验证**；
+5. 候选分支 `feat/v0.5.0-daily-ux` 已删除：**已验证**；
+6. `main` 合并提交的 10 个 CI job 全部结束且通过：**已验证**。
 
 ## 8. Tag 与 GitHub Release
 
-确认 `main` CI 通过后，由人工执行：
+`main` CI 通过后完成：
 
-1. 从精确 `main` 合并提交创建 annotated Tag `v0.5.0`：**待验证**；
-2. 推送 Tag：**待验证**；
-3. 使用 `RELEASE-SUMMARY-0.5.0.md` 创建 GitHub Release：**待验证**；
-4. 核对 Release 的 Tag、提交、wheel 和 sdist：**待验证**；
-5. 追加发布状态提交并生成新的 `CURRENT.md`：**待验证**。
+1. 从精确主线提交创建并推送 annotated Tag `v0.5.0`；Tag 对象为
+   `a72f678bd4b7214f580b3a6c6452bd63f0c962b2`，peeled commit 为
+   `1a2ad71929805485ac44d30fba322b15cd150519`：**已验证**；
+2. 使用 `RELEASE-SUMMARY-0.5.0.md` 创建非 draft、非 prerelease 的 GitHub Release
+   `382931461`：**已验证**；
+3. Release 中的 wheel 与 sdist 大小、GitHub 计算的 digest 和本地 SHA-256 一致：
+   **已验证**；
+4. 本次发布后变更已追加 `RELEASE-05` 完成事件并重新生成 `CURRENT.md`；该事实以本 PR
+   合入 `main` 为准。
 
 Vega Runtime 不执行这些 Git 交付动作；本清单只记录仓库维护流程。
 
 ## 9. 完成条件
 
-以下条件全部取得可复核事实后，才能把候选称为已发布：
+以下发布条件均已取得可复核事实：
 
-- [ ] 版本文件与公共入口输出 `0.5.0`；
-- [ ] 本地最小检查和完整基线均有退出码与计数；
-- [ ] wheel、sdist、`twine check` 和干净环境安装 smoke 通过；
+- [x] 版本文件与公共入口输出 `0.5.0`；
+- [x] 本地最小检查和完整基线均有退出码与计数；
+- [x] wheel、sdist、`twine check` 和干净环境安装 smoke 通过；
 - [x] Codex、Claude Code 真实主路径与 Reviewer timeout 确定性恢复证据完整；
-- [ ] PR required checks 与合并后 `main` CI 通过；
-- [ ] annotated Tag `v0.5.0` 指向通过验证的 `main` 提交；
-- [ ] GitHub Release 已创建且制品来自同一提交；
-- [ ] 发布状态事件已追加并生成当前计划视图。
+- [x] PR required checks 与合并后 `main` CI 通过；
+- [x] annotated Tag `v0.5.0` 指向通过验证的 `main` 提交；
+- [x] GitHub Release 已创建且制品来自同一提交；
+- [x] 发布状态事件已追加并生成当前计划视图。
 
-在上述事实出现前，`v0.5.0` 只能称为候选，不得写成“已发布”或“CI 已通过”。
-历史 `v0.4.0` 材料保持原样。
+`v0.5.0` 已发布。历史 `v0.4.0` 材料保持原样。

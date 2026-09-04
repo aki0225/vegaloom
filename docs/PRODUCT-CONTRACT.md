@@ -17,7 +17,7 @@ Vega 是软件工程 Agent 的控制层。它不重新实现 Coding Agent，而�
   -> 最终人工 PR 判断
 ```
 
-当前 `v0.5.0` 候选把日常入口收敛为 `vega change`、`vega status` 和 `vega explain`。
+`v0.5.0` 把日常入口收敛为 `vega change`、`vega status` 和 `vega explain`。
 `start`、`approve`、`run` 仍保留为需要显式控制阶段的高级入口；旧 `do`、`loop`、`agent`、
 `goal` 和 inspection 命令不再作为公共入口。所有入口继续复用同一 ChangeRun Core Runtime。
 

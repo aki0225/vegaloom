@@ -11,7 +11,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <a href="docs/RELEASE-NOTES-0.5.0.md"><img src="https://img.shields.io/badge/Release-v0.5.0%20candidate-4fb8d8?style=for-the-badge" alt="Vega v0.5.0 候选"></a>
+  <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.5.0"><img src="https://img.shields.io/badge/Release-v0.5.0-4fb8d8?style=for-the-badge" alt="Vega v0.5.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -28,9 +28,9 @@ Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言
 实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。合同内问题可以自动回到
 Worker；越出批准、授权或证据边界时停下来问人。
 
-> 当前最新候选版本：`v0.5.0`；真实 Codex bounded 与 Claude Code human smoke 已完成，
-> 完整 CI、package smoke、Tag 和 GitHub Release 仍待验证。上一个已发布稳定版本为
-> [v0.4.0](https://github.com/aki0225/vegaloom/releases/tag/v0.4.0)。
+> 最新稳定版本：[v0.5.0](https://github.com/aki0225/vegaloom/releases/tag/v0.5.0)。
+> Codex bounded 与 Claude Code human 主路径已完成真实 smoke，发布提交的完整 CI 和
+> Python 3.12 package smoke 已通过。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega ChangeRun：计划批准、Worker、验证、独立 Reviewer 和最终报告">
@@ -285,8 +285,8 @@ LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`re
 | 修改前调查与计划 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 当前事项 | [CURRENT](docs/CURRENT.md) |
 | 文档导航 | [docs/README](docs/README.md) |
-| v0.5.0 候选发布说明 | [RELEASE-NOTES-0.5.0](docs/RELEASE-NOTES-0.5.0.md) |
-| v0.5.0 候选摘要 | [RELEASE-SUMMARY-0.5.0](docs/RELEASE-SUMMARY-0.5.0.md) |
+| v0.5.0 发布说明 | [RELEASE-NOTES-0.5.0](docs/RELEASE-NOTES-0.5.0.md) |
+| v0.5.0 发布摘要 | [RELEASE-SUMMARY-0.5.0](docs/RELEASE-SUMMARY-0.5.0.md) |
 | 发布检查清单 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | v0.4.0 历史发布说明 | [RELEASE-NOTES-0.4.0](docs/RELEASE-NOTES-0.4.0.md) |
 | v0.3.1 历史说明 | [RELEASE-NOTES-0.3.1](docs/RELEASE-NOTES-0.3.1.md) |

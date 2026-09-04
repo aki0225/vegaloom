@@ -1,8 +1,8 @@
-# Vega v0.5.0 发布说明（候选）
+# Vega v0.5.0 发布说明
 
-> 状态：发布候选，日期：2026-09-04。真实 Codex bounded 与 Claude Code human smoke
-> 已完成；Tag、GitHub Release、完整 CI 和 package smoke 仍待验证。本文不把候选文档
-> 当作已发布事实。
+> 状态：已发布，日期：2026-09-04。注解 Tag `v0.5.0` 与 GitHub Release 指向
+> `1a2ad71929805485ac44d30fba322b15cd150519`；PR 与 main 的 10 个 CI job 均通过，
+> wheel 和 sdist 已从该提交构建并上传。
 
 v0.5.0 继续复用既有 ChangeRun、Git Candidate、Verification、Risk、Reviewer 和 Finish，
 重点是让日常任务少记一个 Run ID、少切换几条命令，同时保留人工授权和
@@ -62,12 +62,14 @@ Verification、Risk、预算、无外部副作用和执行终态都能重新证�
 - `ready_to_commit` 只表示候选可交给人检查，不是生产安全证明；
 - 数据库、支付、权限、部署和未知外部副作用继续需要显式风险审查和人工判断。
 
-## 候选验证状态
+## 发布验证
 
 真实 Codex bounded 与 Claude Code human 路径已完成固定临时仓库验收；Reviewer timeout
 使用确定性故障注入验证，没有冒充真实 Provider timeout。脱敏结果见
 [`v0.5.0-daily-ux-smoke.md`](../examples/evidence/v0.5.0-daily-ux-smoke.md)。
 
-本候选的完整测试、跨平台 CI、打包制品、annotated Tag 和 GitHub Release 尚未在本文中确认。
-逐项状态见
-[`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)；发布前不得把“待验证”改写为通过。
+发布提交的 Python 3.12 CI 分片结果为 Core `312 passed`、Core Heavy `126 passed`、
+Supervisor `441 passed`、Security `434 passed, 7 skipped`、Experimental `279 passed`；
+Python 3.11 兼容任务为 `1592 passed, 7 skipped`。Windows、POSIX 和 package smoke
+同时通过。制品摘要、Tag 和 Release 记录见
+[`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)。
