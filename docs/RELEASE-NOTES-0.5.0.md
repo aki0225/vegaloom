@@ -35,9 +35,10 @@ Codex 和 Claude Code 共用同一 Provider Session、Candidate 和 Core 门禁�
 继续使用固定 safe-mode 和按角色限制的工具面；项目 Verification 仍由 Vega Core 执行。
 
 Provider 待处理请求可以在 `vega change` 的当前终端显示脱敏摘要，但摘要不是完整授权事实。
-如果协调状态缺少足以安全判断的原始目标、权限或策略上下文，Vega 会停止并转到高级命令或
-Provider 原生会话；复杂、敏感或无法分类的请求同样如此。**同终端可见不等于同终端自动批准。**
-JSON 和非交互终端不会读取 stdin。
+如果协调状态缺少足以安全判断的原始目标、权限或策略上下文，Vega 会停止当前 attempt，并
+关闭对应 pending，再转 Recovery 或 Provider 原生会话；复杂、敏感或无法分类的请求同样如此。
+高级 `vega run` 仍保持活动 Turn 时，`vega respond` 继续可用，但会重新校验完整生命周期绑定。
+**同终端可见不等于同终端自动批准。** JSON 和非交互终端不会读取 stdin。
 
 ### Reviewer timeout 恢复
 

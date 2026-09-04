@@ -218,8 +218,12 @@ Steer 超过 8 KiB、目标由人工接管或 Session 不存在时拒绝。
 ## 7. 响应 Codex App Server 请求
 
 `vega change` 会在当前终端显示待处理请求的脱敏摘要，但不会把摘要当成完整授权事实。
-命令或文件请求缺少目标路径、权限上下文或策略增量时，简化交互直接 fail-closed；请先在
-Provider 原生会话核对，再使用高级响应命令。终端可见不等于自动批准。
+命令或文件请求缺少目标路径、权限上下文或策略增量时，控制器会停止当前 attempt，并把这条
+pending 标记为 closed。此时先用 `status` / `explain` 对账，再按需要 `recover`、`takeover`
+或创建新 attempt；停止后的请求不能再用 `respond` 补写。
+
+只有高级 `vega run` 仍在另一个终端持有活动 Codex Turn 时，下面的命令才适用。响应前先在
+原生会话核对完整请求；Vega 会重新校验 owner、Thread、Turn、权限和 request binding。
 
 命令或文件审批：
 

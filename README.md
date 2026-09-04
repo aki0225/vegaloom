@@ -72,8 +72,8 @@ Planning，已有任务时继续推进。多个未完成任务、损坏记录或
 显示最近更新的终态 Run，也可以用 `--run` 显式指定。
 
 `change` 默认在当前 TTY 请求人工批准。Provider 请求会在同一终端显示脱敏摘要；如果协调
-状态没有保存足以安全判断的完整原始目标或权限上下文，Vega 会 fail-closed，停止自动推进并
-转到高级命令或 Provider 原生会话处理。**同终端可见不等于同终端自动批准**，复杂、敏感或
+状态没有保存足以安全判断的完整原始目标或权限上下文，Vega 会中断当前 attempt、关闭这条
+待响应请求，再转到恢复或原生会话接管。**同终端可见不等于同终端自动批准**，复杂、敏感或
 无法分类的请求不能只凭摘要接受。
 
 ## 高级路径：拆开调查、批准和执行
@@ -165,13 +165,16 @@ vega latest
 
 ```powershell
 vega steer --run <run_id> --role worker --text "补充检查导入失败后的回滚路径"
-vega respond --run <run_id> --interaction <request_id> --decision accept
 vega pause --run <run_id> --reason "等待需求确认"
 vega stop --run <run_id> --reason "方向变化"
 ```
 
 `steer` 只能补充当前执行，不能改写批准合同。范围、验收或风险边界变化时，提交新的 Contract
 和 Execution Plan：
+
+高级 `vega run` 仍在另一个终端持有活动 Codex Turn 时，可以用
+`vega respond --run <run_id> --interaction <request_id> ...` 响应已经核对的请求。
+`vega change` 遇到这类请求会先停止 attempt 并关闭 pending；停止后再 `respond` 会被拒绝。
 
 Codex 可以在当前 Turn 的安全事件边界接收 Steer；Claude Code V1 把它排到下一 Turn，不会把
 不支持的中途控制伪装成已经送达。

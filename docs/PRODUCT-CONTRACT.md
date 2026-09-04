@@ -170,8 +170,10 @@ Steer 不能修改冻结合同。敏感输入不得写入 Vega Artifact；需要
 不能把旧 attempt 直接接回自动循环。
 
 `vega change` 会在当前 TTY 展示 Provider 待处理请求的脱敏摘要。若当前协调状态缺少足以安全
-判断的完整原始目标或权限上下文，简化交互必须 fail-closed，转到高级 `vega respond` 或
-Provider 原生会话；终端可见不等于自动批准。JSON 和非交互终端不读取 stdin。
+判断的完整原始目标或权限上下文，控制器中断当前 attempt，并把对应 pending 标记为 closed，
+再转 Recovery、Takeover 或新的 attempt；终端可见不等于自动批准。高级 `vega run` 仍保持
+活动 Codex Turn 时，另一终端可以用 `vega respond` 响应已核对的请求；Turn、owner、权限或
+请求绑定不一致时拒绝记录。JSON 和非交互终端不读取 stdin。
 
 Codex 支持在当前 Turn 的安全事件边界发送 Steer。Claude Code V1 没有等价的受控中途发送接口，
 因此只在下一次 Turn 输入中附加排队指令；状态卡会明确显示这一差异。

@@ -92,8 +92,10 @@ ChangeRun。
 批准后的每次可执行恢复都会重新检查策略和 Contract 绑定。失效的批准不能继续启动 Worker。
 
 `vega change` 在当前 TTY 展示批准摘要和 Provider 请求，但 Provider Session 只保留脱敏摘要；
-如果缺少足以证明目标、权限或上下文的完整原始信息，简化响应会 fail-closed，转到高级命令或
-Provider 原生会话。终端可见不等于自动批准；JSON 与非交互终端不会读取 stdin。
+如果缺少足以证明目标、权限或上下文的完整原始信息，控制器会停止当前 attempt、关闭对应
+pending，再转 Recovery 或 Provider 原生会话接管。高级 `vega run` 仍持有活动 Turn 时，
+`vega respond` 才能写入响应；owner、Thread、Turn 和权限绑定全部重新校验。终端可见不等于
+自动批准；JSON 与非交互终端不会读取 stdin。
 
 ### Change Contract 与 Execution Plan
 
@@ -178,8 +180,9 @@ notification 在 JSON-RPC 边界忽略，不会关闭 Observation 链。App Serv
 三次有限退避；关键事件积压超过上限、请求超时或进程树终止未确认时直接失败。
 
 `vega change` 可以在当前终端显示待处理请求的安全摘要；命令或文件请求若缺少完整原始目标、
-权限上下文和策略信息，不以内联 `y/N` 代替授权，而是停在人工边界并提示高级或原生处理。
-需要结构化输入、敏感信息或无法分类的请求同样保持 fail-closed。
+权限上下文和策略信息，不以内联 `y/N` 代替授权，而是停止当前 attempt 并关闭待响应请求。
+需要结构化输入、敏感信息或无法分类的请求同样保持 fail-closed。只有高级入口仍维持活动
+App Server Turn 时，才允许另一终端用 `vega respond` 送回已经核对的响应。
 
 Codex CLI `0.149.1` 的真实 Shadow 表明，原生 `review/start` 能发现代码问题，但请求不能绑定
 Vega 的 Structured Output，响应也没有覆盖清单和风险披露。当前不替换 Reviewer，记录见

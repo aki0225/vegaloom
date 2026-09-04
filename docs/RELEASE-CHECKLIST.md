@@ -70,7 +70,8 @@ python -m twine check dist/*
 
 - `vega change` 的 Codex bounded 与人工路径；
 - `vega change --provider claude` 的 Claude Code Worker / Reviewer 路径；
-- Provider 请求在当前终端可见，但缺少完整原始上下文时 fail-closed，未发生同终端自动批准；
+- Provider 请求在当前终端可见；缺少完整原始上下文时停止 attempt 并关闭 pending，未发生
+  同终端自动批准或停止后的假响应；
 - Core Work Item Reviewer 明确 `timed_out` 时最多自动恢复一次，第二次和不符合前提的情况
   保持 `needs_human`；
 - `vega status` / `vega explain` 的唯一 Run 选择、损坏记录拒绝和只读投影。
