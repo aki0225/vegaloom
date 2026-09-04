@@ -4,8 +4,10 @@ import json
 import os
 import stat
 import subprocess
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import BinaryIO
 from uuid import uuid4
 
 from .agent_contract import AgentObservation, AgentState, ObservationAuthority
@@ -15,6 +17,93 @@ from .repository_identity import repository_scope
 
 class AgentRepositoryGuardError(ValueError):
     """仓库级 Agent 所有权无法安全建立或释放。"""
+
+
+class RepositoryChangeLock:
+    """保护仓库级 ChangeRun 创建/恢复的短临界区。"""
+
+    _local_locks: dict[Path, threading.Lock] = {}
+    _local_locks_guard = threading.Lock()
+
+    def __init__(
+        self,
+        *,
+        lock_path: Path,
+        stream: BinaryIO,
+        local_lock: threading.Lock,
+    ) -> None:
+        self.lock_path = lock_path
+        self._stream = stream
+        self._local_lock = local_lock
+        self._released = False
+
+    @classmethod
+    def acquire(cls, repo: Path) -> RepositoryChangeLock:
+        """按 Git common dir 建立跨进程锁，不把不同仓库串行化。"""
+
+        control_dir = _prepare_control_dir(repo)
+        lock_path = control_dir / "change-start.lock"
+        canonical_lock_path = lock_path.resolve(strict=False)
+        local_lock = cls._local_lock_for(canonical_lock_path)
+        local_lock.acquire()
+        stream: BinaryIO | None = None
+        locked = False
+        try:
+            stream = _open_repository_lock_file(lock_path)
+            _lock_repository_stream(stream)
+            locked = True
+            return cls(
+                lock_path=lock_path,
+                stream=stream,
+                local_lock=local_lock,
+            )
+        except Exception:
+            if stream is not None:
+                if locked:
+                    try:
+                        _unlock_repository_stream(stream)
+                    except OSError:
+                        pass
+                stream.close()
+            local_lock.release()
+            raise
+
+    @classmethod
+    def _local_lock_for(cls, path: Path) -> threading.Lock:
+        with cls._local_locks_guard:
+            lock = cls._local_locks.get(path)
+            if lock is None:
+                lock = threading.Lock()
+                cls._local_locks[path] = lock
+            return lock
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        unlock_error: OSError | None = None
+        try:
+            try:
+                _unlock_repository_stream(self._stream)
+            except OSError as exc:
+                unlock_error = exc
+        finally:
+            self._stream.close()
+            self._local_lock.release()
+        if unlock_error is not None:
+            raise AgentRepositoryGuardError(
+                "仓库 ChangeRun 创建锁释放异常"
+            ) from unlock_error
+
+    def __enter__(self) -> RepositoryChangeLock:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        try:
+            self.release()
+        except AgentRepositoryGuardError:
+            if exc is None:
+                raise
 
 
 def acquire_writer_claim(
@@ -291,6 +380,81 @@ def _prepare_plain_directory(path: Path, expected_parent: Path) -> None:
         raise AgentRepositoryGuardError(
             f"Agent 仓库控制目录越过预期边界：{path.name}"
         )
+
+
+def _open_repository_lock_file(lock_path: Path) -> BinaryIO:
+    if os.path.lexists(lock_path) and _is_link_or_reparse(lock_path):
+        raise AgentRepositoryGuardError(
+            "仓库 ChangeRun 创建锁不能是链接或 reparse point"
+        )
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_BINARY", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    if no_follow:
+        flags |= no_follow
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as exc:
+        raise AgentRepositoryGuardError(
+            "无法打开仓库 ChangeRun 创建锁"
+        ) from exc
+    stream: BinaryIO | None = None
+    try:
+        os.set_inheritable(descriptor, False)
+        descriptor_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(descriptor_stat.st_mode):
+            raise AgentRepositoryGuardError(
+                "仓库 ChangeRun 创建锁必须是普通文件"
+            )
+        if descriptor_stat.st_nlink != 1:
+            raise AgentRepositoryGuardError(
+                "仓库 ChangeRun 创建锁不能是 hardlink"
+            )
+        path_stat = lock_path.stat()
+        if (
+            descriptor_stat.st_dev != path_stat.st_dev
+            or descriptor_stat.st_ino != path_stat.st_ino
+            or path_stat.st_nlink != 1
+        ):
+            raise AgentRepositoryGuardError(
+                "仓库 ChangeRun 创建锁在打开期间被替换"
+            )
+        stream = os.fdopen(descriptor, "r+b", buffering=0)
+        descriptor = -1
+        stream.seek(0, os.SEEK_END)
+        if stream.tell() == 0:
+            stream.write(b"\0")
+        stream.seek(0)
+        return stream
+    except Exception:
+        if stream is not None:
+            stream.close()
+        elif descriptor >= 0:
+            os.close(descriptor)
+        raise
+
+
+def _lock_repository_stream(stream: BinaryIO) -> None:
+    stream.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_repository_stream(stream: BinaryIO) -> None:
+    stream.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def _write_exclusive_json(path: Path, payload: dict[str, object]) -> None:

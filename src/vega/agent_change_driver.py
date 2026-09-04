@@ -26,6 +26,7 @@ from .agent_run_selection import (
     select_named_repository_change_run,
     select_repository_change_run,
 )
+from .agent_repository_guard import RepositoryChangeLock
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
 from .agent_task_card import discover_handoff_task_cards
@@ -120,37 +121,39 @@ class AgentChangeDriver:
         return self._continue_default()
 
     def _start_new(self, text: str) -> ChangeDriverResult:
-        active = self._implicit_active_run()
-        if isinstance(active, ChangeDriverResult):
-            return active
-        if active is not None:
-            return self._attention(
-                active,
-                "change.active_run_exists",
-                (
-                    f"当前仓库已有未完成 ChangeRun：{active.run_dir.name}；"
-                    "使用不带 TEXT 的 `vega change` 继续，"
-                    "或使用高级 `vega start` 显式创建并行任务。"
-                ),
-                ("change", "status", "explain"),
-            )
-        started = self.runtime.start_planning(self.repo, goal=text)
+        with RepositoryChangeLock.acquire(self.repo):
+            active = self._implicit_active_run()
+            if isinstance(active, ChangeDriverResult):
+                return active
+            if active is not None:
+                return self._attention(
+                    active,
+                    "change.active_run_exists",
+                    (
+                        f"当前仓库已有未完成 ChangeRun：{active.run_dir.name}；"
+                        "使用不带 TEXT 的 `vega change` 继续，"
+                        "或使用高级 `vega start` 显式创建并行任务。"
+                    ),
+                    ("change", "status", "explain"),
+                )
+            started = self.runtime.start_planning(self.repo, goal=text)
         self._event(f"Planning ChangeRun 已创建：{started.run_dir.name}")
         return self._drive(started)
 
     def _resume_explicit_task(self, task: Path) -> ChangeDriverResult:
-        active = self._implicit_active_run()
-        if isinstance(active, ChangeDriverResult):
-            return active
-        if active is not None:
-            return self._attention(
-                active,
-                "change.active_run_exists",
-                "当前仓库已有未完成 ChangeRun，拒绝恢复第二个 Writer。",
-                ("change", "status", "explain"),
-            )
         task_path = task if task.is_absolute() else self.repo / task
-        restored = self.runtime.resume_task_card(self.repo, task_path)
+        with RepositoryChangeLock.acquire(self.repo):
+            active = self._implicit_active_run()
+            if isinstance(active, ChangeDriverResult):
+                return active
+            if active is not None:
+                return self._attention(
+                    active,
+                    "change.active_run_exists",
+                    "当前仓库已有未完成 ChangeRun，拒绝恢复第二个 Writer。",
+                    ("change", "status", "explain"),
+                )
+            restored = self.runtime.resume_task_card(self.repo, task_path)
         self._event(f"已从 Task Card 恢复：{restored.run_dir.name}")
         return self._drive(restored)
 
@@ -425,7 +428,49 @@ class AgentChangeDriver:
                 f"检测到可恢复 Task Card：{relative}；确认后再创建本机 ChangeRun。",
                 (f"change --task {relative}",),
             )
-        restored = self.runtime.resume_task_card(self.repo, task)
+        with RepositoryChangeLock.acquire(self.repo):
+            active = self._implicit_active_run()
+            if isinstance(active, ChangeDriverResult):
+                return active
+            if active is not None:
+                return self._attention(
+                    active,
+                    "change.active_run_exists",
+                    "当前仓库已有未完成 ChangeRun，拒绝恢复第二个 Writer。",
+                    ("change", "status", "explain"),
+                )
+            current_cards = discover_handoff_task_cards(self.repo)
+            if not current_cards:
+                return self._attention(
+                    None,
+                    "change.no_active_run",
+                    "当前仓库没有未完成 ChangeRun，也没有可恢复的 Task Card。",
+                    ("change <TEXT>", "start"),
+                )
+            if len(current_cards) > 1:
+                choices = "、".join(
+                    path.relative_to(self.repo).as_posix()
+                    for path in current_cards
+                )
+                return self._attention(
+                    None,
+                    "handoff.multiple_task_cards",
+                    f"当前分支有多个可恢复 Task Card，拒绝猜测：{choices}",
+                    ("change --task <path>",),
+                )
+            current_task = current_cards[0]
+            if current_task.resolve() != task.resolve():
+                current_relative = current_task.relative_to(self.repo).as_posix()
+                return self._attention(
+                    None,
+                    "handoff.confirmation_required",
+                    (
+                        f"可恢复 Task Card 已变化：{current_relative}；"
+                        "请重新确认后再创建本机 ChangeRun。"
+                    ),
+                    (f"change --task {current_relative}",),
+                )
+            restored = self.runtime.resume_task_card(self.repo, current_task)
         self._event(f"已从 Task Card 恢复：{restored.run_dir.name}")
         return self._drive(restored)
 

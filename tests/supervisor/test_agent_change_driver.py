@@ -18,7 +18,7 @@ from vega.agent_change_contract import (
     ExecutionPlan,
     ExecutionWorkItem,
 )
-from vega.agent_change_driver import AgentChangeDriver
+from vega.agent_change_driver import AgentChangeDriver, ChangeDriverResult
 from vega.agent_change_presentation import build_change_approval_snapshot
 from vega.agent_cli_interaction import InteractionPumpUpdate
 from vega.agent_contract import AgentState
@@ -367,6 +367,85 @@ def test_change_rejects_new_text_when_repository_has_active_run(
     assert result.reason_code == "change.active_run_exists"
     assert result.run is not None
     assert result.run.run_dir == started.run_dir
+    assert len(list((repo / "runs").iterdir())) == 1
+
+
+def test_concurrent_new_text_creates_one_run_and_rechecks_active_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    original_start_planning = SupervisorAgentRuntime.start_planning
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    calls: list[str] = []
+    calls_lock = threading.Lock()
+
+    def delayed_start_planning(
+        runtime: SupervisorAgentRuntime,
+        source_repo: Path,
+        *,
+        goal: str,
+    ) -> AgentRun:
+        with calls_lock:
+            calls.append(goal)
+            call_number = len(calls)
+        if call_number == 1:
+            first_entered.set()
+            assert release_first.wait(timeout=5)
+        return original_start_planning(runtime, source_repo, goal=goal)
+
+    def stop_after_creation(
+        driver: AgentChangeDriver,
+        current: AgentRun,
+    ) -> ChangeDriverResult:
+        return ChangeDriverResult(
+            run=current,
+            outcome="completed",
+            reason_code="test.created",
+            message="测试已创建",
+        )
+
+    monkeypatch.setattr(
+        SupervisorAgentRuntime,
+        "start_planning",
+        delayed_start_planning,
+    )
+    monkeypatch.setattr(AgentChangeDriver, "_drive", stop_after_creation)
+
+    results: list[ChangeDriverResult] = []
+    errors: list[BaseException] = []
+
+    def invoke(text: str) -> None:
+        try:
+            results.append(
+                AgentChangeDriver(
+                    repo,
+                    repo,
+                    provider="claude",
+                    timeout_seconds=60,
+                ).change(text=text)
+            )
+        except BaseException as exc:  # pragma: no cover - 仅用于线程回收诊断
+            errors.append(exc)
+
+    first = threading.Thread(target=invoke, args=("第一个任务",))
+    first.start()
+    assert first_entered.wait(timeout=5)
+    second = threading.Thread(target=invoke, args=("第二个任务",))
+    second.start()
+    release_first.set()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert calls == ["第一个任务"]
+    assert sorted(result.reason_code for result in results) == [
+        "change.active_run_exists",
+        "test.created",
+    ]
     assert len(list((repo / "runs").iterdir())) == 1
 
 
