@@ -314,12 +314,104 @@ def test_config_check_warns_when_codex_cli_is_missing(
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    monkeypatch.setattr("vega.project_config.shutil.which", lambda _: None)
+    monkeypatch.setattr("vega.project_config_provider.shutil.which", lambda _: None)
 
     result = check_project_config(repo)
 
     assert any(issue.code == "codex_cli_missing" for issue in result.issues)
     assert not result.has_errors
+
+
+def test_config_check_uses_explicit_claude_provider_and_marks_login_unverified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        "vega.project_config_provider.shutil.which",
+        lambda executable: "claude" if executable == "claude" else None,
+    )
+
+    result = check_project_config(repo, provider="claude")
+
+    assert result.provider == "claude"
+    assert result.provider_cli_status == "available"
+    assert not any(issue.code.endswith("_cli_missing") for issue in result.issues)
+
+
+@pytest.mark.parametrize("worker", ["claude-code", "codex-exec"])
+def test_config_check_selects_claude_from_project_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    worker: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath(".vega.yaml").write_text(
+        f"version: 1\nrunner:\n  worker: {worker}\n  reviewer: claude-code\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("vega.project_config_provider.shutil.which", lambda _: None)
+
+    result = check_project_config(repo)
+
+    assert result.provider == ("claude" if worker == "claude-code" else None)
+    assert result.provider_cli_status == ("missing" if worker == "claude-code" else "unverified")
+    assert any(issue.code == "claude_cli_missing" for issue in result.issues)
+    assert any(issue.code == "codex_cli_missing" for issue in result.issues) == (worker == "codex-exec")
+
+
+def test_change_config_preflight_rejects_missing_fixed_verification_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    monkeypatch.setattr("vega.project_config_provider.shutil.which", lambda _: "codex")
+
+    result = check_project_config(repo, require_change_config=True)
+
+    issue = next(
+        issue for issue in result.issues if issue.code == "change_project_config_missing"
+    )
+    assert issue.severity == "error"
+    assert result.has_errors
+
+
+@pytest.mark.parametrize(
+    ("provider", "installed", "expected"),
+    [(None, "codex", "codex"), (None, "claude", "codex"),
+     ("claude", "claude", "claude"), ("claude", None, "claude")],
+)
+def test_change_preflight_uses_execution_provider_and_committed_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    provider: str | None, installed: str | None, expected: str,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    config = repo / ".vega.yaml"
+    config.write_text(
+        "version: 1\nverification:\n  commands: [pytest]\n"
+        "runner:\n  worker: claude-code\n  reviewer: claude-code\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", ".vega.yaml"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Vega Tests", "-c", "user.email=vega@example.invalid",
+         "commit", "-m", "登记验证配置"], cwd=repo, check=True, capture_output=True,
+    )
+    config.write_text("verification: {commands: []}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "vega.project_config_provider.shutil.which",
+        lambda command: installed if command == installed else None,
+    )
+
+    result = check_project_config(repo, provider=provider, require_change_config=True)
+
+    assert result.provider == expected
+    assert result.verification_commands == ["pytest"]
+    assert result.has_errors == (installed != expected)
 
 
 def test_latest_all_prefers_parent_loop_over_newer_internal_child(tmp_path: Path) -> None:

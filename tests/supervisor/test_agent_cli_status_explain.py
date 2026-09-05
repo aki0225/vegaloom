@@ -10,9 +10,13 @@ from typer.testing import CliRunner
 import vega.agent_cli_snapshot as cli_snapshot_module
 import vega.agent_status_projection as status_projection_module
 from vega.agent_cli_snapshot import (
+    AgentCliRun,
+    AgentCliSnapshot,
     build_agent_cli_snapshot,
     resolve_agent_cli_run,
 )
+from vega.agent_cli_status import render_compact_agent_status, render_agent_explanation
+from vega.agent_explain import AgentExplanation
 from vega.agent_child_status import AgentChildStatusSnapshot
 from vega.agent_contract import AgentCheckpoint, canonical_digest
 from vega.agent_persistence import load_agent_state, save_agent_state
@@ -24,6 +28,43 @@ from vega.provider_session import (
     load_provider_sessions,
     save_provider_sessions,
 )
+
+
+@pytest.mark.parametrize("phase", ["awaiting_approval", "completed", "needs_human"])
+def test_compact_status_requires_authorization_review_and_locates_delivery(
+    tmp_path: Path, phase: str,
+) -> None:
+    run_id = "example-agent"
+    snapshot = AgentCliSnapshot(
+        target=AgentCliRun(tmp_path, tmp_path / "runs" / run_id, "explicit"),
+        status={
+            "run_id": run_id, "agent_phase": phase,
+            "next_steps": ["旧建议：继续运行"],
+            "accepted_checkpoint_sha": "b" * 40,
+            "key_artifacts": [f"runs/{run_id}/agent-final-report.md"],
+            "delivery": {"worktree_path": "worktree", "branch": "vega/task", "base_revision": "a" * 40},
+        },
+        explanation=AgentExplanation(
+            run_id=run_id, phase=phase,
+            outcome="completed" if phase == "completed" else "attention_required",
+            source="phase", actor="runtime", reason_code="example", reason="测试状态",
+            safe_actions=["plan.approve"] if phase == "awaiting_approval" else [],
+        ),
+    )
+
+    status = render_compact_agent_status(snapshot)
+    explanation = render_agent_explanation(snapshot, full=False)
+
+    assert "旧建议" not in status
+    if phase == "awaiting_approval":
+        for text in ("先核对", "change-contract.json", "execution-plan.json", "没有二次询问"):
+            assert text in status and text in explanation
+    if phase == "completed":
+        for text in ("worktree", "vega/task", "a" * 40, "b" * 40, "agent-final-report.md"):
+            assert text in status
+    else:
+        assert "累计 Diff 基线" not in status
+        assert "- 报告：" not in status
 
 
 def test_status_selects_unique_change_run_from_repository_subdirectory(
@@ -132,6 +173,11 @@ def test_status_default_full_and_explain_share_read_only_snapshot(
     assert "执行会话" in compact.output
     assert "Verification：尚未运行" in compact.output
     assert "原因：当前任务仍需完成只读调查和合同编译。" in compact.output
+    assert (
+        f"下一步：在 Run Workspace `{repo}` 目录执行 "
+        f"`vega change --run {run.run_dir.name}`"
+    ) in compact.output
+    assert "下一步：读取" not in compact.output
     assert "# Vega Agent" in full.output
     assert "## 为什么停在这里" in explanation.output
     assert "## 下一步" in explanation.output

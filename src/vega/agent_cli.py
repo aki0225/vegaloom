@@ -34,25 +34,25 @@ from .run_utils import resolve_run_dir
 
 
 def register_agent_commands(app: typer.Typer) -> None:
-    """把 Agent 命令直接注册到顶层，不保留 `vega agent` 包装。"""
+    """把 Agent 命令直接注册到顶层，并按使用频率分组帮助。"""
 
-    app.command("change")(agent_change)
-    app.command("start")(agent_start)
-    app.command("approve")(agent_approve)
-    app.command("run")(agent_run)
-    app.command("retry")(agent_retry)
-    app.command("recover")(agent_recover)
-    app.command("adjudicate")(agent_adjudicate)
-    app.command("revise")(agent_replan)
-    app.command("pause")(agent_pause)
-    app.command("stop")(agent_stop)
-    app.command("resume")(agent_resume)
-    app.command("handoff")(agent_handoff)
-    app.command("steer")(agent_steer)
-    app.command("respond")(agent_respond)
-    app.command("takeover")(agent_takeover)
-    app.command("reclaim")(agent_reclaim)
-    app.command("capabilities")(agent_capabilities)
+    app.command("change", rich_help_panel="日常使用")(agent_change)
+    app.command("start", rich_help_panel="高级控制")(agent_start)
+    app.command("approve", rich_help_panel="高级控制")(agent_approve)
+    app.command("run", rich_help_panel="高级控制")(agent_run)
+    app.command("retry", rich_help_panel="高级控制")(agent_retry)
+    app.command("recover", rich_help_panel="恢复与交接")(agent_recover)
+    app.command("adjudicate", rich_help_panel="高级控制")(agent_adjudicate)
+    app.command("revise", rich_help_panel="高级控制")(agent_replan)
+    app.command("pause", rich_help_panel="恢复与交接")(agent_pause)
+    app.command("stop", rich_help_panel="恢复与交接")(agent_stop)
+    app.command("resume", rich_help_panel="恢复与交接")(agent_resume)
+    app.command("handoff", rich_help_panel="恢复与交接")(agent_handoff)
+    app.command("steer", rich_help_panel="高级控制")(agent_steer)
+    app.command("respond", rich_help_panel="高级控制")(agent_respond)
+    app.command("takeover", rich_help_panel="恢复与交接")(agent_takeover)
+    app.command("reclaim", rich_help_panel="恢复与交接")(agent_reclaim)
+    app.command("capabilities", rich_help_panel="配置与接入")(agent_capabilities)
 
 
 def agent_approve(

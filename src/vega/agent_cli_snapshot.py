@@ -136,6 +136,12 @@ def build_agent_cli_snapshot(
             ),
         )
         payload = _agent_status_payload(target, projection)
+        change_metadata = metadata.get("change_run")
+        if projection.card.phase == "completed" and isinstance(change_metadata, dict):
+            payload["delivery"] = {
+                key: change_metadata.get(key)
+                for key in ("worktree_path", "branch", "base_revision")
+            }
         projection.payload.update(payload)
         explanation = build_agent_explanation(
             target.run_dir,

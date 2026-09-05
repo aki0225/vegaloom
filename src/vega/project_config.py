@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from pathlib import Path
 from typing import Literal
 
@@ -160,6 +159,9 @@ class ProjectConfigCheckResult(BaseModel):
     status: Literal["passed", "failed"] = "passed"
     issues: list[ProjectConfigIssue] = Field(default_factory=list)
     verification_commands: list[str] = Field(default_factory=list)
+    # 仅表示本次预检选择的 Provider；登录状态不会由只读检查猜测。
+    provider: Literal["codex", "claude"] | None = None
+    provider_cli_status: Literal["available", "missing", "unverified"] = "unverified"
 
     @field_validator("repo_path", "source_path")
     @classmethod
@@ -236,15 +238,30 @@ def _read_tracked_config(repo: Path, revision: str, name: str) -> str | None:
     )
 
 
-def check_project_config(repo_path: Path) -> ProjectConfigCheckResult:
+def check_project_config(
+    repo_path: Path,
+    *,
+    provider: Literal["codex", "claude"] | None = None,
+    require_change_config: bool = False,
+) -> ProjectConfigCheckResult:
     """只读预检 `.vega.yaml`，把配置问题变成可展示的结构化结果。
 
     这个函数不执行验证命令，只检查 runtime 能否安全理解配置；真实执行仍由
     verification runtime 控制，避免 config check 本身变成隐式 CI。
     """
+    from .project_config_provider import (
+        provider_cli_available,
+        select_provider,
+        validate_change_startup_config,
+        validate_runtime_dependencies,
+    )
+
     repo = repo_path.resolve()
     try:
-        config = load_project_config(repo)
+        config = load_project_config(
+            repo, tracked_only=require_change_config,
+            tracked_revision="HEAD" if require_change_config else None,
+        )
     except Exception as exc:  # noqa: BLE001 - 这里要把 YAML/Pydantic 错误统一转为用户可读问题
         issue = ProjectConfigIssue(
             code="invalid_project_config",
@@ -257,10 +274,30 @@ def check_project_config(repo_path: Path) -> ProjectConfigCheckResult:
             source_path=_find_config_path(repo),
             status="failed",
             issues=[issue],
+            provider=provider,
         )
 
+    selected_provider = select_provider(config, provider or ("codex" if require_change_config else None))
     issues = validate_project_config(config)
-    issues.extend(_validate_runtime_dependencies(config))
+    if require_change_config:
+        issues = [issue for issue in issues if issue.code != "missing_project_config"]
+        issues.extend(validate_change_startup_config(config))
+    provider_available = (
+        provider_cli_available(selected_provider)
+        if selected_provider is not None
+        else None
+    )
+    issues.extend(
+        validate_runtime_dependencies(
+            config,
+            provider=selected_provider,
+            cli_available=provider_available,
+        )
+    )
+    if require_change_config:
+        for issue in issues:
+            if issue.code.endswith("_cli_missing"):
+                issue.severity = "error"
     issues.extend(
         validate_repository_preflight(
             repo,
@@ -274,6 +311,8 @@ def check_project_config(repo_path: Path) -> ProjectConfigCheckResult:
         status="failed" if any(issue.severity == "error" for issue in issues) else "passed",
         issues=issues,
         verification_commands=config.verification.commands or [],
+        provider=selected_provider,
+        provider_cli_status={True: "available", False: "missing", None: "unverified"}[provider_available],
     )
 
 
@@ -398,53 +437,10 @@ def validate_verification_commands(commands: list[str]) -> list[ProjectConfigIss
     return issues
 
 
-def _validate_runtime_dependencies(config: ProjectConfig) -> list[ProjectConfigIssue]:
-    runners = {
-        (config.runner.worker or "codex-exec").strip().lower(),
-        (config.runner.reviewer or "codex-exec").strip().lower(),
-    }
-    if not runners.intersection({"codex", "codex-exec"}):
-        return []
-    if shutil.which("codex"):
-        return []
-    return [
-        ProjectConfigIssue(
-            code="codex_cli_missing",
-            severity="warning",
-            message="配置会使用 codex-exec，但当前 PATH 中未找到 Codex CLI。",
-            evidence="请先安装并登录 Codex CLI，或显式选择 none/prompt-only runner。",
-        )
-    ]
-
-
 def render_project_config_check(result: ProjectConfigCheckResult) -> str:
-    lines = [
-        "# Vega Config Check",
-        "",
-        f"- 仓库：`{redact_text(result.repo_path)}`",
-        f"- 配置文件：`{redact_text(result.source_path or '未发现')}`",
-        f"- 状态：`{result.status}`",
-        "",
-        "## 问题",
-        "",
-    ]
-    if result.issues:
-        for issue in result.issues:
-            lines.extend(
-                [
-                    f"- [{issue.severity.upper()}] `{issue.code}`：{redact_text(issue.message)}",
-                    f"  - 证据：{redact_text(issue.evidence or '无')}",
-                ]
-            )
-    else:
-        lines.append("- 未发现配置问题。")
+    from .project_config_render import render_project_config_check as render
 
-    lines.extend(["", "## 显式验证命令", ""])
-    if result.verification_commands:
-        lines.extend(f"- `{redact_text(command)}`" for command in result.verification_commands)
-    else:
-        lines.append("- 未配置，运行时将使用 project profile 自动识别。")
-    return redact_text("\n".join(lines).rstrip() + "\n")
+    return render(result)
 
 
 def normalize_scope_profile(scope: str | None) -> str | None:
@@ -471,7 +467,10 @@ def _validate_runner_name(field_name: str, value: str | None) -> list[ProjectCon
     if value is None:
         return []
     normalized = value.strip().lower()
-    if normalized in {"codex-exec", "codex", "none", "prompt-only"}:
+    if normalized in {
+        "codex-exec", "codex", "codex-app-server",
+        "claude", "claude-code", "none", "prompt-only",
+    }:
         return []
     return [
         ProjectConfigIssue(
