@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Literal
 
 import typer
 
@@ -57,12 +58,26 @@ def main(
 @config_app.command("check")
 def config_check(
     repo: Path = typer.Option(..., "--repo", help="目标仓库路径。"),
+    provider: Literal["codex", "claude"] | None = typer.Option(
+        None,
+        "--provider",
+        help="本次使用的 Provider；--change 默认 codex，普通检查读取项目 runner。",
+    ),
+    change: bool = typer.Option(
+        False,
+        "--change",
+        help="按自然语言 `vega change` 的固定配置要求预检。",
+    ),
     json_output: bool = typer.Option(False, "--json", help="输出 JSON。"),
 ) -> None:
     """只读检查 `.vega.yaml` 是否能被运行时安全理解。"""
 
     repo = require_repo_directory(repo)
-    result = check_project_config(repo)
+    result = check_project_config(
+        repo,
+        provider=provider,
+        require_change_config=change,
+    )
     if json_output:
         typer.echo(result.model_dump_json(indent=2))
     else:
@@ -96,7 +111,7 @@ def latest(
         raise typer.BadParameter(str(exc)) from exc
 
 
-@app.command("status")
+@app.command("status", rich_help_panel="日常使用")
 def status(
     run: str | None = typer.Option(
         None,
@@ -135,7 +150,7 @@ def status(
         raise typer.BadParameter(str(exc)) from exc
 
 
-@app.command("explain")
+@app.command("explain", rich_help_panel="日常使用")
 def explain(
     run: str | None = typer.Option(
         None,

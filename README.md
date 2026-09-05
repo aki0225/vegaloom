@@ -38,22 +38,27 @@ Worker；越出批准、授权或证据边界时停下来问人。
 
 ## 快速开始
 
-要求 Python `>=3.11`、Git，以及已经安装并登录的 Codex CLI 或 Claude Code CLI。
+要求 Python `>=3.11`、Git，以及已安装的 Codex CLI 或 Claude Code CLI。Vega 只能确认命令是否存在；
+Provider 是否已登录，要在实际启动会话时确认。
+
+在用于运行 Vega 的 Python 环境中安装稳定版：
 
 ```powershell
-git clone https://github.com/aki0225/vegaloom.git
-cd vegaloom
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e .
-
-vega capabilities
-vega config check --repo .
-vega adapters init codex --repo .  # 在 Codex 宿主中使用时
+python -m pip install https://github.com/aki0225/vegaloom/releases/download/v0.5.0/vegaloom-0.5.0-py3-none-any.whl
 ```
 
-最后一条命令写入仓库级 `$vega-agent` Skill。它不会安装 Hook，也不会修改 Codex 全局配置。
-直接从终端运行 Vega 时可以跳过。
+然后进入**自己的目标 Git 项目**。自然语言任务需要项目提交一份 `.vega.yaml`，登记实际验证
+命令。下面是 pytest 项目的最小示例；其他项目填自己的测试命令：
+
+```yaml
+version: 1
+verification:
+  commands:
+    - python -m pytest -q
+```
+
+先在项目中运行一次该命令，确认依赖已安装、测试能执行，再提交配置。Vega 从已提交版本读取
+策略；未提交的配置不会被当成授权。
 
 ## 日常主路径
 
@@ -61,12 +66,14 @@ vega adapters init codex --repo .  # 在 Codex 宿主中使用时
 
 ```powershell
 vega change "导出按钮点击后没有反应"
+vega change                 # 继续当前任务，不传新目标
 vega status
 vega explain
 ```
 
-`vega change` 会从当前仓库选择唯一未完成的 ChangeRun；没有活动任务时创建新的只读
-Planning，已有任务时继续推进。多个未完成任务、损坏记录或无法证明归属时拒绝猜测。
+带文本的 `vega change` 创建新的 ChangeRun；如果当前仓库已有活动任务，它会拒绝覆盖旧任务。
+不带文本的 `vega change` 才会继续当前仓库唯一未完成的 ChangeRun。多个未完成任务、损坏记录
+或无法证明归属时，Vega 拒绝猜测。
 `vega status` 显示当前阶段、会话、Diff、门禁和下一步，`vega explain` 只读解释决定、
 已确认事实、未知项和安全动作；两者默认优先选择当前仓库唯一未完成的 Run，没有活动任务时
 显示最近更新的终态 Run，也可以用 `--run` 显式指定。
@@ -77,6 +84,9 @@ Planning，已有任务时继续推进。多个未完成任务、损坏记录或
 无法分类的请求不能只凭摘要接受。
 
 ## 高级路径：拆开调查、批准和执行
+
+主线新增的启动预检可以运行 `vega config check --repo . --change`；Claude 加
+`--provider claude`。这些预检选项尚未包含在 v0.5.0 发布包中，试用时按下方开发章节安装源码。
 
 需要显式控制阶段、传入已有 Contract，或使用脚本化流程时，保留 `start`、`approve` 和
 `run`：
@@ -293,11 +303,25 @@ LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`re
 | v0.3.0 历史说明 | [RELEASE-NOTES-0.3.0](docs/RELEASE-NOTES-0.3.0.md) |
 | 真实运行记录 | [real-world-runs](eval/real-world-runs.md) |
 
+## Codex 宿主接入
+
+在目标项目中生成仓库级 `$vega-agent` Skill：
+
+```powershell
+vega adapters init codex --repo .
+```
+
+它不会安装 Hook 或修改 Codex 全局配置。直接从终端运行 Vega 可以跳过。
+
 ## 开发
 
 `Vega` 是产品名，`vegaloom` 是仓库和 Python distribution，`vega` 是 CLI 与导入包。
 
 ```powershell
+git clone https://github.com/aki0225/vegaloom.git
+cd vegaloom
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 python -m compileall src scripts/check_repository_hygiene.py
 python scripts/check_repository_hygiene.py --base-ref origin/main

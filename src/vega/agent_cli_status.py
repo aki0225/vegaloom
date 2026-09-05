@@ -47,8 +47,10 @@ _ACTION_TEXT: dict[PublicActionId, str] = {
     ),
     "human.review": "人工检查当前状态、证据和风险，再决定是否调整授权边界或停止。",
     "plan.approve": (
-        "在 Run Workspace `{run_workspace}` 目录执行 "
-        "`vega approve --run {run_id} --actor human` 批准当前合同。"
+        "在 Run Workspace `{run_workspace}` 先核对 "
+        "`runs/{run_id}/change-contract.json` 和 `runs/{run_id}/execution-plan.json`；"
+        "确认授权范围后执行 `vega approve --run {run_id} --actor human`。"
+        "该高级命令立即批准，没有二次询问。"
     ),
     "plan.revise": (
         "准备修订后的合同和计划，再在 Run Workspace `{run_workspace}` 目录执行 "
@@ -113,12 +115,8 @@ def render_compact_agent_status(snapshot: AgentCliSnapshot) -> str:
     explanation = snapshot.explanation
     phase = str(status.get("agent_phase") or "unknown")
     changed_files = _string_list(status.get("changed_files"))
-    next_steps = _string_list(status.get("next_steps"))
-    next_step = (
-        next_steps[0]
-        if next_steps
-        else _action_list(explanation.safe_actions, snapshot)
-    )
+    # 推荐动作与 explain 同源；next_steps 仍保留为 JSON 兼容字段。
+    next_step = _recommended_action_text(snapshot)
     lines = [
         "# Vega Status",
         "",
@@ -133,7 +131,49 @@ def render_compact_agent_status(snapshot: AgentCliSnapshot) -> str:
         f"- 原因：{explanation.reason}",
         f"- 下一步：{next_step}",
     ]
+    delivery = _delivery_lines(status, phase)
+    if delivery:
+        lines.extend(delivery)
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _recommended_action_text(snapshot: AgentCliSnapshot) -> str:
+    """返回与 explain 相同来源的第一条推荐动作。"""
+
+    explanation = snapshot.explanation
+    if explanation is not None and explanation.safe_actions:
+        return _action_texts(explanation.safe_actions[:1], snapshot)[0]
+    return "暂无可推荐动作，请人工核对状态与证据"
+
+
+def _delivery_lines(status: dict[str, object], phase: str) -> list[str]:
+    """在终态第一屏指出现有报告和 Candidate，不创建新的交付状态。"""
+
+    if phase != "completed":
+        return []
+    lines: list[str] = []
+    delivery = status.get("delivery")
+    if isinstance(delivery, dict):
+        for key, label in (("worktree_path", "代码目录"), ("branch", "任务分支"), ("base_revision", "累计 Diff 基线")):
+            value = delivery.get(key)
+            if isinstance(value, str) and value:
+                lines.append(f"- {label}：`{value}`")
+    candidate = status.get("accepted_checkpoint_sha") or status.get(
+        "active_candidate_sha"
+    )
+    if isinstance(candidate, str) and candidate:
+        lines.append(f"- Candidate：`{candidate}`")
+    artifacts = status.get("key_artifacts")
+    if isinstance(artifacts, list):
+        reports = [
+            item
+            for item in artifacts
+            if isinstance(item, str)
+            and item.endswith(("agent-final-report.md", "agent-final-report.json"))
+        ]
+        if reports:
+            lines.append(f"- 报告：`{', '.join(reports)}`")
+    return lines
 
 
 def render_agent_explanation(
@@ -249,11 +289,6 @@ def _changed_files(changed_files: list[str]) -> str:
 def _gate(value: object) -> str:
     normalized = str(value or "not_run")
     return _GATE_LABELS.get(normalized, normalized)
-
-
-def _action_list(actions: list[PublicActionId], snapshot: AgentCliSnapshot) -> str:
-    rendered = _action_texts(actions, snapshot)
-    return "；".join(rendered) if rendered else "等待人工检查当前状态"
 
 
 def _action_texts(

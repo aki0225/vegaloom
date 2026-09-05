@@ -87,6 +87,28 @@ def test_change_creates_planning_run_and_stops_at_non_tty_approval(
     assert (result.run.run_dir / "plan-card.md").is_file()
 
 
+@pytest.mark.parametrize("config_text", [None, "verification: {commands: []}\n"])
+def test_change_rejects_missing_fixed_config_before_creating_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config_text: str | None,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    config = repo / ".vega.yaml"
+    if config_text is None:
+        config.unlink()
+    else:
+        config.write_text(config_text, encoding="utf-8")
+    _git(repo, "add", ".vega.yaml")
+    _git(repo, "commit", "-m", "移除必需验证配置")
+    driver = AgentChangeDriver(repo, repo)
+    monkeypatch.setattr(
+        driver.runtime, "start_planning",
+        lambda *a, **kw: pytest.fail("配置缺失时不应创建调查或调用模型"),
+    )
+
+    with pytest.raises(ValueError, match="自然语言 Change 需要"):
+        driver.change(text="修复示例函数")
+
+
 @pytest.mark.parametrize(
     ("approval", "policy_enabled"),
     [("human", False), ("bounded", True)],
@@ -346,6 +368,13 @@ def test_change_approval_prompt_includes_non_default_authority_and_plan_fields(
         "Execution Plan digest：",
     ):
         assert expected in prompt
+
+    assert prompt.index("一、你正在批准什么") < prompt.index(
+        "二、执行细节（不改变上述授权范围）"
+    )
+    assert prompt.index("二、执行细节（不改变上述授权范围）") < prompt.index(
+        "三、绑定信息"
+    )
 
 
 def test_change_rejects_new_text_when_repository_has_active_run(

@@ -33,6 +33,7 @@ from .agent_run_selection import (
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
 from .agent_status_sources import load_status_checkpoint_for_display
+from .project_config_provider import ensure_change_startup_config
 
 
 ApprovalMode = Literal["human", "bounded"]
@@ -117,6 +118,7 @@ class AgentChangeDriver:
                     ),
                     ("change", "status", "explain"),
                 )
+            ensure_change_startup_config(self.repo)
             started = self.runtime.start_planning(self.repo, goal=text)
         self._event(f"Planning ChangeRun 已创建：{started.run_dir.name}")
         return self._drive(started)
@@ -165,7 +167,7 @@ class AgentChangeDriver:
             "completed": self._completed,
             "finalizing": self._finalize,
             "planning": self._run_planning,
-            "awaiting_approval": self._approve_phase,
+            "awaiting_approval": self._approve,
             "ready": self._run_ready,
             "acting": self._active_execution,
             "observing": self._active_execution,
@@ -242,12 +244,9 @@ class AgentChangeDriver:
             )
         return executed
 
-    def _approve_phase(
+    def _approve(
         self, current: AgentRun, _provider: AgentProvider
     ) -> AgentRun | ChangeDriverResult:
-        return self._approve(current)
-
-    def _approve(self, current: AgentRun) -> AgentRun | ChangeDriverResult:
         if self.approval == "bounded":
             approved = self.runtime.approve_bounded(current.run_dir.name)
             if approved.state.phase != "ready":

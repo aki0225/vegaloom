@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import queue
-import shutil
 import threading
 import time
 from collections.abc import Callable
@@ -15,6 +14,7 @@ from .agent_recovery import SupervisorAgentRecovery
 from .agent_run import AgentRun
 from .agent_runtime_support import load_agent_bundle
 from .provider_session import close_pending_interactions
+from .project_config_provider import provider_cli_available
 from .run_utils import resolve_run_dir
 
 
@@ -30,10 +30,7 @@ class ProviderOperationBoundary:
 
 
 def ensure_change_provider_ready(provider: AgentProvider) -> None:
-    executable = "claude" if provider == "claude" else "codex"
-    if shutil.which(executable) or (
-        executable == "claude" and shutil.which("claude.cmd")
-    ):
+    if provider_cli_available(provider):
         return
     label = "Claude Code CLI" if provider == "claude" else "Codex CLI"
     raise ValueError(f"当前 PATH 中未找到 {label}；请先安装并登录。")
