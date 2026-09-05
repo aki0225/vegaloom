@@ -1,6 +1,6 @@
 # 架构
 
-> 本文描述 `v0.5.0` 主线架构。它在同一 ChangeRun 合同内同时支持 Codex 和 Claude Code；
+> 本文描述 `v0.5.1` 主线架构。它在同一 ChangeRun 合同内同时支持 Codex 和 Claude Code；
 > 真实 Provider smoke、完整 CI、Python 3.12 package smoke、注解 Tag 和 GitHub Release
 > 均已完成。演进计划见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见

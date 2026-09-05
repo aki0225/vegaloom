@@ -59,7 +59,7 @@ def test_project_skeleton_exists() -> None:
 
 
 def test_python_package_public_api_is_version_only() -> None:
-    assert vega.__version__ == "0.5.0"
+    assert vega.__version__ == "0.5.1"
     assert vega.__all__ == ["__version__"]
     assert importlib.util.find_spec("vega.assurance") is None
     assert importlib.util.find_spec("vega.experimental.assurance") is not None
