@@ -1,11 +1,15 @@
 # Vega 后续演进路线
 
-> 当前稳定版本：[`v0.5.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.5.0)
+> 当前稳定版本：[`v0.5.1`](https://github.com/aki0225/vegaloom/releases/tag/v0.5.1)
 > 本文件保存路线决策和历史背景，不维护实时进度。
 > 当前事项与下一项：[`CURRENT.md`](CURRENT.md)
 > 机器可读计划：[`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json)
 
 ## 最近一次路线决策
+
+2026-09-05，`v0.5.1` 修复 v0.5.0 发布后发现的制品与主线使用说明错位，补齐启动前预检、状态交付提示和
+稳定版安装地址。它不改变 ChangeRun 成功语义、人工授权、写审隔离或 fail-closed 边界；详细材料见
+[`RELEASE-NOTES-0.5.1.md`](RELEASE-NOTES-0.5.1.md)。
 
 2026-09-04，`v0.5.0` 把已验证的 ChangeRun 能力整理为日常主路径，保持同一状态机、
 Candidate、门禁和人工 Git 边界：
