@@ -234,6 +234,10 @@ source revision 的 Planning Proposal。恢复后的历史 Proposal 不算当前
 
 ## 最终报告
 
+完成后，回到启动任务的目录运行 `vega status --run <run_id>`，按返回的**代码目录**和**任务分支**检查修改。
+代码保存在 Vega 管理的 Worktree，源目录保持不动；用**累计 Diff 基线**与 **Candidate** 比较整次任务，
+不要只看最后一条提交。具体命令见[完成后的检查](docs/USAGE-WALKTHROUGH.md#14-完成)。
+
 所有 Work Item 完成后，Vega 从现有 Git、Verification、Risk 和 Reviewer Artifact
 确定性生成：
 
@@ -314,6 +318,7 @@ vega adapters init codex --repo .
 ```
 
 它不会安装 Hook 或修改 Codex 全局配置。直接从终端运行 Vega 可以跳过。
+已有同名 Skill 默认保留。升级 Vega 后先核对项目中的定制内容，确认可以覆盖时再加 `--force` 重新生成。
 
 ## 开发
 

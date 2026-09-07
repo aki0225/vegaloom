@@ -454,41 +454,61 @@
         <div class="quickstart">
           <div class="quickstart-copy">
             <p class="section-number">03 / INSTALL</p>
-            <h2 id="quickstart-title">安装</h2>
+            <h2 id="quickstart-title">安装与配置</h2>
             <p>
-              安装 Vega，为目标仓库生成 Codex adapter，再进入目标仓库。日常主路径是
-              <code>vega change</code>、<code>vega status</code>、<code>vega explain</code>；
-              Codex 主会话仍可运行 <code>$vega-agent</code>。
+              需要 Python 3.11+、Git，以及已安装的 Codex CLI 或 Claude Code CLI。
+              下方命令安装固定提交的 v0.5.1 候选源码；已发布的稳定版本仍为 v0.5.0。
+              Provider 是否已登录，要在实际启动会话时确认。
+            </p>
+            <p>
+              进入自己的目标 Git 项目，在 <code>.vega.yaml</code> 中登记
+              <code>verification.commands</code>。这里是 pytest 项目的最小示例；
+              其他项目应填写自己的验证命令。
             </p>
             <p class="quickstart-boundary">
-              Vega 不执行 commit、push、PR 或 release。验证失败时，Finish 不会返回
-              <code>ready_to_commit</code>。
+              用户当前分支保持不动。Vega 只在受管 Worktree 中创建本地
+              Candidate/Checkpoint Commit；push、创建 PR、merge 和 release 仍由人工控制。
+              验证失败时，Finish 不会返回 <code>ready_to_commit</code>。
             </p>
             <p class="quickstart-boundary">
               Codex 和 Claude Code 共用同一 ChangeRun 合同。Provider 请求可在当前终端显示安全摘要；
               缺少完整原始上下文时会停下转高级或原生处理，不会因为同终端可见而自动批准。
             </p>
+            <p>
+              Codex Skill 是可选宿主接入：在目标项目运行
+              <code>vega adapters init codex --repo .</code> 后，可在 Codex 主会话使用
+              <code>$vega-agent</code>。直接从终端运行 Vega 可以跳过。
+            </p>
           </div>
 
-          <div class="terminal" aria-label="Vega Supervisor Agent 快速开始命令">
+          <div class="terminal" aria-label="Vega 安装、项目配置与启动命令">
             <div class="terminal-bar">
               <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
-              <b>PowerShell</b>
-              <button type="button" data-copy-quickstart>复制命令</button>
+              <b>1. 安装候选源码 / PowerShell</b>
             </div>
-            <pre><code data-quickstart-code>git clone https://github.com/aki0225/vegaloom.git
-cd vegaloom
-python -m pip install -e .
-$targetRepo = "&lt;target-repo&gt;"
-vega adapters init codex --repo $targetRepo
-Set-Location $targetRepo
-vega capabilities
+            <pre><code>python -m pip install "git+https://github.com/aki0225/vegaloom.git@fd98c4b084ba331e355c2cf96d3b92ba4d40c9e4"</code></pre>
+            <div class="terminal-bar">
+              <b>2. 配置目标项目 / .vega.yaml</b>
+            </div>
+            <pre><code>version: 1
+verification:
+  commands:
+    - python -m pytest -q</code></pre>
+            <div class="terminal-prompt">
+              <span>先在目标项目运行所选验证命令，确认依赖和测试可执行，再人工提交配置。
+                Vega 从已提交版本读取策略；未提交的配置不作为授权。</span>
+            </div>
+            <div class="terminal-bar">
+              <b>3. 在目标 Git 仓库启动 / PowerShell</b>
+              <button type="button" data-copy-quickstart>复制启动命令</button>
+            </div>
+            <pre><code data-quickstart-code>vega config check --repo . --change
 vega change "描述一个日常变更"
 vega status
 vega explain</code></pre>
             <div class="terminal-prompt">
-              <span>Codex 主会话入口</span>
-              <code>$vega-agent</code>
+              <span>默认使用 Codex；使用 Claude 时，为预检和首次 change 均加上
+                <code>--provider claude</code>。</span>
             </div>
             <p class="copy-status" role="status" aria-live="polite" data-copy-status></p>
           </div>

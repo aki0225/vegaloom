@@ -1768,6 +1768,11 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert ".codex" not in result.output
     agent_skill_text = agent_skill.read_text(encoding="utf-8")
     assert "vega capabilities" in agent_skill_text
+    assert "vega config check --repo . --change" in agent_skill_text
+    assert 'vega change "描述目标或 Bug 现象" --json' in agent_skill_text
+    assert "vega change --run <run_id> --json" in agent_skill_text
+    assert "vega explain --run <run_id>" in agent_skill_text
+    assert "2～4" not in agent_skill_text
     assert "一个 ChangeRun 同时只有一个可写 Worker" in agent_skill_text
     assert "--contract <change-contract.json>" in agent_skill_text
     assert "--execution-plan <execution-plan.json>" in agent_skill_text

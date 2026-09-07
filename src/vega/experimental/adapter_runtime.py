@@ -19,41 +19,69 @@ description: "当任务需要先调查、批准边界，再由 Vega 调度 Codin
 
 # Vega Agent
 
-Vega 管 ChangeRun、Git Worktree、验证、风险门禁和 Reviewer。宿主会话负责调查、展示计划和处理人工决定；Coding Agent 负责写代码。
+Vega 管 ChangeRun、Git Worktree、验证、风险门禁和 Reviewer。宿主会话展示计划、处理人工决定和汇报结果；Worker 由 Vega 启动。
 
-## 先调查，再启动
+## 选择入口
 
-1. 读取目标仓库的 `AGENTS.md`、`.vega.yaml`、相关代码、测试和 Git 状态。
-2. 根因、范围或验收还不明确时，只读调查。不要先改代码，也不要把猜测写成事实。
-3. 生成两份 JSON：
-   - Change Contract：目标、验收、不变量、Non-goals、允许范围、风险授权和必跑验证；
-   - Execution Plan：已确认事实、假设、2～4 个粗粒度 Work Item、实现安排和未决问题。
-4. 把合同、计划和关键证据展示给用户。没有明确批准，不启动 Worker。
+在目标仓库根目录执行以下命令，后续操作留在同一目录。先读取适用的 `AGENTS.md`、`.vega.yaml` 和 Git 状态。已有任务时先看 `status`、`explain`，确认目标再继续；不要为了绕过失败新建任务。
 
-## 启动
+- 还没有明确计划：使用自然语言入口，由 Vega 的只读 Planner 调查。宿主不必先做一遍相同调查。
+- 主会话已经调查并形成计划：使用显式合同入口，沿用已确认的事实与边界，不再调用 Planner 重做。
+- Work Item 按实际可检查的改动拆分；小任务可以只有一个，不为凑数量拆步骤。
+
+## 自然语言任务
+
+目标项目需要在已提交的 `.vega.yaml` 中登记真实的 `verification.commands`。先确认命令能在项目中执行；缺少配置时向用户说明，不能自行猜测并授权验证命令。
+
+宿主调用使用 `--json`，避免等待终端输入：
 
 ```powershell
-vega capabilities
+vega config check --repo . --change
+vega change "描述目标或 Bug 现象" --json
+```
+
+从返回值读取真实 run_id。`awaiting_approval` 表示调查完成、仍待批准，不能报告成任务完成。展示当前 Plan Card、Contract 和 Execution Plan 中的范围、验收、风险和未决问题。
+
+`vega change` 带文本会新建任务；继续任务使用 `vega change --run <run_id> --json`，不要重复传入目标。多个活动任务时明确选择，不猜最新一个。
+
+## 已有计划
+
+把主会话已有计划整理为两份 JSON：Change Contract 记录目标、验收、不变量、Non-goals、范围、风险授权和必跑验证；Execution Plan 记录事实、假设、Work Item、实现安排和未决问题。
+
+```powershell
 vega start --repo . --contract <change-contract.json> --execution-plan <execution-plan.json>
+```
+
+转换后的合同与计划也要展示给用户。讨论中的假设不是事实，之前对方向的同意也不能替代对实际执行边界的确认。
+
+## 批准和执行
+
+默认人工模式下，两条入口都在实际材料核对并得到用户明确批准后继续：
+
+```powershell
 vega approve --run <run_id> --actor human
 vega run --run <run_id> --timeout 900
 ```
 
-默认 `run` 通过 Codex App Server 复用 Worker Thread。只有明确需要一次性短会话时才加 `--fresh-session`；App Server 不可用时 Vega 会直接报错，不会静默换执行路径。
+首次选择 Claude Code 时，自然语言入口的预检和 `change` 都加 `--provider claude`；显式合同入口在首次 `run` 选择 Provider。同一任务后续沿用绑定的 Provider。
+
+默认 Codex 通过 App Server 复用 Worker Thread。只有明确需要一次性短会话时才加 `--fresh-session`；App Server 不可用时不会静默换执行路径。
 
 ## 看进度和干预
 
 ```powershell
+vega capabilities
 vega status --run <run_id>
+vega explain --run <run_id>
 vega watch --run <run_id> --follow
 vega steer --run <run_id> --role worker --text "补充检查这个边界"
-vega respond --run <run_id> --interaction <request_id> --decision accept
 ```
 
 状态和 `watch` 只显示阶段、Work Item、安全事件、变更、验证、风险及待响应请求，不转发模型推理、完整正文或原始命令参数。
 
 - 方向需要微调但合同没变：用 `steer`。
 - 合同或执行计划要改：先生成新 revision，再运行 `vega revise`；触及合同字段时重新等待人工批准。
+- 高级 `run` 仍持有活动 Codex Turn 时，核对原始请求并得到用户授权后才可 `vega respond`。`change` 已停止 attempt 并关闭的 pending 请求不能再响应。
 - 响应 JSON 含凭据或其他敏感信息：不要写进 Vega Artifact，改用 `vega takeover` 接管原生会话。
 - 只有空闲 Session、没有 active Writer binding 且 Workspace 没有变化时才能 `vega reclaim`。活动 attempt 被接管后先做 Recovery 或 Handoff。
 
@@ -61,13 +89,15 @@ vega respond --run <run_id> --interaction <request_id> --decision accept
 
 - `ready`：再次运行 `vega run --run <run_id>`，执行当前 Work Item 或明确的 Repair。
 - `awaiting_approval`：展示 revision 差异，等待批准。
-- `needs_human`：读取状态卡、Checkpoint 和失败证据；按问题选择 `retry`、`recover`、`revise`、`handoff` 或停止。
+- `needs_human`：先读 `explain` 的原因和安全动作，再按需检查 Checkpoint 和失败证据。不要把 `change` 当万能恢复命令。
 - `finalizing`：重新运行同一个 `vega run`，幂等发布已有可信 Finish。
-- `completed`：读取 `agent-final-report.md`，展示完整变更文件、Reviewer 重点、验证、风险和未证明事项，再由用户决定是否提交或创建 PR。
+- `completed`：读取 `agent-final-report.md`，展示完整变更文件、Reviewer 重点、验证、风险和未证明事项；同时给出 `status` 中的代码目录、任务分支、累计 Diff 基线和 Candidate，供用户检查与交付。
 
 普通 Finding 会生成 Fix Packet 并回到同一个 Worker Thread。Reviewer 使用独立只读 Thread；不要把 Worker 的完整聊天或中间推理转给 Reviewer。
 
 ## 中断和换机器
+
+没有活动 Writer 时用 `pause` 暂停；运行中需要结束执行时用 `stop`，确认进程已停止后再交接。
 
 ```powershell
 vega pause --run <run_id> --reason "暂时离开"
