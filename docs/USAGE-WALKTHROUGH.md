@@ -2,24 +2,28 @@
 
 ## 1. 准备
 
+先按 [README 快速开始](../README.md#快速开始) 安装 Vega。自然语言入口还需要在目标项目提交
+`.vega.yaml`，登记并实际跑通验证命令。以下预检对应自然语言入口，在目标 Git 仓库根目录执行：
+
 ```powershell
-python -m pip install -e .
 vega capabilities
-vega config check --repo <target-repo>
-vega adapters init codex --repo <target-repo>
+vega config check --repo . --change
 ```
 
-`config check` 只检查配置和仓库准备状态，不运行测试。先处理 `.vega.yaml`、`runs/` ignore、
-Python import、行尾和验证命令 warning。
+使用 Claude Code 时，预检和首次执行都加 `--provider claude`。`config check --change`
+只检查已提交配置、仓库准备状态和所选 CLI 是否存在，不运行测试或验证登录态。
 
-Adapter 只写入 `.agents/skills/vega-agent/SKILL.md`。目标仓库已有同名文件时默认不覆盖。
+Codex 宿主接入可选：`vega adapters init codex --repo .` 生成
+`.agents/skills/vega-agent/SKILL.md`。已有同名文件默认保留；升级 Vega 后核对定制内容，
+确认可以覆盖时再加 `--force`。普通终端使用可以跳过。
 
 ## 2. 日常主路径
 
-进入目标 Git 仓库后，直接用一条命令创建或继续当前仓库唯一未完成的 ChangeRun：
+进入目标 Git 仓库后，用带目标的命令新建任务，不带目标则继续当前唯一未完成的任务：
 
 ```powershell
 vega change "导出按钮点击后没有反应"
+vega change                 # 继续当前任务，不传新目标
 vega status
 vega explain
 ```
@@ -423,7 +427,21 @@ checkout 差异不会被误判为代码变化；路径、mode、Blob 内容或 T
 vega run --run <run_id>
 ```
 
-完成后读取：
+完成后，先回到启动任务的目录运行 `vega status --run <run_id>`。状态页会给出代码目录、
+任务分支、累计 Diff 基线、Candidate 和报告位置。修改保存在受管 Worktree，不在原先保持不动的源目录。
+
+把状态页中的实际值填入变量，再查看累计改动；只看最后一条 Candidate 提交可能漏掉前面的 Work Item：
+
+```powershell
+$worktreePath = "<worktree-path>"
+$baseRevision = "<base-revision>"
+$candidateSha = "<candidate-sha>"
+git -C $worktreePath diff --stat $baseRevision $candidateSha
+git -C $worktreePath diff $baseRevision $candidateSha -- "<repo-relative-file>"
+```
+
+报告位于启动任务目录下的 `runs/`。日常入口使用目标仓库；高级 `start --repo <target-repo>`
+可以使用独立的 Vega workspace，以启动时的目录为准：
 
 ```text
 runs/<run_id>/agent-final-report.md

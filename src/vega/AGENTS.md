@@ -4,8 +4,9 @@
 
 - Vega 只有一条公开 ChangeRun：Change Contract、持久 Worker、Git Candidate、Verification、
   Risk、独立 Reviewer 和 Final Report。Core Harness 继续拥有可信完成语义。
-- `start / approve / run / status` 是核心生命周期入口；`watch / steer / respond / revise /
-  retry / pause / stop / recover / adjudicate / takeover / reclaim / handoff / resume` 负责观察、
+- `change / status / explain` 是日常入口；`start / approve / run` 用于显式控制阶段。
+  `watch / steer / respond / revise / retry / pause / stop` 和
+  `recover / adjudicate / takeover / reclaim / handoff / resume` 负责观察、
   人工交互和恢复。它们都操作同一条 ChangeRun，不拥有平行成功语义。
 - 旧 `do / loop / agent / goal / inspection` 命令不再注册；仍被 ChangeRun 调用的 Core
   Runtime 是内部实现。
@@ -56,8 +57,8 @@ CLI
 
 当前 `agent_*` 文件保持扁平结构，按以下职责查找，不为整理文件数量做批量搬迁：
 
-- 入口与编排：`agent_cli`、`agent_start_cli`、`agent_runtime*`、`agent_routing`、
-  `agent_worker`、`agent_finalization`。
+- 入口与编排：`agent_cli`、`agent_change_cli`、`agent_change_driver`、`agent_start_cli`、
+  `agent_runtime*`、`agent_routing`、`agent_worker`、`agent_finalization`。
 - 自然语言规划：`agent_planning*` 只生成未批准 Proposal；不得直接写入 Approved Contract、
   启动 Worker 或创造验证事实。
 - 确定性合同编译：`agent_contract_compiler` 只做 Proposal 到现有合同模型的纯投影和规则检查；
@@ -79,7 +80,8 @@ CLI
   `repository_identity`。
 - 恢复与交接：`agent_recovery*`、`agent_handoff*`、`agent_resume_validation`、
   `agent_side_effect_adjudication`。
-- 状态与展示：`agent_run_status`、`agent_status_*`、`agent_visibility`、`agent_task_card*`。
+- 状态与展示：`agent_run_selection`、`agent_cli_status`、`agent_explain`、`agent_run_status`、
+  `agent_status_*`、`agent_visibility`、`agent_task_card*`。
 - 共享数据和脱敏：`models`、`artifact_rendering`、`redaction`。未列出的模块按最近职责归属，
   不因缺少名称清单就新建通用 `utils` 或平行状态层。
 
