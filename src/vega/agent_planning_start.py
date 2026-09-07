@@ -25,7 +25,7 @@ from .project_context import build_project_context
 from .redaction import redact_text, write_redacted_json, write_redacted_text
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
-from .workspace_check import capture_review_workspace
+from .runtime_workspace import capture_runtime_workspace
 
 
 def start_planning_run(workspace: Path, repo: Path, *, goal: str) -> AgentRun:
@@ -59,7 +59,8 @@ def start_planning_run(workspace: Path, repo: Path, *, goal: str) -> AgentRun:
         run_id=run_id,
         base_revision=revision.commit,
     )
-    snapshot = capture_review_workspace(
+    snapshot = capture_runtime_workspace(
+        workspace,
         handle.worktree_path,
         comparison_base_sha=revision.commit,
     )

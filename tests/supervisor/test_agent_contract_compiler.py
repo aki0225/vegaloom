@@ -30,13 +30,19 @@ from vega.agent_task_card import load_task_card
 from vega.cli_entrypoint import app
 from vega.project_config import load_project_config
 from vega.runner import RunnerResult
+from vega.run_status import run_status_payload
 
 
+@pytest.mark.parametrize("runtime_ignore", [".tmp/", ".tmp/vega-verification/"])
 def test_contract_compiler_enters_existing_approval_flow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    runtime_ignore: str,
 ) -> None:
     repo = _repo(tmp_path / "repo")
+    (repo / ".gitignore").write_text(runtime_ignore + "\n", encoding="utf-8")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-m", "测试：登记运行目录")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     runtime = SupervisorAgentRuntime(workspace)
@@ -96,6 +102,7 @@ def test_contract_compiler_enters_existing_approval_flow(
 
     assert approved.state.phase == "ready"
     assert approved.state.approved_contract_digest is not None
+    assert run_status_payload(workspace, run_dir.name)["agent_phase"] == "ready"
 
 
 @pytest.mark.parametrize(

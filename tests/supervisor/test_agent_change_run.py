@@ -33,10 +33,17 @@ from vega.workspace_check import capture_review_workspace
 _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
+@pytest.mark.parametrize("runtime_ignore", ["", ".tmp/", ".tmp/vega-verification/"])
 def test_change_run_starts_in_isolated_worktree_and_approves_contract(
     tmp_path: Path,
+    runtime_ignore: str,
 ) -> None:
     repo = _repo(tmp_path / "repo")
+    if runtime_ignore:
+        with (repo / ".gitignore").open("a", encoding="utf-8") as stream:
+            stream.write(runtime_ignore + "\n")
+        _git(repo, "add", ".gitignore")
+        _git(repo, "commit", "-m", "测试：登记运行目录")
     source_head = _git(repo, "rev-parse", "HEAD")
     source_status = _git(repo, "status", "--short")
     workspace = tmp_path / "workspace"
@@ -70,6 +77,10 @@ def test_change_run_starts_in_isolated_worktree_and_approves_contract(
     assert approved.state.accepted_checkpoint_sha == source_head
     assert approved.state.current_work_item == "WI-01"
     assert approved.plan.approval_is_current()
+    payload = run_status_payload(workspace, approved.run_dir.name)
+    assert payload["agent_phase"] == "ready"
+    assert (managed_repo / ".tmp" / "vega-verification").is_dir()
+    assert not (repo / ".tmp").exists()
     assert len(approved.plan.work_items) == 2
     assert approved.plan.work_items[0].allowed_paths == ["src/one.py"]
     assert approved.plan.work_items[1].allowed_paths == ["src/two.py"]
@@ -83,6 +94,19 @@ def test_change_run_starts_in_isolated_worktree_and_approves_contract(
     task_brief = (approved.run_dir / "task-brief.md").read_text(encoding="utf-8")
     assert "## Worker 最小自检" in task_brief
     assert "## Vega 确定性 Gate（Candidate 冻结后执行）" in task_brief
+
+    if runtime_ignore:
+        (managed_repo / ".tmp" / "vega-verification" / "result.txt").write_text(
+            "验证输出\n", encoding="utf-8"
+        )
+        assert run_status_payload(workspace, approved.run_dir.name)["agent_phase"] == "ready"
+        (managed_repo / ".tmp" / "user-settings.txt").write_text(
+            "非 Vega 文件\n", encoding="utf-8"
+        )
+        assert (
+            run_status_payload(workspace, approved.run_dir.name)["agent_phase"]
+            == "needs_human"
+        )
 
 
 def test_change_run_ids_are_unique_across_workspaces_in_same_second(

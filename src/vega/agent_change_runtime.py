@@ -46,8 +46,7 @@ from .agent_runtime_support import (
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
 from .verification_command_preflight import require_verification_commands_preflight
-from .workspace_check import capture_review_workspace
-from .workspace_inventory import prepare_verification_temp_root
+from .runtime_workspace import capture_runtime_workspace
 
 
 def start_change_run(
@@ -80,7 +79,8 @@ def start_change_run(
         run_id=run_id,
         base_revision=revision.commit,
     )
-    snapshot = capture_review_workspace(
+    snapshot = capture_runtime_workspace(
+        workspace,
         handle.worktree_path,
         comparison_base_sha=revision.commit,
     )
@@ -172,7 +172,6 @@ def approve_change_run(
         context.execution_plan,
         current=plan,
     )
-    prepare_verification_temp_root(repo)
     ready_state = update_state(
         state,
         phase="ready",

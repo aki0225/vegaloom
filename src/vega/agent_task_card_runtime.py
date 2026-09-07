@@ -117,8 +117,6 @@ def resume_agent_task_card(
             if managed_workspace is not None
             else snapshot
         )
-        if managed_workspace is not None:
-            prepare_verification_temp_root(bound_repository)
         state = state_from_task_card(
             run_id,
             bound_repository,
