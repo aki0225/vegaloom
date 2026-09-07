@@ -13,7 +13,7 @@ def capture_runtime_workspace(
     comparison_base_sha: str | None = None,
     comparison_paths: tuple[str, ...] = (),
 ) -> ReviewWorkspaceSnapshot:
-    """捕获运行阶段快照，并排除目标仓库内由 Vega 自己维护的 runs。"""
+    """统一运行快照的排除范围：Vega 的 runs 和受控验证临时目录。"""
 
     return capture_review_workspace(
         repo_path,

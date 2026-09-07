@@ -15,6 +15,7 @@ from .tracked_workspace import (
     capture_tracked_scope_snapshot,
     collect_comparison_changed_paths,
 )
+from .workspace_inventory import prepare_verification_temp_root
 
 
 _RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
@@ -115,6 +116,8 @@ def prepare_managed_worktree(
         branch=branch,
         base_sha=resolved_base.commit,
     )
+    # 首次快照前准备控制器目录，避免批准或恢复时创建父目录使自己的基线失效。
+    prepare_verification_temp_root(handle.worktree_path)
     _require_source_unchanged(
         repo,
         expected_head=source_head,

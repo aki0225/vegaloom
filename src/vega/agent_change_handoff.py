@@ -18,8 +18,8 @@ from .agent_git_worktree import (
 from .agent_handoff_digest import compute_handoff_workspace_digest
 from .agent_task_card import AgentTaskCard, ChangeRunResume
 from .agent_task_card_discovery import task_card_chain_paths
-from .workspace_check import capture_review_workspace
-from .workspace_inventory import workspace_ignored_path_exclusions
+from .runtime_workspace import capture_runtime_workspace
+from .workspace_inventory import prepare_verification_temp_root
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
@@ -63,12 +63,9 @@ def build_change_handoff_details(
     expected_head = state.active_candidate_sha or accepted_checkpoint
     if current.head_sha != expected_head:
         raise ValueError("ChangeRun Handoff 的 Git HEAD 与当前 Candidate 绑定不一致")
-    snapshot = capture_review_workspace(
+    snapshot = capture_runtime_workspace(
+        workspace,
         repo,
-        ignored_path_exclusions=workspace_ignored_path_exclusions(
-            workspace,
-            repo,
-        ),
         comparison_base_sha=accepted_checkpoint,
     )
     if snapshot.head_sha != expected_head:
@@ -113,7 +110,10 @@ def prepare_resumed_change_workspace(
         restored_checkpoint_sha=resumed_checkpoint,
         changed_files=list(capsule.changed_files),
     )
-    snapshot = capture_review_workspace(
+    # WIP 恢复可能替换目录；在快照前确认受控根仍是仓库内的普通目录。
+    prepare_verification_temp_root(handle.worktree_path)
+    snapshot = capture_runtime_workspace(
+        workspace,
         handle.worktree_path,
         comparison_base_sha=resumed_checkpoint,
     )
@@ -163,7 +163,8 @@ def prepare_resumed_planning_workspace(
         source_revision=handoff_revision,
         task_card_path=relative_task,
     )
-    snapshot = capture_review_workspace(
+    snapshot = capture_runtime_workspace(
+        workspace,
         handle.worktree_path,
         comparison_base_sha=resumed_checkpoint,
     )
