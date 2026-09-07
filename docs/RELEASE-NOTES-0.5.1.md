@@ -11,7 +11,7 @@ v0.5.1 是 v0.5.0 的兼容性与易用性修复版本。它不改变 ChangeRun 
 - Provider 预检与实际执行路径一致，支持显式 Codex/Claude 选择，并分别报告混合 runner 的 CLI 缺失。
 - `status` 与 `explain` 使用同一份安全动作投影；批准提示明确要求先核对合同和执行计划。
 - 完成状态显示已有 Worktree、任务分支、累计 Diff 基线、Candidate 和最终报告位置。
-- README、CLI 帮助和稳定版安装命令与发布制品保持一致。
+- README、CLI 帮助与候选源码一致；正式发布前使用固定提交安装，避免引用尚不存在的制品。
 
 ## 保留的边界
 
@@ -21,5 +21,6 @@ v0.5.1 是 v0.5.0 的兼容性与易用性修复版本。它不改变 ChangeRun 
 
 ## 验证
 
-- 受影响的 Core/Supervisor 定向测试、Ruff、Compileall、仓库卫生、计划和架构门禁通过。
+- 发布候选定向测试：`tests/core/test_smoke.py` 和 `tests/core/test_cli_recovery_hardening.py`，
+  共 `91 passed, 1 skipped`；Ruff、Compileall、仓库卫生、计划和架构门禁通过。
 - PR CI 和合并后的主线 CI 由 GitHub Actions 记录；未以本地结果替代跨平台证据。
