@@ -386,12 +386,12 @@ def validated_review_workspace_fingerprint(
 ) -> str:
     """返回可与验证证据绑定的工作区指纹，不改变最终审查裁决。"""
 
-    # 命名高风险会把完整披露后的 verdict 固定为 needs_human；此处只恢复
+    # 风险门禁会把只读审查后的 verdict 固定为 needs_human；此处只恢复
     # “验证与审查针对同一工作区”的事实，最终状态仍必须交由人工确认。
     trusted_verdict = verdict == "approve" or (
         verdict == "needs_human"
         and risk_gate_result is not None
-        and bool(risk_gate_result.required_reviews)
+        and risk_gate_result.recommendation == "human-review"
     )
     if child_context is None or not trusted_verdict:
         return ""
