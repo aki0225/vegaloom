@@ -23,18 +23,18 @@
 
 ## 发布
 
-`v0.5.1` 发布候选材料：
+`v0.5.1` 发布材料与[下载](https://github.com/aki0225/vegaloom/releases/tag/v0.5.1)：
 
 - [`RELEASE-NOTES-0.5.1.md`](RELEASE-NOTES-0.5.1.md)
 - [`RELEASE-SUMMARY-0.5.1.md`](RELEASE-SUMMARY-0.5.1.md)
 
-当前稳定版本为 [`v0.5.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.5.0)：
+`v0.5.0` 历史发布记录：
 
 - [`RELEASE-NOTES-0.5.0.md`](RELEASE-NOTES-0.5.0.md)
 - [`RELEASE-SUMMARY-0.5.0.md`](RELEASE-SUMMARY-0.5.0.md)
 - [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)
 
-上一个稳定版本为 [`v0.4.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.4.0)：
+`v0.4.0` 历史发布记录：
 
 - [`RELEASE-NOTES-0.4.0.md`](RELEASE-NOTES-0.4.0.md)
 - [`RELEASE-SUMMARY-0.4.0.md`](RELEASE-SUMMARY-0.4.0.md)

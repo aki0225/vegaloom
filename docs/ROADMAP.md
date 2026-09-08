@@ -1,6 +1,6 @@
 # Vega 后续演进路线
 
-> 当前稳定版本：[`v0.5.0`](https://github.com/aki0225/vegaloom/releases/tag/v0.5.0)
+> 版本与制品： [GitHub Releases](https://github.com/aki0225/vegaloom/releases)
 > 本文件保存路线决策和历史背景，不维护实时进度。
 > 当前事项与下一项：[`CURRENT.md`](CURRENT.md)
 > 机器可读计划：[`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json)
