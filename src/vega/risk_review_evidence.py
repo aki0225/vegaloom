@@ -72,15 +72,15 @@ def required_review_iteration_eval_results(
 
 
 def gate_blocks_reviewer_before_execution(result: GateResult) -> bool:
-    """普通 human-review 继续早停；命名必审风险允许只读 Reviewer 生成披露。"""
+    """风险路径允许先收集只读审查；预算和未知阻断原因仍在调用前停止。"""
     if result.recommendation != "human-review":
         return False
-    if not result.required_reviews or not required_review_policy_consistent(result):
+    if not result.reasons or not required_review_policy_consistent(result):
         return True
     return any(
         reason.severity == "high"
         and reason.code
-        not in {"required_risk_review", "project_requires_human_review"}
+        not in {"required_risk_review", "project_requires_human_review", "high_risk_paths"}
         for reason in result.reasons
     )
 

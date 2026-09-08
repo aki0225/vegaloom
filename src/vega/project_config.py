@@ -209,8 +209,8 @@ def load_project_config(
             content = _read_tracked_config(repo, revision.commit, name)
             if content is None:
                 continue
-            data = yaml.safe_load(content) or {}
-            config = ProjectConfig.model_validate(data)
+            data = yaml.safe_load(content)
+            config = ProjectConfig.model_validate({} if data is None else data)
             config.source_path = str(repo / name)
             return config
         return ProjectConfig()
@@ -218,8 +218,8 @@ def load_project_config(
     for name in CONFIG_FILENAMES:
         path = repo / name
         if path.is_file():
-            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            config = ProjectConfig.model_validate(data)
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            config = ProjectConfig.model_validate({} if data is None else data)
             config.source_path = str(path)
             return config
     return ProjectConfig()

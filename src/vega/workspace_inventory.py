@@ -189,6 +189,7 @@ def create_verification_temp_dir(
         / f"iteration-{iteration}"
         / f"command-{command_index}"
     )
+    command_dir = _compact_verification_path(root, command_dir)
     current = root
     for part in command_dir.parent.relative_to(root).parts:
         current = current / part
@@ -214,6 +215,16 @@ def create_verification_temp_dir(
     if not resolved.is_relative_to(root):
         raise ValueError("verification 临时目录逃出受控根路径")
     return resolved
+
+
+def _compact_verification_path(root: Path, command_dir: Path) -> Path:
+    # 给工具的子目录留空间；名称只编码任务位置，不扩大受控根或复用旧内容。
+    if os.name == "nt" and len(str(command_dir)) > 160:
+        if os.path.lexists(command_dir):
+            raise ValueError("verification 旧临时目录已存在；拒绝换名复用同一次验证")
+        identity = command_dir.relative_to(root).as_posix().encode("utf-8")
+        return root / hashlib.sha256(identity).hexdigest()[:16]
+    return command_dir
 
 
 def _validate_verification_temp_root(repo: Path, root: Path) -> None:

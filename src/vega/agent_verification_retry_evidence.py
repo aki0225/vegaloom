@@ -165,7 +165,7 @@ def validate_retry_source(
         or observation.external_side_effects != "none"
         or observation.plan_contradicted
         or observation.verification not in {"failed", "blocked"}
-        or observation.risk != "passed"
+        or observation.risk not in {"passed", "blocked"}
         or observation.review not in {"failed", "blocked"}
         or sorted(observation.changed_files) != sorted(snapshot.changed_files)
         or snapshot.untracked_files
@@ -211,6 +211,10 @@ def validate_retry_source(
         )
     if not _finish_allows_verification_retry(finish, snapshot):
         raise ValueError("原始 child 的失败原因不属于验证专用恢复")
+    # 只重跑验证与只读审查，不把风险待确认解释成已授权。
+    risk = finish["first_screen"]["gates"]["risk"]
+    if observation.risk == "blocked" and risk.get("recommendation") != "human-review":
+        raise ValueError("风险阻断与原始 Finish 不一致，不能执行验证专用恢复")
     return source_summary_ref, claim, finish_sha256
 
 
