@@ -319,7 +319,7 @@ vega run --run <run_id>
 
 ## 10. 只重跑验证
 
-代码和 Reviewer finding 都不需要改，只是验证命令或本地依赖环境需要修正：
+代码、验证命令和 Reviewer finding 都不需要改，仅修复本地依赖环境后，按当前安全动作提示重试：
 
 ```powershell
 vega retry --run <run_id>
@@ -327,6 +327,9 @@ vega retry --run <run_id>
 
 该命令复用当前 Diff 和原 Worker 证据，只重跑 Verification、Risk 和 Reviewer。源码、未跟踪
 文件、Git 控制状态或 Candidate 变化时拒绝。
+
+验证命令需要变化时，先按上一节修订 Execution Plan；涉及 Contract 的固定验证要求时须重新
+批准。不要直接修改 `.vega.yaml` 后重试，`retry` 不会把工作区中的新命令视为授权。
 
 ### 10.1 Reviewer 超时自动恢复一次
 
