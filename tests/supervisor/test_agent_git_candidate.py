@@ -54,6 +54,17 @@ def test_candidate_commit_isolated_from_user_worktree(tmp_path: Path) -> None:
         contract=_contract(),
         execution_plan=_plan(),
     )
+    # 已有短目录与旧版完整 Run ID 目录都不能被重新创建覆盖。
+    with pytest.raises(GitCandidateError, match="拒绝覆盖"):
+        prepare_managed_worktree(repo, workspace_root=handle.worktree_path.parent, run_id=handle.run_id)
+    assert target.read_text(encoding="utf-8") == "def capture():\n    return 'ok'\n"
+    legacy = handle.worktree_path.parent / "task-legacy"
+    legacy.mkdir()
+    marker = legacy / "保留.txt"
+    marker.write_text("原任务现场", encoding="utf-8")
+    with pytest.raises(GitCandidateError, match="拒绝覆盖"):
+        prepare_managed_worktree(repo, workspace_root=legacy.parent, run_id=legacy.name)
+    assert marker.read_text(encoding="utf-8") == "原任务现场"
 
 
 def test_worker_created_commit_is_rejected(tmp_path: Path) -> None:

@@ -145,7 +145,11 @@ def test_high_risk_path_collects_review_without_authorizing_delivery(
     assert finish["finish_status"] == ("needs_fix" if verification_fails else "needs_human")
     assert finish["artifact_integrity"]["valid"] is True
     assert finish["evidence_freshness"]["fresh"] is True
-    assert finish["verification_passed"] is not verification_fails
+    assert finish["verification_passed"] is not verification_fails, {
+        "iteration": state["iterations"][0],
+        "verification": finish["verification_results"],
+        "integrity": finish["artifact_integrity"],
+    }
     if verification_fails:
         from vega.agent_verification_retry_evidence import _finish_allows_verification_retry
         from vega.workspace_check import capture_review_workspace
