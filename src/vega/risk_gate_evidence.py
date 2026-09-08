@@ -215,7 +215,7 @@ def validate_iteration_risk_gate_artifacts(
             issues.append("risk_gate_recommendation_missing")
         if result and _reviewer_evidence_present(iteration):
             if gate_blocks_reviewer_before_execution(result) or (
-                result.required_reviews
+                result.recommendation == "human-review"
                 and iteration.verdict != "needs_human"
             ):
                 issues.append("risk_gate_human_review_bypassed")

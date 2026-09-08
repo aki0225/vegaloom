@@ -91,8 +91,9 @@ class RequiredReviewReviewer:
 
 
 class CountingReviewer:
-    def __init__(self) -> None:
+    def __init__(self, relative_path: str | None = None) -> None:
         self.calls = 0
+        self.relative_path = relative_path
 
     def run(
         self,
@@ -112,12 +113,48 @@ class CountingReviewer:
                     "verdict": "approve",
                     "summary": "未发现明显问题。",
                     "findings": [],
+                    "reviewed_files": [self.relative_path] if self.relative_path else [],
                     "checked_items": ["需求覆盖"],
                 },
                 ensure_ascii=False,
             ),
             command=["counting-reviewer"],
         )
+
+
+@pytest.mark.parametrize("verification_fails", [False, True])
+def test_high_risk_path_collects_review_without_authorizing_delivery(
+    tmp_path: Path, verification_fails: bool,
+) -> None:
+    relative_path = "tests/security/check_config.py"
+    command = 'python -c "raise SystemExit(1)"' if verification_fails else "echo ok"
+    workspace, repo = _init_repo(
+        tmp_path, config=f"version: 1\nverification:\n  commands:\n    - {command}\n",
+        files={relative_path: "VALUE = 1\n"},
+    )
+    reviewer = CountingReviewer(relative_path)
+    run_dir = LoopAutomationRuntime(
+        workspace, worker_runner=PathWorker(relative_path), reviewer_runner=reviewer,
+    ).start(_brief(repo), "auto", max_iterations=1, verify=True)
+    state = _read_json(run_dir / "state.json")
+    assert reviewer.calls == 1
+    assert state["status"] == "needs_human"
+    assert state["iterations"][0]["verdict"] == "needs_human"
+    FinishRuntime(workspace).run(run_dir.name)
+    finish = _read_json(run_dir / "finish-summary.json")
+    assert finish["finish_status"] == ("needs_fix" if verification_fails else "needs_human")
+    assert finish["artifact_integrity"]["valid"] is True
+    assert finish["evidence_freshness"]["fresh"] is True
+    assert finish["verification_passed"] is not verification_fails, {
+        "iteration": state["iterations"][0],
+        "verification": finish["verification_results"],
+        "integrity": finish["artifact_integrity"],
+    }
+    if verification_fails:
+        from vega.agent_verification_retry_evidence import _finish_allows_verification_retry
+        from vega.workspace_check import capture_review_workspace
+
+        assert _finish_allows_verification_retry(finish, capture_review_workspace(repo))
 
 
 def test_auto_named_required_review_runs_reviewer_once_and_stays_human(

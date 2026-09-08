@@ -31,6 +31,7 @@ from vega.runner import RunnerResult
 from vega.experimental.inspection.tool_broker import ToolBroker
 from vega.verification import VerificationRunResult, run_project_verification
 from vega.workspace_check import capture_review_workspace, run_workspace_check
+from vega.workspace_inventory import _compact_verification_path
 
 
 FAKE_SECRET = "sk-runtime-fake-secret-123456"
@@ -700,6 +701,29 @@ def test_verification_explicit_commands_override_project_defaults(
     assert payload["skipped_commands"] == []
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows 长路径回归")
+def test_verification_temp_compacts_long_paths_without_reusing_content(tmp_path: Path) -> None:
+    from vega.workspace_inventory import create_verification_temp_dir
+
+    repo = tmp_path / ("r" * max(1, 145 - len(str(tmp_path))))
+    repo.mkdir()
+    run_id = "verification-" + "a" * 60
+    first = create_verification_temp_dir(repo, run_id, 1, 1)
+    second = create_verification_temp_dir(repo, run_id, 1, 2)
+    assert first.parent == repo / ".tmp" / "vega-verification"
+    assert len(first.name) == 16
+    assert first != second
+    marker = first / ("result-" + "x" * 45 + ".txt")
+    marker.write_text("保留验证结果", encoding="utf-8")
+    with pytest.raises(ValueError, match="拒绝复用"):
+        create_verification_temp_dir(repo, run_id, 1, 1)
+    assert marker.read_text(encoding="utf-8") == "保留验证结果"
+    legacy = first.parent / "old-run" / "iteration-1" / "command-1"
+    legacy.mkdir(parents=True)
+    with pytest.raises(ValueError, match="拒绝换名复用"):
+        create_verification_temp_dir(repo, "old-run", 1, 1)
+
+
 def test_verification_temp_placeholder_isolates_iterations_and_commands(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -742,6 +766,9 @@ def test_verification_temp_placeholder_isolates_iterations_and_commands(
             / "isolation-run"
             / f"iteration-{context.iteration}"
             / f"command-{command_index}"
+        )
+        expected_temp = _compact_verification_path(
+            repo.resolve() / ".tmp" / "vega-verification", expected_temp,
         )
         assert expected_temp.is_dir()
         assert environment == {
@@ -908,13 +935,17 @@ def test_verification_temp_artifacts_redact_sensitive_repo_path(
     assert FAKE_SECRET not in artifacts
     assert "[REDACTED]" in artifacts
     payload = json.loads(result.result_path.read_text(encoding="utf-8"))
-    assert payload["results"][0]["verification_temp"] == (
-        Path(".tmp")
+    expected_temp = (
+        repo.resolve() / ".tmp"
         / "vega-verification"
         / "redaction-run"
         / "iteration-1"
         / "command-1"
-    ).as_posix()
+    )
+    expected_temp = _compact_verification_path(
+        repo.resolve() / ".tmp" / "vega-verification", expected_temp,
+    )
+    assert payload["results"][0]["verification_temp"] == expected_temp.relative_to(repo.resolve()).as_posix()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="仅覆盖 Windows cmd.exe 引号语义")
@@ -960,6 +991,9 @@ def test_windows_verification_preserves_nested_python_quotes(
         / "windows-run"
         / "iteration-4"
         / "command-1"
+    )
+    expected_temp = _compact_verification_path(
+        repo.resolve() / ".tmp" / "vega-verification", expected_temp,
     )
     execution = json.loads(
         output_dir.joinpath(

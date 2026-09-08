@@ -5,12 +5,81 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from vega import git_read, project_config, project_config_preflight
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
 from vega.project_config import check_project_config, render_project_config_check
 from vega.project_profile import ProjectProfileRuntime
 from vega.reflect_runtime import ReflectRuntime
+
+
+@pytest.mark.parametrize(
+    ("content", "expected_commands"),
+    [
+        ("false", None),
+        ("true", None),
+        ("0", None),
+        ("1", None),
+        ('""', None),
+        ('"text"', None),
+        ("[]", None),
+        ("[1]", None),
+        ("", []),
+        ("# 仅含注释\n", []),
+        ("null", []),
+        ("{}", []),
+        ("version: 1\nverification:\n  commands: [echo ok]\n", ["echo ok"]),
+    ],
+)
+def test_project_config_top_level_yaml_validation(
+    tmp_path: Path,
+    content: str,
+    expected_commands: list[str] | None,
+) -> None:
+    repo = tmp_path / "repo"
+    _init_changed_git_repo(repo)
+    config_path = repo / ".vega.yaml"
+    config_path.write_text(content, encoding="utf-8")
+    _stage_paths(repo, ".vega.yaml")
+    subprocess.run(
+        ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test",
+         "commit", "-m", "保存配置测试样本"],
+        cwd=repo, check=True, capture_output=True, text=True,
+    )
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    result = check_project_config(repo)
+    if expected_commands is None:
+        assert result.status == "failed"
+        assert [issue.code for issue in result.issues] == ["invalid_project_config"]
+    else:
+        assert result.status == "passed"
+        assert result.verification_commands == expected_commands
+
+    for tracked_only in (False, True):
+        if tracked_only:
+            # 让工作区内容与提交不同，证明固定版本读取没有退回工作区。
+            config_path.write_text("version: 999\n", encoding="utf-8")
+        if expected_commands is None:
+            with pytest.raises(ValidationError) as exc_info:
+                project_config.load_project_config(
+                    repo, tracked_only=tracked_only, tracked_revision=revision,
+                )
+            assert exc_info.value.errors()[0]["type"] == "model_type"
+        else:
+            config = project_config.load_project_config(
+                repo, tracked_only=tracked_only, tracked_revision=revision,
+            )
+            expected = project_config.ProjectConfig.model_validate(
+                {"verification": {"commands": expected_commands}}
+                if expected_commands else {}
+            )
+            expected.source_path = str(config_path.resolve())
+            assert config == expected
 
 
 @pytest.mark.parametrize(

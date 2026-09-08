@@ -38,6 +38,7 @@ from vega.risk_review_reporting import build_finish_review_section
 from vega.run_status import run_status_payload
 from vega.run_utils import create_run_dir
 from vega.runner import CodexExecRunner, RunnerResult
+from vega.workspace_inventory import _compact_verification_path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -1957,6 +1958,7 @@ def test_loop_auto_stops_after_max_iterations(tmp_path) -> None:
                 / f"iteration-{iteration}"
                 / f"command-{command_index}"
             )
+            expected_temp = _compact_verification_path(verification_temp_root.parent, expected_temp)
             assert expected_temp.is_dir()
             assert "{{vega_verification_temp}}" in command_result["configured_command"]
             assert command_result["command"] == command_result["configured_command"]
@@ -2042,6 +2044,9 @@ def test_loop_two_iteration_success_finishes_with_isolated_verification(
                 / run_dir.name
                 / f"iteration-{iteration}"
                 / f"command-{command_index}"
+            )
+            expected_temp = _compact_verification_path(
+                repo_dir.resolve() / ".tmp" / "vega-verification", expected_temp,
             )
             assert expected_temp.is_dir()
             assert command_result["verification_temp"] == expected_temp.relative_to(

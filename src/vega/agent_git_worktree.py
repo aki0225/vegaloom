@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import stat
@@ -74,8 +75,10 @@ def prepare_managed_worktree(
     _validate_run_id(run_id)
     repo = require_git_root(source_repo)
     root = _prepare_workspace_root(repo, workspace_root)
-    destination = root / run_id
-    if os.path.lexists(destination):
+    # Windows 给验证工具及其内部 Git 目录留空间；任务身份仍由完整 Run ID 和分支保存。
+    directory_name = hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:16] if os.name == "nt" else run_id
+    destination = root / directory_name
+    if os.path.lexists(destination) or os.path.lexists(root / run_id):
         raise GitCandidateError("目标 ChangeRun Worktree 已存在，拒绝覆盖")
 
     resolved_base = resolve_git_revision(repo, base_revision)

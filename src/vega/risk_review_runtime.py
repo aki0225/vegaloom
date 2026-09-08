@@ -74,7 +74,10 @@ def enforce_required_risk_review(
         else []
     )
     if not required_reviews:
-        return _enforce_empty_risk_disclosures(verdict)
+        checked, issues = _enforce_empty_risk_disclosures(verdict)
+        if risk_gate_result is not None and risk_gate_result.recommendation == "human-review":
+            checked = _force_human_verdict(checked)
+        return checked, issues
 
     validation = validate_required_risk_disclosures(
         required_reviews,

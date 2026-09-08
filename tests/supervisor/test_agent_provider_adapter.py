@@ -58,12 +58,14 @@ class _FakeLoopRuntime:
         verification_status: str = "passed",
         core_mutation_relative: str | None = None,
         prepare_runtime_root: bool = False,
+        pending_risk: bool = False,
     ) -> None:
         self.workspace = workspace
         self.finish_status = finish_status
         self.verification_status = verification_status
         self.core_mutation_relative = core_mutation_relative
         self.prepare_runtime_root = prepare_runtime_root
+        self.pending_risk = pending_risk
         self.continued = False
         self.start_count = 0
         self.continue_count = 0
@@ -193,6 +195,12 @@ class _FakeLoopRuntime:
                 "根据 Reviewer finding 修复当前问题。\n",
                 encoding="utf-8",
             )
+        if self.pending_risk:
+            state.status = "needs_human"
+            for item in state.iterations:
+                item.risk_gate_risk = "high"
+                item.risk_gate_recommendation = "human-review"
+                item.verdict = "needs_human"
         state.save(self.child_dir / "state.json")
         return self.child_dir
 
@@ -211,6 +219,7 @@ class _FakeFinishRuntime:
         assert self.loop.child_dir is not None
         assert run == self.loop.child_dir.name
         ready = self.loop.finish_status == "ready_to_commit"
+        verdict = "needs_human" if self.loop.pending_risk else "approve" if ready else "request_changes"
         state = LoopAutomationState.model_validate_json(
             (self.loop.child_dir / "state.json").read_text(encoding="utf-8")
         )
@@ -253,7 +262,7 @@ class _FakeFinishRuntime:
                         "trusted_workspace_fingerprint": snapshot.fingerprint,
                     },
                     "latest_verdict": {
-                        "verdict": "approve" if ready else "request_changes"
+                        "verdict": verdict
                     },
                     "first_screen": {
                         "actual_changes": {"changed_files": changed_files},
@@ -263,10 +272,13 @@ class _FakeFinishRuntime:
                                 if self.loop.verification_status == "passed"
                                 else "failed"
                             ),
-                            "risk": {"status": "success"},
+                            "risk": {
+                                "status": "success",
+                                "recommendation": "human-review" if self.loop.pending_risk else "isolated-review",
+                            },
                         },
                         "review": {
-                            "verdict": "approve" if ready else "request_changes",
+                            "verdict": verdict,
                             "findings": [],
                         },
                     },
@@ -1299,9 +1311,11 @@ def test_reviewer_request_changes_routes_back_to_repair(
     assert observation["repairable_in_scope"] is True
 
 
+@pytest.mark.parametrize("pending_risk", [False, True])
 def test_verification_retry_reuses_original_worker_and_completes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    pending_risk: bool,
 ) -> None:
     _, workspace, run_id = _approved_run(tmp_path)
     monkeypatch.chdir(workspace)
@@ -1309,6 +1323,7 @@ def test_verification_retry_reuses_original_worker_and_completes(
         workspace,
         finish_status="needs_fix",
         verification_status="failed",
+        pending_risk=pending_risk,
     )
     worker = _FakeWorkerRunner()
     adapter = SupervisorAgentProviderAdapter(
@@ -1318,7 +1333,7 @@ def test_verification_retry_reuses_original_worker_and_completes(
         finish_runtime=_FakeFinishRuntime(loop),
     )
     failed = adapter.run(run_id, timeout_seconds=60)
-    assert failed.state.phase == "ready"
+    assert failed.state.phase == ("needs_human" if pending_risk else "ready")
     assert worker.run_count == 1
 
     runtime = SupervisorAgentRuntime(workspace)
@@ -1328,7 +1343,7 @@ def test_verification_retry_reuses_original_worker_and_completes(
     )
     planned = runtime.update_plan(failed.run_dir.name, revised)
     approved = runtime.approve(planned.run_dir.name)
-    loop.finish_status = "ready_to_commit"
+    loop.finish_status = "needs_human" if pending_risk else "ready_to_commit"
     loop.verification_status = "passed"
     retry = SupervisorAgentVerificationRetry(
         workspace,
@@ -1336,10 +1351,25 @@ def test_verification_retry_reuses_original_worker_and_completes(
         finish_runtime=_FakeFinishRuntime(loop),
     )
 
+    if pending_risk:
+        from vega import agent_verification_retry_evidence as retry_evidence
+
+        load_finish = retry_evidence.load_bound_source_finish
+        def inconsistent_risk(*args):
+            finish, digest = load_finish(*args)
+            finish["first_screen"]["gates"]["risk"]["recommendation"] = "isolated-review"
+            return finish, digest
+
+        with monkeypatch.context() as patch:
+            patch.setattr(retry_evidence, "load_bound_source_finish", inconsistent_risk)
+            with pytest.raises(ValueError, match="风险阻断与原始 Finish 不一致"):
+                retry.run(approved.run_dir.name)
+        assert loop.continue_count == 1
+
     completed = retry.run(approved.run_dir.name)
 
-    assert completed.state.phase == "completed"
-    assert completed.state.terminal_status == "ready_to_commit"
+    assert completed.state.phase == ("needs_human" if pending_risk else "completed")
+    assert completed.state.terminal_status == (None if pending_risk else "ready_to_commit")
     assert worker.run_count == 1
     assert loop.start_count == 1
     assert loop.continue_count == 2
