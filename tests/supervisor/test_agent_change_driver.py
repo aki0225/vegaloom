@@ -23,6 +23,7 @@ from vega.agent_change_driver import AgentChangeDriver, ChangeDriverResult
 from vega.agent_change_presentation import build_change_approval_snapshot
 from vega.agent_cli_interaction import InteractionPumpUpdate
 from vega.agent_contract import AgentState
+from vega.agent_persistence import save_agent_state
 from vega.agent_planning import (
     PlanningContractProposal,
     PlanningExecutionPlan,
@@ -43,6 +44,50 @@ from vega.provider_session import (
     save_provider_sessions,
 )
 from vega.runner import RunnerResult
+
+
+@pytest.mark.parametrize("candidate_bound", [False, True])
+def test_change_replan_with_existing_contract_preserves_evidence_without_planner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_bound: bool,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(
+        repo, contract=_contract(), execution_plan=_execution_plan(),
+    )
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    state = AgentState.model_validate({
+        **approved.state.model_dump(mode="json"),
+        "phase": "planning",
+        "approved_plan_digest": None,
+        "active_candidate_sha": "a" * 40 if candidate_bound else None,
+        "allowed_actions": ["replan", "human"],
+    })
+    save_agent_state(approved.run_dir / "agent-state.json", state)
+    evidence_names = ("agent-state.json", "agent-plan.json", "change-contract.json")
+    before = {name: (approved.run_dir / name).read_bytes() for name in evidence_names}
+    monkeypatch.setattr(
+        driver_module, "ensure_change_provider_ready",
+        lambda _: pytest.fail("已有合同的 replan 不得准备 Provider"),
+    )
+    monkeypatch.setattr(
+        PlanningProposalRunner, "run",
+        lambda *args, **kwargs: pytest.fail("已有合同的 replan 不得调用初始 Planner"),
+    )
+
+    result = AgentChangeDriver(repo, repo, provider="claude").change(
+        run=approved.run_dir.name,
+    )
+
+    assert result.outcome == "attention_required"
+    assert result.reason_code == "workflow.replan_required"
+    assert result.safe_actions == ("status", "explain", "revise")
+    assert result.run is not None
+    assert result.run.state == state
+    assert _contract().authority_envelope.max_auto_replans == 0
+    assert {name: (approved.run_dir / name).read_bytes() for name in evidence_names} == before
 
 
 def test_change_creates_planning_run_and_stops_at_non_tty_approval(

@@ -201,6 +201,15 @@ class AgentChangeDriver:
     def _run_planning(
         self, current: AgentRun, provider: AgentProvider
     ) -> AgentRun | ChangeDriverResult:
+        if current.state.contract_revision is not None:
+            # 已编译合同的 replan 必须经过 revision 裁决，不能重用初始调查绕过批准和预算。
+            return self._attention(
+                current,
+                "workflow.replan_required",
+                "当前合同需要重新规划；请查看证据后使用 revise 提交修订，"
+                "由现有合同和预算门禁裁决。保留当前 Candidate 和批准记录。",
+                ("status", "explain", "revise"),
+            )
         if current.state.active_planning_execution_id is not None:
             return self._attention(
                 current,
@@ -327,10 +336,7 @@ class AgentChangeDriver:
     def _interaction_boundary(
         self, boundary: ProviderOperationBoundary
     ) -> ChangeDriverResult:
-        message = (
-            boundary.update.message
-            or "Provider 请求需要人工处理。"
-        )
+        message = boundary.update.message or "Provider 请求需要人工处理。"
         message = (
             f"{message} 当前 attempt 已中断；请使用 status、explain、recover "
             "或 takeover 对账，确认后创建新 attempt。"
@@ -371,15 +377,11 @@ class AgentChangeDriver:
         self, current: AgentRun, _provider: AgentProvider
     ) -> ChangeDriverResult:
         checkpoint, _ = load_status_checkpoint_for_display(
-            current.run_dir,
-            current.state,
+            current.run_dir, current.state,
         )
         actions = ["status", "explain"]
         if can_offer_handoff(
-            current.run_dir,
-            current.state,
-            current.plan,
-            checkpoint,
+            current.run_dir, current.state, current.plan, checkpoint,
         ):
             actions.append("handoff")
         actions.append("change <goal>")

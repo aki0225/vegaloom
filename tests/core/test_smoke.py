@@ -1990,10 +1990,11 @@ def test_loop_auto_stops_after_max_iterations(tmp_path) -> None:
     )
 
 
+@pytest.mark.parametrize("repo_name", ["repo", "long-" + "x" * 70])
 def test_loop_two_iteration_success_finishes_with_isolated_verification(
-    tmp_path,
+    tmp_path, repo_name,
 ) -> None:
-    repo_dir = tmp_path / "repo"
+    repo_dir = tmp_path / repo_name
     _init_clean_git_repo(repo_dir)
     _write_isolated_verification_config(repo_dir)
     runtime = LoopAutomationRuntime(
