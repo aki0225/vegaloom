@@ -123,7 +123,8 @@ Provider Session 只保存本机会话协调信息：Session ID、owner、生命
 ## Candidate 与门禁
 
 Worker 的 `claimed_status=completed` 表示实现已交给控制器验证，不表示测试通过。Worker 沙箱
-缺少依赖或测试工具时，将失败、未运行项如实写入 `tests_claimed`；控制器仍执行全部批准命令。
+缺少依赖或测试工具时，将失败、未运行项如实写入 `tests_claimed`；已登记的依赖准备命令由
+控制器执行，Worker 不尝试安装或重建测试依赖（包括离线安装）。控制器仍执行全部批准命令。
 实现未完成、需扩大授权或外部副作用不明时，Worker 仍返回 `blocked`。Vega 不根据报错文本
 猜测可以跳过哪些检查，也不自动安装合同外的依赖。
 
