@@ -122,6 +122,7 @@ class _AttemptReconciler:
         after_worker = capture_bound_workspace(self.prepared.run_dir)
         if (
             self.prepared.attempt_number > 1
+            and not self.prepared.resumed_before_core
             and result.status == "success"
             and after_worker.fingerprint == self.prepared.before.fingerprint
         ):

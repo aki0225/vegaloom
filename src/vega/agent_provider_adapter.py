@@ -45,6 +45,7 @@ from .agent_provider_preparation import (
     read_task_brief as _read_task_brief,
     review_final_candidate,
     validate_prepared_workspace,
+    require_pre_core_resume,
 )
 from .agent_contract import AgentObservation, AgentState
 from .agent_run import AgentRun
@@ -198,6 +199,12 @@ class SupervisorAgentProviderAdapter:
             ),
         )
         before = capture_bound_workspace(run_dir)
+        resumed_before_core = (
+            change_context is not None and attempt_number > 1
+            and "repair" not in state.allowed_actions
+        )
+        if resumed_before_core:
+            require_pre_core_resume(self.workspace, run_dir, state)
         validate_prepared_workspace(
             before,
             expected_fingerprint=state.workspace_fingerprint,
@@ -253,6 +260,7 @@ class SupervisorAgentProviderAdapter:
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
             change_context=change_context,
+            resumed_before_core=resumed_before_core,
             timeout_seconds=timeout_seconds,
         )
 
@@ -276,7 +284,7 @@ class SupervisorAgentProviderAdapter:
         prepared: PreparedWorkerAttempt,
     ) -> tuple[Path, str]:
         if prepared.change_context is not None:
-            if prepared.attempt_number == 1:
+            if prepared.attempt_number == 1 or prepared.resumed_before_core:
                 prompt = prepared.task_brief
             else:
                 previous_child = require_repair_child(
@@ -348,6 +356,16 @@ class SupervisorAgentProviderAdapter:
             progress_reporter=self.progress_reporter,
         )
         self._event(f"Worker 已启动：{child_run}")
+        # 宿主和 Worker 沙箱的依赖缓存不同；检查职责不能因此退回给用户。
+        prompt += (
+            "\n\n## 实现与验证交接\n"
+            "控制器会在受管 Worktree 执行本轮已批准的全部验证命令，随后进行独立审查。"
+            "先检查当前工具与依赖，避免反复尝试已确认不可用的沙箱缓存。"
+            "实现完成、仅测试工具或依赖不可用时，claimed_status 使用 completed，"
+            "在 tests_claimed 如实列出失败或未运行的命令及原因；这只表示提交验证，不表示测试通过。"
+            "代码尚未完成、需扩大授权或存在未知外部副作用时仍使用 blocked。"
+            "不要为准备环境修改依赖清单、锁文件或验证策略，也不要擅自联网安装。\n"
+        )
         result = prepared.runner.run(
             prompt,
             prepared.repo,

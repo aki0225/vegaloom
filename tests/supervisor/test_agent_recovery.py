@@ -441,7 +441,7 @@ def test_recovery_checkpoint_failure_keeps_original_writer_binding(
         )
     assert first_observation.read_bytes() == first_payload
     monkeypatch.setattr(agent_recovery_module, "uuid4", original_uuid4)
-    with pytest.raises(ValueError, match="只有已暂停且没有 active Writer"):
+    with pytest.raises(ValueError, match="只有已暂停或停止且没有 active Writer"):
         SupervisorAgentRecovery(workspace).resume_local(run_id)
 
     recovered = SupervisorAgentRecovery(workspace).recover(
@@ -636,8 +636,11 @@ def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> No
     assert (stopped.run_dir / "agent-plan.json").read_bytes() == plan_before
     status = runtime.status(stopped.run_dir.name)
     assert "任务已停止" in status
-    assert "不能使用 resume-local" in status
-    assert "resume-local --run" not in status
+    assert "vega resume --run <run-id>" in status
+    restarted = recovery.resume_local(stopped.run_dir.name)
+    assert restarted.run_dir == stopped.run_dir
+    assert restarted.state.phase == "ready"
+    assert (restarted.run_dir / "agent-plan.json").read_bytes() == plan_before
 
 
 def test_status_explains_failed_attempts_after_current_evidence_is_cleared(
@@ -1438,15 +1441,79 @@ def test_recover_uses_bound_worker_when_child_has_newer_core_execution(
     assert summary["execution_artifact"].startswith("executions/worker/")
 
 
+def test_blocked_worker_workspace_reconciliation_resumes_same_run(
+    tmp_path: Path,
+) -> None:
+    repo, workspace, run_id = _approved_run(tmp_path)
+    recovery = SupervisorAgentRecovery(workspace)
+    paused = recovery.pause(run_id, reason="模拟 Worker 已结束并交还人工")
+    checkpoint = _latest_checkpoint(paused.run_dir)
+    checkpoint_path = paused.run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json"
+    payload = checkpoint.model_dump(mode="json")
+    payload.update(status="blocked", operation_started=True, external_side_effects="unknown")
+    save_agent_checkpoint(checkpoint_path, checkpoint.model_validate(payload))
+    original_checkpoint = checkpoint_path.read_bytes()
+    # 依赖准备改变现场只能重新对账，不能把旧指纹或未知副作用当作安全证据。
+    (repo / "README.md").write_text("fixture\n人工准备后的现场\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="不能证明现场可恢复"):
+        recovery.resume_local(run_id)
+    reconciled = recovery.stop(run_id, reason="Worker 已退出，人工准备环境后重新记录现场")
+    current = _latest_checkpoint(reconciled.run_dir)
+    assert current.status == "blocked"
+    assert current.external_side_effects == "unknown"
+    assert current.operation_started is False
+    assert current.workspace_fingerprint != checkpoint.workspace_fingerprint
+    with pytest.raises(ValueError, match="不能证明现场可恢复"):
+        recovery.resume_local(run_id)
+    evidence = reconciled.run_dir / "manual-evidence" / "workspace-reviewed.md"
+    evidence.parent.mkdir()
+    evidence.write_text("已核对执行记录与当前 WIP；仅有本地文件修改，无外部副作用。\n", encoding="utf-8")
+    adjudicated = SupervisorAgentSideEffectAdjudicator(workspace).adjudicate(
+        run_id,
+        AgentRecoveryRequest(
+            actor="operator", reason="核对执行终态与环境准备记录",
+            external_side_effects="none",
+            evidence_refs=["manual-evidence/workspace-reviewed.md"],
+        ),
+    )
+    assert adjudicated.state.phase == "stopped"
+    resumed = recovery.resume_local(run_id)
+    assert resumed.run_dir == paused.run_dir
+    assert resumed.state.phase == "ready"
+    assert resumed.state.active_child_run is None
+    assert resumed.state.active_operation_id is None
+    assert resumed.state.terminal_status is None
+    assert checkpoint_path.read_bytes() == original_checkpoint
+
+
+@pytest.mark.parametrize("handoff_status", ["handoff_ready", "handoff_blocked"])
+def test_stopped_run_with_published_handoff_cannot_resume_locally(
+    tmp_path: Path, handoff_status: str,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    recovery = SupervisorAgentRecovery(workspace)
+    stopped = recovery.stop(run_id, reason="准备交接任务")
+    save_agent_state(
+        stopped.run_dir / "agent-state.json",
+        stopped.state.model_copy(update={"handoff_status": handoff_status}),
+    )
+    state_before = (stopped.run_dir / "agent-state.json").read_bytes()
+    with pytest.raises(ValueError, match="已发布 Handoff"):
+        recovery.resume_local(run_id)
+    assert (stopped.run_dir / "agent-state.json").read_bytes() == state_before
+
+
+@pytest.mark.parametrize("side_effects", ["known", "unknown"])
 def test_resume_rejects_safe_checkpoint_with_known_side_effect(
     tmp_path: Path,
+    side_effects: str,
 ) -> None:
     _, workspace, run_id = _approved_run(tmp_path)
     recovery = SupervisorAgentRecovery(workspace)
     paused = recovery.pause(run_id, reason="准备人工核对外部副作用")
     checkpoint = _latest_checkpoint(paused.run_dir)
     payload = checkpoint.model_dump(mode="json")
-    payload["external_side_effects"] = "known"
+    payload["external_side_effects"] = side_effects
 
     save_agent_checkpoint(
         paused.run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json",

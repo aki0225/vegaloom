@@ -603,12 +603,72 @@ def test_failed_candidate_generates_fix_packet_for_next_attempt(
         load_current_fix_packet(workspace, result.run_dir, result.state)
 
 
+def test_pre_core_blocked_worker_resumes_same_run_without_new_diff(tmp_path: Path) -> None:
+    from vega.agent_recovery import SupervisorAgentRecovery
+    from vega.agent_recovery_request import AgentRecoveryRequest
+    from vega.agent_side_effect_adjudication import SupervisorAgentSideEffectAdjudicator
+
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    plan = _execution_plan()
+    plan.work_items = plan.work_items[:1]
+    started = runtime.start_change(repo, contract=_contract(), execution_plan=plan)
+    runtime.approve(started.run_dir.name, actor="user")
+    reviewer = _ReviewerRunner()
+    loop = _ChangeLoopRuntime(workspace, reviewer)
+    worker = _WorkerRunner(["src/one.py"])
+    worker.claimed_status = "blocked"
+    adapter = SupervisorAgentProviderAdapter(
+        workspace, worker_runner=worker, loop_runtime=loop,
+        finish_runtime=_ChangeFinishRuntime(loop),
+    )
+    failed = adapter.run(started.run_dir.name, timeout_seconds=60)
+    assert failed.state.phase == "needs_human"
+    assert reviewer.calls == 0
+    original = {p: p.read_bytes() for p in (failed.run_dir / "observations").glob("*.json")}
+    recovery = SupervisorAgentRecovery(workspace)
+    recovery.stop(failed.run_dir.name, reason="人工核对依赖准备与本地工具终态")
+    (failed.run_dir / "audit.md").write_text("受控替身仅写批准文件，无外部副作用", encoding="utf-8")
+    SupervisorAgentSideEffectAdjudicator(workspace).adjudicate(
+        failed.run_dir.name,
+        AgentRecoveryRequest(reason="已核对替身执行记录", actor="user",
+                             external_side_effects="none", evidence_refs=["audit.md"]),
+    )
+    resumed = recovery.resume_local(failed.run_dir.name)
+    assert resumed.state.run_id == failed.state.run_id
+    old_child = next((failed.run_dir / "children").glob("*.json"))
+    child_id = json.loads(old_child.read_text(encoding="utf-8"))["child_run"]
+    core_state = workspace / "runs" / child_id / "state.json"
+    core_state.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="已有 Core 结果"):
+        adapter._prepare_attempt(resumed.run_dir.name, 60)
+    core_state.unlink()
+    historical = json.loads(next(iter(original.values())))
+    historical["verification"] = "failed"
+    historical["operation_id"] = "older-operation"
+    older = failed.run_dir / "observations" / "older-core.json"
+    older.write_text(json.dumps(historical), encoding="utf-8")
+    with pytest.raises(ValueError, match="已有 Core 门禁结果"):
+        adapter._prepare_attempt(resumed.run_dir.name, 60)
+    older.unlink()
+    adapter.worker_runner = _WorkerRunner(["src/one.py"])
+    # 新 Worker 仅确认原 WIP，不制造无意义改动来满足 repair 的 Diff 要求。
+    completed = adapter.run(resumed.run_dir.name, timeout_seconds=60)
+    assert completed.state.phase == "completed"
+    assert reviewer.calls == 2  # 后续 attempt 保留原有累计审查规则，不重置预算。
+    assert "实现与验证交接" in adapter.worker_runner.prompts[0]
+    assert all(path.read_bytes() == content for path, content in original.items())
+
+
 class _WorkerRunner:
     def __init__(self, targets: list[str]) -> None:
         self.targets = targets
         self.calls = 0
         self.path_calls: dict[str, int] = {}
         self.prompts: list[str] = []
+        self.claimed_status = "completed"
 
     def run(
         self,
@@ -639,9 +699,9 @@ class _WorkerRunner:
             status="success",
             output=json.dumps(
                 {
-                    "claimed_status": "completed",
+                    "claimed_status": self.claimed_status,
                     "summary": "当前 Work Item 已修改",
-                    "tests_claimed": [],
+                    "tests_claimed": ["沙箱缺少测试依赖，交由控制器运行已批准验证"],
                     "remaining_questions": [],
                 },
                 ensure_ascii=False,

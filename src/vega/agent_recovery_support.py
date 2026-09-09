@@ -255,3 +255,17 @@ def validate_resume_checkpoint(
         or not plan.approval_is_current()
     ):
         raise ValueError("最近 Checkpoint 不能证明现场可恢复；请先重新对账或修订 Plan")
+
+
+def resume_work_item_progress(plan: AgentPlan, state: AgentState) -> AgentPlan:
+    """人工恢复只重开未完成的进度，不伪造 Observation 或改变已批准任务内容。"""
+    updated = plan.model_copy(deep=True)
+    current = next(
+        (item for item in updated.work_items if item.work_item_id == state.current_work_item),
+        None,
+    )
+    if current is None or current.status not in {"pending", "active", "blocked"}:
+        raise ValueError("当前 Work Item 不是可恢复的未完成任务")
+    if current.status == "blocked":
+        current.status = "active"
+    return AgentPlan.model_validate(updated.model_dump(mode="json"))

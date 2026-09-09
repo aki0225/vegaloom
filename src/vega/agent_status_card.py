@@ -318,7 +318,8 @@ def default_next_step(phase: str, current_index: int) -> str:
         return "读取 Core Finish 结论并完成人工提交前检查；Vega 不自动执行 Git 操作"
     if phase == "stopped":
         return (
-            "任务已停止；代码、Goal、Plan 和现场均保留。当前 run 不能使用 "
-            "resume-local；如需继续，请人工创建 Handoff 或新的 Agent run"
+            "任务已停止；代码、Goal、Plan 和现场均保留。人工可使用 "
+            "vega resume --run <run-id> 重新检查 safe Checkpoint 后恢复调度，"
+            "或创建 Handoff"
         )
     return "查看结构化状态与允许动作"

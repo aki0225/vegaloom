@@ -387,6 +387,24 @@ vega stop --run <run_id> --reason "任务取消"
 
 `pause` 只在没有活动 Writer 时生效。`stop` 不回滚代码或删除 Artifact。
 
+Worker 沙箱与宿主可能使用不同的依赖缓存。实现完成后，Worker 可以如实说明测试未运行，
+把代码交给控制器执行已批准的验证命令；无需为了缺少测试工具反复安装或重新调查。
+未完成的实现和未知副作用仍会停止。
+
+若旧 Worker 已结束、Core 尚未启动，且 Run 因环境问题停在 `needs_human`：
+
+1. 在状态卡指出的受管 Worktree 准备原有依赖。不要修改锁文件、合同或验证配置。
+2. 执行 `vega stop --run <run_id> --reason "核对环境准备后的现场"`，记录当前现场；
+   若有漂移，仍保持阻断，不会自动认定安全。
+3. 核对旧进程与实际操作，在 Run 内保存核对依据，通过 `vega adjudicate` 提交人工副作用
+   裁决。`external_side_effects=none` 必须有依据，不能照抄示例当确认。
+4. 执行 `vega resume --run <run_id>`，再执行 `vega change --run <run_id>`。
+
+这条路径保留原 Run、WIP 和失败尝试，不重置 attempt 预算。恢复只重启调度，随后仍需冻结
+Candidate 并通过所有门禁；已产生 Core 结果的任务继续使用原来的修复或 `retry` 路径。
+`resume` 仅接受当前批准、现场未再漂移、无活动 Writer、无外部副作用的 safe Checkpoint。
+已发布 Handoff 的旧 Run 不能本机恢复，必须从 Task Card 接手。
+
 ## 13. 换机器
 
 在现场可解释、没有活动 Writer 时：
