@@ -26,12 +26,18 @@ from vega.provider_session import (
 )
 
 
+@pytest.mark.parametrize("evidence_issue", ["workspace", "decision"])
 def test_evidence_override_precedes_provider_and_recorded_phase(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    evidence_issue: str,
 ) -> None:
     run_dir = _run_dir(tmp_path)
     state = _state(phase="acting", active=True)
+    if evidence_issue == "decision":
+        state = state.model_copy(update={"latest_checkpoint_id": "checkpoint-001"})
+        _write_checkpoint_decision(run_dir, state, reason_code="side_effects.unknown")
+        (run_dir / "decisions/decision-001.json").write_text("{", encoding="utf-8")
     save_provider_sessions(
         run_dir,
         ProviderSessionState(
@@ -43,15 +49,18 @@ def test_evidence_override_precedes_provider_and_recorded_phase(
     _stub_status(
         monkeypatch,
         state,
-        effective_phase="needs_human",
-        integrity_warning="当前 Workspace 与最近证据不一致。",
+        effective_phase="needs_human" if evidence_issue == "workspace" else "acting",
+        integrity_warning="当前 Workspace 与最近证据不一致。" if evidence_issue == "workspace" else None,
         workspace_current=False,
         evidence_health="stale",
     )
 
     result = build_agent_explanation(run_dir, state, _plan())
 
-    assert result.reason_code == "workspace.snapshot_stale"
+    assert result.reason_code == (
+        "workspace.snapshot_stale" if evidence_issue == "workspace" else "evidence.decision_unverified"
+    )
+    assert result.phase == "needs_human"
     assert result.block_category == "evidence"
     assert result.source == "evidence"
 

@@ -95,6 +95,21 @@ def build_agent_explanation(
             evidence_refs=_base_refs(state),
         )
 
+    if decision_issue is not None:
+        return with_provider_warnings(_explanation(
+            state,
+            phase="needs_human",
+            outcome="attention_required",
+            reason_code="evidence.decision_unverified",
+            source="evidence",
+            actor="当前证据投影",
+            reason=decision_issue,
+            facts=[f"持久化阶段为 {state.phase}"],
+            unknowns=["最近 Checkpoint 的路由依据是否完整且绑定正确"],
+            safe_actions=["status_full", "inspect_artifacts", "human"],
+            evidence_refs=_base_refs(state),
+        ), provider_warnings)
+
     if sessions:
         first = sessions[0]
         return with_provider_warnings(_explanation(
@@ -124,21 +139,6 @@ def build_agent_explanation(
     active = _active_execution_explanation(state, status)
     if active is not None:
         return with_provider_warnings(active, provider_warnings)
-
-    if decision_issue is not None:
-        return with_provider_warnings(_explanation(
-            state,
-            phase="needs_human",
-            outcome="attention_required",
-            reason_code="evidence.decision_unverified",
-            source="evidence",
-            actor="当前证据投影",
-            reason=decision_issue,
-            facts=[f"持久化阶段为 {state.phase}"],
-            unknowns=["最近 Checkpoint 的路由依据是否完整且绑定正确"],
-            safe_actions=["status_full", "inspect_artifacts", "human"],
-            evidence_refs=_base_refs(state),
-        ), provider_warnings)
 
     phase = _phase_explanation(run_dir, state, plan, status, checkpoint, decision)
     if phase is not None:

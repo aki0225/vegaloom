@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .agent_contract import (
@@ -13,6 +14,7 @@ from .agent_contract import (
 from .agent_child_status import read_live_child_stage
 from .agent_operation import bound_operation_kind
 from .agent_run_status import (
+    latest_worker_dispatch_binding,
     trusted_worker_label as build_trusted_worker_label,
 )
 from .agent_status_evidence import build_supervisor_evidence
@@ -23,6 +25,8 @@ from .provider_session_projection import (
     session_status_projection,
 )
 from .redaction import redact_text, write_redacted_text
+from .execution_control import inspect_execution_for_recovery
+from .run_utils import resolve_run_dir
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
@@ -182,6 +186,14 @@ def _build_status_card(
         workspace_current=workspace_current,
         workspace_issue=workspace_issue,
         evidence_issue=evidence_issue,
+        workspace_change_in_flight=(
+            workspace_current is False
+            and live_workspace is not None
+            and expected_workspace_fingerprint is not None
+            and workspace_issue is None
+            and evidence_issue is None
+            and _worker_change_in_flight(run_dir, state)
+        ),
     )
     if provider_rows is None:
         provider_rows, provider_session_warning = session_status_projection(run_dir)
@@ -288,18 +300,66 @@ def _terminal_integrity_next_step(
     return "持久化终态的当前证据无法重新验证；不要提交，先检查损坏或过期的 Artifact"
 
 
+def _worker_change_in_flight(run_dir: Path, state: AgentState) -> bool:
+    if not (
+        state.phase == "acting" and state.operation_started
+        and state.active_operation_id and state.active_child_run
+        and state.handoff_status == "none"
+    ):
+        return False
+    if bound_operation_kind(run_dir, state) != "worker":
+        return False
+    if latest_worker_dispatch_binding(run_dir, state) != (
+        state.active_child_run, state.active_operation_id
+    ):
+        return False
+    # 旧 Checkpoint 不是活动 Writer 的冻结结果；只检查当前 child，不能借用父级准备 lease。
+    try:
+        child_dir = resolve_run_dir(run_dir.parent.parent, state.active_child_run)
+    except FileNotFoundError:
+        return False
+    try:
+        inspection = inspect_execution_for_recovery(child_dir)
+    except (OSError, ValueError):
+        # 这里只判断能否免除旧快照告警；无法核验时保留告警，不改变 stop/recover 的拒绝合同。
+        return False
+    record = inspection.record
+    if record is None:
+        return False
+    lease = record.lease
+    try:
+        heartbeat, expires, deadline = (
+            datetime.fromisoformat(value)
+            for value in (lease.last_heartbeat, lease.lease_expires_at, lease.deadline)
+        )
+    except ValueError:
+        return False
+    if any(value.tzinfo is None for value in (heartbeat, expires, deadline)):
+        return False
+    # recovery 的保守阻断也包含进程身份不明；陈旧 lease 不能因此获得正常写入的展示豁免。
+    return bool(
+        not inspection.can_recover
+        and lease.execution_id == state.active_operation_id
+        and lease.step == "worker"
+        and lease.status in {"starting", "running"}
+        and not lease.termination_unconfirmed
+        and heartbeat <= datetime.now(UTC) < min(expires, deadline)
+    )
+
+
 def _integrity_warning(
     *,
     terminal_evidence_invalid: bool,
     workspace_current: bool | None,
     workspace_issue: str | None,
     evidence_issue: str | None = None,
+    workspace_change_in_flight: bool = False,
 ) -> str | None:
     if evidence_issue is not None:
         return evidence_issue
     if workspace_issue is not None:
         return workspace_issue
-    if workspace_current is False:
+    if workspace_current is False and not workspace_change_in_flight:
         return "当前 Workspace 与最近 Observation 或 Checkpoint 不一致。"
     if terminal_evidence_invalid:
         return "持久化 State 记录过 ready_to_commit，但当前证据已失败、过期或无法验证。"

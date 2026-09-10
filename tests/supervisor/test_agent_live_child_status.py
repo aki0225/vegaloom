@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,8 @@ from vega.agent_persistence import save_agent_state
 from vega.cli_entrypoint import app
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_worker import SupervisorAgentWorker
+from vega.execution_control import ExecutionLease
+from vega.execution_process import ProcessProbe
 from vega.models import LoopAutomationState, LoopIterationState
 from vega.review_queue_contract import ReviewQueue, ReviewQueueItem
 from vega.run_status import render_run_status, run_status_payload
@@ -55,17 +59,45 @@ def test_agent_status_projects_live_child_stage_without_changing_parent(
     assert "\n- " in text.partition("## 下一步\n")[2].partition("## 关键产物")[0]
 
 
+@pytest.mark.parametrize(
+    "case", ["absent", "running", "stop_requested", "unconfirmed", "corrupt", "workspace_failed", "foreign_execution", "expired_unknown", "malformed_time"],
+)
 def test_agent_status_waits_when_child_state_has_not_been_persisted(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
 ) -> None:
-    workspace, _, parent, child_dir = _acting_parent(tmp_path)
-    child_dir.rmdir()
-
+    workspace, repo, parent, child_dir = _acting_parent(tmp_path)
+    (repo / "README.md").write_text("受控 Worker 正在修改\n", encoding="utf-8")
+    if case == "absent":
+        child_dir.rmdir()
+    else:
+        _write_worker_execution(child_dir, case)
+    if case == "expired_unknown":
+        monkeypatch.setattr(
+            "vega.execution_control._probe_process", lambda *_: ProcessProbe("unknown"),
+        )
+    if case == "workspace_failed":
+        monkeypatch.setattr(
+            "vega.agent_status_projection.capture_live_workspace",
+            lambda _: (None, "当前 Workspace 无法重新采集或绑定无法验证"),
+        )
     payload = run_status_payload(workspace, parent.run_dir.name)
 
     assert payload["agent_phase"] == "acting"
     assert payload["current_step"] == "acting"
     assert payload["live_child_stage"] == "等待子流程状态"
+    assert payload["workspace_current"] is False
+    assert payload["commit_recommended"] is False
+    explanation = payload["explanation"]
+    assert "run.continue" not in explanation["safe_actions"]
+    if case == "running":
+        assert payload["integrity_warning"] is None
+        assert explanation["phase"] == "acting"
+        assert explanation["reason_code"] == "execution.worker_active"
+    else:
+        assert payload["integrity_warning"]
+        assert explanation["phase"] == "needs_human"
 
 
 def test_agent_status_projects_child_while_worker_alive_requires_human(
@@ -252,6 +284,28 @@ def test_agent_status_rejects_tampered_child_repo_binding(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match="仓库身份不一致"):
         run_status_payload(workspace, parent.run_dir.name)
+
+
+def _write_worker_execution(child_dir: Path, case: str) -> None:
+    now = datetime.now(UTC)
+    expiry = now + timedelta(minutes=-1 if case == "expired_unknown" else 5)
+    path = child_dir / "executions" / "worker" / "execution.json"
+    path.parent.mkdir(parents=True)
+    lease = ExecutionLease(
+        run_id=child_dir.name,
+        execution_id="other-operation" if case == "foreign_execution" else "operation-live-child",
+        step="worker",
+        owner_pid=os.getpid(),
+        started_at=now.isoformat(),
+        last_heartbeat=now.isoformat(),
+        lease_expires_at=expiry.isoformat(),
+        deadline="not-a-time" if case == "malformed_time" else expiry.isoformat(),
+        status="stop_requested" if case == "stop_requested" else "running",
+        termination_unconfirmed=case == "unconfirmed",
+    )
+    path.write_text(
+        "{" if case == "corrupt" else lease.model_dump_json(indent=2), encoding="utf-8",
+    )
 
 
 def _acting_parent(

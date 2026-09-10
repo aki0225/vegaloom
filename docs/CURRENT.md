@@ -5,32 +5,12 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：32 / 33
-- 最近事件：`20260910T023423Z-DAILY-01-started`
+- 已完成：33 / 33
+- 最近事件：`20260910T040317Z-DAILY-01-completed`
 
 ## 当前事项
 
-### 进行中：`DAILY-01` 精简日常变更主路径
-
-控制器准备环境，区分实现、运行与授权问题，统一继续动作和报告；删除重复入口并限制旧任务执行。
-
-验收条件：
-
-- 准备命令来自固定项目策略并进入人工批准合同；同一批准版本最多执行一次，失败和未知副作用不自动重放
-- Reviewer timeout 和可信 Core 证据重算复用原门禁与路由，保留历史失败，不修改业务合同来绕过运行问题
-- change、status、explain 使用同源安全动作，删除公开 run/retry 和 Agent next_steps，不新增成功语义
-- 同次 Reviewer 的可选功能影响只提供导航；代码位置按 Candidate 核验，缺失摘要不影响原门禁
-- 旧执行协议只能查看、停止和可信交接；新任务与 Task Card 恢复显式采用新协议
-- Codex 与 Claude 有受控真实任务记录，并完成一个中等真实任务的日用验收；真实运行与确定性打回恢复测试分别记录，不要求模型必须随机打回；必要回归和 PR CI 通过
-
-要求检查：
-
-- `affected-tests`
-- `architecture-growth`
-- `repository-hygiene`
-- `plan-state`
-- `real-provider-smoke`
-- `pr-ci`
+当前没有可执行事项；计划已经完成，或剩余事项处于阻塞/已替代状态。
 
 ## 全部事项
 
@@ -68,7 +48,7 @@
 | 已完成 | `UX-02` | 增加日常变更入口 | `UX-01` |
 | 已完成 | `UX-03` | 自动恢复一次 Reviewer 超时 | `UX-02` |
 | 已完成 | `RELEASE-05` | 发布 Vega v0.5.0 | `UX-03` |
-| 进行中 | `DAILY-01` | 精简日常变更主路径 | `RELEASE-05` |
+| 已完成 | `DAILY-01` | 精简日常变更主路径 | `RELEASE-05` |
 
 ## 状态规则
 
