@@ -29,6 +29,7 @@ from vega.agent_persistence import (
     save_agent_state,
 )
 from vega.agent_run_status import load_agent_status_state
+from vega.agent_operation import reserve_operation_identity
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_handoff_digest import compute_handoff_workspace_digest
 from vega.agent_worker import SupervisorAgentWorker
@@ -578,9 +579,15 @@ def test_latest_keeps_agent_parent_when_trace_is_corrupt(
         run_status_payload(workspace, bound.run_dir.name)
 
 
+@pytest.mark.parametrize(("operation_registered", "error"), [
+    (True, "active operation 与最近可信 dispatch Trace 不一致"),
+    (False, "active operation Artifact 缺失或无法解析"),
+])
 def test_agent_status_rejects_active_operation_trace_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    operation_registered: bool,
+    error: str,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     workspace = tmp_path / "workspace"
@@ -598,6 +605,12 @@ def test_agent_status_rejects_active_operation_trace_mismatch(
     mismatched_state = bound.state.model_copy(
         update={"active_operation_id": "operation-state"}
     )
+    if operation_registered:
+        # 保持 operation 本身可验证，单独证明 Trace 绑定冲突仍会被拒绝。
+        reserve_operation_identity(
+            bound.run_dir, mismatched_state,
+            child_run="attempt-current", operation_id="operation-state",
+        )
     save_agent_state(
         bound.run_dir / "agent-state.json",
         mismatched_state,
@@ -605,7 +618,7 @@ def test_agent_status_rejects_active_operation_trace_mismatch(
 
     with pytest.raises(
         ValueError,
-        match="active operation 与最近可信 dispatch Trace 不一致",
+        match=error,
     ):
         load_agent_status_state(
             bound.run_dir,

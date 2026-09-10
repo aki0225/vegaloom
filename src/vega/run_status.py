@@ -48,30 +48,18 @@ def render_run_status(workspace: Path, run: str) -> str:
 
 def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     run_dir = resolve_run_dir(workspace, run)
-    state = _read_state(run_dir, include_agent_child_projection=False)
+    state = _read_state(run_dir)
     kind = _infer_kind(run_dir, state)
-    agent_projection = None
-    if kind != "agent":
-        state = _classify_init(workspace, run_dir, state)
-    else:
-        agent_projection = asp.apply_agent_projection(
-            workspace, run, run_dir, state
-        )
-    decisions = (
-        list(agent_projection.decision_history)
-        if agent_projection is not None
-        else asp.combined_decisions(run_dir, include_agent=False)
-    )
-    review_queue = (
-        agent_projection.review_queue
-        if agent_projection is not None
-        else projected_review_queue_status_payload(
-            workspace,
-            run_dir,
-            state,
-            kind,
-        )
-    )
+    if kind == "agent":
+        # Agent 与主 CLI 共用一次证据快照；仅 Core 保留原 next_steps 合同。
+        from .agent_cli_snapshot import AgentCliRun, build_agent_cli_snapshot
+
+        return build_agent_cli_snapshot(AgentCliRun(
+            workspace=run_dir.parent.parent, run_dir=run_dir, selection_source="explicit",
+        )).status
+    state = _classify_init(workspace, run_dir, state)
+    decisions = asp.combined_decisions(run_dir, include_agent=False)
+    review_queue = projected_review_queue_status_payload(workspace, run_dir, state, kind)
     return {
         "run_id": run_dir.name,
         "run_dir": str(run_dir.resolve()),
@@ -82,19 +70,11 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         "risk": state.get("risk"),
         "recommendation": state.get("recommendation"),
         "active_child_run": state.get("active_child_run"),
-        "last_child_run": (
-            agent_projection.last_child_run
-            if agent_projection is not None
-            else state.get("last_child_run")
-        ),
+        "last_child_run": state.get("last_child_run"),
         "last_child_status": state.get("last_child_status"),
         "decision_count": len(decisions),
         "latest_decisions": decisions[-3:],
-        "execution": (
-            agent_projection.execution
-            if agent_projection is not None
-            else latest_execution_payload(run_dir, state.get("status"))
-        ),
+        "execution": latest_execution_payload(run_dir, state.get("status")),
         "agent_phase": state.get("agent_phase"),
         "current_work_item": state.get("current_work_item"),
         "latest_checkpoint_id": state.get("latest_checkpoint_id"),
@@ -103,16 +83,8 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         **review_queue,
         **asp.payload_fields(state),
         **agent_live_stage_payload(state),
-        **(
-            {"next_steps": next_steps_for_run(workspace, run_dir, state, kind)}
-            if agent_projection is None
-            else {}
-        ),
-        "key_artifacts": (
-            list(agent_projection.key_artifacts)
-            if agent_projection is not None
-            else key_artifacts_for_run(run_dir, state, kind)
-        ),
+        "next_steps": next_steps_for_run(workspace, run_dir, state, kind),
+        "key_artifacts": key_artifacts_for_run(run_dir, state, kind),
     }
 
 

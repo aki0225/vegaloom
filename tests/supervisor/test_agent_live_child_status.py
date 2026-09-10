@@ -50,6 +50,9 @@ def test_agent_status_projects_live_child_stage_without_changing_parent(
     assert payload["current_step"] == phase
     assert payload["live_child_stage"] == current_step
     assert f"- Core 子流程：`{current_step}`" in text
+    assert "next_steps" not in payload
+    assert payload["explanation"]["safe_actions"]
+    assert "\n- " in text.partition("## 下一步\n")[2].partition("## 关键产物")[0]
 
 
 def test_agent_status_waits_when_child_state_has_not_been_persisted(

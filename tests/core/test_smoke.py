@@ -1778,7 +1778,9 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert "--contract <change-contract.json>" in agent_skill_text
     assert "--execution-plan <execution-plan.json>" in agent_skill_text
     assert "vega approve --run <run_id> --actor human" in agent_skill_text
-    assert "vega run --run <run_id> --timeout 900" in agent_skill_text
+    assert "vega change --run <run_id> --timeout 900 --json" in agent_skill_text
+    assert "vega run " not in agent_skill_text
+    assert "vega retry " not in agent_skill_text
     assert "vega watch --run <run_id> --follow" in agent_skill_text
     assert "vega steer --run <run_id>" in agent_skill_text
     assert "vega handoff --run <run_id>" in agent_skill_text

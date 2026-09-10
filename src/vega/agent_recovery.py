@@ -70,6 +70,8 @@ class SupervisorAgentRecovery:
         except ValueError as exc:
             write_load_failure_report(run_dir, request.reason, exc)
             raise
+        # 先保留损坏状态的诊断，再检查协议；任何 Writer 操作仍必须经过协议门禁。
+        state.require_current_execution()
         operation_kind = require_recovery_request(run_dir, state, request)
         assert state.active_child_run is not None
         assert state.active_operation_id is not None

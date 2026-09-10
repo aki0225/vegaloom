@@ -15,6 +15,7 @@ from vega import agent_repository_guard as agent_repository_guard_module
 from vega import agent_side_effect_adjudication as agent_adjudication_module
 from vega import agent_worker as agent_worker_module
 from vega.agent_contract import AgentObservation, AgentPlan, AgentWorkItem
+from vega.agent_contract_support import canonical_digest
 from vega.agent_operation import operation_ref
 from vega.agent_persistence import (
     load_agent_checkpoint,
@@ -593,6 +594,7 @@ def test_corrupt_state_and_unknown_schema_write_diagnostic_without_overwrite(
             original["data"]["phase"] = "ready"
         else:
             original["data"]["schema_version"] = 99
+            original["digest"] = canonical_digest(original["data"])
         state_path.write_text(
             json.dumps(original, ensure_ascii=False),
             encoding="utf-8",
@@ -617,6 +619,28 @@ def test_corrupt_state_and_unknown_schema_write_diagnostic_without_overwrite(
         assert report["state_preserved"] is True
         assert report["workspace"]["captured"] is False
         assert "无法共同验证" in report["workspace"]["issue"]
+
+
+def test_old_protocol_recovery_rejects_before_writer_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, workspace, run_id = _approved_run(tmp_path)
+    bound = SupervisorAgentWorker(workspace).bind(
+        run_id, child_run="attempt-old", operation_id="operation-old",
+    )
+    state_path = bound.run_dir / "agent-state.json"
+    save_agent_state(state_path, bound.state.model_copy(update={"execution_protocol": 1}))
+    before = state_path.read_bytes()
+    monkeypatch.setattr(
+        agent_recovery_module, "acquire_writer_claim",
+        lambda *args, **kwargs: pytest.fail("旧协议不得操作 Writer claim"),
+    )
+
+    with pytest.raises(ValueError, match="执行协议"):
+        SupervisorAgentRecovery(workspace).recover(run_id, AgentRecoveryRequest(reason="旧任务恢复"))
+
+    assert state_path.read_bytes() == before
+    assert not (bound.run_dir / "agent-recovery-report.json").exists()
 
 
 def test_pause_resume_and_stop_preserve_goal_and_workspace(tmp_path: Path) -> None:

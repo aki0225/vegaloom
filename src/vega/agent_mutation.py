@@ -32,7 +32,7 @@ def agent_mutation(
         ) -> ResultT:
             run_dir = resolve_run_dir(self.workspace, run)
             with RunMutationLock.acquire(run_dir, operation):
-                if operation not in {"agent.stop", "agent.pause", "agent.handoff"}:
+                if operation not in {"agent.stop", "agent.pause", "agent.handoff", "agent.recover"}:
                     load_agent_state(
                         run_dir / "agent-state.json"
                     ).require_current_execution()
