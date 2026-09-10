@@ -39,7 +39,6 @@ def test_compact_status_requires_authorization_review_and_locates_delivery(
         target=AgentCliRun(tmp_path, tmp_path / "runs" / run_id, "explicit"),
         status={
             "run_id": run_id, "agent_phase": phase,
-            "next_steps": ["旧建议：继续运行"],
             "accepted_checkpoint_sha": "b" * 40,
             "key_artifacts": [f"runs/{run_id}/agent-final-report.md"],
             "delivery": {"worktree_path": "worktree", "branch": "vega/task", "base_revision": "a" * 40},
@@ -55,7 +54,6 @@ def test_compact_status_requires_authorization_review_and_locates_delivery(
     status = render_compact_agent_status(snapshot)
     explanation = render_agent_explanation(snapshot, full=False)
 
-    assert "旧建议" not in status
     if phase == "awaiting_approval":
         for text in ("先核对", "change-contract.json", "execution-plan.json", "没有二次询问"):
             assert text in status and text in explanation
@@ -92,7 +90,7 @@ def test_status_selects_unique_change_run_from_repository_subdirectory(
     }
     assert payload["explanation"]["reason_code"] == "planning.required"
     assert payload["persisted_agent_state"]["run_id"] == run.run_dir.name
-    assert len(payload["next_steps"]) == 3
+    assert "next_steps" not in payload
     assert {
         Path(item).name for item in payload["key_artifacts"]
     } >= {
@@ -196,7 +194,7 @@ def test_status_default_full_and_explain_share_read_only_snapshot(
     assert _artifact_snapshot(run.run_dir) == before
 
 
-def test_explain_uses_run_command_for_separate_workspace(
+def test_explain_uses_change_command_for_separate_workspace(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -216,8 +214,8 @@ def test_explain_uses_run_command_for_separate_workspace(
 
     assert result.exit_code == 0, result.output
     assert f"Run Workspace `{workspace}`" in result.output
-    assert f"vega run --run {run.run_dir.name}" in result.output
-    assert f"vega change --run {run.run_dir.name}" not in result.output
+    assert f"vega run --run {run.run_dir.name}" not in result.output
+    assert f"vega change --run {run.run_dir.name}" in result.output
 
 
 @pytest.mark.parametrize(

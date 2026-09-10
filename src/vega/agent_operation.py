@@ -9,7 +9,7 @@ from .agent_contract import AgentState, canonical_digest
 from .redaction import write_redacted_json_once
 
 
-AgentOperationKind = Literal["worker", "verification_retry"]
+AgentOperationKind = Literal["worker", "verification_retry", "environment_prepare"]
 
 _IDENTITY_FIELDS = frozenset(
     {
@@ -54,7 +54,7 @@ def reserve_operation_identity(
 ) -> str:
     """一次性写入 operation 身份，附加字段不得覆盖绑定事实。"""
 
-    if operation_kind not in {"worker", "verification_retry"}:
+    if operation_kind not in {"worker", "verification_retry", "environment_prepare"}:
         raise ValueError("operation_kind 不受支持")
     extra = dict(details or {})
     conflicts = sorted(_IDENTITY_FIELDS.intersection(extra))
@@ -105,7 +105,7 @@ def bound_operation_kind(
         or payload.get("work_item_id") != state.current_work_item
         or payload.get("child_run") != state.active_child_run
         or payload.get("operation_id") != state.active_operation_id
-        or operation_kind not in {"worker", "verification_retry"}
+        or operation_kind not in {"worker", "verification_retry", "environment_prepare"}
     ):
         raise ValueError("active operation Artifact 身份或类型不一致")
     return operation_kind

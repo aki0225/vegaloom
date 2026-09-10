@@ -32,6 +32,10 @@ def resolve_bound_execution_run_dir(
 
     if not state.active_child_run:
         return agent_run_dir
+    if bound_operation_kind(agent_run_dir, state) == "environment_prepare":
+        if state.active_child_run != agent_run_dir.name:
+            raise ValueError("环境准备 execution 必须绑定当前 Agent run")
+        return agent_run_dir
     try:
         child_dir = resolve_run_dir(workspace, state.active_child_run)
     except FileNotFoundError:
@@ -140,18 +144,28 @@ def stop_active_child(
         state,
         metadata,
     )
-    if child_dir == run_dir:
+    operation_kind = bound_operation_kind(run_dir, state)
+    if child_dir == run_dir and operation_kind != "environment_prepare":
         raise ValueError(
             "Writer 仍绑定，但当前 child 不是可验证的 assist run；"
             "必须先确认停止并运行 recover 完成现场对账"
         )
     assert state.active_operation_id is not None
-    operation_kind = bound_operation_kind(run_dir, state)
+    if operation_kind == "environment_prepare":
+        records = [record for record in find_execution_records(run_dir)
+                   if record.lease.status in {"starting", "running", "stop_requested"}]
+        expected_root = run_dir / "executions" / "environment-prepare" / state.active_operation_id
+        if len(records) != 1 or (
+            records[0].lease.step != "environment_prepare"
+            or records[0].lease.execution_id != state.active_operation_id
+            or not records[0].path.is_relative_to(expected_root)
+        ):
+            raise ValueError("环境准备 active execution 身份缺失或不唯一；禁止误停其他操作")
     record = request_stop_for_run(
         child_dir,
         reason,
         expected_execution_id=(
-            state.active_operation_id if operation_kind == "worker" else None
+            state.active_operation_id if operation_kind in {"worker", "environment_prepare"} else None
         ),
     )
     append_agent_trace(
@@ -170,8 +184,9 @@ def stop_active_child(
         state,
         plan,
         next_step=(
-            "等待当前 child execution 返回 stopped 并完成机器对账；"
-            "若原 agent run 命令已中断，请执行 recover"
+            "等待环境准备执行停止；准备失败或终态未知时不会重试，须人工核对"
+            if operation_kind == "environment_prepare" else
+            "等待当前 child execution 返回 stopped 并完成机器对账；若原 agent run 命令已中断，请执行 recover"
         ),
     )
     return AgentRun(run_dir=run_dir, state=state, plan=plan)

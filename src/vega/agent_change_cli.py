@@ -11,16 +11,16 @@ from .agent_change_driver import AgentChangeDriver, ChangeDriverResult
 from .agent_change_presentation import redact_change_message
 from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_cli_interaction import InteractionPumpUpdate
+from .agent_cli_snapshot import AgentCliRun, build_agent_cli_snapshot, resolve_agent_cli_run
+from .agent_cli_status import render_compact_agent_status
+from .agent_runtime_support import load_agent_bundle
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_recovery_request import AgentRecoveryRequest
-from .agent_provider import resolve_run_provider
 from .agent_run_selection import resolve_repository_root
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_side_effect_adjudication import SupervisorAgentSideEffectAdjudicator
-from .agent_verification_retry import SupervisorAgentVerificationRetry
 from .cli_support import report_execution_progress
 from .redaction import redact_text
-from .run_utils import resolve_run_dir
 
 
 def agent_change(
@@ -55,6 +55,9 @@ def agent_change(
         max=3600,
         help="单次 Planning、Worker 或 Reviewer 外部进程超时秒数。",
     ),
+    fresh_session: bool = typer.Option(
+        False, "--fresh-session", help="显式使用短生命周期 Provider 会话。",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -64,16 +67,34 @@ def agent_change(
     """创建或继续一个日常代码变更，直到完成或遇到授权边界。"""
 
     try:
-        repo = resolve_repository_root(Path.cwd())
+        workspace = Path.cwd()
+        if run is not None:
+            target = resolve_agent_cli_run(workspace, run)
+            _, state, _, metadata = load_agent_bundle(target.workspace, target.run_dir.name)
+            if state.run_kind != "change":
+                raise ValueError("change 只接受 ChangeRun")
+            change_metadata = metadata.get("change_run")
+            if not isinstance(change_metadata, dict):
+                raise ValueError("ChangeRun 缺少源仓库绑定")
+            source = change_metadata.get("source_repo_path")
+            if not isinstance(source, str) or not source:
+                raise ValueError("ChangeRun 缺少源仓库路径")
+            repo = resolve_repository_root(Path(source))
+            workspace = target.workspace
+            run = target.run_dir.name
+        else:
+            repo = resolve_repository_root(workspace)
+            workspace = repo
         interactive = not json_output and _stream_is_tty(sys.stdin)
         driver = AgentChangeDriver(
-            repo,
+            workspace,
             repo,
             provider=provider,
             approval=approval,
             timeout_seconds=timeout_seconds,
             interactive=interactive,
             json_output=json_output,
+            fresh_session=fresh_session,
             confirm=_confirm if interactive else None,
             event_reporter=(
                 None
@@ -111,7 +132,7 @@ def agent_change(
             typer.echo(f"错误：{redact_change_message(str(exc))}", err=True)
         raise typer.Exit(code=1) from exc
 
-    _render_change_result(repo, result, json_output=json_output)
+    _render_change_result(workspace, result, json_output=json_output)
     if result.exit_code:
         raise typer.Exit(code=result.exit_code)
 
@@ -146,36 +167,6 @@ def agent_replan(
     else:
         typer.echo("Execution Plan revision 已在原合同内采用。")
     typer.echo("")
-    typer.echo(SupervisorAgentRuntime(Path.cwd()).status(result.run_dir.name))
-
-
-def agent_retry(
-    run: str = typer.Option(..., "--run", help="ChangeRun ID 或 runs/<run-id>。"),
-    provider: str | None = typer.Option(
-        None,
-        "--provider",
-        help="默认沿用当前 ChangeRun 的 Coding Agent Provider。",
-    ),
-) -> None:
-    """保留当前 Diff，只重跑验证、风险门禁和独立 Reviewer。"""
-
-    try:
-        workspace = Path.cwd()
-        selected_provider = resolve_run_provider(
-            resolve_run_dir(workspace, run),
-            provider,
-        )
-        result = SupervisorAgentVerificationRetry(
-            workspace,
-            progress_reporter=report_execution_progress,
-            event_reporter=lambda message: typer.echo(
-                f"[vega] {message}",
-                err=True,
-            ),
-            provider=selected_provider,
-        ).run(run)
-    except (FileNotFoundError, OSError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
     typer.echo(SupervisorAgentRuntime(Path.cwd()).status(result.run_dir.name))
 
 
@@ -263,7 +254,10 @@ def _render_change_result(
     if result.run is None:
         return
     typer.echo("")
-    typer.echo(SupervisorAgentRuntime(workspace).status(result.run.run_dir.name))
+    snapshot = build_agent_cli_snapshot(AgentCliRun(
+        workspace=workspace, run_dir=result.run.run_dir, selection_source="explicit",
+    ))
+    typer.echo(render_compact_agent_status(snapshot))
 
 
 def _confirm(prompt: str) -> bool:

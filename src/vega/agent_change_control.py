@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from .agent_contract import (
     StrictAgentModel,
 )
 from .agent_persistence import read_agent_trace
+from .agent_operation import operation_ref
 from .redaction import write_redacted_json_once
 from .review_contract import ReviewVerdict
 
@@ -315,6 +318,35 @@ def _review_rounds_for_work_item(
         if (
             observation.work_item_id == work_item_id
             and observation.review != "not_run"
+            and not _is_bound_core_recheck(run_dir, observation)
         ):
             total += 1
     return total
+
+
+def _is_bound_core_recheck(run_dir: Path, observation: AgentObservation) -> bool:
+    """只有不可变 operation 身份与哈希一致，才不计为新的模型审查轮次。"""
+
+    if observation.operation_id is None:
+        return False
+    ref = operation_ref(observation.operation_id)
+    if ref not in observation.evidence_refs:
+        return False
+    path = (run_dir / ref).resolve(strict=True)
+    if not path.is_relative_to(run_dir.resolve(strict=True)):
+        raise ValueError("核心重算 operation 引用越过 run 边界")
+    content = path.read_bytes()
+    payload = json.loads(content.decode("utf-8"))
+    if not isinstance(payload, dict) or payload.get("retry_reason") != "core_evidence_recheck":
+        return False
+    if (
+        hashlib.sha256(content).hexdigest() != observation.evidence_sha256.get(ref)
+        or payload.get("operation_kind") != "verification_retry"
+        or payload.get("authority") != "agent_operation"
+        or payload.get("run_id") != run_dir.name
+        or payload.get("operation_id") != observation.operation_id
+        or payload.get("child_run") != observation.child_run
+        or payload.get("work_item_id") != observation.work_item_id
+    ):
+        raise ValueError("核心重算 operation 身份或哈希无效，不能豁免 Review 计数")
+    return True

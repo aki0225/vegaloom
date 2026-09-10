@@ -3,8 +3,6 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import (
-    BaseModel,
-    ConfigDict,
     Field,
     StringConstraints,
     field_validator,
@@ -12,12 +10,11 @@ from pydantic import (
 )
 
 from .agent_contract_support import (
-    AGENT_SCHEMA_VERSION,
+    StrictAgentModel,
     canonical_digest,
     normalize_relative_paths as _normalize_relative_paths,
     normalize_repo_relative_path as _normalize_repo_relative_path,
     utc_now,
-    validate_schema_version as _validate_schema_version,
 )
 from .agent_change_state import validate_change_state_bindings
 
@@ -66,17 +63,6 @@ ArtifactIdText = Annotated[
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
     ),
 ]
-class StrictAgentModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
-
-    schema_version: int = AGENT_SCHEMA_VERSION
-
-    @field_validator("schema_version")
-    @classmethod
-    def validate_schema_version(cls, value: int) -> int:
-        return _validate_schema_version(value)
-
-
 class AgentWorkItem(StrictAgentModel):
     work_item_id: NonEmptyText
     objective: NonEmptyText
@@ -240,6 +226,7 @@ class AgentObservation(StrictAgentModel):
     verification: GateStatus = "not_run"
     risk: GateStatus = "not_run"
     review: GateStatus = "not_run"
+    core_evidence: GateStatus = "not_run"
     reviewer_runner_status: ReviewerRunnerStatus | None = None
     reviewer_retry_attempt: int = Field(default=0, ge=0)
     all_work_items_completed: bool = False
@@ -427,6 +414,8 @@ class AgentState(StrictAgentModel):
     task_id: NonEmptyText
     repository_id: NonEmptyText
     run_kind: AgentRunKind = "legacy"
+    # 缺失字段代表旧执行协议；保留读取能力，但不得套用新版自动恢复规则。
+    execution_protocol: int = Field(default=1, ge=1)
     phase: AgentPhase = "planning"
     state_version: int = Field(default=1, ge=1)
     goal_revision: int = Field(default=1, ge=1)
@@ -449,6 +438,13 @@ class AgentState(StrictAgentModel):
     handoff_status: Literal["none", "handoff_ready", "handoff_blocked"] = "none"
     terminal_status: TerminalStatus | None = None
     updated_at: str = Field(default_factory=utc_now)
+
+    def require_current_execution(self) -> None:
+        if self.execution_protocol != 2:
+            raise ValueError(
+                "此 Run 使用旧版或不支持的执行协议，仅支持查看、停止和可信交接；"
+                "请从 Task Card 创建新 Run，或重新创建并批准任务。"
+            )
 
     @model_validator(mode="after")
     def validate_phase_bindings(self) -> AgentState:

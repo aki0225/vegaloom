@@ -6,7 +6,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 AGENT_SCHEMA_VERSION = 1
@@ -35,6 +35,18 @@ def validate_schema_version(value: int) -> int:
             f"当前仅支持 {AGENT_SCHEMA_VERSION}"
         )
     return value
+
+
+class StrictAgentModel(BaseModel):
+    """共享严格模型与版本检查，任务模型只定义各自业务字段。"""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    schema_version: int = AGENT_SCHEMA_VERSION
+
+    @field_validator("schema_version")
+    @classmethod
+    def validate_schema_version(cls, value: int) -> int:
+        return validate_schema_version(value)
 
 
 def normalize_repo_relative_path(value: str) -> str:

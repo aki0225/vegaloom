@@ -66,6 +66,7 @@ def start_legacy_agent(
         f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-agent",
     )
     state = AgentState(
+        execution_protocol=2,
         run_id=run_id,
         task_id=base_plan.task_id,
         repository_id=repository_scope(repo_root),

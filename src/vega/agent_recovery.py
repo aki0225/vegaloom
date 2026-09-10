@@ -12,7 +12,6 @@ from .agent_execution_bridge import (
 )
 from .agent_operation import (
     AgentOperationKind,
-    bound_operation_kind,
     operation_ref,
 )
 from .agent_mutation import agent_mutation
@@ -71,11 +70,10 @@ class SupervisorAgentRecovery:
         except ValueError as exc:
             write_load_failure_report(run_dir, request.reason, exc)
             raise
-        require_recovery_request(state, request)
+        operation_kind = require_recovery_request(run_dir, state, request)
         assert state.active_child_run is not None
         assert state.active_operation_id is not None
         repo = bound_repo(run_dir)
-        operation_kind = bound_operation_kind(run_dir, state)
         acquire_writer_claim(
             repo,
             run_dir=run_dir,
@@ -305,7 +303,7 @@ class SupervisorAgentRecovery:
         if state.run_kind == "change" and state.contract_revision is None:
             raise ValueError(
                 "未编译的 Planning ChangeRun 不能恢复为 ready；"
-                "可重试调查请继续运行 `vega run --run <run-id>`，"
+                "可重试调查请继续运行 `vega change --run <run-id>`，"
                 "Workspace 漂移或终止不明时请新建 Planning run 或生成可验证 Handoff"
             )
         if state.phase not in {"needs_human", "stopped"}:

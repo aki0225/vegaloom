@@ -114,6 +114,7 @@ def state_from_task_card(
         else ["human"]
     )
     return AgentState(
+        execution_protocol=2,
         run_id=run_id,
         task_id=card.task_id,
         repository_id=repository_scope(repo),

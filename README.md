@@ -84,18 +84,20 @@ vega explain
 
 ## 高级路径：拆开调查、批准和执行
 
+以下描述当前开发分支。已发布的 v0.5.1 仍有 `run`、`retry`；本轮将它们合并到 `change`。
+旧 Run 保留查看、停止和可信交接能力，不能直接套用新版执行协议。
+
 主线新增的启动预检可以运行 `vega config check --repo . --change`；Claude 加
 `--provider claude`。这条检查使用已提交的项目配置，不会替项目猜测试命令。
 
-需要显式控制阶段、传入已有 Contract，或使用脚本化流程时，保留 `start`、`approve` 和
-`run`：
+需要传入已有 Contract 或使用脚本化流程时，使用 `start`、`approve`，再用 `change` 推进：
 
 ```powershell
 vega start --repo . --text "导出按钮点击后没有反应"
-vega run --run <run_id> --timeout 900
+vega change --run <run_id> --timeout 900 --json
 ```
 
-`run` 先生成带来源引用的 Planning Proposal，再由确定性 Contract Compiler 对照固定
+`change --json` 先生成带来源引用的 Planning Proposal，再由确定性 Contract Compiler 对照固定
 source revision、`.vega.yaml`、路径、验证、风险和预算，生成：
 
 - **Change Contract**：目标、验收、不变量、非目标、风险、验证和允许范围；
@@ -108,7 +110,7 @@ revision 漂移时，run 进入 `needs_human`，不会启动 Worker。编译通�
 
 ```powershell
 vega approve --run <run_id> --actor human
-vega run --run <run_id> --timeout 900
+vega change --run <run_id> --timeout 900
 ```
 
 默认批准方式是人工确认。重复、低风险的小任务可以在仓库中预先登记 bounded 策略：
@@ -128,7 +130,7 @@ approval:
 调用方仍要显式选择：
 
 ```powershell
-vega run --run <run_id> --timeout 900 --approval bounded
+vega change --run <run_id> --timeout 900 --approval bounded
 ```
 
 Vega 只放行范围、验证、预算和副作用都明确，且没有命中人工风险规则的 Contract。策略不匹配
@@ -142,7 +144,7 @@ push、创建 PR 或合并。
 ChangeRun 会继续使用该 Provider，避免恢复时静默切换会话：
 
 ```powershell
-vega run --run <run_id> --provider claude --timeout 900
+vega change --run <run_id> --provider claude --timeout 900
 ```
 
 两条路径复用同一个 ChangeRun、Git Candidate 和门禁。Worker Session 可跨 Work Item
@@ -181,9 +183,8 @@ vega stop --run <run_id> --reason "方向变化"
 `steer` 只能补充当前执行，不能改写批准合同。范围、验收或风险边界变化时，提交新的 Contract
 和 Execution Plan：
 
-高级 `vega run` 仍在另一个终端持有活动 Codex Turn 时，可以用
-`vega respond --run <run_id> --interaction <request_id> ...` 响应已经核对的请求。
-`vega change` 遇到这类请求会先停止 attempt 并关闭 pending；停止后再 `respond` 会被拒绝。
+`vega change` 无法安全处理 Provider 请求时先停止 attempt 并关闭 pending，再显示处理方式。
+已关闭的请求不能通过另一个终端的 `respond` 补写批准。
 
 Codex 可以在当前 Turn 的安全事件边界接收 Steer；Claude Code V1 把它排到下一 Turn，不会把
 不支持的中途控制伪装成已经送达。
@@ -198,7 +199,7 @@ vega revise --run <run_id> `
 
 ### 失败和恢复
 
-- 代码没变，只是验证环境或命令需要重跑：`vega retry --run <run_id>`。
+- 按 `explain` 给出的安全动作继续：`vega change --run <run_id>`。证据或授权不满足时保持停止。
 - Worker 失去可信终态：准备 Recovery Request，再运行
   `vega recover --run <run_id> --input <recovery.json>`。
 - Core Work Item Reviewer 明确 `timed_out`，且 Candidate、Workspace、Verification、Risk、

@@ -8,7 +8,7 @@ from .agent_run_status import (
     agent_live_stage_payload,
     load_agent_status_state,
 )
-from .agent_status_guidance import agent_artifact_names, agent_next_steps
+from .agent_status_guidance import agent_artifact_names
 from . import agent_status_projection as asp
 from .execution_control import ACTIVE_EXECUTION_STATUSES, find_execution_records
 from .run_execution_status import latest_execution_payload
@@ -103,10 +103,10 @@ def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
         **review_queue,
         **asp.payload_fields(state),
         **agent_live_stage_payload(state),
-        "next_steps": (
-            list(agent_projection.next_steps)
-            if agent_projection is not None
-            else next_steps_for_run(workspace, run_dir, state, kind)
+        **(
+            {"next_steps": next_steps_for_run(workspace, run_dir, state, kind)}
+            if agent_projection is None
+            else {}
         ),
         "key_artifacts": (
             list(agent_projection.key_artifacts)
@@ -141,7 +141,6 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
         ]
     routed_next_steps = {
         "loop": _loop_next_steps,
-        "agent": agent_next_steps,
     }.get(run_kind)
     if routed_next_steps is not None:
         return routed_next_steps(run_dir, state)

@@ -12,7 +12,7 @@ _PHASE_LABELS = {
     "planning": "调查与计划",
     "awaiting_approval": "等待批准",
     "ready": "等待执行",
-    "acting": "Worker 执行",
+    "acting": "执行中",
     "observing": "现场对账",
     "needs_human": "等待人工",
     "finalizing": "最终裁决",
@@ -115,7 +115,6 @@ def render_compact_agent_status(snapshot: AgentCliSnapshot) -> str:
     explanation = snapshot.explanation
     phase = str(status.get("agent_phase") or "unknown")
     changed_files = _string_list(status.get("changed_files"))
-    # 推荐动作与 explain 同源；next_steps 仍保留为 JSON 兼容字段。
     next_step = _recommended_action_text(snapshot)
     lines = [
         "# Vega Status",
@@ -249,6 +248,8 @@ def explanation_json_payload(
 
 
 def _provider_attempt(status: dict[str, object]) -> str:
+    if status.get("active_operation_kind") == "environment_prepare":
+        return "环境准备命令执行中；Coding Worker 尚未启动"
     attempt = (
         status.get("active_child_run")
         or status.get("active_planning_execution_id")
@@ -307,11 +308,7 @@ def _action_values(snapshot: AgentCliSnapshot) -> dict[str, str]:
         if snapshot.status_projection is not None
         else ()
     )
-    continue_command = (
-        f"vega change --run {snapshot.target.run_dir.name}"
-        if source_repo == run_workspace
-        else f"vega run --run {snapshot.target.run_dir.name}"
-    )
+    continue_command = f"vega change --run {snapshot.target.run_dir.name}"
     return {
         "run_id": snapshot.target.run_dir.name,
         "run_workspace": str(run_workspace),

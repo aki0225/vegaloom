@@ -35,6 +35,7 @@ _BLOCK_CATEGORIES: dict[str, BlockCategory] = {
     "approval.plan_stale": "authorization",
     "budget.automatic_repair_exhausted": "budget",
     "evidence.decision_unverified": "evidence",
+    "evidence.core_untrusted": "evidence",
     "evidence.external_claim_only": "evidence",
     "evidence.integrity_unverified": "evidence",
     "evidence.no_trusted_progress": "evidence",

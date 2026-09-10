@@ -11,6 +11,7 @@ from .agent_contract import (
     ProviderSessionStatus,
 )
 from .agent_child_status import read_live_child_stage
+from .agent_operation import bound_operation_kind
 from .agent_run_status import (
     trusted_worker_label as build_trusted_worker_label,
 )
@@ -200,6 +201,8 @@ def _build_status_card(
         live_child_stage=(
             live_child_stage
             if live_child_checked
+            else None
+            if state.active_operation_id and bound_operation_kind(run_dir, state) == "environment_prepare"
             else read_live_child_stage(run_dir, state)
         ),
         changed_files=(

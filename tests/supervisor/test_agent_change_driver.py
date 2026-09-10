@@ -83,11 +83,48 @@ def test_change_replan_with_existing_contract_preserves_evidence_without_planner
 
     assert result.outcome == "attention_required"
     assert result.reason_code == "workflow.replan_required"
-    assert result.safe_actions == ("status", "explain", "revise")
+    assert result.safe_actions == ("plan.revise", "status.view_full", "run.stop")
     assert result.run is not None
     assert result.run.state == state
     assert _contract().authority_envelope.max_auto_replans == 0
     assert {name: (approved.run_dir / name).read_bytes() for name in evidence_names} == before
+
+
+@pytest.mark.parametrize("retry_fails", [False, True])
+def test_change_routes_existing_verification_retry_without_worker_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retry_fails: bool,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(repo, contract=_contract(), execution_plan=_execution_plan())
+    ready = runtime.approve(started.run_dir.name)
+    calls: list[str] = []
+
+    class StaticRetry:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, run):
+            calls.append(run)
+            if retry_fails:
+                raise ValueError("验证恢复证据损坏")
+            from vega.agent_recovery import SupervisorAgentRecovery
+            return SupervisorAgentRecovery(repo).stop(run, reason="测试恢复结束")
+
+    monkeypatch.setattr(driver_module, "verification_retry_requested", lambda *args: True)
+    monkeypatch.setattr(driver_module, "SupervisorAgentVerificationRetry", StaticRetry)
+    monkeypatch.setattr(
+        driver_module, "ensure_change_provider_ready",
+        lambda *args: pytest.fail("验证恢复不得改派 Coding Worker"),
+    )
+    driver = AgentChangeDriver(repo, repo)
+    if retry_fails:
+        with pytest.raises(ValueError, match="验证恢复证据损坏"):
+            driver.change(run=ready.run_dir.name)
+    else:
+        result = driver.change(run=ready.run_dir.name)
+        assert result.run is not None and result.run.state.phase == "stopped"
+    assert calls == [ready.run_dir.name]
 
 
 def test_change_creates_planning_run_and_stops_at_non_tty_approval(
@@ -182,17 +219,12 @@ def test_change_continues_unique_run_through_existing_approval_path(
             assert timeout_seconds == 60
             run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
             adapter_calls.append(run)
-            return AgentRun(
-                run_dir=run_dir,
-                state=AgentState.model_validate(
-                    {
-                        **state.model_dump(mode="json"),
-                        "phase": "needs_human",
-                        "allowed_actions": ["human"],
-                    }
-                ),
-                plan=plan,
-            )
+            state = AgentState.model_validate({
+                **state.model_dump(mode="json"),
+                "phase": "needs_human", "allowed_actions": ["human"],
+            })
+            save_agent_state(run_dir / "agent-state.json", state)
+            return AgentRun(run_dir=run_dir, state=state, plan=plan)
 
     monkeypatch.setattr(
         driver_module,
@@ -219,7 +251,7 @@ def test_change_continues_unique_run_through_existing_approval_path(
     assert result.reason_code == "workflow.needs_human"
     assert adapter_calls == [started.run_dir.name]
     _, state, _, _ = load_agent_bundle(repo, started.run_dir.name)
-    assert state.phase == "ready"
+    assert state.phase == "needs_human"
     if approval == "human":
         assert len(prompts) == 1
         assert "目标：修复示例函数" in prompts[0]
@@ -634,7 +666,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
     assert result.reason_code == "provider.interaction_requires_advanced_response"
     assert result.run is not None
-    assert result.safe_actions == ("status", "explain", "recover", "takeover")
+    assert result.safe_actions == tuple(driver_module.AgentChangeDriver(repo, repo)._explanation(result.run).safe_actions)
     assert load_provider_sessions(result.run.run_dir).interactions[0].status == "closed"
     assert [update.status for update in updates] == ["attention"]
     visible = repr([result.message, updates, events])

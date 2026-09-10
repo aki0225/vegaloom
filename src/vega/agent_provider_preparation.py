@@ -33,6 +33,16 @@ from .agent_runtime_support import load_agent_bundle
 from .verification_command_preflight import require_verification_commands_preflight
 from .workspace_check import ReviewWorkspaceSnapshot
 
+def change_run_step_limit(workspace: Path, run: str) -> int:
+    run_dir, state, plan, metadata = load_agent_bundle(workspace, run)
+    context = load_change_run_context(run_dir, state, plan, metadata)
+    if context is None:
+        return 1
+    return len(context.execution_plan.work_items) * (
+        context.contract.authority_envelope.max_repair_rounds + 1
+    )
+
+
 def comparison_binding_from_metadata(
     metadata: dict[str, str],
 ) -> tuple[str | None, tuple[str, ...]]:
@@ -369,6 +379,7 @@ def _require_batch_coverage(
         checked_items=verdict.checked_items,
         findings=verdict.findings,
         risk_disclosures=verdict.risk_disclosures,
+        change_impacts=verdict.change_impacts,
     )
 
 
@@ -440,6 +451,9 @@ def _final_review_prompt(
         "# Vega 最终集成审查\n\n"
         "你是独立只读 Reviewer。只判断累计 Candidate 是否满足已批准合同。"
         "不要相信 Worker 自述，不要修改文件。输出严格匹配 ReviewVerdict JSON。\n\n"
+        "可在 change_impacts 中解释修改功能与影响，每项包含 summary 和 locations，"
+        "locations 每项仅使用当前 Candidate 真实文件的 file 和正整数 line；"
+        "这是模型意见，不是机器证据，信息不足时填 []，不影响门禁。\n\n"
         f"## Change Contract\n```json\n{json.dumps(contract, ensure_ascii=False)}\n```\n\n"
         f"## Execution Plan\n```json\n{json.dumps(plan, ensure_ascii=False)}\n```\n\n"
         "## 已绑定机器证据\n"

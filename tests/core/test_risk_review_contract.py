@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -17,6 +19,10 @@ from vega.review_coverage import (
 from vega.risk_review import (
     build_insufficient_evidence_disclosures,
     validate_required_risk_disclosures,
+)
+from vega.risk_review_reporting import (
+    build_finish_review_section,
+    render_finish_review_section,
 )
 
 
@@ -58,6 +64,55 @@ def test_legacy_verdict_defaults_to_empty_risk_disclosures() -> None:
 
     assert verdict.risk_disclosures == []
     assert verdict.reviewed_files == []
+    assert verdict.change_impacts == []
+    review = build_finish_review_section(
+        verdict, [], changed_files_source="unavailable",
+    )
+    assert review["change_impact_projection"]["items"] == []
+    assert "Reviewer 未提供功能影响说明" in "\n".join(render_finish_review_section(review))
+
+
+@pytest.mark.parametrize("bound", [True, False])
+def test_change_impact_references_use_candidate_not_live_files(tmp_path: Path, bound: bool) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = repo / "main.py"
+    source.write_text("first\nsecond\n", encoding="utf-8")
+    for args in (
+        ["init", "--quiet"], ["add", "main.py"],
+        ["-c", "user.name=测试", "-c", "user.email=test@example.invalid",
+         "commit", "--quiet", "-m", "冻结测试快照"],
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    # 浮动工作区新增的行和文件均不得成为冻结 Candidate 的引用证据。
+    source.write_text("first\nsecond\nthird\n", encoding="utf-8")
+    (repo / "only_live.py").write_text("live\n", encoding="utf-8")
+    locations = [
+        {"file": "main.py", "line": 2},
+        {"file": "main.py", "line": 3},
+        {"file": "only_live.py", "line": 1},
+        {"file": "../main.py", "line": 1},
+        {"file": "main.py", "line": 0},
+    ]
+    verdict = ReviewVerdict.model_validate({
+        "verdict": "approve", "summary": "已检查", "checked_items": ["需求"],
+        "change_impacts": [{"summary": "调整模块行为", "locations": locations}],
+    })
+    review = build_finish_review_section(
+        verdict, ["main.py"], changed_files_source="trusted_risk_gate",
+        repo=repo, candidate_sha=sha if bound else None,
+    )
+    impact = review["change_impact_projection"]["items"][0]
+    assert impact["locations"] == ([locations[0]] if bound else [])
+    assert impact["unverified_location_count"] == (4 if bound else 5)
+    assert review["verdict"] == "approve"
+    assert verdict.change_impacts[0].locations[1].line == 3
+    rendered = "\n".join(render_finish_review_section(review))
+    assert "功能变化与影响（模型意见）" in rendered
+    assert ("`main.py:2`" in rendered) is bound
+    assert "`main.py:3`" not in rendered
+    assert "only_live.py" not in rendered
 
 
 def test_reviewed_files_are_normalized_and_must_be_unique() -> None:

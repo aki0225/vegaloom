@@ -3,8 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from vega.agent_cli_interaction import ProviderInteractionPump
+from vega.agent_contract import AgentState
+from vega.agent_persistence import save_agent_state
+from vega.cli import app
 from vega.provider_session import (
     PendingInteraction,
     ProviderSessionHandle,
@@ -171,6 +175,29 @@ def test_respond_to_interaction_rejects_unowned_handle_without_expected_provider
     interaction = load_provider_sessions(run_dir).interactions[0]
     assert interaction.status == "pending"
     assert interaction.response is None
+
+
+@pytest.mark.parametrize("arguments", [
+    ["steer", "--text", "继续检查"],
+    ["respond", "--interaction", "request-1", "--decision", "accept"],
+    ["takeover"],
+    ["reclaim"],
+])
+def test_legacy_protocol_rejects_provider_controls_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, arguments: list[str],
+) -> None:
+    run_dir = _run_dir(tmp_path, method="item/commandExecution/requestApproval", summary="执行命令")
+    save_agent_state(run_dir / "agent-state.json", AgentState(
+        run_id=run_dir.name, task_id="task-1", repository_id="repo-1",
+    ))
+    before = (run_dir / "provider-sessions.json").read_bytes()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(app, [*arguments, "--run", run_dir.name])
+
+    assert result.exit_code != 0
+    assert "执行协议" in result.output
+    assert (run_dir / "provider-sessions.json").read_bytes() == before
 
 
 def test_close_pending_interactions_removes_response_dead_end(

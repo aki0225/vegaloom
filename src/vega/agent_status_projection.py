@@ -12,6 +12,7 @@ from .agent_contract import (
     AgentState,
     AgentStatusCard,
 )
+from .agent_operation import bound_operation_kind
 from .agent_provider_explain import provider_interaction_projection
 from .agent_persistence import AgentArtifactError, load_agent_state
 from .agent_child_status import (
@@ -23,7 +24,7 @@ from .agent_run_status import (
 )
 from .agent_runtime_support import load_agent_bundle
 from .agent_status_card import _build_status_card, render_status_card
-from .agent_status_guidance import agent_artifact_names, agent_next_steps
+from .agent_status_guidance import agent_artifact_names
 from .agent_status_sources import (
     capture_live_workspace,
     load_provider_sessions_for_display,
@@ -75,7 +76,6 @@ class AgentStatusProjection:
     last_child_run: str | None
     execution: dict[str, Any] | None
     review_queue: dict[str, object]
-    next_steps: tuple[str, ...]
     key_artifacts: tuple[str, ...]
     repo_path: str | None = None
 
@@ -176,7 +176,6 @@ def build_agent_status_projection(
         _PHASE_STATUS[card.phase],
     )
     review_queue = _review_queue_projection(run_dir, child_status)
-    next_steps = tuple(agent_next_steps(run_dir, guidance_state))
     key_artifacts = tuple(
         _existing_agent_artifacts(run_dir, guidance_state)
     )
@@ -187,9 +186,11 @@ def build_agent_status_projection(
             "recorded_terminal_status": state.terminal_status,
             "effective_phase": card.phase,
             "effective_terminal_status": card.terminal_status,
+            "active_operation_kind": (
+                bound_operation_kind(run_dir, state) if state.active_operation_id else None
+            ),
             "last_child_run": last_child_run,
             "execution": execution,
-            "next_steps": list(next_steps),
             "key_artifacts": list(key_artifacts),
             **review_queue,
         }
@@ -214,7 +215,6 @@ def build_agent_status_projection(
         last_child_run=last_child_run,
         execution=execution,
         review_queue=review_queue,
-        next_steps=next_steps,
         key_artifacts=key_artifacts,
         repo_path=repo_path,
     )
@@ -363,10 +363,10 @@ def apply_agent_projection(
                 "provider_session_warning"
             ],
             "last_child_run": projection.last_child_run,
+            "active_operation_kind": projection.payload["active_operation_kind"],
             "brief_run": projection.last_child_run,
             "live_child_stage": projection.card.live_child_stage,
             "execution": projection.execution,
-            "next_steps": list(projection.next_steps),
             "key_artifacts": list(projection.key_artifacts),
             **projection.review_queue,
         }
@@ -410,6 +410,7 @@ def payload_fields(state: dict[str, Any]) -> dict[str, Any]:
         "agent_run_kind": state.get("agent_run_kind"),
         "accepted_checkpoint_sha": state.get("accepted_checkpoint_sha"),
         "active_candidate_sha": state.get("active_candidate_sha"),
+        "active_operation_kind": state.get("active_operation_kind"),
         "active_planning_execution_id": state.get(
             "active_planning_execution_id"
         ),

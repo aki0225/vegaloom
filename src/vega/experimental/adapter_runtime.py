@@ -60,10 +60,10 @@ vega start --repo . --contract <change-contract.json> --execution-plan <executio
 
 ```powershell
 vega approve --run <run_id> --actor human
-vega run --run <run_id> --timeout 900
+vega change --run <run_id> --timeout 900 --json
 ```
 
-首次选择 Claude Code 时，自然语言入口的预检和 `change` 都加 `--provider claude`；显式合同入口在首次 `run` 选择 Provider。同一任务后续沿用绑定的 Provider。
+首次选择 Claude Code 时，自然语言入口的预检和 `change` 都加 `--provider claude`；显式合同入口在首次 `change` 选择 Provider。同一任务后续沿用绑定的 Provider。
 
 默认 Codex 通过 App Server 复用 Worker Thread。只有明确需要一次性短会话时才加 `--fresh-session`；App Server 不可用时不会静默换执行路径。
 
@@ -81,16 +81,16 @@ vega steer --run <run_id> --role worker --text "补充检查这个边界"
 
 - 方向需要微调但合同没变：用 `steer`。
 - 合同或执行计划要改：先生成新 revision，再运行 `vega revise`；触及合同字段时重新等待人工批准。
-- 高级 `run` 仍持有活动 Codex Turn 时，核对原始请求并得到用户授权后才可 `vega respond`。`change` 已停止 attempt 并关闭的 pending 请求不能再响应。
+- `respond` 只响应仍有活动 owner、Thread 和 Turn 的请求；`change` 已停止 attempt 并关闭的 pending 请求不能再响应。
 - 响应 JSON 含凭据或其他敏感信息：不要写进 Vega Artifact，改用 `vega takeover` 接管原生会话。
 - 只有空闲 Session、没有 active Writer binding 且 Workspace 没有变化时才能 `vega reclaim`。活动 attempt 被接管后先做 Recovery 或 Handoff。
 
 ## 按状态处理
 
-- `ready`：再次运行 `vega run --run <run_id>`，执行当前 Work Item 或明确的 Repair。
+- `ready`：再次运行 `vega change --run <run_id>`，执行当前 Work Item 或明确的 Repair。
 - `awaiting_approval`：展示 revision 差异，等待批准。
 - `needs_human`：先读 `explain` 的原因和安全动作，再按需检查 Checkpoint 和失败证据。不要把 `change` 当万能恢复命令。
-- `finalizing`：重新运行同一个 `vega run`，幂等发布已有可信 Finish。
+- `finalizing`：重新运行同一个 `vega change`，幂等发布已有可信 Finish。
 - `completed`：读取 `agent-final-report.md`，展示完整变更文件、Reviewer 重点、验证、风险和未证明事项；同时给出 `status` 中的代码目录、任务分支、累计 Diff 基线和 Candidate，供用户检查与交付。
 
 普通 Finding 会生成 Fix Packet 并回到同一个 Worker Thread。Reviewer 使用独立只读 Thread；不要把 Worker 的完整聊天或中间推理转给 Reviewer。
@@ -111,6 +111,8 @@ vega resume --repo .
 ```
 
 Provider Thread ID 只用于本机续接。换机器时以任务分支、Candidate SHA、Change Contract、Execution Plan 和 Task Card 恢复，不依赖旧聊天记录。
+
+旧执行协议的 Run 只可查看、停止和可信交接；不能直接恢复 Writer。新 Run 或 Task Card 恢复采用当前协议。已登记环境准备由控制器在 Worker 前执行，Worker 不负责安装依赖。
 
 ## 固定边界
 

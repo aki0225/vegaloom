@@ -24,6 +24,7 @@ from .agent_runtime_support import (
 )
 from .agent_verification_retry_evidence import (
     PreparedVerificationRetry,
+    VerificationRetryMode,
     capture_verification_retry_baseline,
     load_source_observation,
     matching_source_plans,
@@ -46,6 +47,28 @@ from .workspace_snapshot import ReviewWorkspaceSnapshot
 VerificationRetryReason = Literal["verification_failure", "reviewer_timeout"]
 
 
+def verification_retry_requested(workspace: Path, run: str) -> bool:
+    """识别人工修订验证后的继续意图，完整执行资格仍由恢复入口检查。"""
+
+    run_dir, state, plan, _ = load_agent_bundle(workspace, run)
+    if (
+        state.run_kind != "change"
+        or state.phase != "ready"
+        or state.active_child_run
+        or state.active_operation_id
+        or "repair" in state.allowed_actions
+        or state.latest_checkpoint_id is None
+    ):
+        return False
+    checkpoint = load_agent_checkpoint(
+        run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
+    )
+    if not checkpoint.failed_attempts:
+        return False
+    # 有失败现场时不能因资格校验失败回退到新 Worker；由恢复路径明确拒绝。
+    return True
+
+
 def prepare_verification_retry(
     workspace: Path,
     run: str,
@@ -57,13 +80,15 @@ def prepare_verification_retry(
 ) -> PreparedVerificationRetry:
     """验证恢复现场，并为既有 Core 门禁链准备只读输入。"""
 
+    if retry_reason not in {"verification_failure", "reviewer_timeout"}:
+        raise ValueError("只读核心重算必须使用专用入口，不能作为验证重跑原因")
     if retry_reason == "reviewer_timeout":
         source = prepare_reviewer_timeout_source(workspace, run)
-        active_plan = _reactivate_current_work_item(
+        active_plan = reactivate_current_work_item(
             source.plan,
             source.state.current_work_item,
         )
-        prepared = _build_prepared(
+        prepared = build_prepared_verification_retry(
             workspace,
             run_dir=source.run_dir,
             state=source.state,
@@ -100,7 +125,7 @@ def prepare_verification_retry(
     return prepared
 
 
-def _reactivate_current_work_item(
+def reactivate_current_work_item(
     plan: AgentPlan,
     work_item_id: str | None,
 ) -> AgentPlan:
@@ -114,7 +139,7 @@ def _reactivate_current_work_item(
         None,
     )
     if current is None or current.status != "blocked":
-        raise ValueError("Reviewer timeout 的当前 Work Item 不是 blocked 状态")
+        raise ValueError("恢复目标的当前 Work Item 不是 blocked 状态")
     current.status = "active"
     return AgentPlan.model_validate(updated.model_dump(mode="json"))
 
@@ -173,7 +198,7 @@ def _prepare_verification_failure(
         child_dir,
         before,
     )
-    return _build_prepared(
+    return build_prepared_verification_retry(
         workspace,
         run_dir=run_dir,
         state=state,
@@ -194,7 +219,7 @@ def _prepare_verification_failure(
     )
 
 
-def _build_prepared(
+def build_prepared_verification_retry(
     workspace: Path,
     *,
     run_dir: Path,
@@ -212,7 +237,7 @@ def _build_prepared(
     source_summary_ref: str,
     source_operation_id: str,
     source_finish_sha256: str,
-    retry_reason: VerificationRetryReason,
+    retry_reason: VerificationRetryMode,
     candidate_sha: str | None = None,
     candidate_ref: str | None = None,
     reviewer_retry_attempt: int = 0,
@@ -226,7 +251,7 @@ def _build_prepared(
     comparison_base_sha, comparison_paths = (
         provider_preparation.comparison_binding_from_metadata(metadata)
     )
-    next_iteration = child_state.current_iteration + 1
+    next_iteration = child_state.current_iteration + int(retry_reason != "core_evidence_recheck")
     plan_scope_baseline = capture_plan_scope_baseline(
         repo,
         plan,

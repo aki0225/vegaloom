@@ -397,6 +397,7 @@ def observation_from_child(
         verification=verification,
         risk=risk,
         review=review,
+        core_evidence="stale" if _finish_evidence_untrusted(finish_summary) else "passed",
         reviewer_runner_status=(
             latest.reviewer_status if latest is not None else None
         ),

@@ -94,6 +94,13 @@ def retry_source_finish_archive_issue(
         )
     elif retry_reason == "reviewer_timeout":
         valid_source = reviewer_timeout_finish_is_valid(finish)
+    elif retry_reason == "core_evidence_recheck":
+        integrity = finish.get("artifact_integrity")
+        freshness = finish.get("evidence_freshness")
+        valid_source = (
+            not isinstance(integrity, dict) or integrity.get("valid") is not True
+            or not isinstance(freshness, dict) or freshness.get("fresh") is not True
+        )
     else:
         valid_source = False
     if not valid_source:

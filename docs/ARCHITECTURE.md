@@ -36,7 +36,7 @@ Host Session
 
 - `cli.py`：`status`、`explain`、`watch`、`latest`、`config` 和 Adapter 初始化；
 - `agent_change_cli.py`：`change` 日常入口，把选择、Planning、批准、Provider 和 Finish 串成一条路径；
-- `agent_cli.py`：`start`、`approve`、`run` 等高级 ChangeRun 命令，以及交互、恢复和交接。
+- `agent_cli.py`：`start`、`approve` 等高级 ChangeRun 命令，以及交互、恢复和交接。
 
 旧 Core CLI 不再注册。Core Runtime 仍被 ChangeRun 内部调用。
 
@@ -85,8 +85,8 @@ Contract Compiler 的输入，不拥有批准或执行权限。
 `agent_approval_policy.py` 负责纯判断，`agent_approval_runtime.py` 负责把结果接回现有
 ChangeRun。
 
-默认仍由 `vega approve` 或交互式 `vega change` 记录人工批准。`vega run --approval bounded`
-和 `vega change --approval bounded` 只有在仓库策略已启用，且范围、Verification、预算、副作用
+默认仍由 `vega approve` 或交互式 `vega change` 记录人工批准。`vega change --approval bounded`
+只有在仓库策略已启用，且范围、Verification、预算、副作用
 和风险都满足策略时，才写入带策略摘要的批准记录。拒绝时状态保持 `awaiting_approval`，Trace
 和状态卡给出原因。
 
@@ -94,8 +94,8 @@ ChangeRun。
 
 `vega change` 在当前 TTY 展示批准摘要和 Provider 请求，但 Provider Session 只保留脱敏摘要；
 如果缺少足以证明目标、权限或上下文的完整原始信息，控制器会停止当前 attempt、关闭对应
-pending，再转 Recovery 或 Provider 原生会话接管。高级 `vega run` 仍持有活动 Turn 时，
-`vega respond` 才能写入响应；owner、Thread、Turn 和权限绑定全部重新校验。终端可见不等于
+pending，再转 Recovery 或 Provider 原生会话接管。`vega respond` 只接受尚有活动 owner 的请求，
+owner、Thread、Turn 和权限绑定全部重新校验。终端可见不等于
 自动批准；JSON 与非交互终端不会读取 stdin。
 
 ### Change Contract 与 Execution Plan

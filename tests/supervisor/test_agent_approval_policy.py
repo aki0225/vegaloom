@@ -14,6 +14,7 @@ from vega.agent_change_contract import (
     ExecutionPlan,
     ExecutionWorkItem,
 )
+from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_run import AgentRun
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_runtime_support import load_agent_bundle
@@ -44,24 +45,25 @@ def test_cli_bounded_mode_requires_explicit_opt_in_and_repository_policy(
             run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
             assert state.phase == "ready"
             adapter_calls.append(run)
-            return AgentRun(run_dir=run_dir, state=state, plan=plan)
+            stopped = SupervisorAgentRecovery(self.workspace).stop(run, reason="测试执行结束")
+            return stopped
 
     monkeypatch.chdir(workspace)
     monkeypatch.setattr(
-        "vega.agent_start_cli.SupervisorAgentProviderAdapter",
+        "vega.agent_change_driver.SupervisorAgentProviderAdapter",
         StaticAdapter,
     )
     monkeypatch.setattr(
-        "vega.agent_start_cli.ensure_runner_ready",
+        "vega.agent_change_driver.ensure_change_provider_ready",
         lambda *_args, **_kwargs: None,
     )
 
     human = CliRunner().invoke(
         app,
-        ["run", "--run", started.run_dir.name, "--timeout", "60"],
+        ["change", "--run", started.run_dir.name, "--timeout", "60"],
     )
 
-    assert human.exit_code == 0, human.output
+    assert human.exit_code == 2, human.output
     assert "等待人工批准" in human.output
     assert adapter_calls == []
     _, state, _, _ = load_agent_bundle(workspace, started.run_dir.name)
@@ -70,7 +72,7 @@ def test_cli_bounded_mode_requires_explicit_opt_in_and_repository_policy(
     bounded = CliRunner().invoke(
         app,
         [
-            "run",
+            "change",
             "--run",
             started.run_dir.name,
             "--timeout",
@@ -80,11 +82,11 @@ def test_cli_bounded_mode_requires_explicit_opt_in_and_repository_policy(
         ],
     )
 
-    assert bounded.exit_code == 0, bounded.output
+    assert bounded.exit_code == 2, bounded.output
     assert "bounded 策略已批准当前 Contract" in bounded.output
     assert adapter_calls == [started.run_dir.name]
     run_dir, state, _, _ = load_agent_bundle(workspace, started.run_dir.name)
-    assert state.phase == "ready"
+    assert state.phase == "stopped"
     contract = json.loads(
         (run_dir / "change-contract.json").read_text(encoding="utf-8")
     )
@@ -104,6 +106,7 @@ def test_cli_bounded_mode_requires_explicit_opt_in_and_repository_policy(
         "scope",
         "budget",
         "verification",
+        "environment_prepare",
     ],
 )
 def test_bounded_approval_rejects_unclear_or_high_risk_contracts(
@@ -149,6 +152,8 @@ def test_bounded_approval_rejects_unclear_or_high_risk_contracts(
                 ]
             }
         )
+    elif case == "environment_prepare":
+        contract = contract.model_copy(update={"prepare_commands": ["python prepare.py"]})
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()

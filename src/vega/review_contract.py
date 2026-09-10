@@ -90,6 +90,22 @@ class ReviewRiskDisclosure(BaseModel):
         return self
 
 
+class ReviewChangeLocation(BaseModel):
+    """报告引用是模型意见；有效性由冻结 Candidate 校验，不参与裁决。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file: str = ""
+    line: int = 0
+
+
+class ReviewChangeImpact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    locations: list[ReviewChangeLocation] = Field(default_factory=list)
+
+
 class ReviewVerdict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -101,6 +117,8 @@ class ReviewVerdict(BaseModel):
     # 历史 verdict 允许缺少该字段，但新 Review Runtime 会做确定性覆盖校验。
     reviewed_files: list[str] = Field(default_factory=list)
     checked_items: list[str] = Field(default_factory=list)
+    # 同次 Reviewer 可选补充，旧 Artifact 缺失时不生成意见，也不改变门禁。
+    change_impacts: list[ReviewChangeImpact] = Field(default_factory=list)
 
     @field_validator("reviewed_files")
     @classmethod

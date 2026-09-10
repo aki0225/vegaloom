@@ -5,8 +5,10 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 from uuid import uuid4
+
+from pydantic import BaseModel
 
 from .execution_control import RunnerExecutionContext
 from .models import RequiredReviewHit
@@ -320,6 +322,9 @@ def _aggregate_verdict(
         risk_disclosures=disclosures,
         reviewed_files=list(queue.covered),
         checked_items=checked_items or ["Review Queue 文件覆盖"],
+        change_impacts=_unique_models(
+            [impact for verdict in verdicts for impact in verdict.change_impacts]
+        ),
     )
 
 
@@ -463,27 +468,20 @@ def _save_queue(run_dir: Path, queue: ReviewQueue) -> None:
         temp.unlink(missing_ok=True)
 
 
-def _unique_models(values: list[ReviewFinding]) -> list[ReviewFinding]:
-    result: list[ReviewFinding] = []
-    seen: set[str] = set()
-    for value in values:
-        digest = value.model_dump_json()
-        if digest not in seen:
-            seen.add(digest)
-            result.append(value)
-    return result
+ReviewModel = TypeVar("ReviewModel", bound=BaseModel)
+
+
+def _unique_models(values: list[ReviewModel]) -> list[ReviewModel]:
+    return list({value.model_dump_json(): value for value in values}.values())
 
 
 def _unique_disclosures(
     values: list[ReviewRiskDisclosure],
 ) -> list[ReviewRiskDisclosure]:
-    result: list[ReviewRiskDisclosure] = []
-    seen: set[str] = set()
+    result: dict[str, ReviewRiskDisclosure] = {}
     for value in values:
-        if value.risk_id not in seen:
-            seen.add(value.risk_id)
-            result.append(value)
-    return result
+        result.setdefault(value.risk_id, value)
+    return list(result.values())
 
 
 def _report(reporter: ProgressReporter | None, event: str) -> None:

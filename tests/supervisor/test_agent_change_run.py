@@ -307,7 +307,7 @@ def test_change_run_accepts_candidate_and_advances_to_next_work_item(
     status_payload = run_status_payload(workspace, result.run_dir.name)
     assert status_payload["agent_run_kind"] == "change"
     assert status_payload["accepted_checkpoint_sha"] == result.state.accepted_checkpoint_sha
-    assert any("vega run" in step for step in status_payload["next_steps"])
+    assert "next_steps" not in status_payload
     assert any(
         path.endswith("change-contract.json")
         for path in status_payload["key_artifacts"]
@@ -430,6 +430,7 @@ def test_change_run_completes_final_work_item(tmp_path: Path) -> None:
     )
     assert report["candidate"]["changed_files"] == ["src/one.py"]
     assert report["integration_review"] is None
+    assert report["change_impact_projection"]["items"] == []
     assert report["supervisor_gates"] == {
         "verification": "passed",
         "risk": "passed",
@@ -437,6 +438,16 @@ def test_change_run_completes_final_work_item(tmp_path: Path) -> None:
         "external_side_effects": "none",
     }
     assert (result.run_dir / "agent-final-report.md").is_file()
+
+    from vega.agent_change_driver import AgentChangeDriver
+    from vega.agent_runtime_support import bound_repo
+    driver = AgentChangeDriver(workspace, repo)
+    assert driver.change(run=result.run_dir.name).outcome == "completed"
+    (bound_repo(result.run_dir) / "src/one.py").write_text("value = 999\n", encoding="utf-8")
+    stale = driver.change(run=result.run_dir.name)
+    assert stale.outcome == "attention_required"
+    assert stale.reason_code == "workspace.snapshot_stale"
+    assert "run.continue" not in stale.safe_actions
 
 
 def test_multi_item_change_run_adds_one_final_integration_review(
@@ -483,6 +494,12 @@ def test_multi_item_change_run_adds_one_final_integration_review(
         "src/two.py",
     ]
     assert report["integration_review"]["status"] == "approve"
+    projection = report["change_impact_projection"]
+    assert projection["candidate_sha"] == report["candidate"]["accepted_sha"]
+    assert projection["items"][0]["locations"] == [{"file": "src/one.py", "line": 1}]
+    report_text = (result.run_dir / "agent-final-report.md").read_text(encoding="utf-8")
+    assert "功能变化与影响（模型意见）" in report_text
+    assert "Candidate 已核验位置：`src/one.py:1`" in report_text
 
 
 @pytest.mark.parametrize("allowed_action", ["next", "repair"])
@@ -517,7 +534,7 @@ def test_adapter_automatically_advances_ready_change_items(
         return next(results)
 
     monkeypatch.setattr(adapter, "_run_once", run_once)
-    monkeypatch.setattr(adapter, "_change_run_step_limit", lambda run: 2)
+    monkeypatch.setattr("vega.agent_provider_adapter.change_run_step_limit", lambda workspace, run: 2)
 
     result = adapter.run("change-run", timeout_seconds=60)
 
@@ -780,6 +797,10 @@ class _ReviewerRunner:
                         if verdict == "approve"
                         else []
                     ),
+                    **({"change_impacts": [{
+                        "summary": "两个模块的累计修改保持一致",
+                        "locations": [{"file": reviewed_files[0], "line": 1}],
+                    }]} if final_batch is not None else {}),
                 },
                 ensure_ascii=False,
             ),

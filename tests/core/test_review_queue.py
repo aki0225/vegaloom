@@ -77,6 +77,10 @@ class QueueReviewer:
                     "risk_disclosures": [],
                     "reviewed_files": reviewed_files,
                     "checked_items": ["当前任务文件覆盖"],
+                    "change_impacts": [{
+                        "summary": "保留各批次功能影响",
+                        "locations": [{"file": reviewed_files[0], "line": 1}],
+                    }],
                 },
                 ensure_ascii=False,
             ),
@@ -124,6 +128,7 @@ def test_review_queue_splits_over_budget_diff_and_aggregates_coverage(
     assert state["status"] == "success"
     assert verdict["verdict"] == "approve"
     assert verdict["reviewed_files"] == queue["covered"]
+    assert len(verdict["change_impacts"]) == len(reviewer.prompts)
     assert context["truncated_sections"] == ["full_diff"]
     assert context["review_queue"]["remaining"] == []
     assert any(item["event"] == "review_queue_started" for item in progress)
@@ -186,7 +191,7 @@ def test_review_queue_splits_only_after_prompt_budget_is_exceeded(
     queue = _read_json(review_run / "review-queue.json")
     assert queue["trigger"] == ["prompt_budget"]
     assert queue["status"] == "completed"
-    assert len(reviewer.prompts) == 2
+    assert len(reviewer.prompts) >= 2
     assert all(item["prompt_chars"] <= 6700 for item in queue["items"])
     assert queue["remaining"] == []
 

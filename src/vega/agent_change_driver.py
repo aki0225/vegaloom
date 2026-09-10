@@ -16,7 +16,6 @@ from .agent_change_presentation import (
 from .agent_approval_runtime import ApprovalSnapshotChangedError
 from .agent_cli_interaction import InteractionPumpUpdate
 from .agent_planning import PLANNING_PROPOSAL_ARTIFACT
-from .agent_planning_handoff import can_offer_handoff
 from .agent_planning_runtime import PlanningProposalRunner
 from .agent_provider import AgentProvider, resolve_run_provider
 from .agent_provider_adapter import SupervisorAgentProviderAdapter
@@ -25,14 +24,16 @@ from .agent_repository_change_lock import (
     RepositoryChangeLock,
 )
 from .agent_run import AgentRun
+from .agent_explain import AgentExplanation
+from .agent_cli_snapshot import AgentCliRun, build_agent_cli_snapshot
+from .agent_verification_retry import SupervisorAgentVerificationRetry
+from .agent_verification_retry_preparation import verification_retry_requested
 from .agent_run_selection import (
     ChangeRunSelectionError,
-    select_named_repository_change_run,
     select_repository_change_run,
 )
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import load_agent_bundle
-from .agent_status_sources import load_status_checkpoint_for_display
 from .project_config_provider import ensure_change_startup_config
 
 
@@ -55,6 +56,7 @@ class AgentChangeDriver:
         timeout_seconds: int = 900,
         interactive: bool = False,
         json_output: bool = False,
+        fresh_session: bool = False,
         confirm: ConfirmCallback | None = None,
         event_reporter: EventReporter | None = None,
         interaction_reporter: InteractionReporter | None = None,
@@ -67,6 +69,7 @@ class AgentChangeDriver:
         self.timeout_seconds = timeout_seconds
         self.interactive = interactive and not json_output
         self.json_output = json_output
+        self.persistent_sessions = not fresh_session
         self.confirm = confirm
         self.event_reporter = event_reporter
         self.interaction_reporter = interaction_reporter
@@ -116,7 +119,6 @@ class AgentChangeDriver:
                         "使用不带 TEXT 的 `vega change` 继续，"
                         "或使用高级 `vega start` 显式创建并行任务。"
                     ),
-                    ("change", "status", "explain"),
                 )
             ensure_change_startup_config(self.repo)
             started = self.runtime.start_planning(self.repo, goal=text)
@@ -134,7 +136,6 @@ class AgentChangeDriver:
                     active,
                     "change.active_run_exists",
                     "当前仓库已有未完成 ChangeRun，拒绝恢复第二个 Writer。",
-                    ("change", "status", "explain"),
                 )
             restored = self.runtime.resume_task_card(self.repo, task_path)
         self._event(f"已从 Task Card 恢复：{restored.run_dir.name}")
@@ -149,6 +150,7 @@ class AgentChangeDriver:
         return self._resume_implicit_task_card()
 
     def _drive(self, current: AgentRun) -> ChangeDriverResult:
+        current.state.require_current_execution()
         for _ in range(12):
             selected_provider = resolve_run_provider(
                 current.run_dir,
@@ -163,16 +165,20 @@ class AgentChangeDriver:
     def _advance_phase(
         self, current: AgentRun, provider: AgentProvider
     ) -> AgentRun | ChangeDriverResult:
+        if current.state.phase in {"acting", "observing", "stopped"}:
+            stopped = current.state.phase == "stopped"
+            return self._attention(
+                current, "workflow.stopped" if stopped else "workflow.execution_already_active",
+                "ChangeRun 已停止，现场保持不变。" if stopped else
+                "当前 ChangeRun 已绑定活动 Writer，拒绝启动第二个 Writer。",
+            )
         handlers = {
             "completed": self._completed,
-            "finalizing": self._finalize,
+            "finalizing": lambda run, _: self.runtime.finalize(run.run_dir.name),
             "planning": self._run_planning,
             "awaiting_approval": self._approve,
             "ready": self._run_ready,
-            "acting": self._active_execution,
-            "observing": self._active_execution,
             "needs_human": self._needs_human,
-            "stopped": self._stopped,
         }
         try:
             handler = handlers[current.state.phase]
@@ -185,18 +191,15 @@ class AgentChangeDriver:
     def _completed(
         self, current: AgentRun, _provider: AgentProvider
     ) -> ChangeDriverResult:
+        explanation = self._explanation(current)
+        completed = explanation.phase == "completed" and explanation.outcome == "completed"
         return ChangeDriverResult(
             run=current,
-            outcome="completed",
-            reason_code="workflow.completed",
-            message="ChangeRun 已完成，最终交付结论来自现有 Core Finish。",
-            safe_actions=("status", "explain"),
+            outcome="completed" if completed else "attention_required",
+            reason_code="workflow.completed" if completed else explanation.reason_code,
+            message=redact_change_message(explanation.reason),
+            safe_actions=tuple(explanation.safe_actions),
         )
-
-    def _finalize(self, current: AgentRun, _provider: AgentProvider) -> AgentRun:
-        result = self.runtime.finalize(current.run_dir.name)
-        self._event("可信 Core Finish 已发布")
-        return result
 
     def _run_planning(
         self, current: AgentRun, provider: AgentProvider
@@ -208,15 +211,9 @@ class AgentChangeDriver:
                 "workflow.replan_required",
                 "当前合同需要重新规划；请查看证据后使用 revise 提交修订，"
                 "由现有合同和预算门禁裁决。保留当前 Candidate 和批准记录。",
-                ("status", "explain", "revise"),
             )
         if current.state.active_planning_execution_id is not None:
-            return self._attention(
-                current,
-                "planning.already_running",
-                "当前 Planning Turn 仍在运行，拒绝启动第二个 Provider Turn。",
-                ("status", "stop"),
-            )
+            return self._reconcile_planning(current, provider)
         if not (current.run_dir / PLANNING_PROPOSAL_ARTIFACT).is_file():
             ensure_change_provider_ready(provider)
         executed = run_provider_operation(
@@ -226,7 +223,7 @@ class AgentChangeDriver:
             lambda: PlanningProposalRunner(
                 self.workspace,
                 provider=provider,
-                persistent_session=True,
+                persistent_session=self.persistent_sessions,
                 progress_reporter=self.progress_reporter,
                 event_reporter=self.event_reporter,
             ).run(
@@ -249,7 +246,6 @@ class AgentChangeDriver:
                 executed,
                 "planning.incomplete",
                 "只读调查没有形成可编译的 Planning Proposal。",
-                ("change", "status", "stop"),
             )
         return executed
 
@@ -263,24 +259,17 @@ class AgentChangeDriver:
                     approved,
                     "approval.bounded_rejected",
                     "bounded 策略未放行，Contract 仍等待人工批准。",
-                    ("approve", "revise", "status", "explain"),
                 )
             self._event("bounded 策略已批准当前 Contract")
             return approved
-        if not self.interactive or self.confirm is None:
+        confirm = self.confirm if self.interactive else None
+        snapshot = build_change_approval_snapshot(current) if confirm is not None else None
+        if snapshot is None or confirm is None or not confirm(snapshot.prompt):
             return self._attention(
                 current,
-                "approval.contract_required",
-                "当前 Contract 等待人工批准；JSON 或非交互终端不会读取 stdin。",
-                ("approve", "revise", "stop"),
-            )
-        snapshot = build_change_approval_snapshot(current)
-        if not self.confirm(snapshot.prompt):
-            return self._attention(
-                current,
-                "approval.declined",
-                "当前 Contract 未获批准，Worker 未启动。",
-                ("approve", "revise", "stop"),
+                "approval.contract_required" if snapshot is None else "approval.declined",
+                "当前 Contract 等待人工批准；JSON 或非交互终端不会读取 stdin。"
+                if snapshot is None else "当前 Contract 未获批准，Worker 未启动。",
             )
         try:
             approved = self.runtime.approve_if_current(
@@ -296,7 +285,6 @@ class AgentChangeDriver:
                 exc.current,
                 "approval.snapshot_changed",
                 "确认期间 Contract、Execution Plan 或 Run 状态已变化；请重新查看并批准。",
-                ("change", "status", "explain"),
             )
         self._event("当前 Contract 已由人工批准")
         return approved
@@ -309,8 +297,10 @@ class AgentChangeDriver:
                 current,
                 "workflow.no_automatic_action",
                 "当前 ready 状态没有可自动执行的 next 或 repair 动作。",
-                ("status", "explain"),
             )
+        if verification_retry_requested(self.workspace, current.run_dir.name):
+            # 判定只选择现有引擎；完整门禁失败必须向外报告，不能偷偷改派 Worker。
+            return self._verification_retry(provider).run(current.run_dir.name)
         ensure_change_provider_ready(provider)
         executed = run_provider_operation(
             self.workspace,
@@ -319,7 +309,7 @@ class AgentChangeDriver:
             lambda: SupervisorAgentProviderAdapter(
                 self.workspace,
                 provider=provider,
-                persistent_sessions=True,
+                persistent_sessions=self.persistent_sessions,
                 progress_reporter=self.progress_reporter,
                 event_reporter=self.event_reporter,
             ).run(
@@ -350,46 +340,24 @@ class AgentChangeDriver:
             boundary.run,
             boundary.update.reason_code or "provider.interaction_required",
             message,
-            ("status", "explain", "recover", "takeover"),
-        )
-
-    def _active_execution(
-        self, current: AgentRun, _provider: AgentProvider
-    ) -> ChangeDriverResult:
-        return self._attention(
-            current,
-            "workflow.execution_already_active",
-            "当前 ChangeRun 已绑定活动 Writer，拒绝启动第二个 Writer。",
-            ("status", "stop", "recover"),
         )
 
     def _needs_human(
-        self, current: AgentRun, _provider: AgentProvider
-    ) -> ChangeDriverResult:
+        self, current: AgentRun, provider: AgentProvider
+    ) -> AgentRun | ChangeDriverResult:
+        if current.state.contract_revision is None and current.state.active_planning_execution_id:
+            return self._reconcile_planning(current, provider)
+        rechecked = self._verification_retry(provider).recheck_core_if_eligible(
+            current.run_dir.name,
+        )
+        if rechecked is not None:
+            if rechecked.state.phase in {"ready", "finalizing"}:
+                return rechecked
+            current = rechecked
         return self._attention(
             current,
             "workflow.needs_human",
             "ChangeRun 已到人工边界；请查看原因和安全下一步。",
-            ("status", "explain"),
-        )
-
-    def _stopped(
-        self, current: AgentRun, _provider: AgentProvider
-    ) -> ChangeDriverResult:
-        checkpoint, _ = load_status_checkpoint_for_display(
-            current.run_dir, current.state,
-        )
-        actions = ["status", "explain"]
-        if can_offer_handoff(
-            current.run_dir, current.state, current.plan, checkpoint,
-        ):
-            actions.append("handoff")
-        actions.append("change <goal>")
-        return self._attention(
-            current,
-            "workflow.stopped",
-            "ChangeRun 已停止，现场保持不变。",
-            tuple(actions),
         )
 
     def _resume_implicit_task_card(self) -> ChangeDriverResult:
@@ -423,7 +391,6 @@ class AgentChangeDriver:
                     active,
                     "change.active_run_exists",
                     "当前仓库已有未完成 ChangeRun，拒绝恢复第二个 Writer。",
-                    ("change", "status", "explain"),
                 )
             current = confirm_task_card_selection(self.repo, selection)
             if not current.selected:
@@ -447,11 +414,13 @@ class AgentChangeDriver:
         )
 
     def _explicit_run(self, run: str) -> AgentRun:
-        selected = select_named_repository_change_run(self.repo, run)
-        run_dir, state, plan, _ = load_agent_bundle(
-            self.workspace,
-            selected.run_dir.name,
-        )
+        run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
+        if state.run_kind != "change":
+            raise ValueError("change 只接受 ChangeRun")
+        change_metadata = metadata.get("change_run")
+        source = change_metadata.get("source_repo_path") if isinstance(change_metadata, dict) else None
+        if not isinstance(source, str) or Path(source).resolve() != self.repo:
+            raise ValueError("指定 Run 不属于当前仓库的可验证 ChangeRun")
         return AgentRun(run_dir=run_dir, state=state, plan=plan)
 
     def _implicit_active_run(self) -> AgentRun | ChangeDriverResult | None:
@@ -485,15 +454,46 @@ class AgentChangeDriver:
         run: AgentRun | None,
         reason_code: str,
         message: str,
-        safe_actions: tuple[str, ...],
+        safe_actions: tuple[str, ...] = (),
     ) -> ChangeDriverResult:
         return ChangeDriverResult(
             run=run,
             outcome="attention_required",
             reason_code=reason_code,
             message=redact_change_message(message),
-            safe_actions=safe_actions,
+            safe_actions=tuple(self._explanation(run).safe_actions) if run is not None else safe_actions,
         )
+
+    def _reconcile_planning(self, current: AgentRun, provider: AgentProvider) -> ChangeDriverResult:
+        # 已绑定的调查只交回原 Runner 对账；本次调用不得顺势开启第二个 Planner。
+        reconciled = PlanningProposalRunner(
+            self.workspace, provider=provider,
+            persistent_session=self.persistent_sessions,
+            progress_reporter=self.progress_reporter, event_reporter=self.event_reporter,
+        ).run(current.run_dir.name, timeout_seconds=self.timeout_seconds)
+        return self._attention(
+            reconciled, "planning.reconciled", "已核对当前调查执行；请查看状态后继续。",
+        )
+
+    def _verification_retry(self, provider: AgentProvider) -> SupervisorAgentVerificationRetry:
+        return SupervisorAgentVerificationRetry(
+            self.workspace, provider=provider,
+            persistent_sessions=self.persistent_sessions,
+            progress_reporter=self.progress_reporter,
+            event_reporter=self.event_reporter,
+        )
+
+    def _explanation(self, current: AgentRun) -> AgentExplanation:
+        # 与 status、explain 复用同一证据快照，不能把阶段名称再推导成另一套建议。
+        snapshot = build_agent_cli_snapshot(AgentCliRun(
+            workspace=current.run_dir.parent.parent,
+            run_dir=current.run_dir,
+            selection_source="explicit",
+        ))
+        assert snapshot.explanation is not None
+        if snapshot.status_projection is None or snapshot.status_projection.state != current.state:
+            raise ValueError("ChangeRun 在结果展示期间已变化；请重新查看 status")
+        return snapshot.explanation
 
     def _event(self, message: str) -> None:
         if self.event_reporter is not None:

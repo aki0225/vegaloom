@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "event_id": "20260910T023423Z-DAILY-01-started",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "DAILY-01",
+  "transition": "started",
+  "recorded_at": "2026-09-10T02:34:23Z",
+  "summary": "已实施主路径精简并完成定向回归及两种 Provider 的正常路径验证；真实 Reviewer 打回后继续与 PR CI 尚待验收，不声明计划完成。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": ["affected-tests", "architecture-growth", "repository-hygiene", "plan-state"],
+    "artifacts": [
+      "docs/MAIN-PATH-SIMPLIFICATION-PLAN.md",
+      "src/vega/agent_environment_preparation.py",
+      "src/vega/agent_core_recheck.py",
+      "tests/supervisor/test_agent_core_recheck.py",
+      "tests/supervisor/test_agent_environment_preparation.py"
+    ]
+  }
+}

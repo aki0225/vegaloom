@@ -107,6 +107,7 @@ def prepare_reviewer_timeout_source(
     """验证 Core Reviewer timeout 现场，不运行命令也不修改状态。"""
 
     run_dir, state, plan, metadata = load_agent_bundle(workspace, run)
+    state.require_current_execution()
     if (
         state.run_kind != "change"
         or state.phase != "needs_human"
