@@ -351,7 +351,7 @@ class AgentChangeDriver:
             current.run_dir.name,
         )
         if rechecked is not None:
-            if rechecked.state.phase in {"ready", "finalizing"}:
+            if rechecked.state.phase in {"ready", "finalizing", "completed"}:
                 return rechecked
             current = rechecked
         return self._attention(

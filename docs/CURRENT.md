@@ -21,7 +21,7 @@
 - change、status、explain 使用同源安全动作，删除公开 run/retry 和 Agent next_steps，不新增成功语义
 - 同次 Reviewer 的可选功能影响只提供导航；代码位置按 Candidate 核验，缺失摘要不影响原门禁
 - 旧执行协议只能查看、停止和可信交接；新任务与 Task Card 恢复显式采用新协议
-- Codex 与 Claude 有受控真实任务记录，至少一次审查打回；Echo 既有证据只读核对，必要回归和 PR CI 通过
+- Codex 与 Claude 有受控真实任务记录，并完成一个中等真实任务的日用验收；真实运行与确定性打回恢复测试分别记录，不要求模型必须随机打回；必要回归和 PR CI 通过
 
 要求检查：
 

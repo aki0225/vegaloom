@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from vega.agent_change_contract import ChangeAuthorityEnvelope, ChangeContract, ExecutionPlan, ExecutionWorkItem
+from vega.agent_change_driver import AgentChangeDriver
 from vega.agent_change_control import change_budget_snapshot
 from vega.agent_core_recheck import core_recheck_available, prepare_core_recheck, require_rechecked_finish
 from vega.agent_persistence import load_agent_state, save_agent_state
@@ -106,7 +107,9 @@ def _blocked_change(tmp_path: Path, verdict: str = "approve"):
 
 
 @pytest.mark.parametrize("verdict", ["approve", "request_changes"])
-def test_recheck_reuses_core_without_worker_review_or_verification(tmp_path: Path, verdict: str) -> None:
+def test_recheck_reuses_core_without_worker_review_or_verification(
+    tmp_path: Path, verdict: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     workspace, blocked, runner, contract = _blocked_change(tmp_path, verdict)
     prepared = prepare_core_recheck(workspace, blocked.run_dir.name)
     old_finish = (prepared.child_dir / "finish-summary.json").read_bytes()
@@ -117,7 +120,16 @@ def test_recheck_reuses_core_without_worker_review_or_verification(tmp_path: Pat
     retry = SupervisorAgentVerificationRetry(workspace)
     retry.loop_runtime.continue_assist = lambda *args, **kwargs: pytest.fail("重算不得运行验证或模型")
 
-    result = retry.recheck_core_if_eligible(blocked.run_dir.name)
+    if verdict == "approve":
+        # 覆盖公开推进接缝：引擎已完成时，本次 change 必须返回完成，而非要求再执行一次。
+        driver = AgentChangeDriver(workspace, tmp_path / "repo")
+        monkeypatch.setattr(driver, "_verification_retry", lambda _: retry)
+        driven = driver.change(run=blocked.run_dir.name)
+        assert driven.outcome == "completed" and driven.exit_code == 0
+        assert driven.reason_code == "workflow.completed"
+        result = driven.run
+    else:
+        result = retry.recheck_core_if_eligible(blocked.run_dir.name)
 
     assert result is not None
     assert result.state.phase == ("completed" if verdict == "approve" else "ready")
