@@ -23,6 +23,7 @@ from vega.agent_change_driver import AgentChangeDriver, ChangeDriverResult
 from vega.agent_change_presentation import build_change_approval_snapshot
 from vega.agent_cli_interaction import InteractionPumpUpdate
 from vega.agent_contract import AgentState
+from vega.agent_persistence import save_agent_state
 from vega.agent_planning import (
     PlanningContractProposal,
     PlanningExecutionPlan,
@@ -43,6 +44,87 @@ from vega.provider_session import (
     save_provider_sessions,
 )
 from vega.runner import RunnerResult
+
+
+@pytest.mark.parametrize("candidate_bound", [False, True])
+def test_change_replan_with_existing_contract_preserves_evidence_without_planner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_bound: bool,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(
+        repo, contract=_contract(), execution_plan=_execution_plan(),
+    )
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    state = AgentState.model_validate({
+        **approved.state.model_dump(mode="json"),
+        "phase": "planning",
+        "approved_plan_digest": None,
+        "active_candidate_sha": "a" * 40 if candidate_bound else None,
+        "allowed_actions": ["replan", "human"],
+    })
+    save_agent_state(approved.run_dir / "agent-state.json", state)
+    evidence_names = ("agent-state.json", "agent-plan.json", "change-contract.json")
+    before = {name: (approved.run_dir / name).read_bytes() for name in evidence_names}
+    monkeypatch.setattr(
+        driver_module, "ensure_change_provider_ready",
+        lambda _: pytest.fail("已有合同的 replan 不得准备 Provider"),
+    )
+    monkeypatch.setattr(
+        PlanningProposalRunner, "run",
+        lambda *args, **kwargs: pytest.fail("已有合同的 replan 不得调用初始 Planner"),
+    )
+
+    result = AgentChangeDriver(repo, repo, provider="claude").change(
+        run=approved.run_dir.name,
+    )
+
+    assert result.outcome == "attention_required"
+    assert result.reason_code == "workflow.replan_required"
+    assert result.safe_actions == ("plan.revise", "status.view_full", "run.stop")
+    assert result.run is not None
+    assert result.run.state == state
+    assert _contract().authority_envelope.max_auto_replans == 0
+    assert {name: (approved.run_dir / name).read_bytes() for name in evidence_names} == before
+
+
+@pytest.mark.parametrize("retry_fails", [False, True])
+def test_change_routes_existing_verification_retry_without_worker_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retry_fails: bool,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(repo, contract=_contract(), execution_plan=_execution_plan())
+    ready = runtime.approve(started.run_dir.name)
+    calls: list[str] = []
+
+    class StaticRetry:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, run):
+            calls.append(run)
+            if retry_fails:
+                raise ValueError("验证恢复证据损坏")
+            from vega.agent_recovery import SupervisorAgentRecovery
+            return SupervisorAgentRecovery(repo).stop(run, reason="测试恢复结束")
+
+    monkeypatch.setattr(driver_module, "verification_retry_requested", lambda *args: True)
+    monkeypatch.setattr(driver_module, "SupervisorAgentVerificationRetry", StaticRetry)
+    monkeypatch.setattr(
+        driver_module, "ensure_change_provider_ready",
+        lambda *args: pytest.fail("验证恢复不得改派 Coding Worker"),
+    )
+    driver = AgentChangeDriver(repo, repo)
+    if retry_fails:
+        with pytest.raises(ValueError, match="验证恢复证据损坏"):
+            driver.change(run=ready.run_dir.name)
+    else:
+        result = driver.change(run=ready.run_dir.name)
+        assert result.run is not None and result.run.state.phase == "stopped"
+    assert calls == [ready.run_dir.name]
 
 
 def test_change_creates_planning_run_and_stops_at_non_tty_approval(
@@ -137,17 +219,12 @@ def test_change_continues_unique_run_through_existing_approval_path(
             assert timeout_seconds == 60
             run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
             adapter_calls.append(run)
-            return AgentRun(
-                run_dir=run_dir,
-                state=AgentState.model_validate(
-                    {
-                        **state.model_dump(mode="json"),
-                        "phase": "needs_human",
-                        "allowed_actions": ["human"],
-                    }
-                ),
-                plan=plan,
-            )
+            state = AgentState.model_validate({
+                **state.model_dump(mode="json"),
+                "phase": "needs_human", "allowed_actions": ["human"],
+            })
+            save_agent_state(run_dir / "agent-state.json", state)
+            return AgentRun(run_dir=run_dir, state=state, plan=plan)
 
     monkeypatch.setattr(
         driver_module,
@@ -174,7 +251,7 @@ def test_change_continues_unique_run_through_existing_approval_path(
     assert result.reason_code == "workflow.needs_human"
     assert adapter_calls == [started.run_dir.name]
     _, state, _, _ = load_agent_bundle(repo, started.run_dir.name)
-    assert state.phase == "ready"
+    assert state.phase == "needs_human"
     if approval == "human":
         assert len(prompts) == 1
         assert "目标：修复示例函数" in prompts[0]
@@ -589,7 +666,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
     assert result.reason_code == "provider.interaction_requires_advanced_response"
     assert result.run is not None
-    assert result.safe_actions == ("status", "explain", "recover", "takeover")
+    assert result.safe_actions == tuple(driver_module.AgentChangeDriver(repo, repo)._explanation(result.run).safe_actions)
     assert load_provider_sessions(result.run.run_dir).interactions[0].status == "closed"
     assert [update.status for update in updates] == ["attention"]
     visible = repr([result.message, updates, events])

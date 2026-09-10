@@ -41,6 +41,7 @@ _ALLOWED_RETRY_ENVIRONMENT_DRIFT_ISSUES = frozenset(
         "ignored_content_complete_mismatch",
     }
 )
+VerificationRetryMode = Literal["verification_failure", "reviewer_timeout", "core_evidence_recheck"]
 
 
 @dataclass(frozen=True)
@@ -64,7 +65,7 @@ class PreparedVerificationRetry:
     pre_core_scope: ScopeGateResult
     comparison_base_sha: str | None
     comparison_paths: tuple[str, ...]
-    retry_reason: Literal["verification_failure", "reviewer_timeout"] = (
+    retry_reason: VerificationRetryMode = (
         "verification_failure"
     )
     candidate_sha: str | None = None

@@ -108,6 +108,8 @@ def build_change_approval_snapshot(current: AgentRun) -> ChangeApprovalSnapshot:
         *_items(contract.authorized_risk_reviews),
         "验证命令：",
         *_items(contract.required_verification),
+        "控制器环境准备（每个批准版本最多一次，失败不重试）：",
+        *_items(contract.prepare_commands),
         "",
         "二、执行细节（不改变上述授权范围）",
         "已确认事实：",

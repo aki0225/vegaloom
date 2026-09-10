@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,7 +16,8 @@ from vega.agent_contract import (
 from vega.agent_explain import build_agent_explanation
 from vega.agent_explain_codes import public_action_ids
 from vega.agent_persistence import save_agent_checkpoint
-from vega.agent_status_sources import load_status_decision_for_display
+from vega.agent_status_sources import load_status_decision_for_display, load_status_checkpoint_for_display
+from vega.agent_provider_explain import provider_interaction_projection
 from vega.provider_session import (
     PendingInteraction,
     ProviderSessionHandle,
@@ -24,12 +26,18 @@ from vega.provider_session import (
 )
 
 
+@pytest.mark.parametrize("evidence_issue", ["workspace", "decision"])
 def test_evidence_override_precedes_provider_and_recorded_phase(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    evidence_issue: str,
 ) -> None:
     run_dir = _run_dir(tmp_path)
     state = _state(phase="acting", active=True)
+    if evidence_issue == "decision":
+        state = state.model_copy(update={"latest_checkpoint_id": "checkpoint-001"})
+        _write_checkpoint_decision(run_dir, state, reason_code="side_effects.unknown")
+        (run_dir / "decisions/decision-001.json").write_text("{", encoding="utf-8")
     save_provider_sessions(
         run_dir,
         ProviderSessionState(
@@ -41,15 +49,18 @@ def test_evidence_override_precedes_provider_and_recorded_phase(
     _stub_status(
         monkeypatch,
         state,
-        effective_phase="needs_human",
-        integrity_warning="当前 Workspace 与最近证据不一致。",
+        effective_phase="needs_human" if evidence_issue == "workspace" else "acting",
+        integrity_warning="当前 Workspace 与最近证据不一致。" if evidence_issue == "workspace" else None,
         workspace_current=False,
         evidence_health="stale",
     )
 
     result = build_agent_explanation(run_dir, state, _plan())
 
-    assert result.reason_code == "workspace.snapshot_stale"
+    assert result.reason_code == (
+        "workspace.snapshot_stale" if evidence_issue == "workspace" else "evidence.decision_unverified"
+    )
+    assert result.phase == "needs_human"
     assert result.block_category == "evidence"
     assert result.source == "evidence"
 
@@ -132,6 +143,38 @@ def test_active_worker_only_lists_supported_actions(
         "provider.steer",
         "run.stop",
     ]
+
+
+@pytest.mark.parametrize("phase", ["planning", "ready", "finalizing"])
+def test_legacy_protocol_never_offers_execution(tmp_path: Path, monkeypatch, phase: str) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase=phase).model_copy(update={"execution_protocol": 1})
+    _stub_status(monkeypatch, state)
+    result = build_agent_explanation(run_dir, state, _plan())
+    assert result.reason_code == "legacy.execution_protocol"
+    assert "run.continue" not in result.safe_actions
+    assert "status.view_full" in result.safe_actions
+
+
+def test_legacy_pending_interaction_only_offers_status_and_stop(tmp_path: Path, monkeypatch) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="acting", active=True).model_copy(update={"execution_protocol": 1})
+    save_provider_sessions(run_dir, ProviderSessionState(
+        run_id=run_dir.name, handles={"worker": _provider_handle()}, interactions=[_interaction()],
+    ))
+    _stub_status(monkeypatch, state)
+    result = build_agent_explanation(run_dir, state, _plan())
+    assert result.safe_actions == ["status.view", "run.stop"]
+
+
+def test_environment_preparation_does_not_offer_worker_controls(tmp_path: Path, monkeypatch) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="acting", active=True).model_copy(update={"active_child_run": "agent-run"})
+    _stub_status(monkeypatch, state, active_operation_kind="environment_prepare")
+    result = build_agent_explanation(run_dir, state, _plan())
+    assert result.reason_code == "environment.preparation_active"
+    assert result.safe_actions == ["status.view", "run.stop"]
+    assert "尚未启动 Coding Worker" in result.reason
 
 
 def test_finalizing_offers_idempotent_continue(tmp_path: Path, monkeypatch) -> None:
@@ -450,11 +493,17 @@ def _stub_status(
         "next_step": "查看当前状态",
     }
     payload.update(updates)
-    monkeypatch.setattr(
-        explain_module,
-        "build_agent_status_payload",
-        lambda *_args, **_kwargs: payload,
-    )
+    def projection(run_dir, actual_state, plan):
+        checkpoint, checkpoint_issue = load_status_checkpoint_for_display(run_dir, actual_state)
+        decision, decision_issue = load_status_decision_for_display(run_dir, checkpoint)
+        interactions, warnings = provider_interaction_projection(run_dir, actual_state)
+        return SimpleNamespace(
+            state=actual_state, plan=plan, payload=payload, checkpoint=checkpoint,
+            decision=decision,
+            decision_issue=decision_issue or (checkpoint_issue if actual_state.latest_checkpoint_id else None),
+            provider_interactions=interactions, provider_warnings=warnings,
+        )
+    monkeypatch.setattr(explain_module, "build_agent_status_projection", projection)
 
 
 def _run_dir(tmp_path: Path) -> Path:
@@ -471,6 +520,7 @@ def _state(
 ) -> AgentState:
     return AgentState(
         run_id="agent-run",
+        execution_protocol=2,
         task_id="task-01",
         repository_id="repo-01",
         phase=phase,

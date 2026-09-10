@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .models import GateResult, RequiredReviewHit, ReviewVerdict
 from .redaction import redact_text
 from .review_contract import normalize_review_path
 from .review_coverage import build_review_file_coverage
+from .review_impact import project_change_impacts, render_change_impacts
 from .runner import RunnerResult
 from .risk_review import render_required_review_gate_lines
 from .risk_review_runtime import (
@@ -145,6 +147,8 @@ def build_finish_review_section(
     changed_files: list[str],
     *,
     changed_files_source: str,
+    repo: Path | None = None,
+    candidate_sha: str | None = None,
 ) -> dict[str, Any]:
     review = (
         verdict.model_dump()
@@ -182,6 +186,9 @@ def build_finish_review_section(
     review["other_changed_files"] = [
         path for path in changed_files if path not in priority_files
     ]
+    review["change_impact_projection"] = project_change_impacts(
+        review.get("change_impacts") or [], repo, candidate_sha,
+    )
     return review
 
 
@@ -192,6 +199,8 @@ def render_finish_review_section(review: dict[str, Any]) -> list[str]:
         "",
         f"- Verdict：`{review.get('verdict') or '无'}`",
         f"- Summary：{review.get('summary') or '未提供'}",
+        "- Findings、风险披露和重点文件位置保留 Reviewer 声明；"
+        "不等于下方功能影响中已核验的 Candidate 引用。",
     ]
     coverage = review.get("coverage") or {}
     if coverage:
@@ -260,6 +269,7 @@ def render_finish_review_section(review: dict[str, Any]) -> list[str]:
                 f"  - 剩余风险：{disclosure.get('residual_risk') or '未提供'}",
             ]
         )
+    lines.extend(render_change_impacts(review.get("change_impact_projection") or {}))
     return lines
 
 
@@ -291,6 +301,12 @@ def verdict_schema_example(
         "risk_disclosures": risk_disclosure_schema_example(required_reviews),
         "reviewed_files": ["src/example.py", "tests/test_example.py"],
         "checked_items": ["需求覆盖", "测试覆盖", "项目规则", "安全风险"],
+        "change_impacts": [
+            {
+                "summary": "功能变化与影响（可选模型意见）",
+                "locations": [{"file": "src/example.py", "line": 1}],
+            }
+        ],
     }
 
 

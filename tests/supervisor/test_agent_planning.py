@@ -439,14 +439,14 @@ def test_planning_rejects_success_while_bound_process_is_still_alive(
     )
     monkeypatch.chdir(workspace)
     monkeypatch.setattr(
-        "vega.agent_start_cli.ensure_runner_ready",
+        "vega.agent_change_driver.ensure_change_provider_ready",
         lambda *_args, **_kwargs: None,
     )
     reconciled = CliRunner().invoke(
         app,
-        ["run", "--run", started.run_dir.name, "--timeout", "60"],
+        ["change", "--run", started.run_dir.name, "--timeout", "60"],
     )
-    assert reconciled.exit_code == 0, reconciled.output
+    assert reconciled.exit_code == 2, reconciled.output
     current = json.loads(
         (started.run_dir / "agent-state.json").read_text(encoding="utf-8")
     )["data"]

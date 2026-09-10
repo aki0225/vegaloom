@@ -264,6 +264,13 @@ def _precondition_route(
             ),
         ),
         (
+            observation.core_evidence in {"blocked", "stale"},
+            (
+                ["human"], "human", "evidence.core_untrusted",
+                "Core 证据尚未通过校验；保留业务合同，先处理运行问题",
+            ),
+        ),
+        (
             observation.plan_contradicted,
             (
                 ["replan", "human"],

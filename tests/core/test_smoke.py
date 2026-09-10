@@ -1778,7 +1778,9 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert "--contract <change-contract.json>" in agent_skill_text
     assert "--execution-plan <execution-plan.json>" in agent_skill_text
     assert "vega approve --run <run_id> --actor human" in agent_skill_text
-    assert "vega run --run <run_id> --timeout 900" in agent_skill_text
+    assert "vega change --run <run_id> --timeout 900 --json" in agent_skill_text
+    assert "vega run " not in agent_skill_text
+    assert "vega retry " not in agent_skill_text
     assert "vega watch --run <run_id> --follow" in agent_skill_text
     assert "vega steer --run <run_id>" in agent_skill_text
     assert "vega handoff --run <run_id>" in agent_skill_text
@@ -1990,10 +1992,11 @@ def test_loop_auto_stops_after_max_iterations(tmp_path) -> None:
     )
 
 
+@pytest.mark.parametrize("repo_name", ["repo", "long-" + "x" * 70])
 def test_loop_two_iteration_success_finishes_with_isolated_verification(
-    tmp_path,
+    tmp_path, repo_name,
 ) -> None:
-    repo_dir = tmp_path / "repo"
+    repo_dir = tmp_path / repo_name
     _init_clean_git_repo(repo_dir)
     _write_isolated_verification_config(repo_dir)
     runtime = LoopAutomationRuntime(

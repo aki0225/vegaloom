@@ -115,6 +115,7 @@ class PlanningProposalRunner:
             self.workspace,
             run_dir.name,
         )
+        state.require_current_execution()
         prepared_state = prepare_planning_state(
             run_dir,
             state,

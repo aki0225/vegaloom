@@ -11,15 +11,15 @@ from .agent_change_cli import (
     agent_change,
     agent_recover,
     agent_replan,
-    agent_retry,
 )
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_runtime import SupervisorAgentRuntime
+from .agent_persistence import load_agent_state
 from .agent_runtime_support import (
     capture_bound_workspace,
     load_agent_bundle,
 )
-from .agent_start_cli import agent_run, agent_start
+from .agent_start_cli import agent_start
 from .agent_provider import provider_resume_command
 from .cli_support import require_repo_directory
 from .provider_session import (
@@ -39,8 +39,6 @@ def register_agent_commands(app: typer.Typer) -> None:
     app.command("change", rich_help_panel="日常使用")(agent_change)
     app.command("start", rich_help_panel="高级控制")(agent_start)
     app.command("approve", rich_help_panel="高级控制")(agent_approve)
-    app.command("run", rich_help_panel="高级控制")(agent_run)
-    app.command("retry", rich_help_panel="高级控制")(agent_retry)
     app.command("recover", rich_help_panel="恢复与交接")(agent_recover)
     app.command("adjudicate", rich_help_panel="高级控制")(agent_adjudicate)
     app.command("revise", rich_help_panel="高级控制")(agent_replan)
@@ -362,8 +360,11 @@ def _recovery() -> SupervisorAgentRecovery:
 
 def _agent_run_dir(run: str) -> Path:
     try:
-        return resolve_run_dir(Path.cwd(), run)
-    except (FileNotFoundError, ValueError) as exc:
+        run_dir = resolve_run_dir(Path.cwd(), run)
+        # 会话控制可以继续原 Writer，因此与 Runtime 调度共用执行协议边界。
+        load_agent_state(run_dir / "agent-state.json").require_current_execution()
+        return run_dir
+    except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
 

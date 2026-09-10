@@ -119,6 +119,7 @@ def reconcile_observation(
             "verification": "not_run",
             "risk": "not_run",
             "review": "not_run",
+            "core_evidence": "not_run",
         }
     )
 

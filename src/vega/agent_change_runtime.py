@@ -85,6 +85,7 @@ def start_change_run(
         comparison_base_sha=revision.commit,
     )
     state = AgentState(
+        execution_protocol=2,
         run_id=run_id,
         task_id=contract.task_id,
         repository_id=repository_scope(handle.worktree_path),

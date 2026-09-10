@@ -58,7 +58,13 @@ class WorkerClaim(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    claimed_status: Literal["completed", "blocked"]
+    claimed_status: Literal["completed", "blocked"] = Field(
+        description=(
+            "completed 只表示实现已交给控制器验证，不表示测试通过。"
+            "代码完成但沙箱缺少测试依赖时，在 tests_claimed 如实记录未运行项；"
+            "实现未完成、需要扩大授权或外部副作用不明时使用 blocked。"
+        )
+    )
     summary: ClaimSummary
     tests_claimed: list[ClaimListItem] = Field(max_length=20)
     remaining_questions: list[ClaimListItem] = Field(max_length=20)
@@ -83,6 +89,7 @@ class PreparedWorkerAttempt:
     comparison_paths: tuple[str, ...] = ()
     change_context: ChangeRunContext | None = None
     timeout_seconds: int = 900
+    resumed_before_core: bool = False
 
 
 @dataclass(frozen=True)
@@ -390,6 +397,7 @@ def observation_from_child(
         verification=verification,
         risk=risk,
         review=review,
+        core_evidence="stale" if _finish_evidence_untrusted(finish_summary) else "passed",
         reviewer_runner_status=(
             latest.reviewer_status if latest is not None else None
         ),

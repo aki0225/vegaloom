@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import agent_explain_codes as explain_codes
+from .agent_core_recheck import core_recheck_available
 from .agent_contract import AgentCheckpoint, AgentDecision, AgentPhase, AgentPlan, AgentState
 from .agent_planning_handoff import can_offer_handoff
-from .agent_provider_explain import (
-    provider_interaction_projection,
-    with_provider_warnings,
-)
-from .agent_status_projection import AgentStatusProjection, build_agent_status_payload
-from .agent_status_sources import load_status_checkpoint_for_display
-from .agent_status_sources import load_status_decision_for_display
-from .provider_session import PROVIDER_SESSIONS_ARTIFACT, PendingInteraction
+from .agent_provider_explain import with_provider_warnings
+from .agent_status_projection import AgentStatusProjection, build_agent_status_projection
+from .provider_session import PROVIDER_SESSIONS_ARTIFACT
 
 
 ExplanationOutcome = Literal["in_progress", "ready", "attention_required", "completed", "stopped", "unknown"]
@@ -42,16 +37,6 @@ class AgentExplanation(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class _ExplanationInputs:
-    status: dict[str, object]
-    sessions: tuple[PendingInteraction, ...]
-    provider_warnings: tuple[str, ...]
-    checkpoint: AgentCheckpoint | None
-    decision: AgentDecision | None
-    decision_issue: str | None
-
-
 def build_agent_explanation(
     run_dir: Path,
     state: AgentState,
@@ -62,8 +47,8 @@ def build_agent_explanation(
     """解释当前 ChangeRun，并优先复用调用方已构建的只读投影。
 
     CLI 传入 ``status_projection`` 后，本函数不会再次构建 status、读取
-    Workspace、Provider Session 或 Checkpoint。保留无投影调用是为了兼容旧
-    Run 的直接 Python 调用方；新入口应始终传入共享投影。
+    Workspace、Provider Session 或 Checkpoint。直接 Python 调用也沿同一投影
+    采集证据，不再维护另一套独立读取路径。
     """
 
     inputs = _load_explanation_inputs(
@@ -71,8 +56,8 @@ def build_agent_explanation(
     )
     if inputs is None:
         return _unverified_projection_explanation(state)
-    status = inputs.status
-    sessions = inputs.sessions
+    status = inputs.payload
+    sessions = inputs.provider_interactions
     provider_warnings = inputs.provider_warnings
     checkpoint = inputs.checkpoint
     decision = inputs.decision
@@ -110,6 +95,21 @@ def build_agent_explanation(
             evidence_refs=_base_refs(state),
         )
 
+    if decision_issue is not None:
+        return with_provider_warnings(_explanation(
+            state,
+            phase="needs_human",
+            outcome="attention_required",
+            reason_code="evidence.decision_unverified",
+            source="evidence",
+            actor="当前证据投影",
+            reason=decision_issue,
+            facts=[f"持久化阶段为 {state.phase}"],
+            unknowns=["最近 Checkpoint 的路由依据是否完整且绑定正确"],
+            safe_actions=["status_full", "inspect_artifacts", "human"],
+            evidence_refs=_base_refs(state),
+        ), provider_warnings)
+
     if sessions:
         first = sessions[0]
         return with_provider_warnings(_explanation(
@@ -131,28 +131,14 @@ def build_agent_explanation(
                 f"请求状态为 {first.status}",
             ],
             unknowns=["该请求尚未由人工接受或拒绝"],
-            safe_actions=explain_codes.provider_interaction_actions(first.method),
+            safe_actions=(explain_codes.provider_interaction_actions(first.method)
+                          if state.execution_protocol == 2 else ["status", "stop"]),
             evidence_refs=[PROVIDER_SESSIONS_ARTIFACT],
         ), provider_warnings)
 
     active = _active_execution_explanation(state, status)
     if active is not None:
         return with_provider_warnings(active, provider_warnings)
-
-    if decision_issue is not None:
-        return with_provider_warnings(_explanation(
-            state,
-            phase="needs_human",
-            outcome="attention_required",
-            reason_code="evidence.decision_unverified",
-            source="evidence",
-            actor="当前证据投影",
-            reason=decision_issue,
-            facts=[f"持久化阶段为 {state.phase}"],
-            unknowns=["最近 Checkpoint 的路由依据是否完整且绑定正确"],
-            safe_actions=["status_full", "inspect_artifacts", "human"],
-            evidence_refs=_base_refs(state),
-        ), provider_warnings)
 
     phase = _phase_explanation(run_dir, state, plan, status, checkpoint, decision)
     if phase is not None:
@@ -189,46 +175,15 @@ def _load_explanation_inputs(
     plan: AgentPlan,
     *,
     status_projection: AgentStatusProjection | None,
-) -> _ExplanationInputs | None:
+) -> AgentStatusProjection | None:
     if status_projection is not None:
         if status_projection.state != state or status_projection.plan != plan:
             raise ValueError("Explain 投影与 Agent State/Plan 身份不一致。")
-        return _ExplanationInputs(
-            status=status_projection.payload,
-            sessions=status_projection.provider_interactions,
-            provider_warnings=status_projection.provider_warnings,
-            checkpoint=status_projection.checkpoint,
-            decision=status_projection.decision,
-            decision_issue=status_projection.decision_issue,
-        )
+        return status_projection
     try:
-        status = build_agent_status_payload(run_dir, state, plan)
+        return build_agent_status_projection(run_dir, state, plan)
     except (OSError, RuntimeError, ValueError):
         return None
-    sessions, provider_warnings = provider_interaction_projection(run_dir, state)
-    checkpoint, checkpoint_issue = load_status_checkpoint_for_display(
-        run_dir,
-        state,
-    )
-    decision, decision_issue = load_status_decision_for_display(
-        run_dir,
-        checkpoint,
-    )
-    return _ExplanationInputs(
-        status=status,
-        sessions=tuple(sessions),
-        provider_warnings=tuple(provider_warnings),
-        checkpoint=checkpoint,
-        decision=decision,
-        decision_issue=(
-            decision_issue
-            or (
-                checkpoint_issue
-                if state.latest_checkpoint_id is not None
-                else None
-            )
-        ),
-    )
 
 
 def _unverified_projection_explanation(state: AgentState) -> AgentExplanation:
@@ -250,7 +205,11 @@ def _unverified_projection_explanation(state: AgentState) -> AgentExplanation:
 def _active_execution_explanation(
     state: AgentState, status: dict[str, object]
 ) -> AgentExplanation | None:
-    if state.active_planning_execution_id is not None:
+    if status.get("active_operation_kind") == "environment_prepare":
+        code = "environment.preparation_active"
+        reason = "正在执行已批准的环境准备命令；尚未启动 Coding Worker。"
+        safe_actions = ["status", "stop"]
+    elif state.active_planning_execution_id is not None:
         code = "planning.execution_active"
         reason = "只读调查仍在运行。"
         safe_actions = ["status", "stop"]
@@ -262,12 +221,14 @@ def _active_execution_explanation(
         code = "execution.observation_active"
         reason = "Vega 正在对账 Candidate 与 Core 证据。"
         safe_actions = ["status", "stop"]
-    elif state.phase == "finalizing":
+    elif state.phase == "finalizing" and state.execution_protocol == 2:
         code = "execution.finalization_active"
         reason = "Vega 正在采用可信 Core Finish 生成最终结论。"
         safe_actions = ["run", "stop"]
     else:
         return None
+    if state.execution_protocol != 2:
+        safe_actions = ["status", "stop"]
     facts = [f"当前阶段为 {state.phase}"]
     if state.current_work_item:
         facts.append(f"当前 Work Item 为 {state.current_work_item}")
@@ -295,6 +256,19 @@ def _phase_explanation(
     checkpoint: AgentCheckpoint | None,
     decision: AgentDecision | None,
 ) -> AgentExplanation | None:
+    if state.execution_protocol != 2 and not (
+        state.active_child_run or state.active_operation_id or state.active_planning_execution_id
+    ):
+        actions = ["status_full", "inspect_artifacts"]
+        actions.extend(["handoff"] if can_offer_handoff(run_dir, state, plan, checkpoint) else [])
+        actions.append("stop")
+        return _explanation(
+            state, phase=state.phase, outcome="attention_required",
+            reason_code="legacy.execution_protocol", source="legacy", actor="执行协议边界",
+            reason="旧执行协议仅保留状态、证据和交接；请从 Task Card 创建新运行。",
+            safe_actions=actions, evidence_refs=_checkpoint_refs(state, checkpoint),
+        )
+
     if state.phase == "awaiting_approval":
         return _explanation(
             state,
@@ -351,6 +325,22 @@ def _phase_explanation(
             reason=reason,
             facts=facts,
             safe_actions=safe_actions,
+            evidence_refs=_checkpoint_refs(state, checkpoint),
+        )
+    if state.phase == "needs_human" and core_recheck_available(run_dir.parent.parent, run_dir.name):
+        return _explanation(
+            state, phase=state.phase, outcome="ready", source="evidence",
+            reason_code="evidence.core_recheck_available", actor="Core 证据对账",
+            reason="当前 Candidate 的已有验证证据可以重新核对；不会启动 Worker 或重跑测试。",
+            safe_actions=["run.continue", "status_full", "stop"],
+            evidence_refs=_checkpoint_refs(state, checkpoint),
+        )
+    if state.phase == "planning" and state.contract_revision is not None:
+        return _explanation(
+            state, phase=state.phase, outcome="attention_required",
+            reason_code="workflow.replan_required", source="phase", actor="合同修订门禁",
+            reason="当前合同需要重新规划；请修订合同和计划，保留原 Candidate 与批准记录。",
+            safe_actions=["revise", "status_full", "stop"],
             evidence_refs=_checkpoint_refs(state, checkpoint),
         )
     if state.phase == "planning" and decision is None:
@@ -452,7 +442,11 @@ def _checkpoint_explanation(
 def _safe_actions(state: AgentState, status: dict[str, object], *, fallback: list[str]) -> list[str]:
     actions = status.get("allowed_actions")
     valid = actions if isinstance(actions, list) and all(isinstance(item, str) for item in actions) else []
-    replan = "run.continue" if state.phase == "planning" else "plan.revise"
+    replan = (
+        "run.continue"
+        if state.phase == "planning" and state.contract_revision is None
+        else "plan.revise"
+    )
     return explain_codes.public_action_ids(valid, fallback=fallback, replan_action=replan)
 
 

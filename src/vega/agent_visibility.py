@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 from .agent_contract import (
@@ -11,7 +10,9 @@ from .agent_contract import (
     AgentStatusCard,
 )
 from .agent_repository_binding import bound_repo, load_run_metadata
+from .git_read import run_git_text
 from .redaction import write_redacted_json, write_redacted_text
+from .review_impact import project_final_change_impacts, render_change_impacts
 from .run_utils import resolve_run_dir
 
 _PHASE_LABELS = {
@@ -246,6 +247,9 @@ def write_agent_final_report(
             "evidence_limits": first_screen.get("evidence_limits", []),
         },
         "integration_review": integration_review,
+        "change_impact_projection": project_final_change_impacts(
+            review, integration_review, bound_repo(run_dir), state.accepted_checkpoint_sha,
+        ),
         "review_priority_files": _review_priority_files(
             review,
             integration_review,
@@ -268,29 +272,19 @@ def _git_change_summary(
     accepted_sha: str,
 ) -> tuple[list[str], str]:
     comparison = f"{base_sha}..{accepted_sha}"
-    names = subprocess.run(
-        ["git", "diff", "--name-only", "--no-ext-diff", "--no-textconv", comparison, "--"],
-        cwd=repo,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    stat = subprocess.run(
-        ["git", "diff", "--stat", "--no-ext-diff", "--no-textconv", comparison, "--"],
-        cwd=repo,
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    if names.returncode != 0 or stat.returncode != 0:
-        raise ValueError("无法从 Accepted Checkpoint 生成累计 Git 摘要")
+    try:
+        names, stat = (
+            run_git_text(repo, ["git", "diff", output, "--no-ext-diff", "--no-textconv",
+                                comparison, "--"])
+            for output in ("--name-only", "--stat")
+        )
+    except RuntimeError as exc:
+        raise ValueError("无法从 Accepted Checkpoint 生成累计 Git 摘要") from exc
     return [
         line.strip().replace("\\", "/")
-        for line in names.stdout.splitlines()
+        for line in names.splitlines()
         if line.strip()
-    ], stat.stdout.strip()
+    ], stat.strip()
 
 
 def _load_final_child_finish(
@@ -344,24 +338,16 @@ def _review_priority_files(
     review: dict[str, object],
     integration_review: dict[str, object] | None,
 ) -> list[str]:
-    values: list[str] = []
-    for path in review.get("priority_files", []) or []:
-        if isinstance(path, str):
-            values.append(path)
-    for finding in review.get("findings", []) or []:
-        if isinstance(finding, dict) and isinstance(finding.get("file"), str):
-            values.append(str(finding["file"]))
-    if integration_review is not None:
-        for batch in integration_review.get("batches", []) or []:
-            if not isinstance(batch, dict):
-                continue
-            verdict = _mapping(batch.get("verdict"))
-            for finding in verdict.get("findings", []) or []:
-                if isinstance(finding, dict) and isinstance(
-                    finding.get("file"),
-                    str,
-                ):
-                    values.append(str(finding["file"]))
+    values = [path for path in review.get("priority_files", []) or [] if isinstance(path, str)]
+    reviews = [review, *[
+        _mapping(batch.get("verdict"))
+        for batch in (integration_review or {}).get("batches", []) or []
+        if isinstance(batch, dict)
+    ]]
+    values.extend(
+        finding["file"] for item in reviews for finding in item.get("findings", []) or []
+        if isinstance(finding, dict) and isinstance(finding.get("file"), str)
+    )
     return list(dict.fromkeys(path for path in values if path))
 
 
@@ -392,8 +378,11 @@ def _render_final_report(payload: dict[str, object]) -> str:
         f"- Verification：`{gates['verification']}`",
         f"- Risk：`{gates['risk']}`",
         f"- Reviewer：`{gates['review']}`",
+        "- 以上 Candidate、文件统计与门禁结果属于机器事实；下方模型意见不改变结果。",
+        *render_change_impacts(_mapping(payload.get("change_impact_projection"))),
         "",
         "## Reviewer 建议优先查看",
+        "- 重点文件来自 Reviewer 声明；不等于已核验的功能影响引用。",
         *(
             [f"- `{path}`" for path in priority_files]
             if priority_files
@@ -408,7 +397,7 @@ def _render_final_report(payload: dict[str, object]) -> str:
         str(candidate["diff_stat"] or "无"),
         "```",
         "",
-        "## Worker Claim",
+        "## Worker Claim（未验证自述）",
         str(payload["worker_claim"] or "未提供"),
         "",
         "## 验证",
@@ -417,7 +406,7 @@ def _render_final_report(payload: dict[str, object]) -> str:
         "## 风险",
         *_render_risk_summary(risk),
         "",
-        "## Reviewer",
+        "## Reviewer（模型意见）",
         *_render_review_summary(review, payload.get("integration_review")),
         "",
         "## 证据边界",
@@ -469,7 +458,10 @@ def _render_risk_summary(risk: dict[str, object]) -> list[str]:
 def _render_review_summary(
     review: dict[str, object], integration_review: object
 ) -> list[str]:
-    lines = [f"- Work Item Reviewer：`{review.get('verdict', 'unknown')}`"]
+    lines = [
+        f"- Work Item Reviewer：`{review.get('verdict', 'unknown')}`",
+        "- 以下 finding 位置保留 Reviewer 原始声明，未作为 Candidate 行号核验事实。",
+    ]
     for finding in review.get("findings", []) or []:
         if isinstance(finding, dict):
             lines.append(

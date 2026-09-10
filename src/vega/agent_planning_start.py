@@ -65,6 +65,7 @@ def start_planning_run(workspace: Path, repo: Path, *, goal: str) -> AgentRun:
         comparison_base_sha=revision.commit,
     )
     state = AgentState(
+        execution_protocol=2,
         run_id=run_id,
         task_id=task_id,
         repository_id=repository_scope(handle.worktree_path),

@@ -168,6 +168,8 @@ def render_review_prompt(inputs: dict[str, Any]) -> str:
             "缓存的命令，也不要修改、提交、推送、发布、删除或执行破坏性操作。",
             "- 重点找真实 bug、遗漏测试、需求不满足、项目规则违反和安全风险。",
             coverage_rule,
+            "- change_impacts 可选说明功能影响（模型意见，不替代门禁）；"
+            "locations 仅引用 Candidate 中真实文件及正行号。不确定位置或未提供说明时用空列表。",
             "- 如果证据不足，不要强行 approve，返回 needs_human。",
             *render_required_review_prompt_rules(required_reviews),
             "- 最终只能输出一个 JSON 对象，不要包 Markdown 代码块。",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .agent_run_status import agent_status_lines
@@ -51,7 +52,22 @@ def render_run_status_payload(payload: dict[str, Any]) -> str:
         if execution.get("termination_unconfirmed"):
             lines.append("- owned process tree：`终止未确认`")
     lines.extend(["", "## 下一步", ""])
-    lines.extend(f"- {item}" for item in payload["next_steps"])
+    if payload["kind"] == "agent":
+        # 只渲染已投影的动作，不重新读取现场或按阶段另推导建议。
+        from .agent_cli_snapshot import AgentCliRun, AgentCliSnapshot
+        from .agent_cli_status import _action_texts
+        from .agent_explain import AgentExplanation
+
+        run_dir = Path(payload["run_dir"])
+        explanation = AgentExplanation.model_validate(payload["explanation"])
+        snapshot = AgentCliSnapshot(
+            target=AgentCliRun(run_dir.parent.parent, run_dir, "explicit"),
+            status=payload, explanation=explanation,
+        )
+        next_steps = _action_texts(explanation.safe_actions, snapshot)
+    else:
+        next_steps = payload["next_steps"]
+    lines.extend(f"- {item}" for item in next_steps)
     lines.extend(["", "## 关键产物", ""])
     artifacts = payload["key_artifacts"]
     if artifacts:

@@ -16,9 +16,12 @@ from .agent_provider_factory import (
     final_reviewer_runner,
 )
 from .agent_contract import AgentObservation, AgentState, AgentWorkItem
-from .agent_worker_evidence import hash_evidence_refs
+from .agent_worker_evidence import hash_evidence_refs, require_child_quiescent
 from .execution_control import RunnerExecutionContext
 from .agent_persistence import read_agent_trace
+from .agent_run_status import latest_dispatch_binding
+from .agent_operation import child_summary_ref
+from .run_utils import resolve_run_dir
 from .comparison_binding import require_comparison_binding_from_mapping
 from .project_config import ProjectConfig
 from .progress import make_execution_progress_reporter
@@ -29,6 +32,16 @@ from .runner import Runner
 from .agent_runtime_support import load_agent_bundle
 from .verification_command_preflight import require_verification_commands_preflight
 from .workspace_check import ReviewWorkspaceSnapshot
+
+def change_run_step_limit(workspace: Path, run: str) -> int:
+    run_dir, state, plan, metadata = load_agent_bundle(workspace, run)
+    context = load_change_run_context(run_dir, state, plan, metadata)
+    if context is None:
+        return 1
+    return len(context.execution_plan.work_items) * (
+        context.contract.authority_envelope.max_repair_rounds + 1
+    )
+
 
 def comparison_binding_from_metadata(
     metadata: dict[str, str],
@@ -72,6 +85,47 @@ def read_task_brief(run_dir: Path) -> str:
     if not content.strip():
         raise ValueError("当前 Task Brief 为空")
     return content
+
+
+def require_pre_core_resume(workspace: Path, run_dir: Path, state: AgentState) -> None:
+    """只为显式恢复的未启动 Core 尝试重建 Worker 输入，保留已有门禁的修复路径。"""
+    trace = read_agent_trace(run_dir / "trace.jsonl")
+    if not trace or trace[-1].get("event") != "agent_resumed":
+        raise ValueError("非 repair 的后续尝试必须来自显式本机恢复")
+    binding = latest_dispatch_binding(run_dir, state)
+    if binding is None or state.active_candidate_sha is not None:
+        raise ValueError("恢复现场缺少原 Worker 绑定或已有 Candidate")
+    child, operation = binding
+    child_dir = resolve_run_dir(workspace, child)
+    require_child_quiescent(child_dir)
+    ref = child_summary_ref(child, operation)
+    matches = []
+    for path in (run_dir / "observations").glob("*.json"):
+        observation = AgentObservation.model_validate_json(path.read_text(encoding="utf-8"))
+        # 最近一次 Worker 可能在 repair 中途停止；不能因此丢掉更早的 Core finding。
+        if observation.work_item_id == state.current_work_item and any(
+            value != "not_run" for value in (observation.verification, observation.risk, observation.review)
+        ):
+            raise ValueError("当前 Work Item 已有 Core 门禁结果，请使用原门禁修复路径")
+        if observation.child_run == child and observation.operation_id == operation:
+            matches.append(observation)
+    if len(matches) != 1:
+        raise ValueError("无法唯一核对恢复来源 Observation")
+    observation = matches[0]
+    if (
+        observation.work_item_id != state.current_work_item
+        or observation.authority != "machine_reconcile"
+        or any(value != "not_run" for value in (
+            observation.verification, observation.risk, observation.review,
+        ))
+        or ref not in observation.evidence_refs
+        or hash_evidence_refs(run_dir, observation.evidence_refs) != observation.evidence_sha256
+    ):
+        raise ValueError("恢复来源已进入 Core 或证据不一致；请使用原门禁修复路径")
+    summary = json.loads((run_dir / ref).read_text(encoding="utf-8"))
+    core = summary.get("core") if isinstance(summary, dict) else None
+    if not isinstance(core, dict) or core.get("status") != "not_run" or (child_dir / "state.json").exists():
+        raise ValueError("已有 Core 结果不能作为未启动 Core 的恢复现场")
 
 
 def next_attempt_context(
@@ -325,6 +379,7 @@ def _require_batch_coverage(
         checked_items=verdict.checked_items,
         findings=verdict.findings,
         risk_disclosures=verdict.risk_disclosures,
+        change_impacts=verdict.change_impacts,
     )
 
 
@@ -396,6 +451,9 @@ def _final_review_prompt(
         "# Vega 最终集成审查\n\n"
         "你是独立只读 Reviewer。只判断累计 Candidate 是否满足已批准合同。"
         "不要相信 Worker 自述，不要修改文件。输出严格匹配 ReviewVerdict JSON。\n\n"
+        "可在 change_impacts 中解释修改功能与影响，每项包含 summary 和 locations，"
+        "locations 每项仅使用当前 Candidate 真实文件的 file 和正整数 line；"
+        "这是模型意见，不是机器证据，信息不足时填 []，不影响门禁。\n\n"
         f"## Change Contract\n```json\n{json.dumps(contract, ensure_ascii=False)}\n```\n\n"
         f"## Execution Plan\n```json\n{json.dumps(plan, ensure_ascii=False)}\n```\n\n"
         "## 已绑定机器证据\n"

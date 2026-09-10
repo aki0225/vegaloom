@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from .approval_policy_config import ApprovalConfig, render_bounded_approval_summary
 from .git_read import coerce_git_output_bytes, run_git_capture
+from .project_config_verification import inspect_verification_commands
 from .project_config_preflight import (
     ProjectConfigIssue,
     validate_repository_preflight,
@@ -37,10 +38,7 @@ from .verification_shell import (
     VerificationShellKind as VerificationShellKind,
     build_verification_shell_command as build_verification_shell_command,
     current_verification_shell_kind as current_verification_shell_kind,
-    find_unknown_verification_placeholders,
     render_verification_command as render_verification_command,
-    unsafe_windows_verification_syntax,
-    verification_temp_placeholder_has_unsafe_context,
 )
 
 
@@ -70,6 +68,7 @@ class VerificationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     commands: list[str] | None = None
+    prepare_commands: list[str] = Field(default_factory=list, max_length=10)
     max_commands: int = Field(default=2, ge=0, le=10)
     timeout_seconds: int = Field(default=180, ge=1, le=3600)
 
@@ -336,6 +335,17 @@ def validate_project_config(config: ProjectConfig) -> list[ProjectConfigIssue]:
             )
         )
     issues.extend(validate_verification_commands(config.verification.commands or []))
+    issues.extend(
+        issue.model_copy(update={
+            "message": issue.message.replace("verification.commands", "verification.prepare_commands"),
+        })
+        for issue in validate_verification_commands(config.verification.prepare_commands)
+    )
+    if len(config.verification.prepare_commands) > config.verification.max_commands:
+        issues.append(ProjectConfigIssue(
+            code="prepare_command_budget_exceeded", severity="error",
+            message="环境准备命令数超过 verification.max_commands。",
+        ))
     issues.extend(_validate_runner_name("runner.worker", config.runner.worker))
     issues.extend(_validate_runner_name("runner.reviewer", config.runner.reviewer))
     for name in config.budget_profiles:
@@ -351,90 +361,7 @@ def validate_project_config(config: ProjectConfig) -> list[ProjectConfigIssue]:
 
 
 def validate_verification_commands(commands: list[str]) -> list[ProjectConfigIssue]:
-    issues: list[ProjectConfigIssue] = []
-    shell_kind = current_verification_shell_kind()
-    for index, command in enumerate(commands, start=1):
-        stripped = command.strip()
-        location = f"verification.commands[{index}]"
-        if not stripped:
-            issues.append(
-                ProjectConfigIssue(
-                    code="empty_verification_command",
-                    severity="error",
-                    message=f"{location} 为空，无法作为自动验证命令执行。",
-                )
-            )
-            continue
-        if "\n" in command or "\r" in command:
-            issues.append(
-                ProjectConfigIssue(
-                    code="multiline_verification_command",
-                    severity="error",
-                    message=f"{location} 包含换行；请把复杂验证封装成脚本，再在这里调用脚本。",
-                    evidence=stripped[:300],
-                )
-            )
-        if stripped.endswith("\\") or stripped.endswith("`"):
-            issues.append(
-                ProjectConfigIssue(
-                    code="truncated_verification_command",
-                    severity="error",
-                    message=f"{location} 看起来以 shell 续行符结尾，疑似命令被截断。",
-                    evidence=stripped[:300],
-                )
-            )
-        unknown_placeholders = find_unknown_verification_placeholders(command)
-        if unknown_placeholders:
-            issues.append(
-                ProjectConfigIssue(
-                    code="unknown_verification_placeholder",
-                    severity="error",
-                    message=(
-                        f"{location} 包含不受支持的 Vega 占位符；"
-                        f"只允许精确字面量 {VERIFICATION_TEMP_PLACEHOLDER}。"
-                    ),
-                    evidence=", ".join(unknown_placeholders),
-                )
-            )
-        if (
-            VERIFICATION_TEMP_PLACEHOLDER in command
-            and verification_temp_placeholder_has_unsafe_context(command, shell_kind)
-        ):
-            issues.append(
-                ProjectConfigIssue(
-                    code="unsafe_verification_temp_placeholder_context",
-                    severity="error",
-                    message=(
-                        f"{location} 中的 {VERIFICATION_TEMP_PLACEHOLDER} 必须作为未加引号的"
-                        "独立路径 token；Runtime 会负责安全引用。"
-                    ),
-                    evidence=VERIFICATION_TEMP_PLACEHOLDER,
-                )
-            )
-        if shell_kind == "cmd":
-            unsafe_windows_syntax = unsafe_windows_verification_syntax(command)
-            if unsafe_windows_syntax:
-                issues.append(
-                    ProjectConfigIssue(
-                        code="unsafe_windows_verification_syntax",
-                        severity="error",
-                        message=(
-                            f"{location} 包含 cmd.exe 不安全或不兼容的 shell 语法；"
-                            "请改用双引号或仓库内脚本，且不要使用单管道。"
-                        ),
-                        evidence=", ".join(unsafe_windows_syntax),
-                    )
-                )
-        if len(stripped) > 500:
-            issues.append(
-                ProjectConfigIssue(
-                    code="long_verification_command",
-                    severity="warning",
-                    message=f"{location} 过长，建议封装为仓库内脚本，减少 YAML 转义错误。",
-                    evidence=f"{len(stripped)} chars",
-                )
-            )
-    return issues
+    return inspect_verification_commands(commands, current_verification_shell_kind())
 
 
 def render_project_config_check(result: ProjectConfigCheckResult) -> str:
@@ -549,6 +476,10 @@ def render_project_config_summary(config: ProjectConfig) -> str:
         lines.extend(f"- `{command}`" for command in config.verification.commands)
     else:
         lines.append("- 未配置，使用 project profile 自动识别。")
+    lines.extend(["", "## 控制器环境准备", ""])
+    lines.extend(f"- `{command}`" for command in config.verification.prepare_commands)
+    if not config.verification.prepare_commands:
+        lines.append("- 未登记；不会从报错推断安装命令。")
     lines.extend(["", "## Scope Profiles", ""])
     if config.budget_profiles:
         for name, budget in config.budget_profiles.items():

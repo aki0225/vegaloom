@@ -13,6 +13,7 @@ from .agent_persistence import (
     save_agent_state,
 )
 from .agent_recovery_request import AgentRecoveryRequest
+from .agent_operation import AgentOperationKind, bound_operation_kind
 from .redaction import write_redacted_json
 from .agent_run_status import latest_dispatch_binding
 from .agent_runtime_logic import update_state
@@ -176,15 +177,23 @@ def block_on_execution_issue(
 
 
 def require_recovery_request(
+    run_dir: Path,
     state: AgentState,
     request: AgentRecoveryRequest,
-) -> None:
+) -> AgentOperationKind:
     if not request.reason.strip():
         raise ValueError("recover 必须提供原因")
     if state.phase not in {"acting", "observing", "needs_human"}:
         raise ValueError(f"当前阶段不需要 Worker recovery：{state.phase}")
     if not state.active_child_run or not state.active_operation_id:
         raise ValueError("当前 run 没有可对账的 Writer binding")
+    kind = bound_operation_kind(run_dir, state)
+    if kind == "environment_prepare":
+        raise ValueError(
+            "环境准备中断后不能按 Worker 恢复；请核对准备命令及进程，"
+            "保留现场并人工核对，不能自动重放安装或外部写入。"
+        )
+    return kind
 
 
 def latest_checkpoint(run_dir: Path, state: AgentState) -> AgentCheckpoint:
@@ -255,3 +264,17 @@ def validate_resume_checkpoint(
         or not plan.approval_is_current()
     ):
         raise ValueError("最近 Checkpoint 不能证明现场可恢复；请先重新对账或修订 Plan")
+
+
+def resume_work_item_progress(plan: AgentPlan, state: AgentState) -> AgentPlan:
+    """人工恢复只重开未完成的进度，不伪造 Observation 或改变已批准任务内容。"""
+    updated = plan.model_copy(deep=True)
+    current = next(
+        (item for item in updated.work_items if item.work_item_id == state.current_work_item),
+        None,
+    )
+    if current is None or current.status not in {"pending", "active", "blocked"}:
+        raise ValueError("当前 Work Item 不是可恢复的未完成任务")
+    if current.status == "blocked":
+        current.status = "active"
+    return AgentPlan.model_validate(updated.model_dump(mode="json"))

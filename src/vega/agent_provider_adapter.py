@@ -28,6 +28,7 @@ from .agent_change_core import (
     reserve_change_core_child,
 )
 from .agent_git_candidate import CandidateCommit
+from .agent_environment_preparation import prepare_change_environment
 from .agent_operation import operation_ref
 from .agent_plan_scope import (
     capture_plan_scope_baseline,
@@ -40,13 +41,15 @@ from .agent_provider_factory import (
 )
 from .agent_reviewer_timeout_retry import auto_retry_reviewer_timeout
 from .agent_provider_preparation import (
+    change_run_step_limit,
     next_attempt_context as _next_attempt_context,
     prepare_dispatch_binding,
     read_task_brief as _read_task_brief,
     review_final_candidate,
     validate_prepared_workspace,
+    require_pre_core_resume,
 )
-from .agent_contract import AgentObservation, AgentState
+from .agent_contract import AgentObservation
 from .agent_run import AgentRun
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_runtime_support import (
@@ -63,7 +66,7 @@ from .execution_control import (
 from .finish_runtime import FinishRuntime
 from .loop_runtime import LoopAutomationRuntime
 from .models import BriefInput, LoopAutomationState
-from .project_config import ProjectConfig, load_project_config
+from .project_config import load_project_config
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 from .runner import Runner, RunnerResult
@@ -107,7 +110,7 @@ class SupervisorAgentProviderAdapter:
             and result.state.phase == "ready"
             and {"next", "repair"}.intersection(result.state.allowed_actions)
         ):
-            max_steps = self._change_run_step_limit(result.run_dir.name)
+            max_steps = change_run_step_limit(self.workspace, result.run_dir.name)
             if steps >= max_steps:
                 raise ValueError("ChangeRun 自动推进超过合同允许的总 attempt 上限")
             steps += 1
@@ -118,21 +121,15 @@ class SupervisorAgentProviderAdapter:
             result = auto_retry_reviewer_timeout(self, result)
         return result
 
-    def _change_run_step_limit(self, run: str) -> int:
-        run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
-        context = load_change_run_context(run_dir, state, plan, metadata)
-        if context is None:
-            return 1
-        return len(context.execution_plan.work_items) * (
-            context.contract.authority_envelope.max_repair_rounds + 1
-        )
-
     def _run_once(
         self,
         run: str,
         *,
         timeout_seconds: int,
     ) -> AgentRun:
+        preparation_failure = prepare_change_environment(self.workspace, run)
+        if preparation_failure is not None:
+            return preparation_failure
         prepared, child_dir, prompt, operation_id, bound = self._prepare_and_bind(
             run,
             timeout_seconds,
@@ -198,6 +195,12 @@ class SupervisorAgentProviderAdapter:
             ),
         )
         before = capture_bound_workspace(run_dir)
+        resumed_before_core = (
+            change_context is not None and attempt_number > 1
+            and "repair" not in state.allowed_actions
+        )
+        if resumed_before_core:
+            require_pre_core_resume(self.workspace, run_dir, state)
         validate_prepared_workspace(
             before,
             expected_fingerprint=state.workspace_fingerprint,
@@ -224,7 +227,10 @@ class SupervisorAgentProviderAdapter:
         )
         task_brief = _read_task_brief(run_dir)
         config = load_project_config(repo)
-        self._ensure_reviewer_for_attempt(run_dir, state, config)
+        ensure_reviewer_runner(
+            self.loop_runtime, config, agent_run_dir=run_dir, state=state,
+            provider=self.provider, persistent_session=self.persistent_sessions,
+        )
         runner = self.worker_runner or worker_runner(
             run_dir,
             state,
@@ -253,22 +259,8 @@ class SupervisorAgentProviderAdapter:
             comparison_base_sha=comparison_base_sha,
             comparison_paths=comparison_paths,
             change_context=change_context,
+            resumed_before_core=resumed_before_core,
             timeout_seconds=timeout_seconds,
-        )
-
-    def _ensure_reviewer_for_attempt(
-        self,
-        run_dir: Path,
-        state: AgentState,
-        config: ProjectConfig,
-    ) -> None:
-        ensure_reviewer_runner(
-            self.loop_runtime,
-            config,
-            agent_run_dir=run_dir,
-            state=state,
-            provider=self.provider,
-            persistent_session=self.persistent_sessions,
         )
 
     def _prepare_child(
@@ -276,7 +268,7 @@ class SupervisorAgentProviderAdapter:
         prepared: PreparedWorkerAttempt,
     ) -> tuple[Path, str]:
         if prepared.change_context is not None:
-            if prepared.attempt_number == 1:
+            if prepared.attempt_number == 1 or prepared.resumed_before_core:
                 prompt = prepared.task_brief
             else:
                 previous_child = require_repair_child(
@@ -348,6 +340,16 @@ class SupervisorAgentProviderAdapter:
             progress_reporter=self.progress_reporter,
         )
         self._event(f"Worker 已启动：{child_run}")
+        # 宿主和 Worker 沙箱的依赖缓存不同；检查职责不能因此退回给用户。
+        prompt += (
+            "\n\n## 实现与验证交接\n"
+            "控制器会在受管 Worktree 执行本轮已批准的全部验证命令，随后进行独立审查。"
+            "先只读检查测试工具；缺失时禁止 Worker 安装或重建依赖（含离线），已登记的准备命令交由控制器执行。"
+            "实现完成、仅测试工具或依赖不可用时，claimed_status 使用 completed，"
+            "在 tests_claimed 如实列出失败或未运行的命令及原因；这只表示提交验证，不表示测试通过。"
+            "代码尚未完成、需扩大授权或存在未知外部副作用时仍使用 blocked。"
+            "不要为准备环境修改依赖清单、锁文件或验证策略，也不要擅自联网安装。\n"
+        )
         result = prepared.runner.run(
             prompt,
             prepared.repo,

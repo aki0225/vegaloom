@@ -12,7 +12,6 @@ from .agent_execution_bridge import (
 )
 from .agent_operation import (
     AgentOperationKind,
-    bound_operation_kind,
     operation_ref,
 )
 from .agent_mutation import agent_mutation
@@ -39,6 +38,7 @@ from .agent_recovery_support import (
     latest_checkpoint,
     reconcile_missing_dispatch_trace,
     require_recovery_request,
+    resume_work_item_progress,
     validate_resume_checkpoint,
     write_load_failure_report,
 )
@@ -48,6 +48,7 @@ from .agent_runtime_support import (
     bound_repo,
     capture_bound_workspace,
     load_agent_bundle,
+    save_agent_plan,
     write_checkpoint,
     write_status_card,
     write_task_brief,
@@ -69,11 +70,12 @@ class SupervisorAgentRecovery:
         except ValueError as exc:
             write_load_failure_report(run_dir, request.reason, exc)
             raise
-        require_recovery_request(state, request)
+        # 先保留损坏状态的诊断，再检查协议；任何 Writer 操作仍必须经过协议门禁。
+        state.require_current_execution()
+        operation_kind = require_recovery_request(run_dir, state, request)
         assert state.active_child_run is not None
         assert state.active_operation_id is not None
         repo = bound_repo(run_dir)
-        operation_kind = bound_operation_kind(run_dir, state)
         acquire_writer_claim(
             repo,
             run_dir=run_dir,
@@ -303,14 +305,20 @@ class SupervisorAgentRecovery:
         if state.run_kind == "change" and state.contract_revision is None:
             raise ValueError(
                 "未编译的 Planning ChangeRun 不能恢复为 ready；"
-                "可重试调查请继续运行 `vega run --run <run-id>`，"
+                "可重试调查请继续运行 `vega change --run <run-id>`，"
                 "Workspace 漂移或终止不明时请新建 Planning run 或生成可验证 Handoff"
             )
-        if state.phase != "needs_human" or state.active_child_run:
-            raise ValueError("只有已暂停且没有 active Writer 的 run 可以本机恢复")
+        if state.phase not in {"needs_human", "stopped"}:
+            raise ValueError("只有已暂停或停止且没有 active Writer 的 run 可以本机恢复")
+        if state.active_child_run or state.active_operation_id:
+            raise ValueError("Writer 仍处于 active binding，不能本机恢复")
+        # Task Card 发布后所有权已进入交接流程，不能复活旧 Run 形成两个调度入口。
+        if state.handoff_status != "none":
+            raise ValueError("当前 run 已发布 Handoff，不能本机恢复；请从 Task Card 恢复")
         checkpoint = latest_checkpoint(run_dir, state)
         actual = capture_bound_workspace(run_dir)
         validate_resume_checkpoint(plan, checkpoint, actual)
+        plan = resume_work_item_progress(plan, state)
         next_state = update_state(
             state,
             phase="ready",
@@ -333,6 +341,7 @@ class SupervisorAgentRecovery:
             state_version=next_state.state_version + 1,
         )
         write_task_brief(run_dir, plan, next_state, resumed)
+        save_agent_plan(run_dir, plan)
         save_agent_state(run_dir / "agent-state.json", next_state)
         append_agent_trace(
             run_dir / "trace.jsonl",
@@ -365,19 +374,11 @@ class SupervisorAgentRecovery:
         if not stopped and state.phase == "needs_human":
             raise ValueError("当前 run 已在等待人工；无需重复 pause")
         actual = capture_bound_workspace(run_dir)
-        latest = (
-            latest_checkpoint(run_dir, state)
-            if state.latest_checkpoint_id is not None
-            else None
-        )
-        external_side_effects = (
-            latest.external_side_effects if latest is not None else "none"
-        )
+        latest = latest_checkpoint(run_dir, state) if state.latest_checkpoint_id else None
+        external_side_effects = latest.external_side_effects if latest else "none"
         planning_refs = planning_handoff_checkpoint_refs(state, latest)
         if state.workspace_fingerprint != actual.fingerprint:
-            blocked_reason = (
-                f"{action} 前 Workspace 已漂移；现场已保留并交由人工对账"
-            )
+            blocked_reason = f"{action} 前 Workspace 已漂移；现场已保留并交由人工对账"
             blocked_state = update_state(
                 state,
                 phase="needs_human",
@@ -473,8 +474,9 @@ class SupervisorAgentRecovery:
             plan,
             checkpoint=checkpoint,
             next_step=(
-                "任务已停止；代码、Goal、Plan 和现场均保留。当前 run 不能使用 "
-                "resume-local；如需继续，请人工创建 Handoff 或新的 Agent run"
+                "任务已停止；代码、Goal、Plan 和现场均保留。人工可使用 "
+                "vega resume --run <run-id> 重新检查 safe Checkpoint 后恢复调度，"
+                "或创建 Handoff"
                 if phase == "stopped"
                 else "停止前 Workspace 控制信息不完整；任务仍等待人工处理"
                 if stopped

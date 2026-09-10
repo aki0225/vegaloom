@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from uuid import uuid4
 
@@ -110,6 +111,20 @@ class SupervisorAgentVerificationRetry:
             bound = self._bind(prepared, operation_id)
         self._event("Core Reviewer 明确超时；正在自动恢复一次")
         return self._run_core(prepared, operation_id, bound)
+    def recheck_core_if_eligible(self, run: str) -> AgentRun | None:
+        """只重算已有核心证据；无资格时不发布 operation，也不启动模型或验证。"""
+
+        from .agent_core_recheck import prepare_core_recheck
+
+        run_dir = resolve_run_dir(self.workspace, run)
+        with RunMutationLock.acquire(run_dir, "agent.retry-verification"):
+            try:
+                prepared = prepare_core_recheck(self.workspace, run)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                return None
+            operation_id = uuid4().hex
+            bound = self._bind(prepared, operation_id)
+        return self._run_core(prepared, operation_id, bound)
     def _prepare_and_bind(
         self,
         run: str,
@@ -135,6 +150,11 @@ class SupervisorAgentVerificationRetry:
         operation_id: str,
     ) -> AgentRun:
         state = prepared.state
+        label = {"reviewer_timeout": "Reviewer timeout 自动恢复",
+                 "core_evidence_recheck": "核心证据重算"}.get(prepared.retry_reason, "验证专用恢复")
+        next_step = ("正在同一 Candidate 上重新读取已有核心证据，不运行测试或 Reviewer"
+                     if prepared.retry_reason == "core_evidence_recheck"
+                     else "正在同一 child 上重跑验证、风险门禁与独立 Reviewer，不启动 Coding Worker")
         acquire_writer_claim(
             prepared.repo,
             run_dir=prepared.run_dir,
@@ -177,23 +197,17 @@ class SupervisorAgentVerificationRetry:
                 operation_started=True,
                 allowed_actions=["human"],
             )
-            if prepared.retry_reason == "reviewer_timeout":
+            if prepared.retry_reason in {"reviewer_timeout", "core_evidence_recheck"}:
                 save_agent_plan(prepared.run_dir, prepared.plan)
             save_agent_state(prepared.run_dir / "agent-state.json", observing)
             state_committed = True
             append_agent_trace(
                 prepared.run_dir / "trace.jsonl",
-                event="verification_retry_committed",
+                event=("core_evidence_recheck_committed"
+                       if prepared.retry_reason == "core_evidence_recheck"
+                       else "verification_retry_committed"),
                 state=observing,
-                observation_summary=(
-                    "已绑定 Reviewer timeout 自动恢复；"
-                    "复用原 child 与 Candidate，不启动新的 Coding Worker"
-                    if prepared.retry_reason == "reviewer_timeout"
-                    else (
-                        "已绑定验证专用恢复；"
-                        "复用原 child 与 Diff，不启动新的 Coding Worker"
-                    )
-                ),
+                observation_summary=f"已绑定{label}；{next_step}",
                 artifact_refs=[
                     operation_relative,
                     prepared.source_summary_ref,
@@ -204,20 +218,9 @@ class SupervisorAgentVerificationRetry:
                 prepared.run_dir,
                 observing,
                 prepared.plan,
-                next_step=(
-                    "正在同一 Candidate 上重跑验证、风险门禁与新的独立 Reviewer"
-                    if prepared.retry_reason == "reviewer_timeout"
-                    else "正在同一 child 上重跑验证、风险门禁与独立 Reviewer"
-                ),
+                next_step=next_step,
             )
-            self._event(
-                (
-                    "Reviewer timeout 自动恢复已启动："
-                    if prepared.retry_reason == "reviewer_timeout"
-                    else "验证专用恢复已启动："
-                )
-                + prepared.child_dir.name
-            )
+            self._event(f"{label}已启动：{prepared.child_dir.name}")
             return AgentRun(
                 run_dir=prepared.run_dir,
                 state=observing,
@@ -243,19 +246,24 @@ class SupervisorAgentVerificationRetry:
                 self.provider,
                 persistent_session=self.persistent_sessions,
             )
-            self.loop_runtime.continue_assist(
-                child_run,
-                prepared.repo,
-                worker_name=provider_runner,
-                reviewer_name=provider_runner,
-                verify=True,
-                verification_commands=list(prepared.work_item.verification),
-                verification_retry_baseline=prepared.core_workspace_baseline,
-            )
+            if prepared.retry_reason != "core_evidence_recheck":
+                self.loop_runtime.continue_assist(
+                    child_run,
+                    prepared.repo,
+                    worker_name=provider_runner,
+                    reviewer_name=provider_runner,
+                    verify=True,
+                    verification_commands=list(prepared.work_item.verification),
+                    verification_retry_baseline=prepared.core_workspace_baseline,
+                )
             self.finish_runtime.run(child_run)
             require_child_quiescent(prepared.child_dir)
             child_state = load_child_state(prepared.child_dir, prepared.repo)
             finish_summary = load_finish_summary(prepared.child_dir, child_run)
+            if prepared.retry_reason == "core_evidence_recheck":
+                from .agent_core_recheck import require_rechecked_finish
+
+                require_rechecked_finish(prepared, operation_id, finish_summary)
             after = capture_bound_workspace(prepared.run_dir)
             if not same_tracked_workspace(prepared.before, after):
                 return self._observe_failure(
@@ -334,7 +342,11 @@ class SupervisorAgentVerificationRetry:
             external_side_effects="none",
             reviewer_retry_attempt=prepared.reviewer_retry_attempt,
         )
-        if observation.all_work_items_completed:
+        if prepared.retry_reason == "core_evidence_recheck":
+            from .agent_core_recheck import reuse_core_integration_review
+
+            observation = reuse_core_integration_review(prepared, observation)
+        elif observation.all_work_items_completed:
             attempt_number = (
                 prepared.child_state.current_iteration
                 if prepared.retry_reason == "reviewer_timeout"
@@ -353,7 +365,7 @@ class SupervisorAgentVerificationRetry:
                 provider=self.provider,
                 reviewer_runner=getattr(self.loop_runtime, "reviewer_runner", None),
             )
-        self._event("验证恢复后的 Workspace 与 Core Artifact 已完成对账")
+        self._event("Workspace 与 Core Artifact 已完成对账")
         routed = self.runtime.observe_machine(prepared.run_dir.name, observation)
         self._event(f"Supervisor 选择：{decision_label(routed, observation)}")
         routed = self._settle_candidate(prepared, routed, observation)
@@ -388,9 +400,9 @@ class SupervisorAgentVerificationRetry:
             outcome=outcome,
         )
         self._event(
-            "Reviewer timeout Candidate 已接受"
+            "Candidate 已接受"
             if outcome == "accept"
-            else "Reviewer timeout Candidate 已还原为待修复 WIP"
+            else "Candidate 已还原为待修复 WIP"
         )
         return settled
     def _observe_failure(
@@ -475,11 +487,12 @@ class SupervisorAgentVerificationRetry:
             external_side_effects="none",
             plan_contradicted=plan_contradicted,
             verification="blocked",
+            core_evidence="stale" if prepared.retry_reason == "core_evidence_recheck" else "not_run",
             risk="not_run",
             review="not_run",
         )
         routed = self.runtime.observe_machine(prepared.run_dir.name, observation)
-        self._event(f"验证专用恢复已停止：{reason}")
+        self._event(f"Core 处理已停止：{reason}")
         return routed
     def _event(self, message: str) -> None:
         if self.event_reporter is not None:

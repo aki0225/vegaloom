@@ -14,6 +14,7 @@ from .comparison_binding import (
     comparison_state_issues,
 )
 from .execution_control import ExecutionLease
+from .workspace_inventory import compact_verification_identity
 from .loop_evidence_support import (
     EvidenceFreshness as EvidenceFreshness,
     capture_current_workspace_snapshot as _capture_current_workspace_snapshot,
@@ -1039,15 +1040,14 @@ def _validate_versioned_verification_result(
             if item.get("executed_command") != expected_executed_command:
                 issues.append(f"{prefix}_verification_executed_command_binding_mismatch")
 
-    expected_temp = None
+    expected_temps = (None,)
     if VERIFICATION_TEMP_PLACEHOLDER in configured_command:
-        expected_temp = (
-            VERIFICATION_TEMP_ROOT
-            / run_id
-            / f"iteration-{iteration.iteration}"
-            / f"command-{command_index}"
-        ).as_posix()
-    if item.get("verification_temp") != expected_temp:
+        identity = Path(run_id) / f"iteration-{iteration.iteration}" / f"command-{command_index}"
+        expected_temps = (
+            (VERIFICATION_TEMP_ROOT / identity).as_posix(),
+            (VERIFICATION_TEMP_ROOT / compact_verification_identity(identity)).as_posix(),
+        )
+    if item.get("verification_temp") not in expected_temps:
         issues.append(f"{prefix}_verification_temp_path_mismatch")
 
     execution_path = (

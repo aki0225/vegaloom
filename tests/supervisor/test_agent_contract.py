@@ -537,6 +537,29 @@ def test_checkpoint_rejects_non_relative_evidence_ref() -> None:
         )
 
 
+@pytest.mark.parametrize("gate", ["stale", "blocked"])
+def test_untrusted_core_evidence_stops_without_business_replan(gate: str) -> None:
+    observation = AgentObservation(
+        observation_id="obs-runtime-failure",
+        work_item_id="W1",
+        child_run="attempt-01",
+        operation_id="operation-01",
+        machine_summary="验证结果存在，但当前证据无法采用",
+        workspace_fingerprint=FINGERPRINT,
+        authority="fake_worker",
+        verification="passed",
+        risk="passed",
+        review="passed",
+        core_evidence=gate,
+        work_item_completed=True,
+        all_work_items_completed=True,
+    )
+    decision = decide_next_action(_approved_plan(), observation)
+    assert decision.selected_action == "human"
+    assert decision.allowed_actions == ["human"]
+    assert decision.reason_code == "evidence.core_untrusted"
+
+
 def _approved_plan() -> AgentPlan:
     return approve_plan(
         AgentPlan(

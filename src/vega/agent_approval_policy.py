@@ -127,6 +127,8 @@ def _contract_reasons(
     execution_plan: ExecutionPlan,
 ) -> list[str]:
     reasons: list[str] = []
+    if contract.prepare_commands:
+        reasons.append("环境准备命令需要人工明确批准，不能复用验证命令的 bounded 权限")
     if execution_plan.unresolved_decisions:
         reasons.append("Execution Plan 仍有未解决决策")
     enabled_side_effects = [

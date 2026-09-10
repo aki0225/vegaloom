@@ -29,6 +29,7 @@ from vega.agent_persistence import (
     save_agent_state,
 )
 from vega.agent_run_status import load_agent_status_state
+from vega.agent_operation import reserve_operation_identity
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_handoff_digest import compute_handoff_workspace_digest
 from vega.agent_worker import SupervisorAgentWorker
@@ -578,9 +579,15 @@ def test_latest_keeps_agent_parent_when_trace_is_corrupt(
         run_status_payload(workspace, bound.run_dir.name)
 
 
+@pytest.mark.parametrize(("operation_registered", "error"), [
+    (True, "active operation 与最近可信 dispatch Trace 不一致"),
+    (False, "active operation Artifact 缺失或无法解析"),
+])
 def test_agent_status_rejects_active_operation_trace_mismatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    operation_registered: bool,
+    error: str,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     workspace = tmp_path / "workspace"
@@ -598,6 +605,12 @@ def test_agent_status_rejects_active_operation_trace_mismatch(
     mismatched_state = bound.state.model_copy(
         update={"active_operation_id": "operation-state"}
     )
+    if operation_registered:
+        # 保持 operation 本身可验证，单独证明 Trace 绑定冲突仍会被拒绝。
+        reserve_operation_identity(
+            bound.run_dir, mismatched_state,
+            child_run="attempt-current", operation_id="operation-state",
+        )
     save_agent_state(
         bound.run_dir / "agent-state.json",
         mismatched_state,
@@ -605,7 +618,7 @@ def test_agent_status_rejects_active_operation_trace_mismatch(
 
     with pytest.raises(
         ValueError,
-        match="active operation 与最近可信 dispatch Trace 不一致",
+        match=error,
     ):
         load_agent_status_state(
             bound.run_dir,
@@ -1673,7 +1686,6 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
         "change",
         "start",
         "approve",
-        "run",
         "revise",
         "status",
         "explain",
@@ -1684,7 +1696,6 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
         "resume",
         "handoff",
         "recover",
-        "retry",
         "adjudicate",
         "pause",
         "stop",
@@ -1696,6 +1707,8 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
     ):
         assert _help_lists_command(result.output, command)
     for command in (
+        "run",
+        "retry",
         "agent",
         "do",
         "loop",
@@ -1714,12 +1727,16 @@ def test_packaged_cli_help_prioritizes_product_commands() -> None:
     ):
         assert not _help_lists_command(result.output, command)
 
-    hidden_help = CliRunner().invoke(app, ["run", "--help"])
+    hidden_help = CliRunner().invoke(app, ["change", "--help"])
     assert hidden_help.exit_code == 0, hidden_help.output
     clean_help = _ANSI_ESCAPE_PATTERN.sub("", hidden_help.output)
     assert "--run" in clean_help
     assert "--fresh-session" in clean_help
     assert "--provider" in clean_help
+
+    for removed in ("run", "retry"):
+        rejected = CliRunner().invoke(app, [removed, "--help"])
+        assert rejected.exit_code != 0
 
 
 def _help_lists_command(output: str, command: str) -> bool:
@@ -1892,6 +1909,24 @@ def _git(repo: Path, *args: str) -> None:
         encoding="utf-8",
     )
     assert process.returncode == 0, process.stderr
+
+
+def test_old_execution_protocol_remains_readable_but_cannot_approve(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    started = runtime.start(repo, goal="修复问题", plan=_single_item_plan())
+    assert started.state.execution_protocol == 2
+    state_path = started.run_dir / "agent-state.json"
+    old = started.state.model_copy(update={"execution_protocol": 1})
+    save_agent_state(state_path, old)
+    before = state_path.read_bytes()
+    assert runtime.status(started.run_dir.name)
+    with pytest.raises(ValueError, match="执行协议"):
+        runtime.approve(started.run_dir.name)
+    assert state_path.read_bytes() == before
+    assert not (started.run_dir / "checkpoints").exists()
 
 
 def _head(repo: Path) -> str:

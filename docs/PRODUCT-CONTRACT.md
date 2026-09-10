@@ -17,8 +17,9 @@ Vega 是软件工程 Agent 的控制层。它不重新实现 Coding Agent，而�
   -> 最终人工 PR 判断
 ```
 
-`v0.5.1` 延续 `vega change`、`vega status` 和 `vega explain` 日常入口，并补齐启动预检和交付提示。
-`start`、`approve`、`run` 仍保留为需要显式控制阶段的高级入口；旧 `do`、`loop`、`agent`、
+当前开发分支使用 `vega change`、`vega status` 和 `vega explain` 日常入口。
+`run`、`retry` 的重复推进职责合并到 `change`；稳定版 v0.5.1 的行为以发布文档为准。
+`start`、`approve` 仍保留为需要显式控制阶段的高级入口；旧 `do`、`loop`、`agent`、
 `goal` 和 inspection 命令不再作为公共入口。所有入口继续复用同一 ChangeRun Core Runtime。
 
 ## 权威关系
@@ -63,7 +64,7 @@ Change Contract 冻结人工授权：
 - 目标、验收条件和不变量；
 - 明确不做的内容；
 - 允许和禁止的仓库范围；
-- 必跑验证；
+- 必跑验证，以及可选的环境准备命令；
 - 已授权的高风险审查领域；
 - 数据库、公共 API、依赖、部署、支付、权限、数据删除和外部写入策略；
 - Repair、Replan、Review 与验证重试预算。
@@ -122,6 +123,17 @@ Provider Session 只保存本机会话协调信息：Session ID、owner、生命
 
 ## Candidate 与门禁
 
+可选 `verification.prepare_commands` 从固定源版本逐字编入 Contract，需要人工批准。
+控制器在首次 Worker 前执行，同一批准摘要最多一次。准备成功只表示环境命令完成；
+之后仍运行全部固定验证。失败、停止或终态未确认时保留现场，不自动重放安装脚本。
+准备命令修改源码、HEAD、未忽略文件或 Git 控制面时停止；bounded 模式不批准非空准备命令。
+
+Worker 的 `claimed_status=completed` 表示实现已交给控制器验证，不表示测试通过。Worker 沙箱
+缺少依赖或测试工具时，将失败、未运行项如实写入 `tests_claimed`；已登记的依赖准备命令由
+控制器执行，Worker 不尝试安装或重建测试依赖（包括离线安装）。控制器仍执行全部批准命令。
+实现未完成、需扩大授权或外部副作用不明时，Worker 仍返回 `blocked`。Vega 不根据报错文本
+猜测可以跳过哪些检查，也不自动安装合同外的依赖。
+
 自主执行发生在 Vega 管理的本地任务分支和隔离 Worktree：
 
 1. Worker 修改文件，但不能创建提交或切换分支；
@@ -137,9 +149,9 @@ Provider Session 只保存本机会话协调信息：Session ID、owner、生命
 风险路径命中后可以先运行只读 Reviewer，结果仍为 `needs_human`，供人工判断；预算超限、
 风险证据无效和无法识别的高风险阻断仍在调用前停止。Reviewer 的 `approve` 不能解除风险门禁。
 
-验证失败同时伴随风险待确认时，已有的 `retry` 可以复用改动重跑门禁，但仍要求当前计划已批准、
-预算足够、工作区可对账、旧审查证据完整且没有代码级 finding。它不会解除风险待确认，
-也不会重启 Worker。缺少旧审查证据的历史失败不自动迁移为可重试任务。
+人工完成必要的验证修订并批准后，`change` 复用原验证恢复流程。预算、Workspace、
+原 Worker 证据或范围不满足时拒绝，不能回退为启动新的 Worker；风险待确认不会被重试解除。
+Core 证据不可信属于运行问题，保留业务合同并交还人工，不据此要求业务 Replan。
 
 Windows 新建 Worktree 使用短目录名，完整 Run ID 和任务分支名不变，旧目录不自动移动。
 验证临时路径过长时也会在原受控根内使用短目录名，仍按任务、轮次和命令隔离，
@@ -182,9 +194,9 @@ Steer 不能修改冻结合同。敏感输入不得写入 Vega Artifact；需要
 
 `vega change` 会在当前 TTY 展示 Provider 待处理请求的脱敏摘要。若当前协调状态缺少足以安全
 判断的完整原始目标或权限上下文，控制器中断当前 attempt，并把对应 pending 标记为 closed，
-再转 Recovery、Takeover 或新的 attempt；终端可见不等于自动批准。高级 `vega run` 仍保持
-活动 Codex Turn 时，另一终端可以用 `vega respond` 响应已核对的请求；Turn、owner、权限或
-请求绑定不一致时拒绝记录。JSON 和非交互终端不读取 stdin。
+再转 Recovery、Takeover 或新的 attempt；终端可见不等于自动批准。
+`respond` 仅接受仍有活动 owner、Thread 和 Turn 的请求，已关闭的请求不能补写批准。
+JSON 和非交互终端不读取 stdin。
 
 Codex 支持在当前 Turn 的安全事件边界发送 Steer。Claude Code V1 没有等价的受控中途发送接口，
 因此只在下一次 Turn 输入中附加排队指令；状态卡会明确显示这一差异。
@@ -242,14 +254,12 @@ vega explain
 
 vega start
 vega approve
-vega run [--provider codex|claude]
 vega watch
 vega latest
 
 vega steer
 vega respond
 vega revise
-vega retry
 vega pause
 vega stop
 vega recover
@@ -264,6 +274,9 @@ vega resume
 只有 `vega.__version__`。
 
 ## 行为边界
+
+- 新建任务与可信 Task Card 恢复使用 `execution_protocol=2`。旧 Run 缺失该字段时按协议 1
+  读取，只支持查看、停止和可信交接；不修改历史状态来假装已迁移。新机器从交接材料建立新 Run。
 
 - Reviewer 会话隔离不是容器或操作系统级安全沙箱。
 - Vega 不扫描或终止不属于当前 run 的 Codex、Node 或 Shell 进程。

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from .loop_evidence import EvidenceFreshness
@@ -46,6 +47,10 @@ def build_finish_first_screen(
         latest_verdict,
         changed_files,
         changed_files_source=changed_files_source,
+        repo=Path(state.repo_path),
+        # ChangeRun 的比较基线绑定代表先冻结 Candidate 再启动 Core；
+        # legacy dirty loop 不具备该前提，不能用当前 HEAD 冒充源码快照。
+        candidate_sha=state.initial_head_sha if state.comparison_base_sha else None,
     )
     return {
         "decision": {

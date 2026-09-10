@@ -326,6 +326,10 @@ def test_adapter_serializes_child_creation_before_writer_binding(
     child_count_lock = threading.Lock()
     prepared = SimpleNamespace(run_dir=run_dir)
 
+    # 本例只核对 child 创建与 Writer 绑定的锁；环境准备由独立合同测试覆盖。
+    monkeypatch.setattr(
+        "vega.agent_provider_adapter.prepare_change_environment", lambda workspace, run: None,
+    )
     monkeypatch.setattr(
         adapter,
         "_prepare_attempt",

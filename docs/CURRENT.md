@@ -5,8 +5,8 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：32 / 32
-- 最近事件：`20260904T181539Z-RELEASE-05-completed`
+- 已完成：33 / 33
+- 最近事件：`20260910T040317Z-DAILY-01-completed`
 
 ## 当前事项
 
@@ -48,6 +48,7 @@
 | 已完成 | `UX-02` | 增加日常变更入口 | `UX-01` |
 | 已完成 | `UX-03` | 自动恢复一次 Reviewer 超时 | `UX-02` |
 | 已完成 | `RELEASE-05` | 发布 Vega v0.5.0 | `UX-03` |
+| 已完成 | `DAILY-01` | 精简日常变更主路径 | `RELEASE-05` |
 
 ## 状态规则
 

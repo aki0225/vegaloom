@@ -220,7 +220,6 @@ def _agent_status_payload(
             "recorded_agent_phase": state.phase,
             "recorded_terminal_status": state.terminal_status,
             "live_child_stage": card.live_child_stage,
-            "next_steps": list(projection.next_steps),
             "key_artifacts": list(projection.key_artifacts),
             **projection.review_queue,
         }

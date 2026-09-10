@@ -222,9 +222,13 @@ def _compact_verification_path(root: Path, command_dir: Path) -> Path:
     if os.name == "nt" and len(str(command_dir)) > 160:
         if os.path.lexists(command_dir):
             raise ValueError("verification 旧临时目录已存在；拒绝换名复用同一次验证")
-        identity = command_dir.relative_to(root).as_posix().encode("utf-8")
-        return root / hashlib.sha256(identity).hexdigest()[:16]
+        return root / compact_verification_identity(command_dir.relative_to(root))
     return command_dir
+
+
+def compact_verification_identity(identity: Path) -> str:
+    """执行和证据读取共用任务位置编码，不依赖读取机器的绝对路径长度。"""
+    return hashlib.sha256(identity.as_posix().encode("utf-8")).hexdigest()[:16]
 
 
 def _validate_verification_temp_root(repo: Path, root: Path) -> None:

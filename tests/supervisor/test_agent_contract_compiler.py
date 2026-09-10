@@ -56,16 +56,16 @@ def test_contract_compiler_enters_existing_approval_flow(
 
     monkeypatch.chdir(workspace)
     monkeypatch.setattr(
-        "vega.agent_start_cli.ensure_runner_ready",
+        "vega.agent_change_driver.ensure_change_provider_ready",
         lambda *_args, **_kwargs: pytest.fail(
             "已有 Proposal 的确定性编译不应要求 Provider 可用"
         ),
     )
     result = CliRunner().invoke(
         app,
-        ["run", "--run", published.run_dir.name, "--timeout", "60"],
+        ["change", "--run", published.run_dir.name, "--timeout", "60"],
     )
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 2, result.output
     run_dir, state, plan, _ = load_agent_bundle(
         workspace,
         published.run_dir.name,
@@ -313,6 +313,18 @@ def test_compiler_rejection_can_handoff_without_contract(
     assert restored.state.phase == "needs_human"
     assert restored.state.contract_revision is None
     assert not (restored.run_dir / "change-contract.json").exists()
+
+
+def test_compiler_freezes_explicit_preparation_in_approval_material(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "repo")
+    proposal = _proposal(repo, task_id="prepare-contract", goal="修复示例")
+    config = load_project_config(repo)
+    config.verification.prepare_commands = ["python prepare.py"]
+    compiled = compile_planning_proposal(repo, proposal, config)
+    assert compiled.contract.prepare_commands == ["python prepare.py"]
+    assert "python prepare.py" in render_plan_card(proposal, compiled)
+    without_preparation = compiled.contract.model_copy(update={"prepare_commands": []})
+    assert compiled.contract.expected_approval_digest() != without_preparation.expected_approval_digest()
 
 
 class _StaticRunner:

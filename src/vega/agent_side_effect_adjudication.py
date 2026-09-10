@@ -199,7 +199,7 @@ def _adjudication_outcome(
             "safe",
             [],
             [],
-            "外部副作用已确认不存在；可生成 Handoff，但仍需人工检查 WIP 与 Task Card",
+            "外部副作用已确认不存在；人工检查 WIP 后可显式 resume 恢复本机调度，或生成 Handoff",
         )
     return (
         "needs_human",

@@ -198,7 +198,9 @@ def _retry_source_worker_evidence(
     return _item(
         "Worker 执行",
         "passed",
-        "复用原始 Worker execution；本轮只重跑验证、风险门禁与 Reviewer",
+        ("复用原始 Worker execution；本轮只重算已有核心证据，未运行测试或 Reviewer"
+         if child_payload.get("retry_reason") == "core_evidence_recheck"
+         else "复用原始 Worker execution；本轮只重跑验证、风险门禁与 Reviewer"),
     )
 
 

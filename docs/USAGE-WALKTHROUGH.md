@@ -47,7 +47,7 @@ Reviewer 和 Finish。省略文本时，它继续当前仓库唯一未完成的 
 
 ```powershell
 vega start --repo <target-repo> --text "导出按钮点击后没有反应"
-vega run --run <run_id> --timeout 900
+vega change --run <run_id> --timeout 900
 ```
 
 Vega 在固定 Git revision 的受管 Worktree 中调查，输出：
@@ -61,7 +61,7 @@ runs/<run_id>/plan-card.md
 ```
 
 Proposal 区分事实、假设、未决问题、建议范围和验证建议，并保留来源引用。随后，同一次
-`run` 调用确定性 Contract Compiler：
+`change` 调用确定性 Contract Compiler：
 
 1. 重新校验 Proposal、固定 source revision 和 Planning 上下文；
 2. 只接受 `.vega.yaml` 已登记的验证命令；
@@ -74,7 +74,7 @@ Proposal 区分事实、假设、未决问题、建议范围和验证建议，�
 
 ```powershell
 vega approve --run <run_id> --actor human
-vega run --run <run_id> --timeout 900
+vega change --run <run_id> --timeout 900
 ```
 
 ## 3. 使用显式 Contract 创建 ChangeRun
@@ -109,7 +109,7 @@ vega status --run <run_id> --json
 
 ```powershell
 vega approve --run <run_id> --actor human
-vega run --run <run_id> --timeout 900
+vega change --run <run_id> --timeout 900
 ```
 
 仓库维护者也可以为重复、低风险任务预先配置：
@@ -131,7 +131,7 @@ approval:
 配置必须进入 Git。调用方还要显式选择：
 
 ```powershell
-vega run --run <run_id> --timeout 900 --approval bounded
+vega change --run <run_id> --timeout 900 --approval bounded
 ```
 
 这条命令只在以下条件全部成立时批准并继续 Worker：
@@ -146,7 +146,7 @@ vega run --run <run_id> --timeout 900 --approval bounded
 调查和修订任务。策略或 Contract 变化会使已有 bounded 批准失效；后续验证、Reviewer 和最终
 人工 Git 交付没有捷径。
 
-`run` 会连续推进合同允许的 `next` 和 `repair`，直到：
+`change` 会连续推进合同允许的 `next` 和 `repair`，直到：
 
 - 全部 Work Item 完成；
 - 需要新的批准；
@@ -157,14 +157,14 @@ vega run --run <run_id> --timeout 900 --approval bounded
 单次 Worker 或 Reviewer timeout 为 60～3600 秒。默认使用 Codex；首次执行可选 Claude Code：
 
 ```powershell
-vega run --run <run_id> --provider claude --timeout 900
+vega change --run <run_id> --provider claude --timeout 900
 ```
 
 同一 ChangeRun 会沿用已经建立的 Provider Session。显式传入另一个 Provider 会被拒绝，避免
 Planning、Worker 和恢复阶段意外落到不同会话。一次性短会话：
 
 ```powershell
-vega run --run <run_id> --timeout 900 --fresh-session
+vega change --run <run_id> --timeout 900 --fresh-session
 ```
 
 当前 Provider 不可用时默认报错，不会静默切换到另一个 Provider 或 fresh session。
@@ -226,8 +226,8 @@ Steer 超过 8 KiB、目标由人工接管或 Session 不存在时拒绝。
 pending 标记为 closed。此时先用 `status` / `explain` 对账，再按需要 `recover`、`takeover`
 或创建新 attempt；停止后的请求不能再用 `respond` 补写。
 
-只有高级 `vega run` 仍在另一个终端持有活动 Codex Turn 时，下面的命令才适用。响应前先在
-原生会话核对完整请求；Vega 会重新校验 owner、Thread、Turn、权限和 request binding。
+以下是排障用响应协议，要求请求仍有活动 owner、Thread 和 Turn。`change` 已关闭的请求
+不能再响应；需要完整原始上下文时转原生会话。Vega 会重新校验权限和 request binding。
 
 命令或文件审批：
 
@@ -312,24 +312,38 @@ Contract 内容未变时，Plan revision 可以自动采用。Contract 内容变
 
 ```powershell
 vega approve --run <run_id> --actor human
-vega run --run <run_id>
+vega change --run <run_id>
 ```
 
 实际 Diff 越界、命中未授权风险或预算耗尽时，即使提议文件写得合法也不会自动采用。
 
 ## 10. 只重跑验证
 
-代码、验证命令和 Reviewer finding 都不需要改，仅修复本地依赖环境后，按当前安全动作提示重试：
+依赖准备不要交给 Worker 反复尝试。需要时在任务开始前登记并提交项目配置，例如：
 
-```powershell
-vega retry --run <run_id>
+```yaml
+verification:
+  prepare_commands:
+    - npm ci --ignore-scripts
+  commands:
+    - npm test
 ```
 
-该命令复用当前 Diff 和原 Worker 证据，只重跑 Verification、Risk 和 Reviewer。源码、未跟踪
-文件、Git 控制状态或 Candidate 变化时拒绝。
+这里的命令只是 Node 项目示例，必须按项目实际情况配置。Vega 将准备命令编入合同并请求
+人工批准，在首次 Worker 前执行一次；有准备命令的任务不能使用 bounded 批准。
+安装失败、停止或退出未确认时保留现场，后续 `change` 不会重复安装。准备成功也不会代替测试。
+
+先查看 `explain` 的安全动作。已完成必要的验证修订并批准时，继续原任务：
+
+```powershell
+vega change --run <run_id>
+```
+
+符合验证恢复资格时，`change` 复用当前 Diff 和原 Worker 证据，重跑 Verification、Risk 和
+Reviewer。源码、未跟踪文件、Git 控制状态或 Candidate 变化时拒绝，不回退到新的 Worker。
 
 验证命令需要变化时，先按上一节修订 Execution Plan；涉及 Contract 的固定验证要求时须重新
-批准。不要直接修改 `.vega.yaml` 后重试，`retry` 不会把工作区中的新命令视为授权。
+批准。直接修改 `.vega.yaml` 不构成授权；`change` 也不是跳过现场核对的万能继续按钮。
 
 ### 10.1 Reviewer 超时自动恢复一次
 
@@ -387,6 +401,24 @@ vega stop --run <run_id> --reason "任务取消"
 
 `pause` 只在没有活动 Writer 时生效。`stop` 不回滚代码或删除 Artifact。
 
+Worker 沙箱与宿主可能使用不同的依赖缓存。实现完成后，Worker 可以如实说明测试未运行，
+把代码交给控制器执行已批准的验证命令；无需为了缺少测试工具反复安装或重新调查。
+未完成的实现和未知副作用仍会停止。
+
+对执行协议 2 的 Run，若上一 Worker 已结束、Core 尚未启动，且因环境问题停在 `needs_human`：
+
+1. 在状态卡指出的受管 Worktree 准备原有依赖。不要修改锁文件、合同或验证配置。
+2. 执行 `vega stop --run <run_id> --reason "核对环境准备后的现场"`，记录当前现场；
+   若有漂移，仍保持阻断，不会自动认定安全。
+3. 核对旧进程与实际操作，在 Run 内保存核对依据，通过 `vega adjudicate` 提交人工副作用
+   裁决。`external_side_effects=none` 必须有依据，不能照抄示例当确认。
+4. 执行 `vega resume --run <run_id>`，再执行 `vega change --run <run_id>`。
+
+这条路径保留原 Run、WIP 和失败尝试，不重置 attempt 预算。恢复只重启调度，随后仍需冻结
+Candidate 并通过所有门禁；已产生 Core 结果的任务由 `change` 选择原有修复或验证重试路径。
+`resume` 仅接受当前批准、现场未再漂移、无活动 Writer、无外部副作用的 safe Checkpoint。
+已发布 Handoff 的旧 Run 不能本机恢复，必须从 Task Card 接手。
+
 ## 13. 换机器
 
 在现场可解释、没有活动 Writer 时：
@@ -424,10 +456,10 @@ checkout 差异不会被误判为代码变化；路径、mode、Blob 内容或 T
 
 ## 14. 完成
 
-正常 `run` 会自动推进 `finalizing`。如果在发布父终态前中断，重新执行：
+正常 `change` 会自动推进 `finalizing`。如果在发布父终态前中断，重新执行：
 
 ```powershell
-vega run --run <run_id>
+vega change --run <run_id>
 ```
 
 完成后，先回到启动任务的目录运行 `vega status --run <run_id>`。状态页会给出代码目录、

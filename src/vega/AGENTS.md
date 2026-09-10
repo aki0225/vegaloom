@@ -4,8 +4,8 @@
 
 - Vega 只有一条公开 ChangeRun：Change Contract、持久 Worker、Git Candidate、Verification、
   Risk、独立 Reviewer 和 Final Report。Core Harness 继续拥有可信完成语义。
-- `change / status / explain` 是日常入口；`start / approve / run` 用于显式控制阶段。
-  `watch / steer / respond / revise / retry / pause / stop` 和
+- `change / status / explain` 是日常入口；`start / approve` 用于显式控制阶段。
+  `watch / steer / respond / revise / pause / stop` 和
   `recover / adjudicate / takeover / reclaim / handoff / resume` 负责观察、
   人工交互和恢复。它们都操作同一条 ChangeRun，不拥有平行成功语义。
 - 旧 `do / loop / agent / goal / inspection` 命令不再注册；仍被 ChangeRun 调用的 Core

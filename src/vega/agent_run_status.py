@@ -7,6 +7,7 @@ from typing import Any
 from .agent_contract import AgentObservation, AgentState
 from .agent_child_status import read_live_child_stage
 from .agent_persistence import AgentArtifactError, load_agent_state, read_agent_trace
+from .agent_operation import bound_operation_kind
 from .progress import PROGRESS_VERSION, RunProgressLog, safe_run_id
 from .run_utils import resolve_run_dir
 
@@ -23,6 +24,9 @@ _PHASE_STATUS = {
     "stopped": "stopped",
 }
 _TRACE_PROGRESS = {
+    "environment_prepare_started": ("environment_prepare", "started"),
+    "environment_prepare_completed": ("environment_prepare", "completed"),
+    "environment_prepare_failed": ("environment_prepare", "failed"),
     "agent_started": ("agent", "started"),
     "change_run_started": ("agent", "started"),
     "planning_run_started": ("agent", "planning_run_started"),
@@ -46,6 +50,7 @@ _TRACE_PROGRESS = {
     "candidate_accepted": ("agent", "checkpoint_accepted"),
     "candidate_restored_for_repair": ("agent", "candidate_restored"),
     "verification_retry_committed": ("verification", "retry_started"),
+    "core_evidence_recheck_committed": ("agent", "evidence_recheck_started"),
     "supervisor_next": ("agent", "supervisor_next"),
     "supervisor_repair": ("agent", "supervisor_repair"),
     "supervisor_replan": ("agent", "supervisor_replan"),
@@ -105,6 +110,7 @@ def load_agent_status_state(
         if include_child_projection
         else state.active_child_run
     )
+    operation_kind = bound_operation_kind(run_dir, state) if state.active_operation_id else None
     payload = {
         "_run_kind": "agent",
         "automation_mode": None,
@@ -116,6 +122,7 @@ def load_agent_status_state(
         "task_id": state.task_id,
         "current_work_item": state.current_work_item,
         "active_child_run": state.active_child_run,
+        "active_operation_kind": operation_kind,
         "active_planning_execution_id": state.active_planning_execution_id,
         "last_child_run": latest_child_run,
         "brief_run": latest_child_run,
@@ -126,7 +133,9 @@ def load_agent_status_state(
         "active_candidate_sha": state.active_candidate_sha,
     }
     if include_child_projection:
-        live_child_stage = read_live_child_stage(run_dir, state)
+        live_child_stage = (
+            None if operation_kind == "environment_prepare" else read_live_child_stage(run_dir, state)
+        )
         if live_child_stage is not None:
             # 这是 status 的只读投影，不回写 Agent State，也不改变父流程阶段。
             payload["live_child_stage"] = live_child_stage
@@ -145,6 +154,9 @@ def latest_trusted_child_run(
     traced_child_run = traced_execution[0] if traced_execution is not None else None
     traced_operation_id = traced_execution[1] if traced_execution is not None else None
     if state.active_child_run is not None:
+        if bound_operation_kind(run_dir, state) == "environment_prepare":
+            # 控制器准备不是 Worker dispatch，不把父 run 冒充成 Core child。
+            return traced_child_run
         if traced_child_run != state.active_child_run:
             raise ValueError("active child 与最近可信 dispatch Trace 不一致")
         if traced_operation_id != state.active_operation_id:
@@ -230,6 +242,8 @@ def trusted_worker_status(
     """同时返回 Worker 展示标签和最近可信 child，避免重复读取 Trace。"""
 
     try:
+        if state.active_operation_id and bound_operation_kind(run_dir, state) == "environment_prepare":
+            return "未启动（控制器正在准备环境）", None
         child_run = latest_trusted_child_run(
             run_dir,
             state,
@@ -403,13 +417,15 @@ def _latest_dispatched_execution(
         "worker_dispatch_committed",
         "worker_dispatch_reconciled",
         "verification_retry_committed",
+        "core_evidence_recheck_committed",
     }
     for item in trace_items:
         event = item.get("event")
         if event not in accepted_events:
             continue
         expected_phase = (
-            "observing" if event == "verification_retry_committed" else "acting"
+            "observing" if event in {"verification_retry_committed", "core_evidence_recheck_committed"}
+            else "acting"
         )
         if item.get("run_id") != expected_run_id or item.get("phase") != expected_phase:
             raise ValueError("Agent operation Trace 与 Agent run 身份不一致")

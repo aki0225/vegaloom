@@ -222,6 +222,7 @@ def validate_dispatch_artifacts(
 ) -> None:
     """dispatch 前复核批准、Checkpoint 与 Task Brief 属于同一现场。"""
 
+    state.require_current_execution()
     if (
         not plan.approval_is_current()
         or state.goal_revision != plan.goal_revision

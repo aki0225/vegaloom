@@ -63,6 +63,7 @@ def compile_planning_proposal(
         ],
         side_effect_policy=contract_proposal.side_effect_policy,
         required_verification=verification,
+        prepare_commands=list(config.verification.prepare_commands),
         authority_envelope=envelope,
     )
     execution_plan = ExecutionPlan(
@@ -165,6 +166,10 @@ def render_plan_card(
         "## 合同验证",
         "",
         *[f"- `{command}`" for command in contract.required_verification],
+        "",
+        "## 控制器环境准备（每个批准版本最多一次）",
+        "",
+        *[f"- `{command}`" for command in contract.prepare_commands or ["未登记"]],
         "",
         "## 额外检查",
         "",

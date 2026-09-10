@@ -94,6 +94,7 @@ class ChangeContract(StrictAgentModel):
         default_factory=ChangeSideEffectPolicy
     )
     required_verification: list[NonEmptyText] = Field(min_length=1)
+    prepare_commands: list[NonEmptyText] = Field(default_factory=list, max_length=10)
     authority_envelope: ChangeAuthorityEnvelope
     approved: bool = False
     approved_at: str | None = None
@@ -140,16 +141,19 @@ class ChangeContract(StrictAgentModel):
     def semantic_content(self) -> dict[str, object]:
         """返回真正需要人工判断的内容，不把 revision 计作业务变化。"""
 
-        return self.model_dump(
-            mode="json",
-            exclude={"contract_revision", *CHANGE_APPROVAL_METADATA_FIELDS},
-        )
+        content = self.content_for_approval()
+        content.pop("contract_revision")
+        return content
 
     def content_for_approval(self) -> dict[str, object]:
-        return self.model_dump(
+        content = self.model_dump(
             mode="json",
             exclude=CHANGE_APPROVAL_METADATA_FIELDS,
         )
+        # 空准备列表不改变历史批准摘要；旧任务仍能只读核对原授权。
+        if not self.prepare_commands:
+            content.pop("prepare_commands")
+        return content
 
     def expected_approval_digest(self) -> str:
         return canonical_digest(self.content_for_approval())
