@@ -16,13 +16,17 @@
 | 已完成的治理计划 | [`AI-MAINTAINABILITY-GOVERNANCE-PLAN.md`](AI-MAINTAINABILITY-GOVERNANCE-PLAN.md) | 三轮治理范围、Dogfood 和验收结果 |
 | 完整使用流程 | [`USAGE-WALKTHROUGH.md`](USAGE-WALKTHROUGH.md) | ChangeRun、交互、恢复和交付 |
 | 调查和计划协议 | [`PLAN-FIRST-PROTOCOL.md`](PLAN-FIRST-PROTOCOL.md) | 修改前调查、事实与假设、人工确认 |
-| Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | v0.5.1 ChangeRun、Provider Session、Core 与数据流 |
+| Runtime 与证据链 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 当前 ChangeRun、Provider Session、Core 与数据流 |
 | Supervisor 状态合同 | [`SUPERVISOR-AGENT-STATE-AUTHORITY.md`](SUPERVISOR-AGENT-STATE-AUTHORITY.md) | 状态、恢复和事实权威 |
 | v0.3.0 能力快照 | [`MVP-SCOPE.md`](MVP-SCOPE.md) | 已发布范围与当时明确不做的内容 |
 | v0.3.0 实施记录 | [`PERSISTENT-INTERACTIVE-AGENT-V1.md`](PERSISTENT-INTERACTIVE-AGENT-V1.md) | 持久交互式 Agent 的冻结决策 |
 | 工作区文件规范 | [`WORKSPACE-HYGIENE.md`](WORKSPACE-HYGIENE.md) | 临时文件、运行产物和清理边界 |
 
 ## 发布
+
+`v0.6.0` 的变更、升级限制和发布核对项见
+[`RELEASE-NOTES-0.6.0.md`](RELEASE-NOTES-0.6.0.md)。制品是否已发布以
+[GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.6.0) 为准。
 
 `v0.5.1` 发布材料与[下载](https://github.com/aki0225/vegaloom/releases/tag/v0.5.1)：
 

@@ -11,7 +11,7 @@
 <p>
   <a href="https://github.com/aki0225/vegaloom/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/aki0225/vegaloom/ci.yml?branch=main&style=for-the-badge&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
-  <a href="https://github.com/aki0225/vegaloom/releases/tag/v0.5.1"><img src="https://img.shields.io/badge/Release-v0.5.1-4fb8d8?style=for-the-badge" alt="Vega v0.5.1"></a>
+  <a href="https://github.com/aki0225/vegaloom/releases/latest"><img src="https://img.shields.io/github/v/release/aki0225/vegaloom?style=for-the-badge&color=4fb8d8" alt="Vega 最新发布版"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-F8FAFC?style=for-the-badge" alt="MIT License"></a>
 </p>
 
@@ -28,8 +28,9 @@ Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言
 实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。合同内问题可以自动回到
 Worker；越出批准、授权或证据边界时停下来问人。
 
-> 本页对应 v0.5.1，修复内容见 [发布说明](docs/RELEASE-NOTES-0.5.1.md)。
-> 下载与发布状态以 [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.5.1) 为准。
+> 本页对应 v0.6.0，变更与升级限制见 [发布说明](docs/RELEASE-NOTES-0.6.0.md)。
+> 发布状态以 [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.6.0) 为准；
+> 制品尚未发布时，请使用 [v0.5.1 及其使用文档](https://github.com/aki0225/vegaloom/blob/v0.5.1/README.md)。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega ChangeRun：计划批准、Worker、验证、独立 Reviewer 和最终报告">
@@ -40,10 +41,10 @@ Worker；越出批准、授权或证据边界时停下来问人。
 要求 Python `>=3.11`、Git，以及已安装的 Codex CLI 或 Claude Code CLI。Vega 只能确认命令是否存在；
 Provider 是否已登录，要在实际启动会话时确认。
 
-在用于运行 Vega 的 Python 环境中安装 Release 提供的 wheel，无需克隆开发工作区：
+确认 v0.6.0 Release 已提供 wheel 后，在用于运行 Vega 的 Python 环境中安装，无需克隆开发工作区：
 
 ```powershell
-python -m pip install "https://github.com/aki0225/vegaloom/releases/download/v0.5.1/vegaloom-0.5.1-py3-none-any.whl"
+python -m pip install "https://github.com/aki0225/vegaloom/releases/download/v0.6.0/vegaloom-0.6.0-py3-none-any.whl"
 ```
 
 然后进入**自己的目标 Git 项目**。自然语言任务需要项目提交一份 `.vega.yaml`，登记实际验证
@@ -84,10 +85,10 @@ vega explain
 
 ## 高级路径：拆开调查、批准和执行
 
-以下描述当前开发分支。已发布的 v0.5.1 仍有 `run`、`retry`；本轮将它们合并到 `change`。
-旧 Run 保留查看、停止和可信交接能力，不能直接套用新版执行协议。
+从 v0.6.0 起，`run`、`retry` 统一由 `change` 推进。旧 Run 保留查看、停止和可信交接能力，
+不能原地套用新版执行协议；升级步骤见 [发布说明](docs/RELEASE-NOTES-0.6.0.md#升级前先看)。
 
-主线新增的启动预检可以运行 `vega config check --repo . --change`；Claude 加
+启动预检运行 `vega config check --repo . --change`；Claude 加
 `--provider claude`。这条检查使用已提交的项目配置，不会替项目猜测试命令。
 
 需要传入已有 Contract 或使用脚本化流程时，使用 `start`、`approve`，再用 `change` 推进：
@@ -299,11 +300,12 @@ LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`re
 | 修改前调查与计划 | [PLAN-FIRST-PROTOCOL](docs/PLAN-FIRST-PROTOCOL.md) |
 | 当前事项 | [CURRENT](docs/CURRENT.md) |
 | 文档导航 | [docs/README](docs/README.md) |
-| v0.5.1 发布说明 | [RELEASE-NOTES-0.5.1](docs/RELEASE-NOTES-0.5.1.md) |
-| v0.5.1 发布摘要 | [RELEASE-SUMMARY-0.5.1](docs/RELEASE-SUMMARY-0.5.1.md) |
+| v0.6.0 发布说明与升级 | [RELEASE-NOTES-0.6.0](docs/RELEASE-NOTES-0.6.0.md) |
+| v0.5.1 版本说明 | [RELEASE-NOTES-0.5.1](docs/RELEASE-NOTES-0.5.1.md) |
+| v0.5.1 版本摘要 | [RELEASE-SUMMARY-0.5.1](docs/RELEASE-SUMMARY-0.5.1.md) |
 | v0.5.0 历史发布说明 | [RELEASE-NOTES-0.5.0](docs/RELEASE-NOTES-0.5.0.md) |
 | v0.5.0 历史发布摘要 | [RELEASE-SUMMARY-0.5.0](docs/RELEASE-SUMMARY-0.5.0.md) |
-| 发布检查清单 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
+| v0.5.0 历史发布验收 | [RELEASE-CHECKLIST](docs/RELEASE-CHECKLIST.md) |
 | v0.4.0 历史发布说明 | [RELEASE-NOTES-0.4.0](docs/RELEASE-NOTES-0.4.0.md) |
 | v0.3.1 历史说明 | [RELEASE-NOTES-0.3.1](docs/RELEASE-NOTES-0.3.1.md) |
 | v0.3.0 历史说明 | [RELEASE-NOTES-0.3.0](docs/RELEASE-NOTES-0.3.0.md) |

@@ -1,5 +1,10 @@
 # 使用说明
 
+本文对应 v0.6.0。安装与发布状态见 [README](../README.md#快速开始)；使用 v0.5.1 时请查阅
+[对应版本的说明](https://github.com/aki0225/vegaloom/blob/v0.5.1/docs/USAGE-WALKTHROUGH.md)。
+旧 Run 只能查看、停止或可信交接，不能原地继续执行。升级前先按
+[发布说明](RELEASE-NOTES-0.6.0.md#升级前先看)处理未完成任务。
+
 ## 1. 准备
 
 先按 [README 快速开始](../README.md#快速开始) 安装 Vega。自然语言入口还需要在目标项目提交
@@ -47,7 +52,7 @@ Reviewer 和 Finish。省略文本时，它继续当前仓库唯一未完成的 
 
 ```powershell
 vega start --repo <target-repo> --text "导出按钮点击后没有反应"
-vega change --run <run_id> --timeout 900
+vega change --run <run_id> --timeout 900 --json
 ```
 
 Vega 在固定 Git revision 的受管 Worktree 中调查，输出：
@@ -61,7 +66,7 @@ runs/<run_id>/plan-card.md
 ```
 
 Proposal 区分事实、假设、未决问题、建议范围和验证建议，并保留来源引用。随后，同一次
-`change` 调用确定性 Contract Compiler：
+`change --json` 调用确定性 Contract Compiler：
 
 1. 重新校验 Proposal、固定 source revision 和 Planning 上下文；
 2. 只接受 `.vega.yaml` 已登记的验证命令；
