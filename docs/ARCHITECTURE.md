@@ -1,8 +1,8 @@
 # 架构
 
-> 本文描述 `v0.5.1` 候选源码架构，在同一 ChangeRun 合同内支持 Codex 和 Claude Code。
-> 已发布的 `v0.5.0` 验证见 [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md)；
-> 候选版本说明见 [`RELEASE-NOTES-0.5.1.md`](RELEASE-NOTES-0.5.1.md)。演进计划见
+> 本文描述 `v0.6.0` 源码架构，在同一 ChangeRun 合同内支持 Codex 和 Claude Code。
+> 发布状态与升级限制见 [`RELEASE-NOTES-0.6.0.md`](RELEASE-NOTES-0.6.0.md)；
+> [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md) 仅记录 v0.5.0 的历史验收。演进计划见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。
 
