@@ -183,7 +183,8 @@ def restore_candidate_as_wip(
         execution_plan=execution_plan,
     )
     handle.run_write(
-        ["git", "reset", "--mixed", candidate.parent_sha],
+        # 新文件保留 intent-to-add，Git 才能把未暂存内容与 Candidate 一起比较。
+        ["git", "reset", "--mixed", "-N", candidate.parent_sha],
         "恢复失败 Candidate 的 WIP",
     )
     handle.require_state(candidate.parent_sha)

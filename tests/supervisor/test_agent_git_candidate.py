@@ -15,6 +15,7 @@ from vega.agent_change_contract import (
 from vega.agent_git_candidate import (
     GitCandidateError,
     freeze_candidate_commit,
+    restore_candidate_as_wip,
     validate_candidate_binding,
 )
 from vega.agent_git_worktree import prepare_managed_worktree
@@ -54,6 +55,13 @@ def test_candidate_commit_isolated_from_user_worktree(tmp_path: Path) -> None:
         contract=_contract(),
         execution_plan=_plan(),
     )
+    restore_candidate_as_wip(
+        handle, candidate=candidate, contract=_contract(), execution_plan=_plan(),
+    )
+    assert _git(handle.worktree_path, "rev-parse", "HEAD") == source_head
+    assert _git(handle.worktree_path, "diff", "--cached", "--name-only") == ""
+    assert _git(handle.worktree_path, "diff", candidate.candidate_sha, "--") == ""
+    assert _git(handle.worktree_path, "rev-parse", candidate.candidate_ref) == candidate.candidate_sha
     # 已有短目录与旧版完整 Run ID 目录都不能被重新创建覆盖。
     with pytest.raises(GitCandidateError, match="拒绝覆盖"):
         prepare_managed_worktree(repo, workspace_root=handle.worktree_path.parent, run_id=handle.run_id)

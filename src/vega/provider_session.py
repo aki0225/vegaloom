@@ -279,7 +279,10 @@ def resolve_session_role(run_dir: Path, requested: str) -> str:
     return reviewers[0][0]
 
 
-def queue_steer(run_dir: Path, role_key: str, instruction: str) -> PendingSteer:
+def queue_steer(
+    run_dir: Path, role_key: str, instruction: str, *,
+    validate_target: Callable[[ProviderSessionHandle], None] | None = None,
+) -> PendingSteer:
     normalized = redact_text(instruction.strip())
     if not normalized:
         raise ValueError("Steer 指令不能为空")
@@ -295,6 +298,9 @@ def queue_steer(run_dir: Path, role_key: str, instruction: str) -> PendingSteer:
         handle = state.handles.get(role_key)
         if handle is None or handle.owner != "vega":
             raise ValueError("目标会话不存在或当前由人工接管")
+        # 公共入口的当前合同校验与入队共用同一把锁，不能沿用锁外的状态快照。
+        if validate_target is not None:
+            validate_target(handle)
         state.steers.append(created)
 
     mutate_provider_sessions(run_dir, "agent.steer", mutate)

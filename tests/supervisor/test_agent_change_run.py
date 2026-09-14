@@ -620,7 +620,11 @@ def test_failed_candidate_generates_fix_packet_for_next_attempt(
         load_current_fix_packet(workspace, result.run_dir, result.state)
 
 
-def test_pre_core_blocked_worker_resumes_same_run_without_new_diff(tmp_path: Path) -> None:
+def test_pre_core_blocked_worker_resumes_same_run_without_new_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from vega.agent_change_driver import AgentChangeDriver
+    from vega.agent_persistence import load_agent_checkpoint, save_agent_checkpoint
     from vega.agent_recovery import SupervisorAgentRecovery
     from vega.agent_recovery_request import AgentRecoveryRequest
     from vega.agent_side_effect_adjudication import SupervisorAgentSideEffectAdjudicator
@@ -655,12 +659,17 @@ def test_pre_core_blocked_worker_resumes_same_run_without_new_diff(tmp_path: Pat
     )
     resumed = recovery.resume_local(failed.run_dir.name)
     assert resumed.state.run_id == failed.state.run_id
+    monkeypatch.setattr("vega.agent_change_driver.ensure_change_provider_ready", lambda _: None)
+    monkeypatch.setattr(
+        "vega.agent_change_driver.SupervisorAgentProviderAdapter", lambda *args, **kwargs: adapter,
+    )
+    driver = AgentChangeDriver(workspace, repo, timeout_seconds=60)
     old_child = next((failed.run_dir / "children").glob("*.json"))
     child_id = json.loads(old_child.read_text(encoding="utf-8"))["child_run"]
     core_state = workspace / "runs" / child_id / "state.json"
     core_state.write_text("{}", encoding="utf-8")
-    with pytest.raises(ValueError, match="已有 Core 结果"):
-        adapter._prepare_attempt(resumed.run_dir.name, 60)
+    with pytest.raises(ValueError, match="无法解析 assist child state"):
+        driver.change(run=resumed.run_dir.name)
     core_state.unlink()
     historical = json.loads(next(iter(original.values())))
     historical["verification"] = "failed"
@@ -668,11 +677,22 @@ def test_pre_core_blocked_worker_resumes_same_run_without_new_diff(tmp_path: Pat
     older = failed.run_dir / "observations" / "older-core.json"
     older.write_text(json.dumps(historical), encoding="utf-8")
     with pytest.raises(ValueError, match="已有 Core 门禁结果"):
-        adapter._prepare_attempt(resumed.run_dir.name, 60)
+        driver.change(run=resumed.run_dir.name)
     older.unlink()
+    checkpoint_path = resumed.run_dir / "checkpoints" / f"{resumed.state.latest_checkpoint_id}.json"
+    checkpoint = load_agent_checkpoint(checkpoint_path)
+    wrong_child = workspace / "runs" / "wrong-child"
+    wrong_child.mkdir()
+    save_agent_checkpoint(checkpoint_path, checkpoint.model_copy(update={"failed_attempts": ["wrong-child"]}))
+    with pytest.raises(ValueError, match="失败 Checkpoint 与原 Worker 绑定不一致"):
+        driver.change(run=resumed.run_dir.name)
+    save_agent_checkpoint(checkpoint_path, checkpoint)
+    assert worker.calls == 1
     adapter.worker_runner = _WorkerRunner(["src/one.py"])
     # 新 Worker 仅确认原 WIP，不制造无意义改动来满足 repair 的 Diff 要求。
-    completed = adapter.run(resumed.run_dir.name, timeout_seconds=60)
+    result = driver.change(run=resumed.run_dir.name)
+    assert result.run is not None
+    completed = result.run
     assert completed.state.phase == "completed"
     assert reviewer.calls == 2  # 后续 attempt 保留原有累计审查规则，不重置预算。
     assert "实现与验证交接" in adapter.worker_runner.prompts[0]

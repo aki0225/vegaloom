@@ -127,7 +127,9 @@ class SupervisorAgentProviderAdapter:
         *,
         timeout_seconds: int,
     ) -> AgentRun:
-        preparation_failure = prepare_change_environment(self.workspace, run)
+        preparation_failure = prepare_change_environment(
+            self.workspace, run, progress_reporter=self._report_preparation_progress,
+        )
         if preparation_failure is not None:
             return preparation_failure
         prepared, child_dir, prompt, operation_id, bound = self._prepare_and_bind(
@@ -143,6 +145,13 @@ class SupervisorAgentProviderAdapter:
             bound,
         )
         return self._reconcile_attempt(executed)
+
+    def _report_preparation_progress(self, step: str, elapsed_seconds: int) -> None:
+        if self.event_reporter is not None:
+            action = "已开始" if elapsed_seconds == 0 else "运行中"
+            self.event_reporter(f"环境准备{action}，已用时 {elapsed_seconds} 秒；Worker 尚未启动")
+        elif self.progress_reporter is not None:
+            self.progress_reporter(step, elapsed_seconds)
 
     def _prepare_and_bind(
         self,

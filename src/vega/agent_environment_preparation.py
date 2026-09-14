@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -46,14 +47,17 @@ class PreparedEnvironment:
     result_ref: str
 
 
-def prepare_change_environment(workspace: Path, run: str) -> AgentRun | None:
+def prepare_change_environment(
+    workspace: Path, run: str, *,
+    progress_reporter: Callable[[str, int], None] | None = None,
+) -> AgentRun | None:
     """只执行批准的准备命令；一次预算先落盘，进程运行不占用 mutation lock。"""
     run_dir = resolve_run_dir(workspace, run)
     with RunMutationLock.acquire(run_dir, "agent.dispatch"):
         prepared = _bind_preparation(workspace, run_dir)
     if prepared is None:
         return None
-    evidence, succeeded, reason = _execute_preparation(prepared)
+    evidence, succeeded, reason = _execute_preparation(prepared, progress_reporter)
     return _publish_preparation(workspace, prepared, evidence, succeeded, reason)
 
 
@@ -148,7 +152,10 @@ def _requires_preparation(context: ChangeRunContext, repo: Path, config: Project
     return True
 
 
-def _execute_preparation(prepared: PreparedEnvironment) -> tuple[dict[str, str], bool, str]:
+def _execute_preparation(
+    prepared: PreparedEnvironment,
+    progress_reporter: Callable[[str, int], None] | None = None,
+) -> tuple[dict[str, str], bool, str]:
     run_dir, repo, config = prepared.run_dir, prepared.repo, prepared.config
     operation_id, commands = prepared.operation_id, prepared.contract.prepare_commands
     evidence: dict[str, str] = {}
@@ -162,6 +169,7 @@ def _execute_preparation(prepared: PreparedEnvironment) -> tuple[dict[str, str],
             RunnerExecutionContext(
                 execution_root=run_dir, execution_dir=execution_dir, run_id=run_dir.name,
                 step="environment_prepare", execution_id=operation_id, iteration=index + 1,
+                progress_reporter=progress_reporter,
             ),
         )
         lease_path = execution_dir / "execution.json"

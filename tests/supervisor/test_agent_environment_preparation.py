@@ -7,10 +7,13 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from vega.agent_change_contract import ChangeAuthorityEnvelope, ChangeContract, ExecutionPlan, ExecutionWorkItem
 from vega.agent_environment_preparation import prepare_change_environment
 from vega.agent_change_presentation import build_change_approval_snapshot
+from vega.agent_change_driver import AgentChangeDriver, ChangeDriverResult
+from vega.agent_provider_adapter import SupervisorAgentProviderAdapter
 from vega.agent_recovery import SupervisorAgentRecovery
 from vega.agent_persistence import load_agent_state, read_agent_trace
 from vega.agent_runtime import SupervisorAgentRuntime
@@ -18,15 +21,37 @@ from vega.agent_runtime_support import (
     bound_repo, capture_bound_workspace, load_agent_bundle, validate_dispatch_artifacts,
 )
 from vega.execution_control import find_execution_records
+from vega.execution_feedback import ExecutionProgressTicker
+from vega.cli_entrypoint import app
 from vega.project_config import ProjectConfig, validate_project_config
 from vega.run_status import run_status_payload
 
 
 @pytest.mark.parametrize("outcome", ["success", "failed", "tracked_mutation"])
-def test_preparation_is_owned_once_and_never_verification_success(tmp_path: Path, outcome: str) -> None:
+def test_preparation_is_owned_once_and_never_verification_success(
+    tmp_path: Path, outcome: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     workspace, run_dir = _approved_run(tmp_path, outcome=outcome)
     before = load_agent_state(run_dir / "agent-state.json")
-    result = prepare_change_environment(workspace, run_dir.name)
+    events = []
+
+    class ImmediateTicker(ExecutionProgressTicker):
+        def started(self):
+            super().started()
+            # 推进反馈时钟，不等待真实 25 秒，也不改变进程 timeout 时钟。
+            self.tick(self.next_report_at)
+
+    def report(step, elapsed):
+        events.append((step, elapsed))
+        if outcome == "failed" or (outcome == "success" and elapsed == 25):
+            raise RuntimeError("测试：进度输出失败")
+
+    monkeypatch.setattr("vega.execution_control.ExecutionProgressTicker", ImmediateTicker)
+    result = prepare_change_environment(workspace, run_dir.name, progress_reporter=report)
+    assert events == (
+        [("environment_prepare", 0)] if outcome == "failed"
+        else [("environment_prepare", 0), ("environment_prepare", 25)]
+    )
     current = load_agent_state(run_dir / "agent-state.json")
     leases = find_execution_records(run_dir)
     assert len(leases) == 1
@@ -104,6 +129,39 @@ def test_preparation_can_be_observed_and_stopped_without_worker(tmp_path: Path) 
         result = future.result(timeout=15)
     assert result is not None and result.state.phase == "needs_human"
     assert find_execution_records(run_dir)[0].lease.status == "stopped"
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_preparation_progress_uses_cli_stderr_and_respects_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, json_output: bool,
+) -> None:
+    def preparation(workspace, run, *, progress_reporter):
+        ticker = ExecutionProgressTicker("environment_prepare", progress_reporter)
+        ticker.started()
+        ticker.tick(ticker.next_report_at)
+        return object()  # 准备阶段即返回，不进入真实 Worker。
+
+    def change(driver, **kwargs):
+        adapter = SupervisorAgentProviderAdapter(
+            tmp_path, progress_reporter=driver.progress_reporter,
+            event_reporter=driver.event_reporter,
+        )
+        adapter._run_once("test-run", timeout_seconds=60)
+        return ChangeDriverResult(None, "attention_required", "test.prepared", "等待人工")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("vega.agent_change_cli.resolve_repository_root", lambda path: path)
+    monkeypatch.setattr("vega.agent_provider_adapter.prepare_change_environment", preparation)
+    monkeypatch.setattr(AgentChangeDriver, "change", change)
+    result = CliRunner().invoke(app, ["change", *(["--json"] if json_output else [])])
+    assert result.exit_code == 2
+    assert "环境准备" not in result.stdout
+    if json_output:
+        assert json.loads(result.stdout)["reason_code"] == "test.prepared"
+        assert result.stderr == ""
+    else:
+        assert "环境准备已开始，已用时 0 秒" in result.stderr
+        assert "环境准备运行中，已用时 25 秒" in result.stderr
 
 
 @pytest.mark.parametrize("commands,max_commands", [([""], 2), (["echo ok", "echo later"], 1), (["echo ok\necho bad"], 2)])
