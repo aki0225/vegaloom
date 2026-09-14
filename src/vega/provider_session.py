@@ -84,6 +84,8 @@ class PendingInteraction(BaseModel):
     thread_id: str
     turn_id: str | None = None
     summary: str
+    context_ref: str | None = None
+    context_digest: str | None = None
     status: InteractionStatus = "pending"
     response: dict[str, object] | None = None
     created_at: str = Field(default_factory=utc_now)
@@ -95,6 +97,8 @@ class ProviderSessionState(BaseModel):
 
     schema_version: int = 1
     run_id: str
+    worker_permission_mode: Literal["ask", "auto-review", "full-access"] | None = None
+    worker_permission_source: Literal["explicit"] | None = None
     revision: int = Field(default=1, ge=1)
     handles: dict[str, ProviderSessionHandle] = Field(default_factory=dict)
     steers: list[PendingSteer] = Field(default_factory=list)
@@ -491,4 +495,6 @@ def _interaction_binding(interaction: PendingInteraction) -> tuple[object, ...]:
         interaction.turn_id,
         interaction.summary,
         interaction.created_at,
+        interaction.context_ref,
+        interaction.context_digest,
     )

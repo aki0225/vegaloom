@@ -10,6 +10,7 @@
 | 产品边界与成功语义 | [`PRODUCT-CONTRACT.md`](PRODUCT-CONTRACT.md) | Core、Supervisor、证据和行为边界 |
 | 当前事项与下一项 | [`CURRENT.md`](CURRENT.md) | 由机器计划和事件账本生成的当前状态 |
 | 主路径精简 | [`MAIN-PATH-SIMPLIFICATION-PLAN.md`](MAIN-PATH-SIMPLIFICATION-PLAN.md) | 准备环境、继续动作、报告与旧任务迁移 |
+| Worker 权限改进计划 | [`WORKER-PERMISSIONS-PLAN.md`](WORKER-PERMISSIONS-PLAN.md) | 有效执行权限与有限原生审批响应的已批准有限计划 |
 | 演进事项与验收 | [`../plans/vega-agent-evolution.json`](../plans/vega-agent-evolution.json) | 稳定事项、依赖和要求检查 |
 | 路线决策与历史 | [`ROADMAP.md`](ROADMAP.md) | 为什么选择或停止某条路线 |
 | 有界自主执行计划 | [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md) | 自然语言 Planning、Contract Compiler 和有界批准 |

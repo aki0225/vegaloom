@@ -65,7 +65,7 @@ verification:
 进入目标 Git 仓库后，日常任务不需要复制 Run ID 或手工串起多个阶段：
 
 ```powershell
-vega change "导出按钮点击后没有反应"
+vega change "导出按钮点击后没有反应" --worker-permissions auto-review
 vega change                 # 继续当前任务，不传新目标
 vega status
 vega explain
@@ -78,10 +78,12 @@ vega explain
 已确认事实、未知项和安全动作；两者默认优先选择当前仓库唯一未完成的 Run，没有活动任务时
 显示最近更新的终态 Run，也可以用 `--run` 显式指定。
 
-`change` 默认在当前 TTY 请求人工批准。Provider 请求会在同一终端显示脱敏摘要；如果协调
-状态没有保存足以安全判断的完整原始目标或权限上下文，Vega 会中断当前 attempt、关闭这条
-待响应请求，再转到恢复或原生会话接管。**同终端可见不等于同终端自动批准**，复杂、敏感或
-无法分类的请求不能只凭摘要接受。
+持久 Codex Worker 首次显式选择权限后沿用同一 Run 的选择；上例也可由用户明确选择
+`--worker-permissions full-access`，需要人工询问则选 `ask`，不宣称继承宿主权限。
+`change` 默认在当前 TTY 请求任务批准。完整的 Codex command/file 审批可在同一终端
+查看本机临时原文后选择本次允许或拒绝（默认拒绝），等待不停止 attempt；持久审计仍仅保存
+脱敏信息，不记录原始命令或文件变更。缺上下文、不支持的请求以及非TTY/JSON仍停止并交还
+人工，不能只凭摘要接受；临时上下文在响应或进程退出时清理。
 
 ## 高级路径：拆开调查、批准和执行
 

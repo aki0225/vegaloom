@@ -5,8 +5,8 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：33 / 33
-- 最近事件：`20260910T040317Z-DAILY-01-completed`
+- 已完成：35 / 35
+- 最近事件：`20260914T111348Z-EXEC-02-completed`
 
 ## 当前事项
 
@@ -49,6 +49,8 @@
 | 已完成 | `UX-03` | 自动恢复一次 Reviewer 超时 | `UX-02` |
 | 已完成 | `RELEASE-05` | 发布 Vega v0.5.0 | `UX-03` |
 | 已完成 | `DAILY-01` | 精简日常变更主路径 | `RELEASE-05` |
+| 已完成 | `EXEC-01` | 尊重 Worker 已选择的有效执行权限 | `DAILY-01` |
+| 已完成 | `EXEC-02` | 接通有限的 Codex 原生审批响应 | `EXEC-01` |
 
 ## 状态规则
 

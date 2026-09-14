@@ -63,7 +63,7 @@ def test_contract_compiler_enters_existing_approval_flow(
     )
     result = CliRunner().invoke(
         app,
-        ["change", "--run", published.run_dir.name, "--timeout", "60"],
+        ["change", "--run", published.run_dir.name, "--timeout", "60", "--worker-permissions", "ask"],
     )
     assert result.exit_code == 2, result.output
     run_dir, state, plan, _ = load_agent_bundle(

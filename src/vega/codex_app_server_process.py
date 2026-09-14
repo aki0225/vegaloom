@@ -27,6 +27,9 @@ class AppServerInvocation(BaseModel):
     role_key: str
     repo_path: str
     sandbox: str
+    approval_policy: str = "never"
+    approvals_reviewer: str = "user"
+    approval_context_prefix: str | None = None
     output_schema: dict[str, Any] | None = None
     model: str | None = None
     reasoning_effort: str | None = None

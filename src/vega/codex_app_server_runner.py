@@ -6,8 +6,11 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .codex_app_server_process import AppServerInvocation
+from .codex_app_server_permissions import permissions_for_role
+from .codex_approval_context import cleanup_approval_contexts
 from .codex_mcp_isolation import (
     CodexMcpIsolationError,
     build_mcp_disable_overrides,
@@ -82,9 +85,14 @@ class CodexAppServerRunner:
                 error="未找到 codex，无法启动 App Server。",
                 command=[self.executable, "app-server"],
             )
+        prepared = False
         try:
+            sandbox, approval_policy, approvals_reviewer = permissions_for_role(
+                self.run_dir, self.role_key, sandbox, self.isolate_session,
+            )
             prompt = self._prompt_with_pending_anchor(prompt)
             self._prepare_handle()
+            prepared = True
             request_path = execution_context.execution_dir / "app-server-request.json"
             guard = ExecutionPathGuard(
                 execution_context.execution_root,
@@ -98,6 +106,9 @@ class CodexAppServerRunner:
                 role_key=self.role_key,
                 repo_path=str(repo_path.resolve()),
                 sandbox=sandbox,
+                approval_policy=approval_policy,
+                approvals_reviewer=approvals_reviewer,
+                approval_context_prefix=uuid4().hex,
                 output_schema=_strict_output_schema(self.output_schema),
                 model=self.options.model,
                 reasoning_effort=self.options.reasoning_effort,
@@ -110,7 +121,8 @@ class CodexAppServerRunner:
                 newline="\n",
             )
         except (CodexMcpIsolationError, OSError, ValueError) as exc:
-            self._mark_unavailable()
+            if prepared:
+                self._mark_unavailable()
             return RunnerResult(
                 status="error",
                 output="",
@@ -139,18 +151,21 @@ class CodexAppServerRunner:
             output_line_observer=observer.observe,
             capture_stderr_separately=True,
         )
-        owned = run_owned_process(
-            command,
-            prompt,
-            repo_path.resolve(),
-            timeout_seconds,
-            context,
-            environment={
-                "PYTHONDONTWRITEBYTECODE": "1",
-                "PYTHONIOENCODING": "utf-8",
-                "PYTHONUTF8": "1",
-            },
-        )
+        try:
+            owned = run_owned_process(
+                command,
+                prompt,
+                repo_path.resolve(),
+                timeout_seconds,
+                context,
+                environment={
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                    "PYTHONUTF8": "1",
+                },
+            )
+        finally:
+            cleanup_approval_contexts(self.run_dir, invocation.approval_context_prefix)
         parsed = _extract_helper_result(owned.output)
         if owned.status != "success":
             self._mark_unavailable()
@@ -220,6 +235,11 @@ class CodexAppServerRunner:
 
     def _prepare_handle(self) -> None:
         def mutation(state) -> None:
+            existing = state.handles.get(self.role_key)
+            if existing is not None and (
+                existing.owner != "vega" or existing.lifecycle in {"active", "waiting_user"}
+            ):
+                raise ValueError("Provider Session 已有活动 Turn 或由人工接管")
             handle = ensure_session_handle(
                 state,
                 self.role_key,

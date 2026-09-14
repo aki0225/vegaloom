@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from uuid import uuid4
 from . import __version__
 from .agent_contract_support import utc_now
 from .codex_app_server_process import (
@@ -14,15 +13,14 @@ from .codex_app_server_process import (
     terminate_app_server_tree,
 )
 from .codex_app_server_permissions import require_thread_permissions
+from .codex_approval_context import AppServerApprovals
 from .codex_app_server_rpc import (
-    CODEX_SUPPORTED_SERVER_REQUESTS,
     CodexAppServerRpc,
     codex_initialize_capabilities,
 )
 from .execution_process import prepare_subprocess_command
 from .provider_session import (
-    PendingInteraction, load_provider_sessions, mutate_provider_sessions,
-    summarize_provider_interaction,
+    load_provider_sessions, mutate_provider_sessions,
 )
 from .redaction import redact_text
 _MAX_AGENT_MESSAGE_CHARS = 1024 * 1024
@@ -36,7 +34,9 @@ class _AppServerClient:
         self.thread_id: str | None = None
         self.turn_id: str | None = None
         self.safe_to_steer = False
-        self.pending_rpc: dict[str, str] = {}
+        self.approvals = AppServerApprovals(
+            self.run_dir, invocation.role_key, invocation.repo_path, invocation.approval_context_prefix,
+        )
         self.turn_error: str | None = None
     def run(self, prompt: str) -> int:
         command = _app_server_command(self.invocation, windows=os.name == "nt")
@@ -67,6 +67,7 @@ class _AppServerClient:
         finally:
             if not self._shutdown():
                 exit_code = 1
+            self.approvals.close()
         return exit_code
     def _initialize(self) -> None:
         client = {"name": "vega", "title": "Vega", "version": __version__}
@@ -82,11 +83,17 @@ class _AppServerClient:
     def _open_thread(self) -> None:
         state = load_provider_sessions(self.run_dir)
         handle = state.handles[self.invocation.role_key]
-        approval_policy = "never" if self.invocation.sandbox == "read-only" else "on-request"
         params = {
             "cwd": self.invocation.repo_path,
             "sandbox": self.invocation.sandbox,
-            "approvalPolicy": approval_policy,
+            "approvalPolicy": self.invocation.approval_policy,
+            "approvalsReviewer": self.invocation.approvals_reviewer,
+            "config": {
+                "sandbox_workspace_write.writable_roots": [],
+                "sandbox_workspace_write.network_access": False,
+                "sandbox_workspace_write.exclude_tmpdir_env_var": True,
+                "sandbox_workspace_write.exclude_slash_tmp": True,
+            },
         }
         if self.invocation.model is not None:
             params["model"] = self.invocation.model
@@ -105,6 +112,9 @@ class _AppServerClient:
             )
         sandbox, approval_policy = require_thread_permissions(
             result, requested_sandbox=self.invocation.sandbox,
+            requested_approval=self.invocation.approval_policy,
+            requested_reviewer=self.invocation.approvals_reviewer,
+            requested_cwd=self.invocation.repo_path,
         )
         thread = result.get("thread") if isinstance(result, dict) else None
         thread_id = thread.get("id") if isinstance(thread, dict) else None
@@ -170,12 +180,13 @@ class _AppServerClient:
         _emit_progress("turn_started")
     def _event_loop(self) -> None:
         while True:
-            self._send_pending_responses()
             self._send_pending_steers()
             message = self.rpc.receive(timeout=0.1)
             if message is None:
                 if self.process is not None and self.process.poll() is not None:
                     raise RuntimeError("App Server 在 Turn 完成前退出")
+                # 先消费已到达的失效/完成通知，再发送本机排队的授权。
+                self._send_pending_responses()
                 continue
             if "id" in message and "method" in message:
                 self._record_server_request(message)
@@ -193,6 +204,7 @@ class _AppServerClient:
     ) -> bool:
         handlers = {
             "item/started": self._handle_item_started,
+            "serverRequest/resolved": self.approvals.resolve,
             "thread/tokenUsage/updated": self._handle_token_usage,
         }
         handler = handlers.get(method)
@@ -217,6 +229,7 @@ class _AppServerClient:
         self._complete_turn(str(turn.get("status") or "unknown"))
         return True
     def _handle_item_started(self, params: dict[str, object]) -> None:
+        self.approvals.observe_item(params)
         item = params.get("item")
         if not isinstance(item, dict):
             return
@@ -294,57 +307,10 @@ class _AppServerClient:
         _emit_progress("turn_completed")
         _emit_result("success", message=final_message)
     def _record_server_request(self, message: dict[str, object]) -> None:
-        rpc_id = json.dumps(message["id"], ensure_ascii=False, separators=(",", ":"))
-        method = str(message["method"])
-        if method not in CODEX_SUPPORTED_SERVER_REQUESTS:
-            raise RuntimeError(f"App Server 请求类型不受支持：{method}")
-        params = message.get("params")
-        params = params if isinstance(params, dict) else {}
-        interaction_id = f"request-{uuid4().hex[:12]}"
-        summary = summarize_provider_interaction(method, params)
-        interaction = PendingInteraction(
-            interaction_id=interaction_id,
-            role_key=self.invocation.role_key,
-            rpc_request_id=rpc_id,
-            method=method,
-            thread_id=str(params.get("threadId") or self.thread_id or ""),
-            turn_id=str(params["turnId"]) if "turnId" in params else self.turn_id,
-            summary=summary,
-        )
-        def mutation(session_state) -> None:
-            session_state.interactions.append(interaction)
-            handle = session_state.handles[self.invocation.role_key]
-            handle.lifecycle = "waiting_user"
-            handle.last_event = "waiting_user"
-            handle.updated_at = utc_now()
-        mutate_provider_sessions(self.run_dir, "agent.session", mutation)
-        self.pending_rpc[rpc_id] = interaction_id
+        self.approvals.record(message, self.thread_id, self.turn_id)
         _emit_progress("waiting_user")
     def _send_pending_responses(self) -> None:
-        if not self.pending_rpc:
-            return
-        state = load_provider_sessions(self.run_dir)
-        by_id = {item.interaction_id: item for item in state.interactions}
-        for rpc_id, interaction_id in list(self.pending_rpc.items()):
-            interaction = by_id.get(interaction_id)
-            if (
-                interaction is None
-                or interaction.status != "responded"
-                or interaction.response is None
-            ):
-                continue
-            self.rpc.respond(_rpc_id(rpc_id), interaction.response)
-            def mutation(session_state, target=interaction_id) -> None:
-                for item in session_state.interactions:
-                    if item.interaction_id == target:
-                        item.status = "closed"
-                        item.resolved_at = utc_now()
-                handle = session_state.handles[self.invocation.role_key]
-                handle.lifecycle = "active"
-                handle.last_event = "user_response_sent"
-                handle.updated_at = utc_now()
-            mutate_provider_sessions(self.run_dir, "agent.session", mutation)
-            self.pending_rpc.pop(rpc_id, None)
+        if self.approvals.send_responses(self.rpc.respond):
             _emit_progress("user_response_sent")
     def _send_pending_steers(self) -> None:
         if not self.safe_to_steer or self.thread_id is None or self.turn_id is None:
@@ -406,14 +372,6 @@ class _AppServerClient:
         except OSError:
             pass
         return True
-def _rpc_id(value: str) -> str | int:
-    try:
-        decoded = json.loads(value)
-    except json.JSONDecodeError:
-        return value
-    if isinstance(decoded, (str, int)) and not isinstance(decoded, bool):
-        return decoded
-    return value
 def _app_server_command(
     invocation: AppServerInvocation,
     *,

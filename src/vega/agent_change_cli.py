@@ -10,7 +10,7 @@ import typer
 from .agent_change_driver import AgentChangeDriver, ChangeDriverResult
 from .agent_change_presentation import redact_change_message
 from .agent_change_contract import ChangeContract, ExecutionPlan
-from .agent_cli_interaction import InteractionPumpUpdate
+from .agent_cli_interaction import InteractionPumpUpdate, TerminalApprovalPrompt
 from .agent_cli_snapshot import AgentCliRun, build_agent_cli_snapshot, resolve_agent_cli_run
 from .agent_cli_status import render_compact_agent_status
 from .agent_runtime_support import load_agent_bundle
@@ -47,6 +47,10 @@ def agent_change(
         "human",
         "--approval",
         help="human 在当前终端确认；bounded 还要求仓库策略显式放行。",
+    ),
+    worker_permissions: Literal["ask", "auto-review", "full-access"] | None = typer.Option(
+        None, "--worker-permissions",
+        help="显式选择并绑定 Codex Worker 执行权限；不是任务批准，也不自动继承宿主。",
     ),
     timeout_seconds: int = typer.Option(
         900,
@@ -95,6 +99,7 @@ def agent_change(
             interactive=interactive,
             json_output=json_output,
             fresh_session=fresh_session,
+            worker_permissions=worker_permissions,
             confirm=_confirm if interactive else None,
             event_reporter=(
                 None
@@ -105,7 +110,9 @@ def agent_change(
                 )
             ),
             interaction_reporter=(
-                None if json_output else _render_interaction_update
+                None if json_output else
+                TerminalApprovalPrompt(_render_interaction_update)
+                if interactive and _stream_is_tty(sys.stderr) else _render_interaction_update
             ),
             progress_reporter=(
                 None if json_output else report_execution_progress

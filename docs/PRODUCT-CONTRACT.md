@@ -121,9 +121,24 @@ model 和 effort。Vega 固定 Claude Code 的 safe-mode、工具白名单和权
 不能放宽这些参数。Claude 的只读 Reviewer 只开放 `Read / Glob / Grep`，Worker 只增加
 `Edit / Write`；项目验证仍由 Vega 执行。
 
+持久 Codex Worker 使用调用者显式选择并绑定 Run 的执行权限，不宣称自动继承宿主会话。
+首次调用模型前，未选择的 Run 会给出继续同一 Run 的完整命令，例如
+`vega change --run <run-id> --worker-permissions ask`；非交互模式不替用户选择。
+`ask` 使用 `workspace-write / on-request / user`，`auto-review` 使用
+`workspace-write / on-request / auto_review`，`full-access` 使用
+`danger-full-access / never / user`。启动与恢复均核验实际生效模式、审批 reviewer 及必要范围；
+组织限制、不支持或缺失的返回值明确拒绝，不静默降级。模式来源不取自目标仓库配置。
+同一 Run 后续沿用选择，不能更换模式或在活动执行/人工接管时重新绑定；退役协议仍只允许
+查看、停止和可信交接。Planning 和独立 Reviewer 继续只读，不继承 Worker 写权限。
+`--fresh-session` 保留原有固定兼容行为，不提供上述新模式的完整生效核验；显式模式及
+已绑定该模式的 Run 不可改用无法核验的 runner，Claude 同样不映射这些 Codex 模式。
+执行权限不扩大任务合同、人工批准或交付授权。Full Access 的 Worktree 不是 OS 隔离，
+事后 Diff 不能阻止外部副作用。原生 auto_review 由 Codex 处理，Vega 不增加第二审批模型。
+
 Provider Session 只保存本机会话协调信息：Session ID、owner、生命周期、Turn、压缩次数、Token
-用量、待发送 Steer 和待响应请求。待响应请求只保留脱敏摘要，不保存可以替代原生 Provider
-授权判断的完整目标、权限或网络上下文；它不参与 Verification、Risk、Reviewer 或 Finish 裁决。
+用量、显式 Worker 权限模式及来源、待发送 Steer 和待响应请求。待响应请求只保留脱敏摘要、
+临时上下文引用及摘要校验值，不保存原始命令、文件变更、权限或网络上下文；它不参与
+Verification、Risk、Reviewer 或 Finish 裁决。
 
 ## Candidate 与门禁
 
@@ -196,11 +211,17 @@ Steer 不能修改冻结合同。敏感输入不得写入 Vega Artifact；需要
 直接 `reclaim`。活动 attempt 被接管时会先中断执行；人工处理后必须走 Recovery 或 Handoff，
 不能把旧 attempt 直接接回自动循环。
 
-`vega change` 会在当前 TTY 展示 Provider 待处理请求的脱敏摘要。若当前协调状态缺少足以安全
-判断的完整原始目标或权限上下文，控制器中断当前 attempt，并把对应 pending 标记为 closed，
-再转 Recovery、Takeover 或新的 attempt；终端可见不等于自动批准。
+`vega change` 仅对完整 Codex command/file approval 提供同终端知情响应：实际 command/cwd
+或匹配同一 Item 的文件变更与请求绑定只存放在 Run 的本机临时目录，原文仅显示在 stderr TTY，
+终端控制字符转义，不经过 stdout 进度、Trace 或 Provider Session 持久审计。用户只可选择
+本次 `accept/decline`，默认拒绝，不提供永久或会话授权；拒绝由 Provider 按原生语义处理。
+等待继续原 attempt，stop/中断仍可结束等待；主线程非阻塞读键，不创建后台 stdin 线程。
+响应入队和原生发送前均核对请求、角色、owner、Thread/Turn 与上下文绑定，过期、重复或
+接管不发送旧授权；响应或 helper/受管进程退出时清理临时文件。异常断电可能留下临时文件，
+本机目录访问权限仍由操作系统负责，不承诺安全擦除或 OS 隔离。
+缺完整上下文、网络/额外权限/策略增量/MCP 等不支持请求，以及非TTY/JSON，仍中断 attempt、
+关闭 pending 并显示恢复或接管边界，不读 stdin、不输出原文、不无限等待用户。
 `respond` 仅接受仍有活动 owner、Thread 和 Turn 的请求，已关闭的请求不能补写批准。
-JSON 和非交互终端不读取 stdin。
 
 Codex 支持在当前 Turn 的安全事件边界发送 Steer。Claude Code V1 没有等价的受控中途发送接口，
 因此只在下一次 Turn 输入中附加排队指令；状态卡会明确显示这一差异。

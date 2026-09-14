@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "20260914T111347Z-EXEC-01-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "EXEC-01",
+  "transition": "completed",
+  "recorded_at": "2026-09-14T11:13:47Z",
+  "summary": "已实现显式 Worker 权限选择与 Run 绑定、实际 Thread 权限核验及只读角色隔离；未证明可信宿主权限读取，采用显式选择而非自动继承。定向与 Claude 兼容回归、唯一 Codex full-access 真实任务及绑定源码 PR CI 已通过。本记录写入时，事件尚未进入 main，PR #119 依赖仍待合并，最终文档事件提交需通过 CI。",
+  "evidence": {
+    "pull_requests": [120],
+    "commits": ["6d617020bfca1d3b0320a3a7cf86137b58551d17"],
+    "checks": [
+      "affected-permission-tests", "claude-compatibility-tests", "architecture-growth",
+      "repository-hygiene", "plan-state", "pr-ci"
+    ],
+    "artifacts": [
+      "docs/WORKER-PERMISSIONS-PLAN.md",
+      "docs/PRODUCT-CONTRACT.md",
+      "src/vega/codex_app_server_permissions.py",
+      "tests/supervisor/test_codex_app_server.py",
+      "tests/supervisor/test_agent_change_driver.py",
+      "tests/supervisor/test_agent_contract_compiler.py",
+      "tests/supervisor/test_claude_code_provider.py"
+    ]
+  }
+}

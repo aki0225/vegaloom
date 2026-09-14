@@ -25,6 +25,7 @@ _OBSERVED_NOTIFICATIONS: Final[frozenset[str]] = frozenset(
         "error",
         "item/completed",
         "item/started",
+        "serverRequest/resolved",
         "thread/compacted",
         "thread/tokenUsage/updated",
         "turn/completed",
