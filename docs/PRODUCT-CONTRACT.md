@@ -98,6 +98,10 @@ Execution Plan 记录 Agent 可以调整的实现安排：
 - 候选文件与依赖顺序；
 - 实现策略、附加检查和未决问题。
 
+`implementation_strategy` 是计划说明，不是 Worker 的完整输入，也不会整段注入 Task Brief。
+必须执行的要求应写入实际编译的 Work Item 目标或合同约束；Worker 自检使用现有 Work Item
+`verification`，不能仅写在策略说明中，也不能代替控制器的固定 Verification。
+
 合同不变时，Agent 可以拆分 Work Item、调整顺序、换实现方案或增加测试。Reviewer 发现原假设
 错误时返回 `replan`，由新的计划 revision 承接；Reviewer 本身不批准自己提出的新合同。
 

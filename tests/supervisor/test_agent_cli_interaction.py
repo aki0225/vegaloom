@@ -8,12 +8,13 @@ from typer.testing import CliRunner
 from vega.agent_cli_interaction import ProviderInteractionPump
 from vega.agent_contract import AgentState
 from vega.agent_persistence import save_agent_state
-from vega.cli import app
+from vega.cli_entrypoint import app
 from vega.provider_session import (
     PendingInteraction,
     ProviderSessionHandle,
     ProviderSessionState,
     close_pending_interactions,
+    ensure_session_handle,
     load_provider_sessions,
     mutate_provider_sessions,
     respond_to_interaction,
@@ -197,6 +198,63 @@ def test_legacy_protocol_rejects_provider_controls_before_mutation(
 
     assert result.exit_code != 0
     assert "执行协议" in result.output
+    assert (run_dir / "provider-sessions.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("role", ["worker", "reviewer:WI-01"])
+def test_steer_checks_current_revision_inside_enqueue_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str,
+) -> None:
+    run_dir = _run_dir(tmp_path, method="item/fileChange/requestApproval", summary="修改文件")
+    current = AgentState(
+        run_id=run_dir.name, task_id="task-1", repository_id="repo-1",
+        run_kind="change", execution_protocol=2, contract_revision=1,
+        execution_plan_revision=1, accepted_checkpoint_sha="a" * 40,
+    )
+    save_agent_state(run_dir / "agent-state.json", current)
+
+    def prepare_session(state):
+        ensure_session_handle(
+            state, role, work_item_id="WI-01", contract_revision=current.contract_revision,
+            plan_revision=current.plan_revision,
+        )
+
+    mutate_provider_sessions(run_dir, "agent.session", prepare_session)
+    monkeypatch.chdir(tmp_path)
+    args = ["steer", "--run", run_dir.name, "--role", role, "--text", "继续检查"]
+    assert CliRunner().invoke(app, args).exit_code == 0
+    before = (run_dir / "provider-sessions.json").read_bytes()
+
+    def revise_before_enqueue(text, path):
+        save_agent_state(run_dir / "agent-state.json", current.model_copy(update={
+            "contract_revision": 2, "execution_plan_revision": 2, "plan_revision": 2,
+        }))
+        return text
+
+    # CLI 已读取旧状态后发生 revision；必须在入队锁内重读，而非只校验锁外快照。
+    with monkeypatch.context() as patch:
+        patch.setattr("vega.agent_cli._load_text_choice", revise_before_enqueue)
+        result = CliRunner().invoke(app, args)
+    assert result.exit_code != 0
+    assert "尚未发送" in result.output and "新会话准备后重新提交" in result.output
+    assert (run_dir / "provider-sessions.json").read_bytes() == before
+
+    current = current.model_copy(update={
+        "contract_revision": 2, "execution_plan_revision": 2, "plan_revision": 2,
+    })
+    mutate_provider_sessions(run_dir, "agent.session", prepare_session)
+    assert CliRunner().invoke(app, args).exit_code == 0
+    steers = load_provider_sessions(run_dir).steers
+    assert [item.status for item in steers] == ["rejected", "queued"]
+
+    save_agent_state(run_dir / "agent-state.json", current.model_copy(update={
+        "execution_plan_revision": 3, "plan_revision": 3,
+    }))
+    result = CliRunner().invoke(app, args)
+    assert (result.exit_code == 0) == (role == "worker")
+    before = (run_dir / "provider-sessions.json").read_bytes()
+    (run_dir / "agent-state.json").unlink()
+    assert CliRunner().invoke(app, args).exit_code != 0
     assert (run_dir / "provider-sessions.json").read_bytes() == before
 
 

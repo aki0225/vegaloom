@@ -29,14 +29,16 @@ from vega.agent_change_run import (
 )
 from vega.agent_contract import AgentDecision, AgentObservation, AgentState
 from vega.agent_git_candidate import freeze_candidate_commit
-from vega.agent_persistence import append_agent_trace, save_agent_state
+from vega.agent_persistence import append_agent_trace, load_agent_checkpoint, save_agent_state
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_runtime_logic import update_state
 from vega.agent_runtime_support import (
     capture_bound_workspace,
     save_agent_plan,
+    write_checkpoint,
 )
 from vega.agent_verification_retry import SupervisorAgentVerificationRetry
+from vega.agent_verification_retry_preparation import verification_retry_requested
 from vega.cli_entrypoint import app
 
 
@@ -237,6 +239,23 @@ def test_active_candidate_can_be_restored_for_contract_boundary_replan(
         workspace_fingerprint=snapshot.fingerprint,
         allowed_actions=["human"],
     )
+    failed_attempts = ["attempt-earlier", "attempt-replan"]
+    for child in failed_attempts:
+        append_agent_trace(
+            approved.run_dir / "trace.jsonl", event="worker_dispatch_committed",
+            state=update_state(
+                approved.state, phase="acting", active_child_run=child,
+                active_operation_id=f"operation-{child}",
+            ),
+        )
+    checkpoint = write_checkpoint(
+        approved.run_dir, blocked_state, snapshot, reason="两次尝试仍需人工处理",
+        status="blocked", pending_actions=["human"], failed_attempts=failed_attempts,
+    )
+    blocked_state = update_state(
+        blocked_state, latest_checkpoint_id=checkpoint.checkpoint_id,
+        state_version=blocked_state.state_version + 1,
+    )
     save_agent_state(approved.run_dir / "agent-state.json", blocked_state)
 
     current_contract = _load_contract(approved.run_dir)
@@ -282,6 +301,61 @@ def test_active_candidate_can_be_restored_for_contract_boundary_replan(
     assert pending.state.phase == "awaiting_approval"
     assert pending.state.active_candidate_sha is None
     assert pending.state.approved_contract_digest is None
+    reapproved = runtime.approve(pending.run_dir.name, actor="user")
+    checkpoint = load_agent_checkpoint(
+        reapproved.run_dir / "checkpoints" / f"{reapproved.state.latest_checkpoint_id}.json"
+    )
+    assert checkpoint.failed_attempts == failed_attempts
+    assert not verification_retry_requested(workspace, reapproved.run_dir.name)
+
+    archive = reapproved.run_dir / "execution-plans/execution-plan-revision-001.json"
+    archived_content = archive.read_bytes()
+    damaged_plan = json.loads(archived_content)
+    damaged_plan["work_items"][0]["objective"] = "归档中不存在的新实现授权"
+    archive.write_text(json.dumps(damaged_plan), encoding="utf-8")
+    with pytest.raises(ValueError, match="旧 Contract 或 Execution Plan 归档无法验证"):
+        verification_retry_requested(workspace, reapproved.run_dir.name)
+    archive.write_bytes(archived_content)
+    assert not verification_retry_requested(workspace, reapproved.run_dir.name)
+
+    # 同一失败历史下，下一次仅修订验证要求不能再次借人工批准改派 Worker。
+    append_agent_trace(
+        reapproved.run_dir / "trace.jsonl", event="worker_dispatch_committed",
+        state=update_state(
+            reapproved.state, phase="acting", active_child_run=failed_attempts[-1],
+            active_operation_id="operation-verification-source",
+        ),
+    )
+    verification_contract = ChangeContract.model_validate({
+        **_load_contract(reapproved.run_dir).model_dump(
+            mode="json", exclude=CHANGE_APPROVAL_METADATA_FIELDS,
+        ),
+        "contract_revision": 3,
+        "required_verification": [*_contract().required_verification, "git diff --check"],
+        "authority_envelope": {
+            **_load_contract(reapproved.run_dir).authority_envelope.model_dump(mode="json"),
+            "max_verification_retries": 2,
+        },
+    })
+    verification_plan = proposed_plan.model_copy(deep=True, update={
+        "contract_revision": 3, "plan_revision": 3, "additional_checks": ["git diff --check"],
+    })
+    verification_plan.work_items[0].verification.append("git diff --check")
+    pending = runtime.revise_change(
+        reapproved.run_dir.name, proposed_contract=verification_contract,
+        proposed_execution_plan=verification_plan,
+    )
+    verified = runtime.approve(pending.run_dir.name, actor="user")
+    assert verification_retry_requested(workspace, verified.run_dir.name)
+    archive = verified.run_dir / "execution-plans/execution-plan-revision-002.json"
+    archived_content = archive.read_bytes()
+    altered_strategy = json.loads(archived_content)
+    altered_strategy["implementation_strategy"] = ["未被批准投影绑定的策略说明"]
+    archive.write_text(json.dumps(altered_strategy), encoding="utf-8")
+    assert verification_retry_requested(workspace, verified.run_dir.name)
+    archive.write_bytes(archived_content)
+    with pytest.raises(ValueError, match="没有唯一失败 child"):
+        SupervisorAgentVerificationRetry(workspace).run(verified.run_dir.name)
 
 
 def test_auto_replan_budget_exhaustion_stops_for_human(tmp_path: Path) -> None:

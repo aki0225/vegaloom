@@ -23,6 +23,7 @@ from .agent_start_cli import agent_start
 from .agent_provider import provider_resume_command
 from .cli_support import require_repo_directory
 from .provider_session import (
+    ProviderSessionHandle,
     load_provider_sessions,
     queue_steer,
     resolve_session_role,
@@ -178,6 +179,7 @@ def agent_steer(
             run_dir,
             role_key,
             _load_text_choice(text, input_path),
+            validate_target=lambda target: _require_current_steer_target(run_dir, target),
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -188,6 +190,22 @@ def agent_steer(
         )
     else:
         typer.echo(f"Steer 已排队：{steer.steer_id}；目标={role_key}")
+
+
+def _require_current_steer_target(run_dir: Path, handle: ProviderSessionHandle) -> None:
+    current = load_agent_state(run_dir / "agent-state.json")
+    current.require_current_execution()
+    if current.run_id != run_dir.name:
+        raise ValueError("当前 AgentState 身份不一致；Steer 尚未发送，拒绝入队")
+    if handle.contract_revision != current.contract_revision or (
+        handle.role.startswith("reviewer:")
+        and handle.plan_revision is not None
+        and handle.plan_revision != current.plan_revision
+    ):
+        raise ValueError(
+            "目标会话 revision 已过期或不匹配；Steer 尚未发送、未入队。"
+            "请在新会话准备后重新提交。"
+        )
 
 
 def agent_respond(

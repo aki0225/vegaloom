@@ -4,9 +4,11 @@ from pathlib import Path
 from typing import Literal
 
 from . import agent_provider_preparation as provider_preparation
+from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_change_control import require_change_verification_retry_budget
+from .agent_change_run import load_change_run_context, validate_change_projection
 from .agent_contract import AgentPlan, AgentState, AgentWorkItem
-from .agent_persistence import load_agent_checkpoint
+from .agent_persistence import load_agent_checkpoint, read_agent_trace
 from .agent_plan_scope import (
     capture_plan_scope_baseline,
     evaluate_plan_scope,
@@ -15,7 +17,7 @@ from .agent_plan_scope import (
 from .agent_provider import AgentProvider
 from .agent_provider_factory import ensure_reviewer_runner
 from .agent_reviewer_timeout_retry import prepare_reviewer_timeout_source
-from .agent_run_status import latest_worker_dispatch_binding
+from .agent_run_status import latest_dispatch_binding, latest_worker_dispatch_binding
 from .agent_runtime_support import (
     bound_repo,
     capture_bound_workspace,
@@ -50,7 +52,7 @@ VerificationRetryReason = Literal["verification_failure", "reviewer_timeout"]
 def verification_retry_requested(workspace: Path, run: str) -> bool:
     """识别人工修订验证后的继续意图，完整执行资格仍由恢复入口检查。"""
 
-    run_dir, state, plan, _ = load_agent_bundle(workspace, run)
+    run_dir, state, plan, metadata = load_agent_bundle(workspace, run)
     if (
         state.run_kind != "change"
         or state.phase != "ready"
@@ -65,8 +67,101 @@ def verification_retry_requested(workspace: Path, run: str) -> bool:
     )
     if not checkpoint.failed_attempts:
         return False
+    if _approved_implementation_revision(run_dir, state, plan, metadata):
+        return False
+    if len(checkpoint.failed_attempts) == 1:
+        child_dir = resolve_run_dir(workspace, checkpoint.failed_attempts[0])
+        if not (child_dir / "state.json").exists():
+            binding = latest_dispatch_binding(run_dir, state)
+            if binding is None or binding[0] != child_dir.name:
+                raise ValueError("失败 Checkpoint 与原 Worker 绑定不一致")
+            # 缺文件不是重跑依据；只有完整证明 Core 尚未启动的显式恢复才可继续 Worker。
+            provider_preparation.require_pre_core_resume(workspace, run_dir, state)
+            return False
     # 有失败现场时不能因资格校验失败回退到新 Worker；由恢复路径明确拒绝。
     return True
+
+
+def _approved_implementation_revision(
+    run_dir: Path, state: AgentState, plan: AgentPlan, metadata: dict[str, object],
+) -> bool:
+    """失败历史继续保留；只有新的人工实现授权才开始新的 Worker epoch。"""
+
+    context = load_change_run_context(run_dir, state, plan, metadata)
+    assert context is not None
+    contract, execution_plan = context.contract, context.execution_plan
+    if contract.approval_source != "human" or contract.contract_revision <= 1:
+        return False
+    binding = latest_dispatch_binding(run_dir, state)
+    if binding is None:
+        return False
+    trace = read_agent_trace(run_dir / "trace.jsonl")
+    last_dispatch = max(
+        index for index, item in enumerate(trace)
+        if (item.get("child_run"), item.get("operation_id")) == binding
+    )
+    revisions = [
+        item for item in trace[last_dispatch + 1:]
+        if item.get("event") in {
+            "change_revision_requires_approval", "change_contract_approved",
+            "change_execution_plan_auto_applied",
+        }
+    ]
+    # auto_apply 不是本分支的新人工批准，不借 attempt 预算重置推断实现意图。
+    if len(revisions) < 2 or [item.get("event") for item in revisions[-2:]] != [
+        "change_revision_requires_approval", "change_contract_approved",
+    ]:
+        return False
+    revision, approval = revisions[-2:]
+    if any(
+        item.get("run_id") != state.run_id or item.get("work_item") != state.current_work_item
+        for item in (revision, approval)
+    ) or revision.get("phase") != "awaiting_approval" or approval.get("phase") != "ready":
+        raise ValueError("新实现授权的 revision Trace 身份不一致")
+    contract_ref = f"contracts/contract-revision-{contract.contract_revision - 1:03d}.json"
+    plan_ref = (
+        "execution-plans/"
+        f"execution-plan-revision-{execution_plan.plan_revision - 1:03d}.json"
+    )
+    projection_ref = f"plans/plan-revision-{execution_plan.plan_revision - 1:03d}.json"
+    if not {contract_ref, plan_ref, projection_ref}.issubset(revision.get("artifact_refs", [])):
+        raise ValueError("新实现授权缺少绑定的旧 Contract 或 Execution Plan 归档")
+    try:
+        previous_contract = ChangeContract.model_validate_json(
+            (run_dir / contract_ref).read_text(encoding="utf-8")
+        )
+        previous_plan = ExecutionPlan.model_validate_json(
+            (run_dir / plan_ref).read_text(encoding="utf-8")
+        )
+        previous_projection = AgentPlan.model_validate_json(
+            (run_dir / projection_ref).read_text(encoding="utf-8")
+        )
+        validate_change_projection(previous_contract, previous_plan, previous_projection)
+    except (OSError, ValueError) as exc:
+        raise ValueError("新实现授权的旧 Contract 或 Execution Plan 归档无法验证") from exc
+    if (
+        not previous_contract.approval_is_current()
+        or previous_contract.task_id != state.task_id
+        or previous_contract.contract_revision + 1 != contract.contract_revision
+        or previous_plan.plan_revision + 1 != execution_plan.plan_revision
+    ):
+        raise ValueError("新实现授权的旧 Contract 或 Execution Plan 归档不一致")
+    implementations = []
+    for source_contract, source_plan in (
+        (previous_contract, previous_projection), (contract, plan),
+    ):
+        contract_content = source_contract.semantic_content()
+        contract_content.pop("required_verification")
+        contract_content["authority_envelope"].pop("max_verification_retries")
+        # 策略说明没有进入旧批准投影，不能单凭它的差异授予新 Worker。
+        plan_content = source_plan.content_for_approval()
+        plan_content.pop("goal_revision")
+        plan_content.pop("plan_revision")
+        for item in plan_content["work_items"]:
+            item.pop("verification")
+        implementations.append((contract_content, plan_content))
+    # 仅改变验证要求仍必须复用原 Worker 证据；匹配失败绝不作为改派依据。
+    return implementations[0] != implementations[1]
 
 
 def prepare_verification_retry(
