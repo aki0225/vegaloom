@@ -50,7 +50,7 @@ def test_cli_bounded_mode_requires_explicit_opt_in_and_repository_policy(
 
     monkeypatch.chdir(workspace)
     monkeypatch.setattr(
-        "vega.agent_change_driver.SupervisorAgentProviderAdapter",
+        "vega.agent_change_execution.SupervisorAgentProviderAdapter",
         StaticAdapter,
     )
     monkeypatch.setattr(
@@ -60,7 +60,7 @@ def test_cli_bounded_mode_requires_explicit_opt_in_and_repository_policy(
 
     human = CliRunner().invoke(
         app,
-        ["change", "--run", started.run_dir.name, "--timeout", "60"],
+        ["change", "--run", started.run_dir.name, "--timeout", "60", "--worker-permissions", "ask"],
     )
 
     assert human.exit_code == 2, human.output

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 from .agent_change_execution import ProviderOperationBoundary, ensure_change_provider_ready
-from .agent_change_execution import run_provider_operation
+from .agent_change_execution import run_provider_operation, run_change_worker
 from .agent_change_task_card import TaskCardSelection, confirm_task_card_selection
 from .agent_change_task_card import select_unique_task_card
 from .agent_change_presentation import (
@@ -18,7 +18,7 @@ from .agent_cli_interaction import InteractionPumpUpdate
 from .agent_planning import PLANNING_PROPOSAL_ARTIFACT
 from .agent_planning_runtime import PlanningProposalRunner
 from .agent_provider import AgentProvider, resolve_run_provider
-from .agent_provider_adapter import SupervisorAgentProviderAdapter
+from .codex_app_server_permissions import prepare_change_permissions
 from .agent_repository_change_lock import (
     AgentRepositoryGuardBusyError,
     RepositoryChangeLock,
@@ -57,6 +57,7 @@ class AgentChangeDriver:
         interactive: bool = False,
         json_output: bool = False,
         fresh_session: bool = False,
+        worker_permissions: str | None = None,
         confirm: ConfirmCallback | None = None,
         event_reporter: EventReporter | None = None,
         interaction_reporter: InteractionReporter | None = None,
@@ -70,6 +71,7 @@ class AgentChangeDriver:
         self.interactive = interactive and not json_output
         self.json_output = json_output
         self.persistent_sessions = not fresh_session
+        self.worker_permissions = worker_permissions
         self.confirm = confirm
         self.event_reporter = event_reporter
         self.interaction_reporter = interaction_reporter
@@ -151,11 +153,15 @@ class AgentChangeDriver:
 
     def _drive(self, current: AgentRun) -> ChangeDriverResult:
         current.state.require_current_execution()
-        for _ in range(12):
-            selected_provider = resolve_run_provider(
-                current.run_dir,
-                self.requested_provider,
+        selected_provider = resolve_run_provider(current.run_dir, self.requested_provider)
+        if self.worker_permissions is not None or (
+            current.state.phase in {"planning", "awaiting_approval", "ready"}
+            and not verification_retry_requested(self.workspace, current.run_dir.name)
+        ):
+            prepare_change_permissions(
+                current.run_dir, self.worker_permissions, selected_provider, self.persistent_sessions,
             )
+        for _ in range(12):
             advanced = self._advance_phase(current, selected_provider)
             if isinstance(advanced, ChangeDriverResult):
                 return advanced
@@ -302,20 +308,13 @@ class AgentChangeDriver:
             # 判定只选择现有引擎；完整门禁失败必须向外报告，不能偷偷改派 Worker。
             return self._verification_retry(provider).run(current.run_dir.name)
         ensure_change_provider_ready(provider)
-        executed = run_provider_operation(
+        executed = run_change_worker(
             self.workspace,
             current,
             provider,
-            lambda: SupervisorAgentProviderAdapter(
-                self.workspace,
-                provider=provider,
-                persistent_sessions=self.persistent_sessions,
-                progress_reporter=self.progress_reporter,
-                event_reporter=self.event_reporter,
-            ).run(
-                current.run_dir.name,
-                timeout_seconds=self.timeout_seconds,
-            ),
+            persistent_sessions=self.persistent_sessions,
+            progress_reporter=self.progress_reporter,
+            timeout_seconds=self.timeout_seconds,
             interaction_reporter=self.interaction_reporter,
             event_reporter=self.event_reporter,
         )

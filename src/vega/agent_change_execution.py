@@ -7,9 +7,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .agent_cli_interaction import InteractionPumpUpdate, ProviderInteractionPump
+from .agent_cli_interaction import InteractionPumpUpdate, ProviderInteractionPump, TerminalApprovalPrompt
 from .agent_change_presentation import redact_change_message
 from .agent_provider import AgentProvider
+from .agent_provider_adapter import SupervisorAgentProviderAdapter
 from .agent_recovery import SupervisorAgentRecovery
 from .agent_run import AgentRun
 from .agent_runtime_support import load_agent_bundle
@@ -36,6 +37,24 @@ def ensure_change_provider_ready(provider: AgentProvider) -> None:
     raise ValueError(f"当前 PATH 中未找到 {label}；请先安装并登录。")
 
 
+def run_change_worker(
+    workspace: Path, current: AgentRun, provider: AgentProvider, *,
+    persistent_sessions: bool, timeout_seconds: int,
+    progress_reporter: Callable[[str, int], None] | None,
+    interaction_reporter: InteractionReporter | None, event_reporter: EventReporter | None,
+) -> AgentRun | ProviderOperationBoundary:
+    """把 Worker 调用接到既有进程交互边界；权限只读取 Run 已绑定选择。"""
+    adapter = SupervisorAgentProviderAdapter(
+        workspace, provider=provider, persistent_sessions=persistent_sessions,
+        progress_reporter=progress_reporter, event_reporter=event_reporter,
+    )
+    return run_provider_operation(
+        workspace, current, provider,
+        lambda: adapter.run(current.run_dir.name, timeout_seconds=timeout_seconds),
+        interaction_reporter=interaction_reporter, event_reporter=event_reporter,
+    )
+
+
 def run_provider_operation(
     workspace: Path,
     current: AgentRun,
@@ -45,7 +64,7 @@ def run_provider_operation(
     interaction_reporter: InteractionReporter | None,
     event_reporter: EventReporter | None,
 ) -> AgentRun | ProviderOperationBoundary:
-    """运行 Provider；Codex 等待授权时只展示边界并停止当前 attempt。"""
+    """运行 Provider；完整 TTY 请求可等待响应，其余继续使用既有停止边界。"""
 
     if provider == "claude":
         return operation()
@@ -72,6 +91,7 @@ def _run_codex_operation(
     _start_operation_thread(current, operation, results)
     pump = ProviderInteractionPump(
         current.run_dir,
+        prompt=interaction_reporter if isinstance(interaction_reporter, TerminalApprovalPrompt) else None,
     )
     boundary: InteractionPumpUpdate | None = None
     stop_deadline: float | None = None
@@ -123,6 +143,8 @@ def _run_codex_operation(
             event_reporter,
         )
         raise
+    finally:
+        pump.close()
 
 
 def _start_operation_thread(

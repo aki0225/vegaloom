@@ -12,7 +12,7 @@ import pytest
 
 from vega import agent_finalization as agent_finalization_module
 from vega.agent_provider_adapter import SupervisorAgentProviderAdapter
-from vega.agent_provider_factory import ensure_reviewer_runner
+from vega.agent_provider_factory import ensure_reviewer_runner, worker_runner
 from vega.agent_worker_evidence import (
     _verification_status,
     require_single_executable_work_item,
@@ -310,6 +310,13 @@ def test_adapter_configures_mcp_isolated_default_reviewer(
     assert isinstance(reviewer, CodexExecRunner)
     assert reviewer.isolate_mcp is True
     assert reviewer.single_writer is False
+    legacy_worker = worker_runner(
+        workspace / "runs" / "fresh-run",
+        AgentState(run_id="fresh-run", task_id="task", repository_id="repo"),
+        ProjectConfig(), provider="codex", persistent_session=False,
+    )
+    assert isinstance(legacy_worker, CodexExecRunner)
+    assert legacy_worker.single_writer is True
 
 
 def test_adapter_serializes_child_creation_before_writer_binding(

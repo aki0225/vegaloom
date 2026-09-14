@@ -661,9 +661,9 @@ def test_pre_core_blocked_worker_resumes_same_run_without_new_diff(
     assert resumed.state.run_id == failed.state.run_id
     monkeypatch.setattr("vega.agent_change_driver.ensure_change_provider_ready", lambda _: None)
     monkeypatch.setattr(
-        "vega.agent_change_driver.SupervisorAgentProviderAdapter", lambda *args, **kwargs: adapter,
+        "vega.agent_change_execution.SupervisorAgentProviderAdapter", lambda *args, **kwargs: adapter,
     )
-    driver = AgentChangeDriver(workspace, repo, timeout_seconds=60)
+    driver = AgentChangeDriver(workspace, repo, timeout_seconds=60, worker_permissions="ask")
     old_child = next((failed.run_dir / "children").glob("*.json"))
     child_id = json.loads(old_child.read_text(encoding="utf-8"))["child_run"]
     core_state = workspace / "runs" / child_id / "state.json"

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import time
+import json
+import os
+import select
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -9,10 +14,12 @@ from .provider_session import (
     PendingInteraction,
     ProviderSessionState,
     load_provider_sessions,
+    respond_to_interaction,
 )
+from .codex_approval_context import read_approval_context
 
 
-PumpStatus = Literal["idle", "attention"]
+PumpStatus = Literal["idle", "waiting", "attention"]
 
 _COMMAND_APPROVAL = "item/commandExecution/requestApproval"
 _FILE_APPROVAL = "item/fileChange/requestApproval"
@@ -35,10 +42,15 @@ class InteractionPumpUpdate:
 
 
 class ProviderInteractionPump:
-    """只检测 Provider 请求，不在简化终端读取输入或代发响应。"""
+    """在主线程轮询原生请求；只有独立临时上下文允许知情响应。"""
 
-    def __init__(self, run_dir: Path) -> None:
+    def __init__(self, run_dir: Path, *, prompt: TerminalApprovalPrompt | None = None) -> None:
         self.run_dir = run_dir.resolve()
+        self.prompt = prompt
+
+    def close(self) -> None:
+        if self.prompt is not None:
+            self.prompt.close()
 
     def poll(self) -> InteractionPumpUpdate:
         """执行一次非阻塞状态轮询；调用方可与 Provider future 并行等待。"""
@@ -57,6 +69,7 @@ class ProviderInteractionPump:
             if item.status == "pending"
         ]
         if not pending:
+            self.close()
             return InteractionPumpUpdate(status="idle")
         if len(pending) != 1:
             return _attention(
@@ -73,6 +86,11 @@ class ProviderInteractionPump:
                 message=binding_error,
             )
         eligibility_error = _inline_eligibility_error(interaction)
+        if self.prompt is not None and interaction.method in {_COMMAND_APPROVAL, _FILE_APPROVAL}:
+            try:
+                return self._respond_inline(interaction)
+            except (OSError, ValueError):
+                self.close()
         return _attention(
             interaction,
             reason_code="provider.interaction_requires_advanced_response",
@@ -81,6 +99,25 @@ class ProviderInteractionPump:
                 "Vega 将停止当前 attempt；停止后请使用 status、explain、"
                 "recover 或 takeover 对账，确认后创建新 attempt。"
             ),
+        )
+
+    def _respond_inline(self, interaction: PendingInteraction) -> InteractionPumpUpdate:
+        assert self.prompt is not None
+        context = read_approval_context(self.run_dir, interaction)
+        decision = self.prompt.poll_approval(interaction, context)
+        message = "等待本次执行许可；默认拒绝，可随时停止。"
+        if decision is not None:
+            if decision not in {"accept", "decline"}:
+                raise ValueError("仅允许本次 accept/decline")
+            read_approval_context(self.run_dir, interaction)
+            respond_to_interaction(
+                self.run_dir, interaction.interaction_id, {"decision": decision},
+                expected=interaction, expected_provider="codex",
+            )
+            self.close()
+            message = "已提交本次响应，等待 Provider 继续。"
+        return InteractionPumpUpdate(
+            status="waiting", interaction_id=interaction.interaction_id, message=message,
         )
 
 
@@ -113,11 +150,9 @@ def _inline_eligibility_error(
     interaction: PendingInteraction,
 ) -> str | None:
     if interaction.method in {_COMMAND_APPROVAL, _FILE_APPROVAL}:
-        # Provider Session 只保存脱敏摘要，无法重新证明 cwd、目标路径、
-        # 网络上下文或策略增量。基于 friendly display 标签批准会把展示提示
-        # 错当成权限事实，因此简化终端只能提示接管，不能内联 accept。
+        # 摘要不能替代独立临时上下文，也不能证明未支持的权限增量。
         return (
-            "简化状态没有保存知情授权所需的完整目标与权限上下文；"
+            "当前通路缺少本机可交互的完整目标，或包含未支持的网络、额外权限、策略增量；"
             "请接管原生会话核对请求，Vega 不会仅凭脱敏摘要批准。"
         )
     if interaction.method in _ADVANCED_METHODS:
@@ -153,3 +188,89 @@ def _load_current_state(run_dir: Path) -> ProviderSessionState:
                 time.sleep(0.02)
     assert last_error is not None
     raise last_error
+
+
+class TerminalApprovalPrompt:
+    """临时原文只写本机 stderr TTY；主线程非阻塞读键，不创建 stdin 线程。"""
+
+    def __init__(self, reporter: Callable[[InteractionPumpUpdate], None]) -> None:
+        self.reporter = reporter
+        self.shown: tuple[str, str | None] | None = None
+        self.buffer = ""
+        self.extended_key = False
+        self.overflow = False
+        self.last_update: InteractionPumpUpdate | None = None
+
+    def __call__(self, update: InteractionPumpUpdate) -> None:
+        if update != self.last_update:
+            self.reporter(update)
+            self.last_update = update
+
+    def poll_approval(self, interaction: PendingInteraction, context: dict) -> str | None:
+        if not sys.stdin.isatty() or not sys.stderr.isatty():
+            raise ValueError("知情授权只支持本机交互终端")
+        identity = (interaction.interaction_id, interaction.context_digest)
+        if self.shown != identity:
+            self.close()
+            self._discard_input()
+            self.shown = identity
+            text = json.dumps(context, ensure_ascii=False, indent=2)
+            visible = "".join(char if char.isprintable() or char == "\n" else f"\\u{ord(char):04x}" for char in text)
+            sys.stderr.write(
+                "\n[本次原生请求原文；不改变任务合同；不写入持久审计]\n"
+                + visible + "\n仅允许本次执行？[y/N]（Enter 拒绝，Ctrl+C 停止） "
+            )
+            sys.stderr.flush()
+            return None
+        chars = self._read_available()
+        if chars is None:
+            return None
+        if chars == "":
+            return "decline"
+        for char in chars:
+            if char == "\x03":
+                raise KeyboardInterrupt
+            if char in "\r\n":
+                sys.stderr.write("\n")
+                sys.stderr.flush()
+                return "accept" if not self.overflow and self.buffer.lower() == "y" else "decline"
+            if char in "\b\x7f":
+                self.buffer = self.buffer[:-1]
+            else:
+                self.overflow = self.overflow or len(self.buffer) >= 256
+                if not self.overflow:
+                    self.buffer += char
+        return None
+
+    def _read_available(self) -> str | None:
+        if os.name == "nt":
+            import msvcrt
+
+            if not msvcrt.kbhit():
+                return None
+            char = msvcrt.getwch()
+            if self.extended_key or char in {"\x00", "\xe0"}:
+                self.extended_key = not self.extended_key
+                return None
+            return char
+        descriptor = sys.stdin.fileno()
+        if not select.select([descriptor], [], [], 0)[0]:
+            return None
+        return os.read(descriptor, 256).decode("utf-8", errors="replace")
+
+    def _discard_input(self) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            while msvcrt.kbhit():
+                msvcrt.getwch()
+        else:
+            import termios
+
+            termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+
+    def close(self) -> None:
+        self.shown = None
+        self.buffer = ""
+        self.extended_key = False
+        self.overflow = False

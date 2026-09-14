@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import io
+import threading
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from vega.agent_cli_interaction import ProviderInteractionPump
+from vega.agent_cli_interaction import ProviderInteractionPump, TerminalApprovalPrompt
+from vega.codex_approval_context import AppServerApprovals
 from vega.agent_contract import AgentState
 from vega.agent_persistence import save_agent_state
 from vega.cli_entrypoint import app
@@ -86,13 +89,18 @@ def test_interaction_pump_never_approves_from_redacted_friendly_summary(
 
 def test_interaction_pump_never_reads_non_tty_or_json_input(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    run_dir = _run_dir(
-        tmp_path,
-        method="item/commandExecution/requestApproval",
-        summary="读取文件；检查项目规则",
-    )
-    update = ProviderInteractionPump(run_dir).poll()
+    run_dir, approvals = _complete_request(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO("y\n"))
+    output = io.StringIO()
+    monkeypatch.setattr("sys.stderr", output)
+    monkeypatch.setattr(TerminalApprovalPrompt, "_read_available", lambda self: pytest.fail("不得读取 stdin"))
+    for prompt in (None, TerminalApprovalPrompt(lambda update: None)):
+        update = ProviderInteractionPump(run_dir, prompt=prompt).poll()
+        assert update.status == "attention"
+    assert output.getvalue() == ""
+    approvals.close()
 
     assert update.status == "attention"
     assert (
@@ -100,6 +108,140 @@ def test_interaction_pump_never_reads_non_tty_or_json_input(
         == "provider.interaction_requires_advanced_response"
     )
     assert load_provider_sessions(run_dir).interactions[0].status == "pending"
+
+
+@pytest.mark.parametrize(("keys", "decision"), [("y\n", "accept"), ("\n", "decline")])
+def test_terminal_approval_displays_bound_context_and_sends_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, keys: str, decision: str,
+) -> None:
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    run_dir, approvals = _complete_request(tmp_path)
+    output = Tty()
+    monkeypatch.setattr("sys.stdin", Tty())
+    monkeypatch.setattr("sys.stderr", output)
+    monkeypatch.setattr(TerminalApprovalPrompt, "_discard_input", lambda self: None)
+
+    def read_keys(self):
+        assert threading.current_thread() is threading.main_thread()
+        return keys
+
+    monkeypatch.setattr(TerminalApprovalPrompt, "_read_available", read_keys)
+    pump = ProviderInteractionPump(run_dir, prompt=TerminalApprovalPrompt(lambda update: None))
+    assert pump.poll().status == "waiting"
+    displayed = output.getvalue()
+    assert "DO_NOT_PERSIST_APPROVAL" in displayed and "managed-worktree" in displayed
+    assert "thread-1" in displayed and "turn-1" in displayed
+    assert "\x1b" not in displayed and "\u202e" not in displayed
+    assert "\\u001b" in displayed and "\\u202e" in displayed
+    assert pump.poll().status == "waiting"
+    sent = []
+    assert approvals.send_responses(lambda rpc, response: sent.append((rpc, response)))
+    assert not approvals.send_responses(lambda *args: pytest.fail("不得重复发送"))
+    assert sent == [(99, {"decision": decision})]
+    assert pump.poll().status == "idle"
+    assert not list((run_dir / ".provider-approvals").glob("*.json"))
+    assert "DO_NOT_PERSIST_APPROVAL" not in (run_dir / "provider-sessions.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("change", ["turn", "owner", "duplicate", "context", "display-turn", "native-resolved"])
+def test_approval_rechecks_binding_after_display_and_before_native_send(
+    tmp_path: Path, change: str,
+) -> None:
+    run_dir, approvals = _complete_request(tmp_path)
+
+    class Prompt(TerminalApprovalPrompt):
+        def poll_approval(self, interaction, context):
+            if self.shown is None:
+                self.shown = (interaction.interaction_id, interaction.context_digest)
+                return None
+            if change == "display-turn":
+                mutate_provider_sessions(run_dir, "agent.session", lambda state: setattr(
+                    state.handles["worker"], "last_turn_id", "turn-new",
+                ))
+            return "accept"
+
+    prompt = Prompt(lambda update: None)
+    pump = ProviderInteractionPump(run_dir, prompt=prompt)
+    assert pump.poll().status == "waiting"
+    interaction = load_provider_sessions(run_dir).interactions[0]
+    # 响应已排队后接管/换 Turn 仍须在发送锁内拒绝。
+    if change in {"turn", "owner"}:
+        assert pump.poll().status == "waiting"
+    elif change == "display-turn":
+        assert pump.poll().status == "attention"
+        assert load_provider_sessions(run_dir).interactions[0].response is None
+
+    def mutation(state):
+        if change == "turn":
+            state.handles["worker"].last_turn_id = "turn-new"
+        elif change == "owner":
+            state.handles["worker"].owner = "human"
+        elif change == "duplicate":
+            state.interactions[0].status = "closed"
+
+    mutate_provider_sessions(run_dir, "agent.session", mutation)
+    if change == "native-resolved":
+        approvals.resolve({"requestId": 99, "threadId": "unrelated-thread"})
+        assert load_provider_sessions(run_dir).interactions[0].status == "pending"
+        approvals.resolve({"requestId": 99, "threadId": "thread-1"})
+        assert pump.poll().status == "idle"
+        assert load_provider_sessions(run_dir).interactions[0].status == "closed"
+    if change == "context":
+        (run_dir / ".provider-approvals" / interaction.context_ref).write_text("{}", encoding="utf-8")
+        assert pump.poll().status == "attention"
+    elif change == "duplicate":
+        assert pump.poll().status == "idle"
+        with pytest.raises(ValueError):
+            respond_to_interaction(run_dir, interaction.interaction_id, {"decision": "accept"}, expected=interaction)
+    if change in {"turn", "owner"}:
+        with pytest.raises(ValueError, match="owner/Thread/Turn"):
+            approvals.send_responses(lambda *args: pytest.fail("不得发送旧授权"))
+    else:
+        assert not approvals.send_responses(lambda *args: pytest.fail("不得发送旧授权"))
+    approvals.close()
+    assert not list((run_dir / ".provider-approvals").glob("*.json"))
+
+
+@pytest.mark.parametrize("extra", [
+    {"networkApprovalContext": {"host": "example.invalid"}},
+    {"additionalPermissions": {"network": {"enabled": True}}},
+    {"proposedExecpolicyAmendment": ["echo"]},
+])
+def test_complete_command_with_unsupported_scope_never_prompts(tmp_path: Path, extra: dict) -> None:
+    run_dir, approvals = _complete_request(tmp_path, extra=extra)
+
+    class Prompt(TerminalApprovalPrompt):
+        def poll_approval(self, interaction, context):
+            pytest.fail("不支持的授权不能进入简化问答")
+
+    assert ProviderInteractionPump(run_dir, prompt=Prompt(lambda update: None)).poll().status == "attention"
+    assert load_provider_sessions(run_dir).interactions[0].context_ref is None
+    approvals.close()
+
+
+@pytest.mark.parametrize("variant", ["missing-item", "grant-root"])
+def test_file_approval_requires_matching_changes_without_root_grant(tmp_path: Path, variant: str) -> None:
+    method = "item/fileChange/requestApproval"
+    run_dir = _run_dir(tmp_path, method=method, summary="文件修改")
+    mutate_provider_sessions(run_dir, "agent.session", lambda state: state.interactions.clear())
+    approvals = AppServerApprovals(run_dir, "worker", "managed-worktree", None)
+    approvals.observe_item({"threadId": "thread-1", "turnId": "turn-1", "item": {
+        "id": "file-1", "type": "fileChange", "changes": [{
+            "path": "example.txt", "kind": {"type": "add"}, "diff": "+content",
+        }],
+    }})
+    params = {"threadId": "thread-1", "turnId": "turn-1", "itemId": "file-1"}
+    if variant == "missing-item":
+        params["itemId"] = "file-unobserved"
+    else:
+        params["grantRoot"] = "expanded-root"
+    approvals.record({"id": 99, "method": method, "params": params}, "thread-1", "turn-1")
+    assert load_provider_sessions(run_dir).interactions[0].context_ref is None
+    assert ProviderInteractionPump(run_dir, prompt=TerminalApprovalPrompt(lambda update: None)).poll().status == "attention"
+    approvals.close()
 
 
 @pytest.mark.parametrize(
@@ -291,6 +433,19 @@ def test_command_summary_marks_mixed_unknown_actions_unclassified() -> None:
     )
 
     assert summary == "未分类命令执行（请接管原生会话确认）"
+
+
+def _complete_request(tmp_path: Path, *, extra: dict | None = None) -> tuple[Path, AppServerApprovals]:
+    method = "item/commandExecution/requestApproval"
+    run_dir = _run_dir(tmp_path, method=method, summary="命令请求")
+    mutate_provider_sessions(run_dir, "agent.session", lambda state: state.interactions.clear())
+    approvals = AppServerApprovals(run_dir, "worker", "managed-worktree", None)
+    approvals.record({"id": 99, "method": method, "params": {
+        "threadId": "thread-1", "turnId": "turn-1", "itemId": "item-1", "startedAtMs": 0,
+        "command": "echo DO_NOT_PERSIST_APPROVAL\x1b[2J\u202e", "cwd": "managed-worktree",
+        **(extra or {}),
+    }}, "thread-1", "turn-1")
+    return run_dir, approvals
 
 
 def _run_dir(tmp_path: Path, *, method: str, summary: str) -> Path:

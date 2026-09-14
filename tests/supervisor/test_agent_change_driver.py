@@ -127,9 +127,14 @@ def test_change_routes_existing_verification_retry_without_worker_fallback(
     assert calls == [ready.run_dir.name]
 
 
+@pytest.mark.parametrize(
+    ("provider", "permissions", "fresh"),
+    [("claude", None, False), ("codex", "auto-review", False), ("codex", None, True)],
+)
 def test_change_creates_planning_run_and_stops_at_non_tty_approval(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    provider: str, permissions: str | None, fresh: bool,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     original_planning_runner = PlanningProposalRunner
@@ -155,7 +160,9 @@ def test_change_creates_planning_run_and_stops_at_non_tty_approval(
     result = AgentChangeDriver(
         repo,
         repo,
-        provider="claude",
+        provider=provider,
+        worker_permissions=permissions,
+        fresh_session=fresh,
         interactive=False,
         json_output=True,
         timeout_seconds=60,
@@ -167,6 +174,59 @@ def test_change_creates_planning_run_and_stops_at_non_tty_approval(
     assert result.run.state.phase == "awaiting_approval"
     assert not result.run.state.active_child_run
     assert (result.run.run_dir / "plan-card.md").is_file()
+    assert load_provider_sessions(result.run.run_dir).worker_permission_mode == permissions
+    continued = AgentChangeDriver(
+        repo, repo, provider=provider, fresh_session=fresh,
+    ).change(run=result.run.run_dir.name)
+    assert continued.reason_code == "approval.contract_required"
+
+
+def test_change_requires_explicit_permissions_before_first_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        PlanningProposalRunner, "run",
+        lambda *a, **kw: pytest.fail("缺少权限时不得调用首次模型"),
+    )
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("非交互不得读取 stdin"))
+    response = CliRunner().invoke(app, ["change", "修复示例函数", "--json"])
+    assert response.exit_code == 1
+    payload = json.loads(response.output)
+    assert "vega change --run " in payload["message"]
+    assert "--worker-permissions ask" in payload["message"]
+    assert "auto-review" in payload["message"] and "full-access" in payload["message"]
+    runs = list((repo / "runs").glob("*-agent"))
+    assert len(runs) == 1
+    assert runs[0].name in payload["message"]
+    assert load_provider_sessions(runs[0]).worker_permission_source is None
+
+
+@pytest.mark.parametrize("case", ["changed", "human", "active", "retired", "fresh", "claude", "unsupported"])
+def test_change_rejects_unsafe_permission_rebinding(tmp_path: Path, case: str) -> None:
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    current = runtime.start_change(repo, contract=_contract(), execution_plan=_execution_plan())
+    AgentChangeDriver(repo, repo, worker_permissions="ask").change(run=current.run_dir.name)
+    sessions = load_provider_sessions(current.run_dir)
+    if case in {"human", "active"}:
+        sessions.handles["worker"] = ProviderSessionHandle(
+            role="worker", owner="human" if case == "human" else "vega",
+            lifecycle="active" if case == "active" else "idle", thread_id="thread-1",
+        )
+        save_provider_sessions(current.run_dir, sessions)
+    if case == "retired":
+        current.state.execution_protocol = 1
+        save_agent_state(current.run_dir / "agent-state.json", current.state)
+    before = (current.run_dir / "provider-sessions.json").read_bytes()
+    mode = {"changed": "full-access", "unsupported": "unknown"}.get(case, "ask")
+    with pytest.raises(ValueError):
+        AgentChangeDriver(
+            repo, repo, worker_permissions=mode,
+            fresh_session=case == "fresh", provider="claude" if case == "claude" else "codex",
+        ).change(run=current.run_dir.name)
+    assert (current.run_dir / "provider-sessions.json").read_bytes() == before
 
 
 @pytest.mark.parametrize("config_text", [None, "verification: {commands: []}\n"])
@@ -227,7 +287,7 @@ def test_change_continues_unique_run_through_existing_approval_path(
             return AgentRun(run_dir=run_dir, state=state, plan=plan)
 
     monkeypatch.setattr(
-        driver_module,
+        execution_module,
         "SupervisorAgentProviderAdapter",
         StaticAdapter,
     )
@@ -556,9 +616,11 @@ def test_concurrent_new_text_creates_one_run_and_rechecks_active_state(
     assert len(list((repo / "runs").iterdir())) == 1
 
 
+@pytest.mark.parametrize("json_output", [False, True])
 def test_change_stops_for_codex_interaction_that_requires_full_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    json_output: bool,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     runtime = SupervisorAgentRuntime(repo)
@@ -613,7 +675,21 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
                     ],
                 ),
             )
-            assert stop_requested.wait(2), "driver 没有在交互边界请求停止"
+            from vega.codex_approval_context import AppServerApprovals
+
+            approvals = AppServerApprovals(run_dir, "worker", str(repo), None)
+            if json_output:
+                sessions = load_provider_sessions(run_dir)
+                sessions.interactions.clear()
+                save_provider_sessions(run_dir, sessions)
+                approvals.record({"id": 99, "method": "item/commandExecution/requestApproval", "params": {
+                    "threadId": "thread-1", "turnId": "turn-1", "itemId": "item-1",
+                    "command": "echo DO_NOT_PERSIST_APPROVAL", "cwd": str(repo),
+                }}, "thread-1", "turn-1")
+            try:
+                assert stop_requested.wait(2), "driver 没有在交互边界请求停止"
+            finally:
+                approvals.close()
             return AgentRun(
                 run_dir=run_dir,
                 state=AgentState.model_validate(
@@ -639,7 +715,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
             )
 
     monkeypatch.setattr(
-        driver_module,
+        execution_module,
         "SupervisorAgentProviderAdapter",
         InteractiveAdapter,
     )
@@ -654,10 +730,26 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
         StaticRecovery,
     )
 
+    if json_output:
+        monkeypatch.chdir(repo)
+        monkeypatch.setattr("builtins.input", lambda *args: pytest.fail("JSON 不得读取 stdin"))
+        monkeypatch.setattr("typer.prompt", lambda *args, **kwargs: pytest.fail("JSON 不得询问"))
+        result = CliRunner().invoke(app, ["change", "--worker-permissions", "ask", "--json"])
+        payload = json.loads(result.stdout)
+        assert payload["reason_code"] == "provider.interaction_requires_advanced_response"
+        assert result.exit_code == 2 and result.stderr == ""
+        assert "DO_NOT_PERSIST_APPROVAL" not in result.output
+        assert fake_path not in result.output and fake_secret not in result.output
+        pending = load_provider_sessions(started.run_dir).interactions[0]
+        assert pending.status == "closed" and pending.response is None
+        assert not list((started.run_dir / ".provider-approvals").glob("*.json"))
+        return
+
     result = AgentChangeDriver(
         repo,
         repo,
         provider="codex",
+        worker_permissions="ask",
         interactive=True,
         interaction_reporter=updates.append,
         event_reporter=events.append,
@@ -754,6 +846,77 @@ def test_stop_request_closes_pending_provider_interactions(
         None,
     )
     assert load_provider_sessions(run_dir).interactions[0].status == "closed"
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_complete_approval_wait_can_stop_without_stdin_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interrupt: bool,
+) -> None:
+    from vega.agent_cli_interaction import TerminalApprovalPrompt
+    from vega.codex_approval_context import AppServerApprovals
+
+    repo = _repo(tmp_path / "repo")
+    current = SupervisorAgentRuntime(repo).start_change(
+        repo, contract=_contract(), execution_plan=_execution_plan(),
+    )
+    save_provider_sessions(current.run_dir, ProviderSessionState(
+        run_id=current.run_dir.name, handles={"worker": ProviderSessionHandle(
+            provider="codex", role="worker", owner="vega", thread_id="thread-1",
+            last_turn_id="turn-1", permissions_verified=True, lifecycle="active",
+        )},
+    ))
+    approvals = AppServerApprovals(current.run_dir, "worker", str(repo), None)
+    approvals.record({"id": 99, "method": "item/commandExecution/requestApproval", "params": {
+        "threadId": "thread-1", "turnId": "turn-1", "itemId": "item-1",
+        "command": "echo DO_NOT_PERSIST_APPROVAL", "cwd": str(repo),
+    }}, "thread-1", "turn-1")
+    stopped, exited = threading.Event(), threading.Event()
+    updates = []
+
+    class Recovery:
+        def __init__(self, workspace):
+            assert workspace == repo
+
+        def stop(self, run, *, reason):
+            stopped.set()
+            assert exited.wait(2), "停止必须确认后台 operation 已退出"
+
+    class Prompt(TerminalApprovalPrompt):
+        def poll_approval(self, interaction, context):
+            assert threading.current_thread() is threading.main_thread()
+            if self.shown is None:
+                self.shown = (interaction.interaction_id, interaction.context_digest)
+                return None
+            if interrupt:
+                raise KeyboardInterrupt
+            assert execution_module._request_stop(repo, current.run_dir.name, "用户停止", None)
+            return None
+
+    def operation():
+        try:
+            assert stopped.wait(2), "完整 pending 应等待用户，而非失败或无限等待"
+            return current
+        finally:
+            approvals.close()
+            exited.set()
+
+    monkeypatch.setattr(execution_module, "SupervisorAgentRecovery", Recovery)
+    prompt = Prompt(updates.append)
+    if interrupt:
+        with pytest.raises(KeyboardInterrupt):
+            execution_module.run_provider_operation(
+                repo, current, "codex", operation, interaction_reporter=prompt, event_reporter=None,
+            )
+    else:
+        assert execution_module.run_provider_operation(
+            repo, current, "codex", operation, interaction_reporter=prompt, event_reporter=None,
+        ) is current
+    assert stopped.is_set() and exited.is_set() and prompt.shown is None
+    assert updates and all(update.status == "waiting" for update in updates)
+    pending = load_provider_sessions(current.run_dir).interactions[0]
+    assert pending.status == "closed" and pending.response is None
+    assert not list((current.run_dir / ".provider-approvals").glob("*.json"))
+    assert "DO_NOT_PERSIST_APPROVAL" not in repr(updates)
 
 
 def test_change_json_never_reads_stdin_without_active_run(

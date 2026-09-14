@@ -35,7 +35,6 @@ from vega.provider_session import (
     load_provider_sessions,
     mutate_provider_sessions,
     queue_steer,
-    respond_to_interaction,
     set_session_owner,
     summarize_provider_interaction,
 )
@@ -58,8 +57,15 @@ def test_command_approval_summary_hides_unknown_action_label() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("mode", "sandbox", "approval", "reviewer"),
+    [("ask", "workspace-write", "on-request", "user"),
+     ("auto-review", "workspace-write", "on-request", "auto_review"),
+     ("full-access", "danger-full-access", "never", "user")],
+)
 def test_app_server_reuses_thread_and_injects_pending_anchor(
     tmp_path: Path,
+    mode: str, sandbox: str, approval: str, reviewer: str,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -69,6 +75,10 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
     _write_task_anchor_inputs(run_dir)
     events: list[str] = []
     runner = _runner(run_dir)
+    mutate_provider_sessions(
+        run_dir, "agent.session",
+        lambda state: setattr(state, "worker_permission_mode", mode),
+    )
 
     first = runner.run(
         "第一轮 EARLY_COMPLETE",
@@ -109,8 +119,9 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
     assert fake_state["thread_start_params"]["model"] == "fake-model"
     assert fake_state["thread_start_params"]["approvalPolicy"] == "never"
     assert fake_state["turn_start_params"][0]["effort"] == "high"
-    assert fake_state["resume_params"][0]["sandbox"] == "workspace-write"
-    assert fake_state["resume_params"][0]["approvalPolicy"] == "on-request"
+    assert fake_state["resume_params"][0]["sandbox"] == sandbox
+    assert fake_state["resume_params"][0]["approvalPolicy"] == approval
+    assert fake_state["resume_params"][0]["approvalsReviewer"] == reviewer
     assert fake_state["server_args"] == ["--listen", "stdio://"]
     opt_out = fake_state["initialize_params"]["capabilities"][
         "optOutNotificationMethods"
@@ -122,8 +133,8 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
     assert any(event.endswith("thread_ready") for event in events)
     assert any(event.endswith("context_compacted") for event in events)
     current = load_provider_sessions(run_dir).handles["worker"]
-    assert current.sandbox == "workspace-write"
-    assert current.approval_policy == "on-request"
+    assert current.sandbox == sandbox
+    assert current.approval_policy == approval
     assert current.permissions_verified is True
     profile_runner = CodexAppServerRunner(
         run_dir,
@@ -288,9 +299,87 @@ def test_app_server_rejects_unverified_read_only_permission() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "override",
+    [{"approvalPolicy": "never"}, {"approvalsReviewer": None},
+     {"sandbox": {"type": "dangerFullAccess"}}, {"cwd": "different-root"},
+     {"sandbox": {"type": "workspaceWrite", "writableRoots": ["outside"],
+                  "networkAccess": False, "excludeTmpdirEnvVar": True, "excludeSlashTmp": True}}],
+)
+def test_app_server_rejects_changed_permissions_on_resume(tmp_path: Path, override: dict) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_fake_app_server(repo)
+    run_dir = tmp_path / "runs" / "agent-run"
+    run_dir.mkdir(parents=True)
+    runner = _runner(run_dir)
+    first = runner.run(
+        "首次实现", repo, sandbox="workspace-write", timeout_seconds=30,
+        execution_context=_execution_context(run_dir, "initial", []),
+    )
+    assert first.status == "success"
+    (repo / ".fake-permission-override.json").write_text(json.dumps(override), encoding="utf-8")
+    resumed = runner.run(
+        "不应送入模型", repo, sandbox="workspace-write", timeout_seconds=30,
+        execution_context=_execution_context(run_dir, "changed", []),
+    )
+    assert resumed.status == "error"
+    assert not load_provider_sessions(run_dir).handles["worker"].permissions_verified
+    observed = json.loads((repo / ".fake-app-server-state.json").read_text(encoding="utf-8"))
+    assert len(observed["prompts"]) == 1
+
+
+@pytest.mark.parametrize("role", ["worker", "reviewer:WI-01"])
+def test_app_server_read_only_roles_do_not_inherit_worker_full_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, role: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_fake_app_server(repo)
+    run_dir = tmp_path / "runs" / "agent-run"
+    run_dir.mkdir(parents=True)
+    runner = _runner(run_dir)
+    runner.role_key = role
+    runner.isolate_session = True
+    monkeypatch.setattr(
+        "vega.codex_app_server_runner.build_mcp_disable_overrides", lambda *a, **kw: [],
+    )
+    mutate_provider_sessions(
+        run_dir, "agent.session", lambda state: setattr(state, "worker_permission_mode", "full-access"),
+    )
+    result = runner.run(
+        "只读调查", repo, sandbox="read-only", timeout_seconds=30,
+        execution_context=_execution_context(run_dir, "readonly", []),
+    )
+    assert result.status == "success"
+    handle = load_provider_sessions(run_dir).handles[role]
+    assert handle.sandbox == "read-only" and handle.approval_policy == "never"
+    assert handle.permissions_verified
+    rejected = runner.run(
+        "不能写入", repo, sandbox="workspace-write", timeout_seconds=30,
+        execution_context=_execution_context(run_dir, "reject-write", []),
+    )
+    assert rejected.status == "error"
+    observed = json.loads((repo / ".fake-app-server-state.json").read_text(encoding="utf-8"))
+    assert len(observed["prompts"]) == 1
+    assert observed["thread_start_params"]["approvalsReviewer"] == "user"
+
+
+@pytest.mark.parametrize(("prompt", "decision"), [
+    ("ASK_APPROVAL", "accept"), ("ASK_APPROVAL", "decline"), ("ASK_FILE_APPROVAL", "accept"),
+])
 def test_app_server_waits_for_explicit_approval_response(
     tmp_path: Path,
+    prompt: str,
+    decision: str,
 ) -> None:
+    from vega.agent_cli_interaction import ProviderInteractionPump, TerminalApprovalPrompt
+
+    class LocalPrompt(TerminalApprovalPrompt):
+        def poll_approval(self, interaction, context):
+            self.context = context
+            return decision
+
     repo = tmp_path / "repo"
     repo.mkdir()
     _write_fake_app_server(repo)
@@ -301,18 +390,15 @@ def test_app_server_waits_for_explicit_approval_response(
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(
             runner.run,
-            "ASK_APPROVAL",
+            prompt,
             repo,
             sandbox="workspace-write",
             timeout_seconds=30,
             execution_context=_execution_context(run_dir, "approval", []),
         )
         interaction_id = _wait_for_interaction(run_dir)
-        respond_to_interaction(
-            run_dir,
-            interaction_id,
-            {"decision": "accept"},
-        )
+        terminal = LocalPrompt(lambda update: None)
+        assert ProviderInteractionPump(run_dir, prompt=terminal).poll().status == "waiting"
         result = future.result(timeout=20)
 
     assert result.status == "success"
@@ -326,7 +412,32 @@ def test_app_server_waits_for_explicit_approval_response(
     fake_state = json.loads(
         (repo / ".fake-app-server-state.json").read_text(encoding="utf-8")
     )
-    assert fake_state["approval_response"] == {"decision": "accept"}
+    assert fake_state["approval_response"] == {"decision": decision}
+    assert fake_state["approval_response_count"] == 1
+    assert terminal.context["binding"]["interaction_id"] == interaction_id
+    assert "DO_NOT_PERSIST_APPROVAL" in json.dumps(terminal.context)
+    assert not list((run_dir / ".provider-approvals").glob("*.json"))
+    for path in run_dir.rglob("*"):
+        if path.is_file():
+            assert b"DO_NOT_PERSIST_APPROVAL" not in path.read_bytes(), path.name
+
+
+def test_app_server_closes_natively_resolved_request_without_response(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _write_fake_app_server(repo)
+    run_dir = tmp_path / "runs" / "agent-run"
+    run_dir.mkdir(parents=True)
+    result = _runner(run_dir).run(
+        "ASK_APPROVAL RESOLVE_REQUEST", repo, sandbox="workspace-write", timeout_seconds=30,
+        execution_context=_execution_context(run_dir, "resolved", []),
+    )
+    assert result.status == "success"
+    interaction = load_provider_sessions(run_dir).interactions[0]
+    assert interaction.status == "closed" and interaction.response is None
+    state = json.loads((repo / ".fake-app-server-state.json").read_text(encoding="utf-8"))
+    assert state.get("approval_response_count", 0) == 0
+    assert not list((run_dir / ".provider-approvals").glob("*.json"))
 
 
 def test_app_server_preserves_safe_turn_error(tmp_path: Path) -> None:
@@ -526,6 +637,10 @@ def test_provider_session_history_keeps_pending_items(tmp_path: Path) -> None:
 
 
 def _runner(run_dir: Path) -> CodexAppServerRunner:
+    def choose(state) -> None:
+        state.worker_permission_mode = "ask"
+        state.worker_permission_source = "explicit"
+    mutate_provider_sessions(run_dir, "agent.session", choose)
     return CodexAppServerRunner(
         run_dir,
         "worker",
@@ -623,11 +738,22 @@ def thread_result(params):
         "workspace-write": "workspaceWrite",
         "danger-full-access": "dangerFullAccess",
     }
-    return {
+    sandbox = {"type": sandbox_types[params["sandbox"]]}
+    if params["sandbox"] != "danger-full-access":
+        sandbox["networkAccess"] = False
+    if params["sandbox"] == "workspace-write":
+        sandbox.update(writableRoots=[], excludeTmpdirEnvVar=True, excludeSlashTmp=True)
+    result = {
         "thread": {"id": thread_id},
-        "sandbox": {"type": sandbox_types[params["sandbox"]]},
+        "cwd": params["cwd"],
+        "sandbox": sandbox,
         "approvalPolicy": params.get("approvalPolicy", "on-request"),
+        "approvalsReviewer": params["approvalsReviewer"],
     }
+    override_path = Path(__file__).with_name(".fake-permission-override.json")
+    if override_path.exists():
+        result.update(json.loads(override_path.read_text(encoding="utf-8")))
+    return result
 
 def complete():
     message = json.dumps({
@@ -725,6 +851,17 @@ for raw in sys.stdin:
             send({"id": request["id"], "result": {"turn": {"id": turn_id}}})
         if "FAIL_TURN" in prompt:
             fail()
+        elif "ASK_FILE_APPROVAL" in prompt:
+            send({"method": "item/started", "params": {
+                "threadId": thread_id, "turnId": turn_id,
+                "item": {"id": "file-1", "type": "fileChange", "changes": [{
+                    "path": "example.txt", "kind": {"type": "add"},
+                    "diff": "+DO_NOT_PERSIST_APPROVAL",
+                }]},
+            }})
+            send({"id": "99", "method": "item/fileChange/requestApproval", "params": {
+                "threadId": thread_id, "turnId": turn_id, "itemId": "file-1", "startedAtMs": 0,
+            }})
         elif "ASK_APPROVAL" in prompt:
             send({
                 "id": "99",
@@ -732,14 +869,24 @@ for raw in sys.stdin:
                 "params": {
                     "threadId": thread_id,
                     "turnId": turn_id,
+                    "itemId": "command-1",
+                    "startedAtMs": 0,
+                    "command": "echo DO_NOT_PERSIST_APPROVAL",
+                    "cwd": str(Path.cwd()),
                     "commandActions": [{"type": "read"}],
-                    "reason": "测试审批",
+                    "reason": "测试审批 DO_NOT_PERSIST_APPROVAL",
                 },
             })
+            if "RESOLVE_REQUEST" in prompt:
+                send({"method": "serverRequest/resolved", "params": {
+                    "threadId": thread_id, "requestId": "99",
+                }})
+                complete()
         elif "EARLY_COMPLETE" not in prompt:
             complete()
     elif request.get("id") == "99":
         state["approval_response"] = request["result"]
+        state["approval_response_count"] = state.get("approval_response_count", 0) + 1
         save()
         complete()
     elif method == "turn/steer":

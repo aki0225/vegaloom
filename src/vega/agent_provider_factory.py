@@ -8,6 +8,7 @@ from .agent_provider import AgentProvider
 from .agent_worker_evidence import WorkerClaim
 from .claude_code_runner import ClaudeCodeRunner
 from .codex_app_server_runner import CodexAppServerRunner
+from .codex_app_server_permissions import require_worker_runner_permissions
 from .loop_runtime import LoopAutomationRuntime
 from .project_config import ProjectConfig
 from .review_contract import ReviewVerdict
@@ -59,6 +60,7 @@ def worker_runner(
     provider: AgentProvider,
     persistent_session: bool,
 ) -> Runner:
+    require_worker_runner_permissions(run_dir, provider, persistent_session)
     if provider == "claude":
         return ClaudeCodeRunner(
             run_dir,
