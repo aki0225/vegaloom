@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "event_id": "20260914T111348Z-EXEC-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "EXEC-02",
+  "transition": "completed",
+  "recorded_at": "2026-09-14T11:13:48Z",
+  "summary": "已接通具备临时知情上下文的 Codex command/file 单次审批，复用请求绑定与停止边界；定向回归及绑定源码 PR CI 已通过。唯一真实 full-access 任务完成 Worker、固定5项测试、独立只读 Reviewer 与 ready_to_commit；不宣称真实 auto_review、TTY 或 Claude 验收通过。本记录写入时，事件尚未进入 main，依赖 PR #119 未合并，最终文档事件提交仍需 CI。",
+  "evidence": {
+    "pull_requests": [120],
+    "commits": ["6d617020bfca1d3b0320a3a7cf86137b58551d17"],
+    "checks": [
+      "affected-interaction-tests", "architecture-growth", "repository-hygiene",
+      "plan-state", "real-codex-smoke", "pr-ci"
+    ],
+    "artifacts": [
+      "docs/WORKER-PERMISSIONS-PLAN.md",
+      "docs/PRODUCT-CONTRACT.md",
+      "src/vega/codex_approval_context.py",
+      "src/vega/agent_cli_interaction.py",
+      "tests/supervisor/test_codex_app_server.py",
+      "tests/supervisor/test_agent_cli_interaction.py",
+      "tests/supervisor/test_agent_change_driver.py"
+    ]
+  }
+}

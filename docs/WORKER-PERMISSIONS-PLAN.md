@@ -99,9 +99,10 @@ Worker 返回文件列表、完成验收项、实际命令/计数/退出码/耗�
 此前候选留待独立决定，不混入本轮。
 
 未证实存在可信的宿主有效权限读取接口，已采用一次显式选择并绑定 Run，不宣传自动继承。
-EXEC-01、EXEC-02 本地候选及唯一真实验收均已由主控独立审阅；当前仍是本地候选，
-尚未进行本次实现的 PR CI、提交、push 或合并。准备 PR 时再按现有规则随实现加入完成事件，
-本轮不提前生成事件，也不改历史事项或计划脚本。
+EXEC-01、EXEC-02 本地候选及唯一真实验收均已由主控独立审阅，源码已提交至 PR #120，
+精确提交 `6d617020bfca1d3b0320a3a7cf86137b58551d17` 的 CI 已通过。
+本记录写入时，PR #120 追加两项完成事件；事件尚未进入 main，依赖 PR #119 仍未合并，
+最终文档与事件提交仍需通过 CI，不把分支状态当作主线完成或最终交付。
 
 ## 本地验收摘要
 
@@ -117,5 +118,14 @@ EXEC-01、EXEC-02 本地候选及唯一真实验收均已由主控独立审阅�
   **5 tests OK**及`git diff --check`均exit 0，最终`completed / ready_to_commit`。
 - Candidate `2690aa13ca5fd9749fed9bb87f0c10e1682399d9`仅改`labels.py`（+10/-1）；
   源main保持原HEAD且干净，受管worktree干净，记录的调用器与Worker/Reviewer进程均已退出。
-- 不宣称真实auto_review、TTY审批、Claude或跨平台验证通过；本地候选不等于PR CI或最终交付。
+- 不宣称真实auto_review、TTY审批、Claude或跨平台Provider验收通过；CI不替代真实交互验收。
 - 原始日志、计时、结果及运行证据保留在`.local-validation/exec-permissions/`，不提交这些产物。
+
+## PR 源码验证与事件边界
+
+- 首轮 CI 的 Supervisor 失败后，仅修正一个旧合同编译测试 fixture，显式传入
+  `--worker-permissions ask`，保留全部原断言；本地对应两场景 **2 failed → 2 passed**。
+- 该轮定位与唯一重试新增本地定向耗时 **91.93 秒**，累计约 **460.00 秒**；原始失败日志保留、不提交。
+- 主控核验上述精确提交的[最终源码 CI](https://github.com/aki0225/vegaloom/actions/runs/34836746362)：
+  静态、py311、Core、CoreHeavy、Supervisor、Security、Windows/wheel、POSIX、构建wheel共9项成功，
+  Experimental按路径跳过1项，无失败。该结论不覆盖本记录写入时尚未提交的文档/事件差异。
