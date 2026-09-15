@@ -66,6 +66,7 @@ def assess_change_revision(
     current_plan: ExecutionPlan,
     proposed_plan: ExecutionPlan,
     budget: ChangeBudgetSnapshot,
+    request_approval: bool = False,
 ) -> ChangeRevisionAssessment:
     declared = classify_declared_revision(
         current_contract=current_contract,
@@ -107,6 +108,7 @@ def assess_change_revision(
         missing_risk_authorizations=missing,
         unknown_risk_authorizations=unknown,
         budget=budget,
+        request_approval=request_approval,
     )
     return ChangeRevisionAssessment(
         assessment_id=f"revision-{uuid4().hex[:12]}",
@@ -275,6 +277,7 @@ def _revision_outcome(
     missing_risk_authorizations: list[str],
     unknown_risk_authorizations: list[str],
     budget: ChangeBudgetSnapshot,
+    request_approval: bool = False,
 ) -> tuple[RevisionOutcome, str | None, str]:
     blockers: list[str] = []
     if scope_violations:
@@ -308,6 +311,12 @@ def _revision_outcome(
                 "请决定扩大合同预算、人工修订或停止任务。"
             )
             return "needs_human", question, "Review 达到停止条件"
+        if request_approval:
+            return (
+                "requires_approval",
+                "是否人工批准原合同内的新 Execution Plan？",
+                "调用方显式请求人工计划审批，不消耗自动 Replan 预算",
+            )
         if budget.auto_replans_used >= budget.max_auto_replans:
             question = (
                 "自动 Replan 预算已用完："

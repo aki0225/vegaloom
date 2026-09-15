@@ -90,8 +90,6 @@ def _approved_implementation_revision(
     context = load_change_run_context(run_dir, state, plan, metadata)
     assert context is not None
     contract, execution_plan = context.contract, context.execution_plan
-    if contract.approval_source != "human" or contract.contract_revision <= 1:
-        return False
     binding = latest_dispatch_binding(run_dir, state)
     if binding is None:
         return False
@@ -118,34 +116,14 @@ def _approved_implementation_revision(
         for item in (revision, approval)
     ) or revision.get("phase") != "awaiting_approval" or approval.get("phase") != "ready":
         raise ValueError("新实现授权的 revision Trace 身份不一致")
-    contract_ref = f"contracts/contract-revision-{contract.contract_revision - 1:03d}.json"
-    plan_ref = (
-        "execution-plans/"
-        f"execution-plan-revision-{execution_plan.plan_revision - 1:03d}.json"
+    previous_contract, previous_projection = _load_implementation_revision_archive(
+        run_dir, state, contract, execution_plan, revision,
     )
-    projection_ref = f"plans/plan-revision-{execution_plan.plan_revision - 1:03d}.json"
-    if not {contract_ref, plan_ref, projection_ref}.issubset(revision.get("artifact_refs", [])):
-        raise ValueError("新实现授权缺少绑定的旧 Contract 或 Execution Plan 归档")
-    try:
-        previous_contract = ChangeContract.model_validate_json(
-            (run_dir / contract_ref).read_text(encoding="utf-8")
-        )
-        previous_plan = ExecutionPlan.model_validate_json(
-            (run_dir / plan_ref).read_text(encoding="utf-8")
-        )
-        previous_projection = AgentPlan.model_validate_json(
-            (run_dir / projection_ref).read_text(encoding="utf-8")
-        )
-        validate_change_projection(previous_contract, previous_plan, previous_projection)
-    except (OSError, ValueError) as exc:
-        raise ValueError("新实现授权的旧 Contract 或 Execution Plan 归档无法验证") from exc
     if (
-        not previous_contract.approval_is_current()
-        or previous_contract.task_id != state.task_id
-        or previous_contract.contract_revision + 1 != contract.contract_revision
-        or previous_plan.plan_revision + 1 != execution_plan.plan_revision
+        previous_contract.contract_revision != contract.contract_revision
+        and contract.approval_source != "human"
     ):
-        raise ValueError("新实现授权的旧 Contract 或 Execution Plan 归档不一致")
+        return False
     implementations = []
     for source_contract, source_plan in (
         (previous_contract, previous_projection), (contract, plan),
@@ -162,6 +140,47 @@ def _approved_implementation_revision(
         implementations.append((contract_content, plan_content))
     # 仅改变验证要求仍必须复用原 Worker 证据；匹配失败绝不作为改派依据。
     return implementations[0] != implementations[1]
+
+
+def _load_implementation_revision_archive(
+    run_dir: Path, state: AgentState, contract: ChangeContract,
+    execution_plan: ExecutionPlan, revision: dict[str, object],
+) -> tuple[ChangeContract, AgentPlan]:
+    """验证最近人工修订绑定的旧计划、合同及批准投影。"""
+    plan_ref = (
+        "execution-plans/"
+        f"execution-plan-revision-{execution_plan.plan_revision - 1:03d}.json"
+    )
+    projection_ref = f"plans/plan-revision-{execution_plan.plan_revision - 1:03d}.json"
+    if not {plan_ref, projection_ref}.issubset(revision.get("artifact_refs", [])):
+        raise ValueError("新实现授权缺少绑定的旧 Contract 或 Execution Plan 归档")
+    try:
+        previous_plan = ExecutionPlan.model_validate_json(
+            (run_dir / plan_ref).read_text(encoding="utf-8")
+        )
+        # Plan-only 人工修订保留合同版本，旧合同只能从绑定的旧 Plan 解析。
+        contract_ref = f"contracts/contract-revision-{previous_plan.contract_revision:03d}.json"
+        if contract_ref not in revision.get("artifact_refs", []):
+            raise ValueError("旧 Execution Plan 未绑定归档 Contract")
+        previous_contract = ChangeContract.model_validate_json(
+            (run_dir / contract_ref).read_text(encoding="utf-8")
+        )
+        previous_projection = AgentPlan.model_validate_json(
+            (run_dir / projection_ref).read_text(encoding="utf-8")
+        )
+        validate_change_projection(previous_contract, previous_plan, previous_projection)
+    except (OSError, ValueError) as exc:
+        raise ValueError("新实现授权的旧 Contract 或 Execution Plan 归档无法验证") from exc
+    if (
+        not previous_contract.approval_is_current()
+        or previous_contract.task_id != state.task_id
+        or contract.contract_revision != previous_contract.contract_revision + int(
+            previous_contract.semantic_content() != contract.semantic_content()
+        )
+        or previous_plan.plan_revision + 1 != execution_plan.plan_revision
+    ):
+        raise ValueError("新实现授权的旧 Contract 或 Execution Plan 归档不一致")
+    return previous_contract, previous_projection
 
 
 def prepare_verification_retry(

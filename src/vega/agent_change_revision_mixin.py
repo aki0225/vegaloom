@@ -31,6 +31,7 @@ class ChangeRevisionRuntimeMixin:
         *,
         proposed_contract: ChangeContract,
         proposed_execution_plan: ExecutionPlan,
+        request_approval: bool = False,
     ) -> AgentRun:
         run_dir, state, plan, metadata = self._load_run(run)
         return revise_change_run(
@@ -40,4 +41,5 @@ class ChangeRevisionRuntimeMixin:
             metadata,
             proposed_contract=proposed_contract,
             proposed_execution_plan=proposed_execution_plan,
+            request_approval=request_approval,
         )

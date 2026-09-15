@@ -105,6 +105,12 @@ Execution Plan 记录 Agent 可以调整的实现安排：
 合同不变时，Agent 可以拆分 Work Item、调整顺序、换实现方案或增加测试。Reviewer 发现原假设
 错误时返回 `replan`，由新的计划 revision 承接；Reviewer 本身不批准自己提出的新合同。
 
+显式 `revise --request-approval` 可将合同内的 Plan-only 修订交人工批准：合同版本和原批准
+保持不变，Plan 版本递增并进入 `awaiting_approval`，经 `approve` 才能执行，不能由 bounded
+策略自动批准。此路径不消耗自动 Replan 次数，但仍检查真实 Diff、风险、证据和 Review
+预算；未指定该选项的自动修订继续受原自动 Replan 预算约束。
+同合同的人工实现计划修订可承接失败历史；仅验证内容变化仍走验证专用恢复，不改派 Worker。
+
 ## Worker 与 Reviewer
 
 默认 Provider 是 Codex，也可以在首次执行时显式选择 Claude Code。两条路径共用以下合同：

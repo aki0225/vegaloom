@@ -93,6 +93,9 @@ def approve_bounded_change_run(
         raise ValueError("当前状态不允许执行 bounded 自动批准")
     context = load_change_run_context(run_dir, state, plan, metadata)
     assert context is not None
+    if context.contract.approval_is_current():
+        # 保留有效合同的待批准状态来自显式人工计划修订，不能转为策略自动批准。
+        return _reject(run_dir, state, plan, "人工计划修订必须由人工批准")
     snapshot = capture_bound_workspace(run_dir)
     if (
         snapshot.fingerprint != state.workspace_fingerprint

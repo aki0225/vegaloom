@@ -195,6 +195,23 @@ def test_bounded_approval_becomes_stale_when_policy_changes(
         execution_plan=_execution_plan(),
     )
     approved = runtime.approve_bounded(started.run_dir.name)
+    contract_path = approved.run_dir / "change-contract.json"
+    original_contract = ChangeContract.model_validate_json(contract_path.read_text(encoding="utf-8"))
+    revised_plan = _execution_plan().model_copy(deep=True, update={"plan_revision": 2})
+    revised_plan.work_items[0].objective += "；人工纠正实现安排"
+    pending = runtime.revise_change(
+        approved.run_dir.name, proposed_contract=original_contract,
+        proposed_execution_plan=revised_plan, request_approval=True,
+    )
+    assert pending.state.phase == "awaiting_approval"
+    assert runtime.approve_bounded(pending.run_dir.name).state.phase == "awaiting_approval"
+    approved = runtime.approve(pending.run_dir.name, actor="人工计划批准者")
+    assert ChangeContract.model_validate_json(
+        contract_path.read_text(encoding="utf-8"),
+    ).model_dump() == original_contract.model_dump()
+    assert original_contract.approval_source == "bounded"
+    trace = (approved.run_dir / "trace.jsonl").read_text(encoding="utf-8")
+    assert "人工计划批准者" in trace
     metadata = json.loads(
         (approved.run_dir / "agent-run.json").read_text(encoding="utf-8")
     )

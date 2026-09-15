@@ -160,7 +160,8 @@ def approve_change_run(
     work_item = current_change_work_item(plan, state)
     repo = bound_repo(run_dir)
     require_verification_commands_preflight(repo, work_item.verification)
-    approved_contract = approve_change_contract(
+    plan_only = context.contract.approval_is_current()
+    approved_contract = context.contract if plan_only else approve_change_contract(
         context.contract,
         actor=actor,
         source=approval_source,
@@ -191,6 +192,8 @@ def approve_change_run(
         if approval_source == "bounded"
         else "Approved Contract 已批准"
     )
+    if plan_only:
+        approval_reason = f"Execution Plan 已由 `{actor}` 人工批准；保留原 Contract 批准记录"
     checkpoint = write_checkpoint_fn(
         run_dir,
         ready_state,

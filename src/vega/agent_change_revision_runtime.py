@@ -43,6 +43,7 @@ def revise_change_run(
     *,
     proposed_contract: ChangeContract,
     proposed_execution_plan: ExecutionPlan,
+    request_approval: bool = False,
 ) -> AgentRun:
     """按真实 Diff、风险路径和冻结合同裁决 ChangeRun revision。"""
 
@@ -73,6 +74,7 @@ def revise_change_run(
         current_plan=context.execution_plan,
         proposed_plan=proposed_execution_plan,
         budget=budget,
+        request_approval=request_approval,
     )
     assessment_ref = write_revision_assessment(run_dir, assessment)
     restored_candidate_ref: str | None = None

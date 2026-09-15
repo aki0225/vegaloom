@@ -156,6 +156,9 @@ def agent_replan(
         "--execution-plan",
         help="提议的 Execution Plan JSON。",
     ),
+    request_approval: bool = typer.Option(
+        False, "--request-approval", help="将合同内 Plan 修订提交人工批准，不自动采用。",
+    ),
 ) -> None:
     """按合同字段、真实 Diff 和风险路径裁决 ChangeRun revision。"""
 
@@ -164,11 +167,12 @@ def agent_replan(
             run,
             proposed_contract=_load_change_contract(contract_path),
             proposed_execution_plan=_load_execution_plan(execution_plan_path),
+            request_approval=request_approval,
         )
     except (OSError, FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     if result.state.phase == "awaiting_approval":
-        typer.echo("Contract revision 已写入，等待人工批准。")
+        typer.echo("Revision 已写入，等待人工批准。")
     elif result.state.phase == "needs_human":
         typer.echo("Revision 触及合同、风险或预算边界，已停止自动执行。")
     else:
