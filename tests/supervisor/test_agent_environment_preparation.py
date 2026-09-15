@@ -38,8 +38,8 @@ def test_preparation_is_owned_once_and_never_verification_success(
     class ImmediateTicker(ExecutionProgressTicker):
         def started(self):
             super().started()
-            # 推进反馈时钟，不等待真实 25 秒，也不改变进程 timeout 时钟。
-            self.tick(self.next_report_at)
+            # 推进到 25 秒区间内部，避开浮点边界；不改变进程 timeout 时钟。
+            self.tick(self.next_report_at + 0.5)
 
     def report(step, elapsed):
         events.append((step, elapsed))
@@ -138,7 +138,7 @@ def test_preparation_progress_uses_cli_stderr_and_respects_json(
     def preparation(workspace, run, *, progress_reporter):
         ticker = ExecutionProgressTicker("environment_prepare", progress_reporter)
         ticker.started()
-        ticker.tick(ticker.next_report_at)
+        ticker.tick(ticker.next_report_at + 0.5)
         return object()  # 准备阶段即返回，不进入真实 Worker。
 
     def change(driver, **kwargs):
