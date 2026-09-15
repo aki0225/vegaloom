@@ -27,9 +27,10 @@ from vega.agent_change_run import (
     load_change_run_context,
     write_candidate_artifact,
 )
-from vega.agent_contract import AgentDecision, AgentObservation, AgentState
+from vega.agent_contract import AgentDecision, AgentObservation, AgentState, canonical_digest
 from vega.agent_git_candidate import freeze_candidate_commit
 from vega.agent_persistence import append_agent_trace, load_agent_checkpoint, save_agent_state
+from vega.agent_plan_scope import capture_plan_scope_baseline, evaluate_plan_scope
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_runtime_logic import update_state
 from vega.agent_runtime_support import (
@@ -189,10 +190,11 @@ def test_actual_risk_path_requires_contract_revision_and_human_approval(
     assert _load_contract(reapproved.run_dir).authorized_risk_reviews == ["payment"]
 
 
+@pytest.mark.parametrize("manual_plan", [False, True])
 def test_active_candidate_can_be_restored_for_contract_boundary_replan(
-    tmp_path: Path,
+    tmp_path: Path, manual_plan: bool,
 ) -> None:
-    repo = _repo(tmp_path / "repo", required_review=True)
+    repo = _repo(tmp_path / "repo", required_review=not manual_plan)
     source_head = _git(repo, "rev-parse", "HEAD")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -262,51 +264,68 @@ def test_active_candidate_can_be_restored_for_contract_boundary_replan(
     plan_revision = _execution_plan().model_copy(
         update={"plan_revision": 2, "hypotheses": ["需要调整当前实现"]}
     )
-    blocked = runtime.revise_change(
-        approved.run_dir.name,
-        proposed_contract=current_contract,
-        proposed_execution_plan=plan_revision,
-    )
+    if manual_plan:
+        proposed_plan = plan_revision.model_copy(deep=True)
+        proposed_plan.work_items[0].objective += "；按人工修订继续实现"
+        pending = runtime.revise_change(
+            approved.run_dir.name, proposed_contract=current_contract,
+            proposed_execution_plan=proposed_plan, request_approval=True,
+        )
+    else:
+        blocked = runtime.revise_change(
+            approved.run_dir.name,
+            proposed_contract=current_contract,
+            proposed_execution_plan=plan_revision,
+        )
 
-    assert blocked.state.phase == "needs_human"
-    assert blocked.state.active_candidate_sha is None
-    assert blocked.state.allowed_actions == ["replan", "human"]
-    assert _git(context.worktree.worktree_path, "rev-parse", "HEAD") == source_head
-    assert _git(context.worktree.worktree_path, "status", "--short") == "M src/one.py"
-    assert (blocked.run_dir / candidate_ref).is_file()
-    assert _latest_assessment(blocked.run_dir)["missing_risk_authorizations"] == [
-        "payment"
-    ]
-    assert "candidate_restored_for_replan" in (
-        blocked.run_dir / "trace.jsonl"
-    ).read_text(encoding="utf-8")
+        assert blocked.state.phase == "needs_human"
+        assert blocked.state.active_candidate_sha is None
+        assert blocked.state.allowed_actions == ["replan", "human"]
+        assert _git(context.worktree.worktree_path, "rev-parse", "HEAD") == source_head
+        assert _git(context.worktree.worktree_path, "status", "--short") == "M src/one.py"
+        assert (blocked.run_dir / candidate_ref).is_file()
+        assert _latest_assessment(blocked.run_dir)["missing_risk_authorizations"] == [
+            "payment"
+        ]
+        assert "candidate_restored_for_replan" in (
+            blocked.run_dir / "trace.jsonl"
+        ).read_text(encoding="utf-8")
 
-    proposed_contract = ChangeContract.model_validate(
-        {
-            **current_contract.model_dump(
-                mode="json",
-                exclude=CHANGE_APPROVAL_METADATA_FIELDS,
-            ),
-            "contract_revision": 2,
-            "authorized_risk_reviews": ["payment"],
-        }
-    )
-    proposed_plan = plan_revision.model_copy(update={"contract_revision": 2})
-    pending = runtime.revise_change(
-        blocked.run_dir.name,
-        proposed_contract=proposed_contract,
-        proposed_execution_plan=proposed_plan,
-    )
+        proposed_contract = ChangeContract.model_validate(
+            {
+                **current_contract.model_dump(
+                    mode="json",
+                    exclude=CHANGE_APPROVAL_METADATA_FIELDS,
+                ),
+                "contract_revision": 2,
+                "authorized_risk_reviews": ["payment"],
+            }
+        )
+        proposed_plan = plan_revision.model_copy(update={"contract_revision": 2})
+        pending = runtime.revise_change(
+            blocked.run_dir.name,
+            proposed_contract=proposed_contract,
+            proposed_execution_plan=proposed_plan,
+        )
 
     assert pending.state.phase == "awaiting_approval"
     assert pending.state.active_candidate_sha is None
     assert pending.state.approved_contract_digest is None
     reapproved = runtime.approve(pending.run_dir.name, actor="user")
+    if manual_plan:
+        assert _load_contract(reapproved.run_dir).model_dump() == current_contract.model_dump()
     checkpoint = load_agent_checkpoint(
         reapproved.run_dir / "checkpoints" / f"{reapproved.state.latest_checkpoint_id}.json"
     )
     assert checkpoint.failed_attempts == failed_attempts
     assert not verification_retry_requested(workspace, reapproved.run_dir.name)
+    scope = capture_plan_scope_baseline(
+        context.worktree.worktree_path, reapproved.plan, reapproved.plan.work_items[0],
+        expected_head_sha=source_head, iteration=1,
+    )
+    assert evaluate_plan_scope(
+        context.worktree.worktree_path, scope, expected_head_sha=source_head, iteration=1,
+    ).status == "success"
 
     archive = reapproved.run_dir / "execution-plans/execution-plan-revision-001.json"
     archived_content = archive.read_bytes()
@@ -317,6 +336,10 @@ def test_active_candidate_can_be_restored_for_contract_boundary_replan(
         verification_retry_requested(workspace, reapproved.run_dir.name)
     archive.write_bytes(archived_content)
     assert not verification_retry_requested(workspace, reapproved.run_dir.name)
+    archive.unlink()
+    with pytest.raises(ValueError, match="旧 Contract 或 Execution Plan 归档无法验证"):
+        verification_retry_requested(workspace, reapproved.run_dir.name)
+    archive.write_bytes(archived_content)
 
     # 同一失败历史下，下一次仅修订验证要求不能再次借人工批准改派 Worker。
     append_agent_trace(
@@ -330,7 +353,7 @@ def test_active_candidate_can_be_restored_for_contract_boundary_replan(
         **_load_contract(reapproved.run_dir).model_dump(
             mode="json", exclude=CHANGE_APPROVAL_METADATA_FIELDS,
         ),
-        "contract_revision": 3,
+        "contract_revision": reapproved.state.contract_revision + 1,
         "required_verification": [*_contract().required_verification, "git diff --check"],
         "authority_envelope": {
             **_load_contract(reapproved.run_dir).authority_envelope.model_dump(mode="json"),
@@ -338,7 +361,7 @@ def test_active_candidate_can_be_restored_for_contract_boundary_replan(
         },
     })
     verification_plan = proposed_plan.model_copy(deep=True, update={
-        "contract_revision": 3, "plan_revision": 3, "additional_checks": ["git diff --check"],
+        "contract_revision": reapproved.state.contract_revision + 1, "plan_revision": 3, "additional_checks": ["git diff --check"],
     })
     verification_plan.work_items[0].verification.append("git diff --check")
     pending = runtime.revise_change(
@@ -358,7 +381,10 @@ def test_active_candidate_can_be_restored_for_contract_boundary_replan(
         SupervisorAgentVerificationRetry(workspace).run(verified.run_dir.name)
 
 
-def test_auto_replan_budget_exhaustion_stops_for_human(tmp_path: Path) -> None:
+@pytest.mark.parametrize("request_approval", [False, True])
+def test_auto_replan_budget_exhaustion_stops_for_human(
+    tmp_path: Path, request_approval: bool,
+) -> None:
     repo = _repo(tmp_path / "repo")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -380,16 +406,69 @@ def test_auto_replan_budget_exhaustion_stops_for_human(tmp_path: Path) -> None:
         update={"plan_revision": 2, "hypotheses": ["更换实现顺序"]}
     )
 
+    original_contract = _load_contract(approved.run_dir)
     result = runtime.revise_change(
         approved.run_dir.name,
         proposed_contract=_load_contract(approved.run_dir),
         proposed_execution_plan=proposed,
+        request_approval=request_approval,
     )
 
+    if request_approval:
+        assert result.state.phase == "awaiting_approval"
+        assert result.state.contract_revision == 1
+        assert result.state.execution_plan_revision == 2
+        assert result.state.approved_plan_digest is None
+        assert runtime.approve_bounded(result.run_dir.name).state.phase == "awaiting_approval"
+        approval = {
+            "expected_state_version": result.state.state_version,
+            "expected_contract_digest": _load_contract(result.run_dir).expected_approval_digest(),
+            "expected_execution_plan_revision": 2,
+            "expected_execution_plan_digest": canonical_digest(proposed.model_dump(mode="json")),
+        }
+        with pytest.raises(ValueError, match="确认期间"):
+            runtime.approve_if_current(
+                result.run_dir.name, **{**approval, "expected_execution_plan_digest": "stale"},
+            )
+        ready = runtime.approve_if_current(
+            result.run_dir.name, **approval, actor="人工计划修订",
+        )
+        assert _load_contract(ready.run_dir).model_dump() == original_contract.model_dump()
+        assert ready.state.phase == "ready"
+        assert ready.plan.approval_is_current()
+        assert change_budget_snapshot(
+            ready.run_dir, ready.state, _load_contract(ready.run_dir),
+        ).auto_replans_used == 0
+        return
     assert result.state.phase == "needs_human"
     assert "自动 Replan 预算已用完" in _latest_assessment(
         result.run_dir
     )["approval_question"]
+
+
+@pytest.mark.parametrize("blocker", ["review", "scope"])
+def test_manual_plan_revision_preserves_review_and_scope_gates(
+    tmp_path: Path, blocker: str,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    contract = approve_change_contract(_contract(), actor="user")
+    budget = ChangeBudgetSnapshot(
+        run_id="manual-revision", work_item_id="WI-01", worker_attempts_used=0,
+        repair_rounds_used=0, auto_replans_used=0, review_rounds_used=int(blocker == "review"),
+        verification_retries_used=0, max_repair_rounds=1, max_auto_replans=0,
+        max_review_rounds=1, max_verification_retries=1,
+    )
+    assessment = assess_change_revision(
+        repo=repo, changed_files=["outside.py"] if blocker == "scope" else [],
+        current_contract=contract, proposed_contract=contract,
+        current_plan=_execution_plan(),
+        proposed_plan=_execution_plan().model_copy(
+            update={"plan_revision": 2, "hypotheses": ["人工纠正安排"]},
+        ),
+        budget=budget, request_approval=True,
+    )
+    assert assessment.outcome == "needs_human"
+    assert ("Review" if blocker == "review" else "authority_envelope") in assessment.approval_question
 
 
 def test_contract_revision_also_advances_execution_plan_revision(
@@ -647,6 +726,7 @@ def test_agent_replan_command_is_registered() -> None:
     assert result.exit_code == 0, result.output
     assert "--contract" in output
     assert "--execution-plan" in output
+    assert "--request-approval" in output
 
 
 def _contract() -> ChangeContract:
