@@ -239,6 +239,7 @@ def render_fix_packet(packet: ChangeFixPacket) -> str:
     ]
     if packet.findings:
         lines.extend(["", "### Reviewer Findings", ""])
+        lines.append("明确标为 suggestion 的项仅供参考，不是必须返修；minor 不因此变为可选。")
         for finding in packet.findings:
             location = (
                 f"`{finding.file}:{finding.line}`"
@@ -379,6 +380,7 @@ def _fix_required_actions(
     actions = [
         item.recommendation.strip() or item.title.strip()
         for item in findings
-        if item.recommendation.strip() or item.title.strip()
+        if item.severity != "suggestion"
+        and (item.recommendation.strip() or item.title.strip())
     ]
     return list(dict.fromkeys(actions or [fallback]))

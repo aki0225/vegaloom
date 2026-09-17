@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import json
+from .execution_paths import ExecutionPathGuard
+
 from datetime import datetime
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from .agents_proposal import write_agents_md_proposals
 from .brief_generator import (
@@ -10,12 +15,12 @@ from .brief_generator import (
     write_common_brief_artifacts,
     write_feature_artifacts,
 )
-from .models import BriefInput, BriefState
+from .models import BriefInput, BriefState, ReflectState
 from .project_context import write_project_context
 from .project_knowledge import load_project_knowledge, write_knowledge_context
 from .redaction import redact_text
 from .repository_identity import resolve_git_revision
-from .run_utils import create_run_dir
+from .run_utils import create_run_dir, resolve_run_dir
 from .trace import TraceWriter
 
 COMMON_ARTIFACTS = [
@@ -143,3 +148,118 @@ def _run_brief_eval(run_dir: Path, expected_artifacts: list[str]) -> list[str]:
 
 def _render_eval(results: list[str]) -> str:
     return "# Eval\n\n" + "\n".join(f"- {item}" for item in results) + "\n"
+
+
+def read_source_brief_artifact(
+    workspace: Path,
+    source_run: object,
+    repo_path: Path,
+) -> tuple[str, list[str], list[str]]:
+    if not source_run:
+        return "", [], []
+    if not isinstance(source_run, str):
+        issue = "source_brief_run_invalid"
+        return "", [issue], [f"{issue}: 上游 source_run 不是字符串"]
+    try:
+        run_dir = resolve_run_dir(workspace, source_run)
+    except (FileNotFoundError, ValueError) as exc:
+        issue = "source_brief_run_invalid"
+        return "", [issue], [f"{issue}: 无法解析上游 source_run：{type(exc).__name__}"]
+    state_path = run_dir / "state.json"
+    if not state_path.exists():
+        issue = "source_brief_state_missing"
+        return "", [issue], [f"{issue}: 上游 source_run 缺少 state.json"]
+    try:
+        source_state = BriefState.model_validate_json(
+            state_path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError, ValueError) as exc:
+        issue = "source_brief_state_invalid"
+        return "", [issue], [f"{issue}: 上游 state.json 无法验证：{type(exc).__name__}"]
+
+    issues: list[str] = []
+    diagnostics: list[str] = []
+    if source_state.run_id != run_dir.name:
+        issues.append("source_brief_run_id_mismatch")
+        diagnostics.append(
+            "source_brief_run_id_mismatch: state.run_id 与 source run 目录不一致"
+        )
+    if Path(source_state.repo_path).resolve() != repo_path.resolve():
+        issues.append("source_brief_repo_mismatch")
+        diagnostics.append(
+            "source_brief_repo_mismatch: source brief 与当前仓库不一致"
+        )
+    if source_state.status != "success":
+        issues.append("source_brief_state_not_success")
+        diagnostics.append(
+            f"source_brief_state_not_success: source brief 状态为 {source_state.status}"
+        )
+    if issues:
+        return "", list(dict.fromkeys(issues)), list(dict.fromkeys(diagnostics))
+    brief_text, brief_issues, brief_diagnostics = read_text_artifact(
+        run_dir / "agent-brief.md",
+        "source_brief",
+    )
+    return (
+        brief_text,
+        list(dict.fromkeys([*issues, *brief_issues])),
+        list(dict.fromkeys([*diagnostics, *brief_diagnostics])),
+    )
+
+
+
+def read_text_artifact(
+    path: Path,
+    issue_prefix: str,
+) -> tuple[str, list[str], list[str]]:
+    if not path.exists():
+        issue = f"{issue_prefix}_missing"
+        return "", [issue], [f"{issue}: 缺少 {path.name}"]
+    try:
+        return path.read_text(encoding="utf-8", errors="replace"), [], []
+    except OSError as exc:
+        issue = f"{issue_prefix}_unreadable"
+        return "", [issue], [f"{issue}: {path.name} 无法读取：{type(exc).__name__}"]
+
+
+
+ACCEPTANCE_SUPPLEMENT_ARTIFACT = "acceptance-supplement.json"
+
+
+def read_acceptance_supplement(
+    workspace: Path, source_run: object, head_sha: str, *, reflect_run: str | None = None,
+) -> str:
+    """独立审查数据，不参与 Brief、规则或项目知识编译。"""
+    if reflect_run is not None:
+        reflect_dir = resolve_run_dir(workspace, reflect_run)
+        ExecutionPathGuard(workspace, reflect_dir).validate_artifact(reflect_dir / "state.json")
+        reflect_state = ReflectState.model_validate_json((reflect_dir / "state.json").read_text(encoding="utf-8"))
+        if (ACCEPTANCE_SUPPLEMENT_ARTIFACT in reflect_state.artifacts
+                or (reflect_dir / ACCEPTANCE_SUPPLEMENT_ARTIFACT).exists()):
+            source_run = reflect_run
+    if not source_run:
+        return ""
+    if not isinstance(source_run, str):
+        raise ValueError("验收补充的来源 Run 无效")
+    run_dir = resolve_run_dir(workspace, source_run)
+    path = run_dir / ACCEPTANCE_SUPPLEMENT_ARTIFACT
+    guard = ExecutionPathGuard(run_dir.parent, run_dir)
+    guard.validate_artifact(path)
+    guard.validate_artifact(run_dir / "state.json")
+    model = ReflectState if source_run == reflect_run else BriefState
+    state = model.model_validate_json((run_dir / "state.json").read_text(encoding="utf-8"))
+    if not path.exists():
+        if ACCEPTANCE_SUPPLEMENT_ARTIFACT in state.artifacts:
+            raise ValueError("已登记的验收补充缺失")
+        return ""
+    if ACCEPTANCE_SUPPLEMENT_ARTIFACT not in state.artifacts:
+        raise ValueError("验收补充未由控制器登记")
+    with path.open("rb") as stream:
+        content = stream.read(100001)
+    guard.validate_artifact(path)
+    if len(content) > 100000:
+        raise ValueError("验收补充超出读取上限")
+    payload = json.loads(content.decode("utf-8"))
+    if not isinstance(payload, dict) or payload.get("candidate_sha") != head_sha:
+        raise ValueError("验收补充不属于当前 Candidate")
+    return content.decode("utf-8")

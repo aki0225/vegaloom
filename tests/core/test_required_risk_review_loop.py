@@ -157,8 +157,11 @@ def test_high_risk_path_collects_review_without_authorizing_delivery(
         assert _finish_allows_verification_retry(finish, capture_review_workspace(repo))
 
 
+@pytest.mark.parametrize("review_verdict", ["approve", "request_changes"])
 def test_auto_named_required_review_runs_reviewer_once_and_stays_human(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    review_verdict: str,
 ) -> None:
     relative_path = "src/payments/charge.py"
     workspace, repo = _init_repo(
@@ -168,6 +171,17 @@ def test_auto_named_required_review_runs_reviewer_once_and_stays_human(
     )
     worker = PathWorker(relative_path)
     reviewer = RequiredReviewReviewer(relative_path)
+    original = reviewer.run
+
+    def review_with_requested_verdict(*args, **kwargs):
+        result = original(*args, **kwargs)
+        payload = json.loads(result.output)
+        payload["verdict"] = review_verdict
+        result.output = json.dumps(payload, ensure_ascii=False)
+        return result
+
+    monkeypatch.setattr(reviewer, "run", review_with_requested_verdict)
+    expected_verdict = "needs_human" if review_verdict == "approve" else "request_changes"
 
     run_dir = LoopAutomationRuntime(
         workspace,
@@ -196,11 +210,11 @@ def test_auto_named_required_review_runs_reviewer_once_and_stays_human(
     assert reviewer.calls == 1
     assert len(state["iterations"]) == 1
     assert state["status"] == "needs_human"
-    assert iteration["verdict"] == "needs_human"
-    assert local_verdict["verdict"] == "needs_human"
+    assert iteration["verdict"] == expected_verdict
+    assert local_verdict["verdict"] == expected_verdict
     assert child_review_state["status"] == "needs_human"
-    assert child_review_state["verdict"] == "needs_human"
-    assert child_verdict["verdict"] == "needs_human"
+    assert child_review_state["verdict"] == expected_verdict
+    assert child_verdict["verdict"] == expected_verdict
     assert local_verdict["risk_disclosures"][0]["risk_id"] == "payment"
     assert gate_result["required_reviews"][0]["id"] == "payment"
     assert {
@@ -226,13 +240,16 @@ def test_auto_named_required_review_runs_reviewer_once_and_stays_human(
     )
     assert integrity.valid, integrity.issues
     assert len(integrity.review_verdicts) == 1
-    assert integrity.review_verdicts[0].verdict == "needs_human"
+    assert integrity.review_verdicts[0].verdict == expected_verdict
 
     FinishRuntime(workspace).run(run_dir.name)
     finish = _read_json(run_dir / "finish-summary.json")
-    assert finish["finish_status"] == "needs_human"
+    assert finish["finish_status"] == (
+        "needs_fix" if review_verdict == "request_changes" else "needs_human"
+    )
+    assert finish["first_screen"]["gates"]["risk"]["recommendation"] == "human-review"
     assert finish["loop_status"] == "needs_human"
-    assert finish["latest_verdict"]["verdict"] == "needs_human"
+    assert finish["latest_verdict"]["verdict"] == expected_verdict
     assert finish["artifact_integrity"]["valid"] is True
     assert finish["evidence_freshness"]["fresh"] is True
     assert finish["verification_passed"] is True

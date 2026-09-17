@@ -90,6 +90,30 @@ class ReviewQueue(BaseModel):
         return normalized
 
 
+def aggregate_needs_human_reason(
+    queue: ReviewQueue, verdicts: list[ReviewVerdict],
+) -> Literal["acceptance_missing"] | None:
+    """只汇总完整队列的纯验收缺口；子 Verdict 已独立保存，无需复制到 Item。"""
+    if (
+        not verdicts or len(verdicts) != len(queue.items)
+        or queue.status == "blocked" or queue.issue or queue.remaining
+        or any(item.status != "completed" or item.runner_status != "success"
+               or item.remaining or item.issue for item in queue.items)
+    ):
+        return None
+    if not any(verdict.verdict == "needs_human" for verdict in verdicts):
+        return None
+    if all(
+        verdict.verdict == "approve" or (
+            verdict.verdict == "needs_human"
+            and verdict.needs_human_reason == "acceptance_missing"
+        )
+        for verdict in verdicts
+    ):
+        return "acceptance_missing"
+    return None
+
+
 def review_queue_required(
     inputs: dict[str, object],
     metrics: PromptMetrics,

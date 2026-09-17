@@ -411,6 +411,9 @@ def _enforce_empty_risk_disclosures(
 
 
 def _force_human_verdict(verdict: ReviewVerdict) -> ReviewVerdict:
+    # 保留 Reviewer 的返修意见；human-review 风险门禁仍独立阻断最终交付。
+    if verdict.verdict == "request_changes":
+        return redact_review_verdict(verdict)
     return redact_review_verdict(
         ReviewVerdict(
             verdict="needs_human",

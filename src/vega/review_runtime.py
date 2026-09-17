@@ -10,12 +10,14 @@ from typing import Any, Callable
 from pydantic import ValidationError
 
 from .artifact_rendering import render_review_context
+from .brief_runtime import read_source_brief_artifact as _read_source_brief_artifact
+from .brief_runtime import read_text_artifact as _read_text_artifact
 from .comparison_binding import (
     safe_comparison_base as _safe_comparison_base,
     safe_comparison_paths as _safe_comparison_paths,
 )
 from .execution_control import RunnerExecutionContext
-from .models import BriefState, GateResult, ReviewFinding, ReviewState, ReviewVerdict
+from .models import GateResult, ReviewFinding, ReviewState, ReviewVerdict
 from .project_config import (
     ProjectConfig,
     load_project_config,
@@ -37,6 +39,7 @@ from .review_coverage import (
     review_file_coverage_issues_for_verdict,
 )
 from .review_evidence import review_evidence_issues as _review_evidence_issues
+from .brief_runtime import read_acceptance_supplement
 from .review_eval import (
     append_review_eval_outcome as _append_review_eval_outcome,
     render_eval,
@@ -678,6 +681,13 @@ def collect_review_inputs(
     source_brief, source_brief_issues, source_brief_diagnostics = (
         _read_source_brief_artifact(workspace, upstream_source_run, repo)
     )
+    try:
+        acceptance_supplement = read_acceptance_supplement(
+            workspace, upstream_source_run, current_snapshot.head_sha, reflect_run=source_dir.name,
+        )
+    except (OSError, ValueError):
+        acceptance_supplement = ""
+        source_brief_issues.append("acceptance_supplement_invalid")
     evidence_issues = [
         *state_issues,
         *evidence_read_issues,
@@ -697,6 +707,7 @@ def collect_review_inputs(
             full_diff,
             test_summary,
             current_snapshot,
+            acceptance_supplement,
         ),
     ]
     evidence_issues = list(dict.fromkeys(evidence_issues))
@@ -783,6 +794,7 @@ def collect_review_inputs(
         "comparison_base_sha": comparison_base_sha,
         "comparison_paths": list(comparison_paths),
         "source_brief": source_brief,
+        "acceptance_supplement": redact_text(acceptance_supplement),
         "reflection": reflection,
         "diff_summary": diff_summary,
         "test_summary": test_summary,
@@ -1038,61 +1050,6 @@ def _redacted_model_json(verdict: ReviewVerdict) -> str:
     )
 
 
-def _read_source_brief_artifact(
-    workspace: Path,
-    source_run: object,
-    repo_path: Path,
-) -> tuple[str, list[str], list[str]]:
-    if not source_run:
-        return "", [], []
-    if not isinstance(source_run, str):
-        issue = "source_brief_run_invalid"
-        return "", [issue], [f"{issue}: 上游 source_run 不是字符串"]
-    try:
-        run_dir = resolve_run_dir(workspace, source_run)
-    except (FileNotFoundError, ValueError) as exc:
-        issue = "source_brief_run_invalid"
-        return "", [issue], [f"{issue}: 无法解析上游 source_run：{type(exc).__name__}"]
-    state_path = run_dir / "state.json"
-    if not state_path.exists():
-        issue = "source_brief_state_missing"
-        return "", [issue], [f"{issue}: 上游 source_run 缺少 state.json"]
-    try:
-        source_state = BriefState.model_validate_json(
-            state_path.read_text(encoding="utf-8")
-        )
-    except (OSError, ValidationError, ValueError) as exc:
-        issue = "source_brief_state_invalid"
-        return "", [issue], [f"{issue}: 上游 state.json 无法验证：{type(exc).__name__}"]
-
-    issues: list[str] = []
-    diagnostics: list[str] = []
-    if source_state.run_id != run_dir.name:
-        issues.append("source_brief_run_id_mismatch")
-        diagnostics.append(
-            "source_brief_run_id_mismatch: state.run_id 与 source run 目录不一致"
-        )
-    if Path(source_state.repo_path).resolve() != repo_path.resolve():
-        issues.append("source_brief_repo_mismatch")
-        diagnostics.append(
-            "source_brief_repo_mismatch: source brief 与当前仓库不一致"
-        )
-    if source_state.status != "success":
-        issues.append("source_brief_state_not_success")
-        diagnostics.append(
-            f"source_brief_state_not_success: source brief 状态为 {source_state.status}"
-        )
-    if issues:
-        return "", list(dict.fromkeys(issues)), list(dict.fromkeys(diagnostics))
-    brief_text, brief_issues, brief_diagnostics = _read_text_artifact(
-        run_dir / "agent-brief.md",
-        "source_brief",
-    )
-    return (
-        brief_text,
-        list(dict.fromkeys([*issues, *brief_issues])),
-        list(dict.fromkeys([*diagnostics, *brief_diagnostics])),
-    )
 
 
 def _read_text(path: Path) -> str:
@@ -1107,18 +1064,6 @@ def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _read_text_artifact(
-    path: Path,
-    issue_prefix: str,
-) -> tuple[str, list[str], list[str]]:
-    if not path.exists():
-        issue = f"{issue_prefix}_missing"
-        return "", [issue], [f"{issue}: 缺少 {path.name}"]
-    try:
-        return path.read_text(encoding="utf-8", errors="replace"), [], []
-    except OSError as exc:
-        issue = f"{issue_prefix}_unreadable"
-        return "", [issue], [f"{issue}: {path.name} 无法读取：{type(exc).__name__}"]
 
 
 def _read_json_artifact(

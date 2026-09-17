@@ -15,6 +15,7 @@ from .project_context import write_project_context
 from .project_knowledge import load_project_knowledge
 from .redaction import assert_not_sensitive_path, redact_text
 from .review_evidence import make_review_evidence as _make_review_evidence
+from .brief_runtime import ACCEPTANCE_SUPPLEMENT_ARTIFACT, read_acceptance_supplement
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir, resolve_run_dir
 from .runtime_workspace import capture_runtime_workspace
@@ -48,7 +49,9 @@ class ReflectRuntime:
         lesson: str | None = None,
         comparison_base_sha: str | None = None,
         comparison_paths: tuple[str, ...] = (),
+        acceptance_supplement: str = "",
     ) -> Path:
+        host_acceptance = acceptance_supplement
         repo = repo_path.resolve()
         test_text = _read_optional_log(
             test_log,
@@ -150,6 +153,21 @@ class ReflectRuntime:
             reflection,
             encoding="utf-8",
         )
+        try:
+            acceptance_supplement = read_acceptance_supplement(self.workspace, source_run, workspace_snapshot.head_sha)
+        except (OSError, ValueError):
+            acceptance_supplement = ""
+            source_brief_issues.append("acceptance_supplement_invalid")
+        if host_acceptance:
+            acceptance_supplement = json.dumps({
+                "authority": "untrusted_acceptance_statements",
+                "candidate_sha": workspace_snapshot.head_sha,
+                "project": acceptance_supplement,
+                "host": host_acceptance,
+            }, ensure_ascii=False)
+            (run_dir / ACCEPTANCE_SUPPLEMENT_ARTIFACT).write_text(
+                acceptance_supplement, encoding="utf-8", newline="\n",
+            )
         review_evidence = _make_review_evidence(
             workspace_snapshot,
             test_summary,
@@ -158,6 +176,7 @@ class ReflectRuntime:
             review_source_run=run_id,
             upstream_source_run=safe_source_run,
             source_brief=profile_text,
+            acceptance_supplement=acceptance_supplement,
             reflection=reflection,
             diff_summary=diff_summary,
             source_brief_issues=source_brief_issues,
@@ -201,6 +220,7 @@ class ReflectRuntime:
         run_dir.joinpath("eval.md").write_text("# Eval\n\n(pending)\n", encoding="utf-8")
         expected_artifacts = [
             *REFLECT_ARTIFACTS,
+            *([ACCEPTANCE_SUPPLEMENT_ARTIFACT] if host_acceptance else []),
             *(["memory-proposals.jsonl"] if normalized_lesson else []),
         ]
         eval_results = _run_reflect_eval(run_dir, git_data, expected_artifacts)

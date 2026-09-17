@@ -101,3 +101,9 @@ def _historical_gate_note(run_dir: Path | None) -> str | None:
         f"Reviewer={by_gate.get('review', '尚未运行')}；"
         "只用于定位，不能作为当前门禁的通过证据。"
     )
+
+
+def verification_label(value: str, *, candidate_transition: bool = False) -> str:
+    if candidate_transition and value == "not_run":
+        return "已进入验证阶段，结果待对账"
+    return _GATE_LABELS.get(value, value)

@@ -113,6 +113,42 @@ Execution Plan 记录 Agent 可以调整的实现安排：
 
 ## Worker 与 Reviewer
 
+生成的 Vega Skill 要求工作主会话自行读取材料、调用既有入口推进并直接汇报技术结果，
+用户负责关键业务与生产授权，不承担搬运报告或猜测内部恢复命令的工作。已有明确计划不重复
+Planning，执行权限沿用显式绑定，不默认 full-access。项目必要验收应在送审前准备，
+固定 Verification 仍由控制器执行。Worker 可用 `acceptance_refs` 引用当前 Work Item 已批准范围内
+已有的 UTF-8 md/txt/log/json 项目材料，提供相对 `path` 和原文 `sha256`；最多4份、每份4096字节。
+控制器检查路径、脱敏并冻结补充，在任务和规则编译后写入独立审查输入，由现有 Review evidence
+绑定 Candidate 和内容。不把材料传入 Brief、路径发现或项目知识检索；材料缺失、越界、超限或
+漂移不能正常消费，仍受原审查输入预算限制。这是来源可追溯的辅助快照，不证明命令执行或成功。
+此接口不支持任意 Run 日志、图片附件或未获准的新输出目录，不授权 Worker 写控制器目录，
+不扩 writableRoots、不要求 full-access。无合法材料来源时保留验收缺口，不宣称全项目开箱即用。
+Reviewer 区分实际缺陷、必要验收缺口和可选建议；Fix Packet 不将明确的 `suggestion`
+列为强制返修，但保留原 finding 可读，`minor` 不自动变成可选。最终人工确认不能由返修授权替代。
+
+`ReviewVerdict.needs_human_reason` 仅在 `needs_human` 时可声明：纯验收材料缺口且无需新增业务
+授权或风险裁决为 `acceptance_missing`，其他或混合原因为 `human_decision`；历史缺字段仍是
+未分类人工阻断，不自动迁移。`approve/request_changes` 不得携带非空阻断原因。
+宿主通过 `vega change --run <run-id> --acceptance-file acceptance/checks.json` 显式提交辅助陈述：
+JSON 绑定 `run_id`、完整 `candidate_sha`，`records` 为1..4条；每条 `check/action/result/uncovered`
+各1..2048字符，`source` 为 `host_observation/tool_transcript/worker_report`。文件最多32768字节，
+只读 Run Workspace 子目录中的显式相对 JSON，拒绝 runs、Git 控制目录、敏感路径、穿越和链接；
+不递归读取记录中的引用。无需修改业务文件，不授权 Worker 写控制器目录。
+来源性质不是工具执行认证；脱敏后的记录只进入编译后的独立审查数据，复用 Review 输入完整性，
+不参与规则发现。坏材料或保存失败不消耗新 operation，不改变旧状态。仅实际绑定且完整的
+`acceptance_missing` 允许在同一 Candidate 追加审查，复用验证重试与 Review 预算、Verification、
+Risk、独立 Reviewer 和 Finish；保留旧审查，不启动 Worker，也不以旧 approve 或材料自述成功。
+未分类或真正人工阻断、活动进程、漂移、授权/策略变化、未知副作用仍拒绝。当前补验入口仅承接
+原始 Worker 后的首次验收阻断；已恢复过的来源不自动连续补验，新拒绝如实交回主会话。
+
+先复现再修复是通常的工作方法，不默认成为必须证明历史顺序的验收条件；若合同确需首败记录，
+开工前明确合法保存位置。主会话负责从本次绑定产物或获准读取的精确原生 Thread 工具结果提取
+必要材料并补交，不传完整对话/推理、不扫描其他会话、不放宽人工业务条件。没有历史结果须明示。
+显式人工 Contract 可保留原固定验证并追加已授权的本题验证，不改变 Planner/bounded 登记限制。
+验收补充不计作新增 Worker；最终集成审查仍按实际 Worker 次数、多 Work Item、revision、风险及
+副作用等原条件触发。最终文本报告优先展示最新轮次，历史分组保留失败、超时与证据引用；旧格式
+缺少轮次时不猜测或删除记录，机器验证字段与成功语义不变。
+
 默认 Provider 是 Codex，也可以在首次执行时显式选择 Claude Code。两条路径共用以下合同：
 
 - 一个 ChangeRun 复用一个 Worker Session；
@@ -149,6 +185,8 @@ Verification、Risk、Reviewer 或 Finish 裁决。
 ## Candidate 与门禁
 
 可选 `verification.prepare_commands` 从固定源版本逐字编入 Contract，需要人工批准。
+批准前与开工前都核对合同准备列表和项目登记列表；不一致时公开入口及状态解释给出同一修订指引。
+受管目录依赖应由该控制器准备流程处理，宿主安装不自动成为可信快照；未登记策略时须先解决项目接入，不能在批准后自行安装并忽略漂移。
 控制器在首次 Worker 前执行，同一批准摘要最多一次。准备成功只表示环境命令完成；
 之后仍运行全部固定验证。失败、停止或终态未确认时保留现场，不自动重放安装脚本。
 准备命令修改源码、HEAD、未忽略文件或 Git 控制面时停止；bounded 模式不批准非空准备命令。
@@ -173,6 +211,14 @@ Worker 的 `claimed_status=completed` 表示实现已交给控制器验证，不
 
 风险路径命中后可以先运行只读 Reviewer，结果仍为 `needs_human`，供人工判断；预算超限、
 风险证据无效和无法识别的高风险阻断仍在调用前停止。Reviewer 的 `approve` 不能解除风险门禁。
+
+人工可在当前合同显式批准 `allow_pending_risk_repair=true`；默认 false，旧批准摘要不变，
+不能通过 bounded 批准启用。它只允许已授权 `authorized_risk_reviews` 风险领域内的局部返修：
+当前证据完整、新鲜、固定验证 passed、无外部副作用、范围和预算允许，且 Reviewer 正常
+request_changes，具有明确代码位置、证据和建议的非 suggestion 缺陷，风险披露完整。
+Risk 的 blocked/human-review 保持原值；Reviewer approve 后仍交人工，不自动 next/finalize。
+未披露或新增风险、必要证据不足、needs_human verdict、执行中断、未知副作用和越界均不适用；
+扩大范围或改变业务约束仍须修订并批准合同，不自动恢复旧任务。
 
 人工完成必要的验证修订并批准后，`change` 复用原验证恢复流程。预算、Workspace、
 原 Worker 证据或范围不满足时拒绝，不能回退为启动新的 Worker；风险待确认不会被重试解除。
@@ -320,3 +366,8 @@ vega resume
 
 新能力必须明确改善人工操作、恢复、缺陷发现、上下文成本或交付理解中的至少一项，并用真实任务
 验证。只增加命令、状态、Artifact 或架构名词不算进展。
+
+
+## 日用改造验收记录
+
+定向验证、真实日用与尚未覆盖范围见 [日用改造交付记录](DAILY-DELIVERY-0917.md)。

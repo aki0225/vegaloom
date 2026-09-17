@@ -98,6 +98,7 @@ class AgentPlan(StrictAgentModel):
     observed_facts: list[NonEmptyText] = Field(default_factory=list)
     hypotheses: list[NonEmptyText] = Field(default_factory=list)
     unresolved_decisions: list[NonEmptyText] = Field(default_factory=list)
+    allow_pending_risk_repair: bool = False
     work_items: list[AgentWorkItem] = Field(min_length=1, max_length=8)
     approved: bool = False
     approved_at: str | None = None
@@ -136,6 +137,8 @@ class AgentPlan(StrictAgentModel):
             item.model_dump(mode="json", exclude={"status"})
             for item in self.work_items
         ]
+        if not self.allow_pending_risk_repair:
+            payload.pop("allow_pending_risk_repair")
         return payload
 
     def expected_approval_digest(self) -> str:

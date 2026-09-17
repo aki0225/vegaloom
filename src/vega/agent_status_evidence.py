@@ -22,6 +22,7 @@ from .execution_control import ExecutionLease
 from .project_config import ScopeConfig, scope_policy_sha256
 from .run_utils import resolve_run_dir
 from .scope_gate import ScopeGateResult
+from .agent_status_sources import verification_interruption_detail
 
 
 _STAGES = ("post-worker", "post-core")
@@ -393,15 +394,8 @@ def _core_evidence(
     core_status = core.get("status")
     finish_status = core.get("finish_status")
     finish_sha256 = core.get("finish_sha256")
-    if finish_status != "ready_to_commit":
-        return _item(
-            "核心完成",
-            "failed",
-            f"finish_status={finish_status!r}",
-        )
     if (
-        core_status != "success"
-        or not isinstance(finish_sha256, str)
+        not isinstance(finish_sha256, str)
         or SHA256_PATTERN.fullmatch(finish_sha256) is None
         or observation.child_run is None
     ):
@@ -422,8 +416,12 @@ def _core_evidence(
         )
     if hashlib.sha256(finish_bytes).hexdigest() != finish_sha256:
         return _item("核心完成", "stale", "child Finish 摘要不匹配")
+    if isinstance(finish, dict) and finish.get("run_id") == observation.child_run and finish.get("finish_status") == finish_status != "ready_to_commit":
+        detail = verification_interruption_detail(finish, observation)
+        return _item("核心完成", "failed", detail or f"finish_status={finish_status!r}；中断详情未验证")
     if (
         not isinstance(finish, dict)
+        or core_status != "success"
         or finish.get("run_id") != observation.child_run
         or finish.get("finish_status") != "ready_to_commit"
         or finish.get("verification_passed") is not True

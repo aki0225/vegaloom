@@ -46,7 +46,7 @@ from .verification_command_preflight import require_verification_commands_prefli
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
-VerificationRetryReason = Literal["verification_failure", "reviewer_timeout"]
+VerificationRetryReason = Literal["verification_failure", "reviewer_timeout", "acceptance_supplement"]
 
 
 def verification_retry_requested(workspace: Path, run: str) -> bool:
@@ -194,10 +194,12 @@ def prepare_verification_retry(
 ) -> PreparedVerificationRetry:
     """验证恢复现场，并为既有 Core 门禁链准备只读输入。"""
 
-    if retry_reason not in {"verification_failure", "reviewer_timeout"}:
+    if retry_reason not in {"verification_failure", "reviewer_timeout", "acceptance_supplement"}:
         raise ValueError("只读核心重算必须使用专用入口，不能作为验证重跑原因")
-    if retry_reason == "reviewer_timeout":
-        source = prepare_reviewer_timeout_source(workspace, run)
+    if retry_reason in {"reviewer_timeout", "acceptance_supplement"}:
+        source = prepare_reviewer_timeout_source(
+            workspace, run, acceptance=retry_reason == "acceptance_supplement",
+        )
         active_plan = reactivate_current_work_item(
             source.plan,
             source.state.current_work_item,

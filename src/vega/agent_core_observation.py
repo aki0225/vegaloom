@@ -2,6 +2,53 @@ from __future__ import annotations
 
 from .agent_contract import GateStatus
 from .models import LoopIterationState
+from .agent_change_contract import ChangeContract
+from .review_contract import RequiredReviewHit, ReviewVerdict
+from .risk_review import validate_required_risk_disclosures
+
+
+def pending_risk_repair_is_authorized(
+    contract: ChangeContract | None,
+    latest: LoopIterationState | None,
+    finish: dict[str, object],
+) -> bool:
+    """人工只授权范围内返修；风险状态和最终交付确认不在这里改变。"""
+    if (
+        contract is None or not contract.allow_pending_risk_repair
+        or not contract.approval_is_current() or contract.approval_source != "human"
+        or latest is None or finish_evidence_untrusted(finish)
+        or verification_status(latest, finish) != "passed"
+        or review_status(latest) != "failed" or latest.risk_gate_status != "success"
+        or latest.risk_gate_recommendation != "human-review"
+        or not scope_remained_inside_plan(latest)
+        or any(status != "success" for status in (
+            latest.scope_gate_status, latest.scope_gate_post_verification_status,
+            latest.scope_gate_pre_review_status,
+        ))
+        or contract.side_effect_policy.external_write_during_validation
+        or contract.side_effect_policy.deployment_action
+    ):
+        return False
+    try:
+        screen = finish["first_screen"]
+        changes = screen["actual_changes"]
+        required = [RequiredReviewHit.model_validate(item) for item in changes["required_reviews"]]
+        review = ReviewVerdict.model_validate(finish["latest_verdict"])
+        findings = changes["high_risk_findings"]
+        allowed = set(contract.authorized_risk_reviews)
+        return (
+            bool(required) and {hit.id for hit in required}.issubset(allowed)
+            and not changes["budget_findings"]
+            and all(item["code"] == "required_risk_review" for item in findings)
+            and review.verdict == "request_changes"
+            and any(item.severity != "suggestion" and item.file in changes["changed_files"]
+                    and item.line > 0 and item.evidence.strip() and item.recommendation.strip()
+                    for item in review.findings)
+            and all(item.assessment != "insufficient_evidence" for item in review.risk_disclosures)
+            and validate_required_risk_disclosures(required, review.risk_disclosures, review.findings).valid
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 _BLOCKING_VERIFICATION_INTERRUPTION = {

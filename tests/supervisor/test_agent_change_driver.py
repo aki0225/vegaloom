@@ -440,6 +440,7 @@ def test_change_approval_prompt_includes_non_default_authority_and_plan_fields(
     private_path = "Q:" + "\\Users\\example\\private\\request.txt"  # repo-path-policy: allow-test-fixture
     contract = ChangeContract(
         task_id="task-detailed",
+        allow_pending_risk_repair=True,
         goal=f"根据 {private_path} 修改支付重试",
         acceptance=["重复请求只产生一次扣款"],
         invariants=["账本记录保持唯一"],
@@ -483,7 +484,11 @@ def test_change_approval_prompt_includes_non_default_authority_and_plan_fields(
         execution_plan=plan,
     )
 
-    prompt = build_change_approval_snapshot(started).prompt
+    snapshot = build_change_approval_snapshot(started)
+    prompt = snapshot.prompt
+    assert snapshot.contract_digest == contract.expected_approval_digest()
+    assert "范围内风险返修：允许" in prompt
+    assert "最终高风险交付仍需人工确认" in prompt
 
     assert private_path not in prompt
     assert "目标：根据 <redacted-path> 修改支付重试" in prompt
@@ -758,7 +763,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
     assert result.reason_code == "provider.interaction_requires_advanced_response"
     assert result.run is not None
-    assert result.safe_actions == tuple(driver_module.AgentChangeDriver(repo, repo)._explanation(result.run).safe_actions)
+    assert result.safe_actions == tuple(driver_module.explain_selected_run(result.run).safe_actions)
     assert load_provider_sessions(result.run.run_dir).interactions[0].status == "closed"
     assert [update.status for update in updates] == ["attention"]
     visible = repr([result.message, updates, events])
@@ -940,6 +945,22 @@ def test_change_json_never_reads_stdin_without_active_run(
         "safe_actions": ["change <TEXT>", "start"],
     }
 
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(repo, contract=_contract(), execution_plan=_execution_plan())
+    for output_mode in (["--json"], []):
+        rejected = CliRunner().invoke(app, ["change", "互斥输入", "--run", started.run_dir.name, *output_mode])
+        assert rejected.exit_code == 1, rejected.output
+        assert "TEXT、--run 与 --task 必须且只能选择一种输入方式" in rejected.output
+        if output_mode:
+            rejected_payload = json.loads(rejected.stdout)
+            assert rejected_payload["reason_code"] == "change.request_failed"
+            assert rejected_payload["current_state"]["reason_code"] == "approval.contract_required"
+    runtime.start_change(repo, contract=_contract(), execution_plan=_execution_plan())
+    ambiguous = CliRunner().invoke(app, ["change", "--json"])
+    assert ambiguous.exit_code == 2, ambiguous.output
+    assert json.loads(ambiguous.stdout)["run_id"] is None
+    assert json.loads(ambiguous.stdout)["reason_code"] == "change.multiple_active_runs"
+
     fake_path = "Q:" + "\\Users\\example\\private\\error.log"  # repo-path-policy: allow-test-fixture
     fake_secret = "sk-change-json-fake-secret-123456"
 
@@ -953,6 +974,8 @@ def test_change_json_never_reads_stdin_without_active_run(
     assert fake_path not in failed.output
     assert fake_secret not in failed.output
     assert error_payload["message"] == "读取 <redacted-path> 失败，api_key=[REDACTED]"
+    assert error_payload["run_id"] is None
+    assert "current_state" not in error_payload
 
 
 def test_change_implicit_task_card_requires_confirmation_before_resume(
@@ -1136,3 +1159,10 @@ def _git(repo: Path, *args: str) -> str:
         encoding="utf-8",
     )
     return result.stdout.strip()
+
+
+def test_verification_retry_keeps_driver_timeout(tmp_path):
+    driver = AgentChangeDriver(tmp_path, tmp_path, timeout_seconds=60)
+    retry = driver._verification_retry("codex")
+    assert retry.timeout_seconds == 60
+    assert retry.loop_runtime.timeout_seconds == 60

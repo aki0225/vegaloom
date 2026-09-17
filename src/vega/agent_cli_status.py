@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .agent_cli_snapshot import AgentCliSnapshot
+from .agent_status_history import verification_label
 from .agent_explain_codes import PublicActionId
 from .agent_repository_binding import load_run_metadata
 from .run_status import render_run_status_payload
@@ -79,6 +80,11 @@ _ACTION_TEXT: dict[PublicActionId, str] = {
         "在 Run Workspace `{run_workspace}` 目录执行 `{continue_command}` "
         "继续当前 ChangeRun。"
     ),
+    "review.supplement": (
+        "在 Run Workspace `{run_workspace}` 准备相对路径 JSON，然后执行 "
+        "`vega change --run {run_id} --acceptance-file <相对子目录>/checks.json`；"
+        "材料须绑定当前 Run/Candidate，只作辅助陈述。"
+    ),
     "run.stop": (
         "在 Run Workspace `{run_workspace}` 目录执行 "
         "`vega stop --run {run_id} --reason \"<停止原因>\"` 停止并保留现场。"
@@ -124,7 +130,7 @@ def render_compact_agent_status(snapshot: AgentCliSnapshot) -> str:
         f"- Work Item：`{status.get('current_work_item') or '未记录'}`",
         f"- 执行会话：{_provider_attempt(status)}",
         f"- 修改文件：{_changed_files(changed_files)}",
-        f"- Verification：{_gate(status.get('verification'))}",
+        f"- Verification：{verification_label(str(status.get('verification')), candidate_transition=bool(status.get('candidate_transition')))}",
         f"- Risk：{_gate(status.get('risk'))}",
         f"- Reviewer：{_gate(status.get('review'))}",
         f"- 原因：{explanation.reason}",

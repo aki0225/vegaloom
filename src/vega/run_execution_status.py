@@ -33,6 +33,7 @@ def latest_execution_payload(
     )
     lease = record.lease
     return {
+        "run_id": lease.run_id,
         "status": lease.status,
         "step": lease.step,
         "iteration": lease.iteration,
@@ -41,6 +42,7 @@ def latest_execution_payload(
         "termination_unconfirmed": lease.termination_unconfirmed,
         "last_heartbeat": lease.last_heartbeat,
         "deadline": lease.deadline,
+        "lease_expires_at": lease.lease_expires_at,
         "path": str(record.path.resolve()),
     }
 

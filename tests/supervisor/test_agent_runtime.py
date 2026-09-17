@@ -83,7 +83,7 @@ def test_agent_status_redacts_dynamic_render(
     monkeypatch.setattr(
         agent_status_card_module,
         "render_agent_status_card",
-        lambda card: "Authorization: Bearer vega-live-secret\n",
+        lambda card, *, candidate_transition=False: "Authorization: Bearer vega-live-secret\n",
     )
 
     refreshed = runtime.status(run.run_dir.name)

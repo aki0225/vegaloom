@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -16,6 +16,7 @@ from .agent_worker_evidence import (
     load_finish_summary,
     observation_from_child,
     require_child_quiescent,
+    read_acceptance_references,
     write_child_summary,
 )
 from .agent_plan_scope import (
@@ -150,6 +151,7 @@ class _AttemptReconciler:
             return None
         assert self.claim is not None
         try:
+            supplement = read_acceptance_references(self.prepared, self.claim)
             self.candidate = freeze_candidate_commit(
                 context.worktree,
                 expected_parent_sha=self.prepared.before.head_sha,
@@ -163,10 +165,12 @@ class _AttemptReconciler:
                 candidate=self.candidate,
             )
             self.pipeline.initialize_core(
-                self.prepared,
+                replace(self.prepared, acceptance_supplement=supplement),
                 self.executed.child_dir,
                 self.candidate,
             )
+            if read_acceptance_references(self.prepared, self.claim) != supplement:
+                raise ValueError("验收材料在 Candidate 初始化期间发生变化")
         except (OSError, ValueError) as exc:
             return self._failure(
                 f"ChangeRun Candidate 无法进入 Core：{exc}",
@@ -278,6 +282,7 @@ class _AttemptReconciler:
             self.finish_summary,
             evidence_refs=[*refs, summary_ref],
             external_side_effects=self.prepared.external_side_effects,
+            change_contract=(self.prepared.change_context.contract if self.prepared.change_context else None),
         )
         if (
             observation.all_work_items_completed

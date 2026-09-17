@@ -67,6 +67,45 @@ def test_supervisor_evidence_requires_bound_success_artifacts(tmp_path: Path) ->
     ]
 
 
+@pytest.mark.parametrize("case", ["timed_out", "stopped", "termination-unconfirmed", "unconfirmed_command", "corrupt", "drift", "old_iteration"])
+def test_bound_core_interruption_remains_visible_without_success(tmp_path: Path, case: str) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state()
+    observation = _write_valid_evidence(run_dir, _observation(), state)
+    finish_path = run_dir.parent / observation.child_run / "finish-summary.json"
+    finish = json.loads(finish_path.read_text(encoding="utf-8"))
+    status = case if case in {"timed_out", "stopped", "termination-unconfirmed"} else "timed_out"
+    finish.update(finish_status="needs_human", verification_passed=False,
+                  iterations=[{"iteration": 2 if case == "old_iteration" else 1, "reviewer_status": "skipped"}],
+                  verification_results=[{"iteration": 1, "run_id": observation.child_run,
+                    "workspace_fingerprint": "2" * 64 if case == "drift" else "1" * 64,
+                    "interruption_status": status, "skipped_commands": ["check"],
+                    "results": [{"interruption_status": "termination-unconfirmed"}] if case == "unconfirmed_command" else []}])
+    finish["evidence_freshness"] = {"fresh": False, "issues": ["trusted_review_missing"],
+                                   "current_workspace_fingerprint": "1" * 64}
+    assert observation.workspace_fingerprint != "1" * 64
+    finish_path.write_text(json.dumps(finish), encoding="utf-8")
+    summary_path = run_dir / _child_ref(observation)
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["core"].update(status="needs_human", finish_status="needs_human",
+                           finish_sha256=hashlib.sha256(finish_path.read_bytes()).hexdigest())
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    observation = observation.model_copy(update={"evidence_sha256": {
+        **observation.evidence_sha256, _child_ref(observation): hashlib.sha256(summary_path.read_bytes()).hexdigest(),
+    }})
+    if case == "corrupt":
+        finish_path.write_text("{}", encoding="utf-8")
+    evidence = build_supervisor_evidence(run_dir, state, observation, _plan())
+    core = evidence[-1]
+    assert core.status != "passed"
+    if case in {"corrupt", "drift", "old_iteration"}:
+        assert "Core 验证中断" not in core.detail
+    else:
+        expected = "termination-unconfirmed" if case == "unconfirmed_command" else case
+        assert f"Core 验证中断：{expected}" in core.detail
+        assert "后续 1 条验证未运行；本轮 Reviewer 未运行" in core.detail
+
+
 def test_supervisor_evidence_marks_machine_observation_without_refs_unverified(
     tmp_path: Path,
 ) -> None:

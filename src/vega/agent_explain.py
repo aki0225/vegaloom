@@ -7,10 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import agent_explain_codes as explain_codes
 from .agent_core_recheck import core_recheck_available
+from .acceptance_submission import acceptance_explanation
 from .agent_contract import AgentCheckpoint, AgentDecision, AgentPhase, AgentPlan, AgentState
 from .agent_planning_handoff import can_offer_handoff
 from .agent_provider_explain import with_provider_warnings
 from .agent_status_projection import AgentStatusProjection, build_agent_status_projection
+from .agent_status_sources import explanation_detail
 from .provider_session import PROVIDER_SESSIONS_ARTIFACT
 
 
@@ -66,32 +68,31 @@ def build_agent_explanation(
     effective_phase = cast(AgentPhase, status["effective_phase"])
     if (
         status.get("integrity_warning")
-        or effective_phase != status.get("recorded_phase")
+        or (effective_phase != status.get("recorded_phase") and not status.get("preparation_issue"))
     ):
         workspace_current = status.get("workspace_current")
+        candidate_transition = status.get("candidate_transition") is True
         reason_code = (
+            "workspace.candidate_transition" if candidate_transition else
             "workspace.snapshot_stale"
             if workspace_current is False
             else "evidence.integrity_unverified"
         )
         return _explanation(
             state,
-            phase="needs_human",
-            outcome="attention_required",
+            phase=effective_phase if candidate_transition else "needs_human",
+            outcome="in_progress" if candidate_transition else "attention_required",
             reason_code=reason_code,
             source="evidence",
             actor="当前证据投影",
-            reason=str(
-                status.get("integrity_warning")
-                or "当前证据无法支持持久化状态。"
-            ),
+            reason=explanation_detail(status, str(status.get("integrity_warning") or "当前证据无法支持持久化状态。")),
             facts=[
                 f"持久化阶段为 {status.get('recorded_phase')}",
                 f"当前有效阶段为 {effective_phase}",
                 f"证据健康状态为 {status.get('evidence_health')}",
             ],
             unknowns=["原状态是否仍能由当前 Workspace 和 Artifact 重新证明"],
-            safe_actions=_safe_actions(state, status, fallback=["human"]),
+            safe_actions=["status", "stop"] if candidate_transition else _safe_actions(state, status, fallback=["human"]),
             evidence_refs=_base_refs(state),
         )
 
@@ -140,7 +141,9 @@ def build_agent_explanation(
     if active is not None:
         return with_provider_warnings(active, provider_warnings)
 
-    phase = _phase_explanation(run_dir, state, plan, status, checkpoint, decision)
+    phase = acceptance_explanation(run_dir, state) or _phase_explanation(
+        run_dir, state, plan, status, checkpoint, decision,
+    )
     if phase is not None:
         return with_provider_warnings(phase, provider_warnings)
     if decision is not None and checkpoint is not None:
@@ -214,8 +217,8 @@ def _active_execution_explanation(
         reason = "只读调查仍在运行。"
         safe_actions = ["status", "stop"]
     elif state.phase == "acting":
-        code = "execution.worker_active"
-        reason = "Worker 正在执行当前 Work Item。"
+        code = "execution.core_pending" if status.get("core_stage_note") else "execution.worker_active"
+        reason = str(status.get("core_stage_note") or "Worker 正在执行当前 Work Item。")
         safe_actions = ["status", "steer", "stop"]
     elif state.phase == "observing":
         code = "execution.observation_active"
@@ -269,18 +272,19 @@ def _phase_explanation(
             safe_actions=actions, evidence_refs=_checkpoint_refs(state, checkpoint),
         )
 
-    if state.phase == "awaiting_approval":
+    preparation_issue = status.get("preparation_issue")
+    if preparation_issue or state.phase == "awaiting_approval":
         return _explanation(
             state,
-            phase=state.phase,
+            phase="needs_human" if preparation_issue else state.phase,
             outcome="attention_required",
-            reason_code="approval.contract_required",
+            reason_code="environment.prepare_policy_mismatch" if preparation_issue else "approval.contract_required",
             source="phase",
             actor="批准策略",
-            reason="当前 Change Contract 尚未获得有效批准。",
+            reason=str(preparation_issue or "当前 Change Contract 尚未获得有效批准。"),
             facts=[f"Plan revision 为 {state.plan_revision}"],
-            unknowns=["人工是否接受当前目标、范围、验证和风险边界"],
-            safe_actions=["approve", "revise", "stop"],
+            unknowns=[] if preparation_issue else ["人工是否接受当前目标、范围、验证和风险边界"],
+            safe_actions=["revise", "stop"] if preparation_issue else ["approve", "revise", "stop"],
             evidence_refs=[*_base_refs(state), "agent-plan.json"],
         )
     if state.phase == "completed":
@@ -400,7 +404,7 @@ def _decision_explanation(
             "supervisor": "Supervisor",
             "human": "人工",
         }[decision.source],
-        reason=decision.reason,
+        reason=explanation_detail(status, decision.reason) if reason_code == "evidence.core_untrusted" else decision.reason,
         facts=[
             f"选择动作为 {decision.selected_action}",
             f"允许动作为 {', '.join(decision.allowed_actions)}",

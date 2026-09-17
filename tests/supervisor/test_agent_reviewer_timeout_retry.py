@@ -36,6 +36,30 @@ from vega.project_config import ProjectConfig
 from vega.runner import RunnerResult
 
 
+def test_acceptance_rejects_failed_verification_before_workspace_capture(tmp_path, monkeypatch):
+    state = AgentState(run_id="parent", task_id="task", repository_id="repo", run_kind="change",
+        execution_protocol=2, phase="needs_human", active_candidate_sha="a" * 40, accepted_checkpoint_sha="d" * 40,
+        contract_revision=1, execution_plan_revision=1, approved_contract_digest="c" * 64)
+    contract = ChangeContract(task_id="task", goal="修复", acceptance=["正确"], required_verification=["check"],
+                              authority_envelope=ChangeAuthorityEnvelope(allowed_paths=["sample.py"]))
+    child = SimpleNamespace(automation_mode="assist", status="needs_human", current_iteration=1, max_iterations=2,
+        iterations=[SimpleNamespace(lifecycle="completed", reviewer_status="success", verification_status="failed")])
+    monkeypatch.setattr(reviewer_timeout_retry, "load_agent_bundle", lambda *_: (tmp_path, state, None, {}))
+    monkeypatch.setattr(reviewer_timeout_retry, "load_change_run_context", lambda *_: SimpleNamespace(contract=contract))
+    monkeypatch.setattr(reviewer_timeout_retry, "require_child_quiescent", lambda *_: None)
+    monkeypatch.setattr(reviewer_timeout_retry, "require_change_verification_retry_budget", lambda *_: None)
+    monkeypatch.setattr(reviewer_timeout_retry, "_require_review_budget", lambda *_: None)
+    monkeypatch.setattr(reviewer_timeout_retry, "require_single_executable_work_item", lambda *_: AgentWorkItem(work_item_id="W1", objective="修复", external_side_effects="none"))
+    monkeypatch.setattr(reviewer_timeout_retry, "bound_repo", lambda *_: tmp_path)
+    monkeypatch.setattr(reviewer_timeout_retry, "require_verification_commands_preflight", lambda *_: None)
+    monkeypatch.setattr(reviewer_timeout_retry, "_reviewer_timeout_checkpoint", lambda *_: SimpleNamespace(failed_attempts=["child"]))
+    monkeypatch.setattr(reviewer_timeout_retry, "resolve_run_dir", lambda *_: tmp_path)
+    monkeypatch.setattr(reviewer_timeout_retry, "load_child_state", lambda *_: child)
+    monkeypatch.setattr(reviewer_timeout_retry, "capture_bound_workspace", lambda *_: pytest.fail("明显不符不得采集 Workspace"))
+    with pytest.raises(ValueError, match="Core child 不是可自动恢复"):
+        reviewer_timeout_retry.prepare_reviewer_timeout_source(tmp_path, "parent", acceptance=True)
+
+
 class _Worker:
     def __init__(self) -> None:
         self.calls = 0
@@ -81,6 +105,7 @@ class _Reviewer:
     def __init__(self, outcomes: list[str]) -> None:
         self.outcomes = outcomes
         self.calls = 0
+        self.prompts: list[str] = []
 
     def run(
         self,
@@ -91,11 +116,15 @@ class _Reviewer:
         timeout_seconds: int,
         execution_context: RunnerExecutionContext | None = None,
     ) -> RunnerResult:
+        self.prompts.append(prompt)
         del repo_path, timeout_seconds
         assert sandbox == "read-only"
         assert execution_context is not None
         outcome = self.outcomes[min(self.calls, len(self.outcomes) - 1)]
         self.calls += 1
+        reason = outcome if outcome in {"acceptance_missing", "legacy"} else None
+        if reason is not None:
+            outcome = "success"
         controller = ExecutionController(execution_context)
         controller.prepare(["fake-reviewer"], 60)
         controller.finish(
@@ -115,7 +144,8 @@ class _Reviewer:
             status="success",
             output=json.dumps(
                 {
-                    "verdict": "approve",
+                    "verdict": "needs_human" if reason else "approve",
+                    **({"needs_human_reason": "acceptance_missing"} if reason == "acceptance_missing" else {}),
                     "summary": "当前 Candidate 未发现阻断问题",
                     "findings": [],
                     "reviewed_files": reviewed_files,
@@ -408,3 +438,97 @@ def _git(repo: Path, *args: str) -> None:
         timeout=30,
     )
     assert process.returncode == 0, process.stderr
+
+
+@pytest.mark.parametrize("case", ["accepted", "legacy", "candidate_drift", "policy_drift", "bad", "write_error"])
+def test_acceptance_submission_rechecks_candidate_without_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    from vega.agent_change_driver import AgentChangeDriver
+    from vega.agent_verification_retry import SupervisorAgentVerificationRetry
+    import vega.acceptance_submission as submission
+
+    workspace, approved = _approved_change(tmp_path)
+    reviewer = _Reviewer(["legacy" if case == "legacy" else "acceptance_missing", "success"])
+    worker = _Worker()
+    loop = LoopAutomationRuntime(workspace, reviewer_runner=reviewer)
+    pending = SupervisorAgentProviderAdapter(
+        workspace, worker_runner=worker, loop_runtime=loop,
+        finish_runtime=FinishRuntime(workspace),
+    ).run(approved.run_dir.name, timeout_seconds=60)
+    assert pending.state.phase == "needs_human"
+    assert worker.calls == reviewer.calls == 1
+    from vega.agent_runtime_support import load_agent_bundle
+    metadata = load_agent_bundle(workspace, pending.run_dir.name)[3]
+    source = Path(metadata["change_run"]["source_repo_path"])
+    # 材料在宿主工作目录，不需要修改项目 allowlist。
+    directory = workspace / "acceptance-input"
+    directory.mkdir()
+    path = directory / "checks.json"
+    payload = {
+        "run_id": pending.run_dir.name, "candidate_sha": pending.state.active_candidate_sha,
+        "records": [{"check": "本机命令行实际交互", "action": "执行项目帮助入口",
+                     "result": "HOST_ACCEPTANCE_SENTINEL：观察到帮助文本", "uncovered": "未覆盖网络",
+                     "source": "host_observation"}],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    if case == "bad":
+        path.write_text('{"records":[]}', encoding="utf-8")
+    if case == "candidate_drift":
+        from vega.agent_runtime_support import bound_repo
+        (bound_repo(pending.run_dir) / "src/one.py").write_text("value = 99\n", encoding="utf-8")
+    if case == "policy_drift":
+        from vega.agent_runtime_support import bound_repo
+        policy = bound_repo(pending.run_dir) / ".vega.yaml"
+        policy.write_text(policy.read_text(encoding="utf-8") + "\nrisk:\n  require_human_review: [src/**]\n", encoding="utf-8")
+    if case == "write_error":
+        def refuse(*args):
+            raise OSError("模拟验收记录写入失败")
+        monkeypatch.setattr(submission, "archive_submission", refuse)
+    old_reviews = {p: p.read_bytes() for p in workspace.glob("runs/*-review/review-verdict.json")}
+    before = {p.relative_to(pending.run_dir): p.read_bytes() for p in pending.run_dir.rglob("*") if p.is_file()}
+    driver = AgentChangeDriver(workspace, source, json_output=True)
+    retry = SupervisorAgentVerificationRetry(workspace, loop_runtime=loop)
+    monkeypatch.setattr(driver, "_verification_retry", lambda provider: retry)
+    if case == "accepted":
+        from vega.agent_explain import build_agent_explanation
+        explanation = build_agent_explanation(pending.run_dir, pending.state, pending.plan)
+        assert explanation.reason_code == "review.acceptance_missing"
+        assert "review.supplement" in explanation.safe_actions
+        driver.worker_permissions = "full-access"
+        with pytest.raises(ValueError, match="不接受 Worker 权限变更"):
+            driver.change(run=pending.run_dir.name, acceptance_file=Path("acceptance-input/checks.json"))
+        assert (pending.run_dir / "agent-state.json").read_bytes() == before[Path("agent-state.json")]
+        driver.worker_permissions = None
+        result = driver.change(run=pending.run_dir.name, acceptance_file=Path("acceptance-input/checks.json"))
+        assert result.run.state.phase == "completed"
+        assert worker.calls == 1 and reviewer.calls == 2
+        assert not (pending.run_dir / "integration-reviews").exists()
+        assert "HOST_ACCEPTANCE_SENTINEL" not in reviewer.prompts[0]
+        assert "HOST_ACCEPTANCE_SENTINEL" in reviewer.prompts[1]
+        assert "untrusted_host_acceptance_statement" in reviewer.prompts[1]
+        # 首轮 Review 保持原分类；新审查不能覆盖旧 Artifact。
+        assert old_reviews and all(p.read_bytes() == content for p, content in old_reviews.items())
+        from vega.agent_runtime_support import bound_repo
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=bound_repo(pending.run_dir), text=True).strip()
+        assert head == payload["candidate_sha"]
+    else:
+        if case == "bad":
+            with pytest.raises(OSError):
+                driver.change(run=pending.run_dir.name, acceptance_file=Path("acceptance-input/missing.json"))
+        with pytest.raises((ValueError, OSError)):
+            driver.change(run=pending.run_dir.name, acceptance_file=Path("acceptance-input/checks.json"))
+        after = {p.relative_to(pending.run_dir): p.read_bytes() for p in pending.run_dir.rglob("*") if p.is_file()}
+        assert after == before
+        assert worker.calls == reviewer.calls == 1
+
+
+def test_acceptance_submission_uses_git_object_id_formats():
+    from pydantic import ValidationError
+    from vega.acceptance_submission import AcceptanceSubmission
+
+    record = dict(check="检查", action="操作", result="结果", uncovered="无", source="host_observation")
+    for size in (40, 64):
+        assert AcceptanceSubmission(run_id="run", candidate_sha="a" * size, records=[record]).candidate_sha == "a" * size
+    with pytest.raises(ValidationError):
+        AcceptanceSubmission(run_id="run", candidate_sha="a" * 41, records=[record])

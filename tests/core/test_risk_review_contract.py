@@ -65,6 +65,9 @@ def test_legacy_verdict_defaults_to_empty_risk_disclosures() -> None:
     assert verdict.risk_disclosures == []
     assert verdict.reviewed_files == []
     assert verdict.change_impacts == []
+    assert verdict.needs_human_reason is None
+    with pytest.raises(ValueError, match="只有 needs_human"):
+        ReviewVerdict.model_validate({**verdict.model_dump(), "needs_human_reason": "acceptance_missing"})
     review = build_finish_review_section(
         verdict, [], changed_files_source="unavailable",
     )

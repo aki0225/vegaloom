@@ -25,6 +25,30 @@ from vega.loop_runtime import LoopAutomationRuntime
 from vega.runner import RunnerResult
 
 
+def test_recheck_rejects_core_failure_before_candidate_git_checks(tmp_path, monkeypatch):
+    from vega import agent_core_recheck as recheck
+    from vega.agent_contract import AgentState
+    state = AgentState(run_id="parent", task_id="task", repository_id="repo", run_kind="change",
+        execution_protocol=2, phase="needs_human", active_candidate_sha="a" * 40,
+        latest_checkpoint_id="checkpoint", allowed_actions=["human"], accepted_checkpoint_sha="d" * 40,
+        contract_revision=1, execution_plan_revision=1, approved_contract_digest="c" * 64)
+    contract = ChangeContract(task_id="task", goal="修复", acceptance=["正确"], required_verification=["check"],
+                              authority_envelope=ChangeAuthorityEnvelope(allowed_paths=["sample.py"]))
+    monkeypatch.setattr("vega.agent_runtime_support.load_agent_bundle", lambda *_: (tmp_path, state, None, {}))
+    monkeypatch.setattr("vega.agent_change_run.load_change_run_context", lambda *_: SimpleNamespace(contract=contract))
+    monkeypatch.setattr(recheck, "_load_recheck_observation", lambda *_: SimpleNamespace(evidence_refs=["candidates/operation.json"], child_run="child"))
+    monkeypatch.setattr("vega.agent_change_run.load_candidate_artifact", lambda *_: SimpleNamespace(candidate_sha="a" * 40))
+    monkeypatch.setattr("vega.agent_runtime_support.bound_repo", lambda *_: tmp_path)
+    monkeypatch.setattr("vega.run_utils.resolve_run_dir", lambda *_: tmp_path)
+    monkeypatch.setattr("vega.agent_worker_evidence.require_child_quiescent", lambda *_: None)
+    def reject_core(*_):
+        raise ValueError("当前 Core 证据仍缺失、损坏或过期")
+    monkeypatch.setattr(recheck, "_fresh_core_finish", reject_core)
+    monkeypatch.setattr("vega.agent_git_candidate.validate_candidate_binding", lambda *a, **k: pytest.fail("Core 已拒绝，不应再检查 Git"))
+    monkeypatch.setattr("vega.agent_runtime_support.capture_bound_workspace", lambda *_: pytest.fail("Core 已拒绝，不应重复采集"))
+    assert not core_recheck_available(tmp_path, "parent")
+
+
 class _Runner:
     def __init__(self, verdict: str) -> None:
         self.verdict = verdict

@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from .project_config import load_project_config
 from .agent_change_contract import (
     ApprovalSource,
     ChangeContract,
@@ -45,7 +46,7 @@ from .agent_runtime_support import (
 )
 from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir
-from .verification_command_preflight import require_verification_commands_preflight
+from .verification_command_preflight import preparation_policy_issue, require_verification_commands_preflight
 from .runtime_workspace import capture_runtime_workspace
 
 
@@ -160,6 +161,9 @@ def approve_change_run(
     work_item = current_change_work_item(plan, state)
     repo = bound_repo(run_dir)
     require_verification_commands_preflight(repo, work_item.verification)
+    issue = preparation_policy_issue(load_project_config(repo), context.contract.prepare_commands)
+    if issue:
+        raise ValueError(issue)
     plan_only = context.contract.approval_is_current()
     approved_contract = context.contract if plan_only else approve_change_contract(
         context.contract,

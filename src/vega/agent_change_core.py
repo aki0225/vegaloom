@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .loop_project_policy import apply_runner_defaults, load_stable_start_policy
-from .models import BriefInput
+from .models import BriefInput, BriefState, LoopAutomationState
+from .redaction import write_redacted_json_once
+from .brief_runtime import ACCEPTANCE_SUPPLEMENT_ARTIFACT
 from .run_lock import RunMutationLock
 from .run_utils import create_run_dir, resolve_run_dir
 from .tracked_workspace import normalize_comparison_paths, validate_comparison_base
@@ -29,6 +31,7 @@ def initialize_change_core_child(
     *,
     comparison_base_sha: str,
     comparison_paths: tuple[str, ...],
+    acceptance_supplement: str = "",
 ) -> Path:
     """在 Candidate Commit 已冻结后初始化预留的 assist Core child。"""
 
@@ -56,7 +59,7 @@ def initialize_change_core_child(
         "codex-exec",
     )
     with RunMutationLock.acquire(run_dir, "loop.start"):
-        return runtime._start_locked(
+        initialized = runtime._start_locked(
             brief_input,
             "assist",
             worker_name,
@@ -71,3 +74,17 @@ def initialize_change_core_child(
             resolved_base,
             normalized_paths,
         )
+        if acceptance_supplement:
+            state = LoopAutomationState.model_validate_json((run_dir / "state.json").read_text(encoding="utf-8"))
+            if not state.brief_run:
+                raise ValueError("验收补充缺少已编译 Brief 绑定")
+            brief_dir = resolve_run_dir(runtime.workspace, state.brief_run)
+            write_redacted_json_once(brief_dir / ACCEPTANCE_SUPPLEMENT_ARTIFACT, {
+                "authority": "untrusted_project_acceptance_snapshot",
+                "candidate_sha": initial_head_sha,
+                "sources": acceptance_supplement,
+            })
+            brief_state = BriefState.model_validate_json((brief_dir / "state.json").read_text(encoding="utf-8"))
+            brief_state.artifacts.append(ACCEPTANCE_SUPPLEMENT_ARTIFACT)
+            brief_state.save(brief_dir / "state.json")
+        return initialized

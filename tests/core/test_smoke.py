@@ -1762,6 +1762,10 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     agent_skill = repo_dir / ".agents" / "skills" / "vega-agent" / "SKILL.md"
     assert agent_skill.exists()
+    skill_text = agent_skill.read_text(encoding="utf-8")
+    assert "不默认写成必须证明历史执行顺序" in skill_text
+    assert "不改变 Planner/bounded" in skill_text
+    assert "精确 Thread 身份" in skill_text
     assert not (repo_dir / ".agents" / "skills" / "vega-loop").exists()
     assert not (repo_dir / ".agents" / "skills" / "vega-review").exists()
     assert legacy_skill.read_text(encoding="utf-8") == "legacy skill\n"
@@ -1770,14 +1774,18 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     agent_skill_text = agent_skill.read_text(encoding="utf-8")
     assert "vega capabilities" in agent_skill_text
     assert "vega config check --repo . --change" in agent_skill_text
-    assert 'vega change "描述目标或 Bug 现象" --json' in agent_skill_text
+    assert 'vega change "描述目标或 Bug 现象" --worker-permissions' in agent_skill_text
+    assert "不默认 full-access" in agent_skill_text
+    assert "不要求用户搬运材料" in agent_skill_text
+    assert "--request-approval" in agent_skill_text
+    assert "依据任务和项目确定固定验证与必要实际验收" in agent_skill_text
     assert "vega change --run <run_id> --json" in agent_skill_text
     assert "vega explain --run <run_id>" in agent_skill_text
     assert "2～4" not in agent_skill_text
     assert "一个 ChangeRun 同时只有一个可写 Worker" in agent_skill_text
     assert "--contract <change-contract.json>" in agent_skill_text
     assert "--execution-plan <execution-plan.json>" in agent_skill_text
-    assert "vega approve --run <run_id> --actor human" in agent_skill_text
+    assert "vega approve --run <run_id> --actor <实际授权执行者>" in agent_skill_text
     assert "vega change --run <run_id> --timeout 900 --json" in agent_skill_text
     assert "vega run " not in agent_skill_text
     assert "vega retry " not in agent_skill_text
@@ -1786,6 +1794,15 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     assert "vega handoff --run <run_id>" in agent_skill_text
     assert "vega resume --repo ." in agent_skill_text
     assert "Reviewer 使用独立只读 Thread" in agent_skill_text
+    from vega.cli_entrypoint import app as public_app
+    help_result = CliRunner().invoke(public_app, ["change", "--help"])
+    assert help_result.exit_code == 0
+    from typer.main import get_command
+    change_command = get_command(public_app).commands["change"]
+    assert any("--acceptance-file" in parameter.opts for parameter in change_command.params)
+    assert "--acceptance-file acceptance/checks.json" in agent_skill_text
+    assert "不能拆命令规避权限" in agent_skill_text
+    assert "未分类历史 needs_human" in agent_skill_text
     assert "Git 自动化只限于受管 Worktree" in agent_skill_text
     assert "vega agent " not in agent_skill_text
     assert "vega loop " not in agent_skill_text

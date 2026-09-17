@@ -95,6 +95,7 @@ class ChangeContract(StrictAgentModel):
     )
     required_verification: list[NonEmptyText] = Field(min_length=1)
     prepare_commands: list[NonEmptyText] = Field(default_factory=list, max_length=10)
+    allow_pending_risk_repair: bool = False
     authority_envelope: ChangeAuthorityEnvelope
     approved: bool = False
     approved_at: str | None = None
@@ -153,6 +154,8 @@ class ChangeContract(StrictAgentModel):
         # 空准备列表不改变历史批准摘要；旧任务仍能只读核对原授权。
         if not self.prepare_commands:
             content.pop("prepare_commands")
+        if not self.allow_pending_risk_repair:
+            content.pop("allow_pending_risk_repair")
         return content
 
     def expected_approval_digest(self) -> str:

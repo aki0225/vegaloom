@@ -38,6 +38,9 @@ def agent_change(
         "--task",
         help="从指定 Git Task Card 恢复。",
     ),
+    acceptance_file: Path | None = typer.Option(
+        None, "--acceptance-file", help="显式 --run：提交 workspace 内相对 JSON，仅 acceptance_missing 原 Candidate 再审，不启动 Worker。",
+    ),
     provider: Literal["codex", "claude"] | None = typer.Option(
         None,
         "--provider",
@@ -57,7 +60,7 @@ def agent_change(
         "--timeout",
         min=60,
         max=3600,
-        help="单次 Planning、Worker 或 Reviewer 外部进程超时秒数。",
+        help="单次 Planning、Worker 或 Reviewer 外部进程超时秒数；不控制项目 verification.timeout_seconds（每条验证及准备命令，默认 180s）。",
     ),
     fresh_session: bool = typer.Option(
         False, "--fresh-session", help="显式使用短生命周期 Provider 会话。",
@@ -70,6 +73,8 @@ def agent_change(
 ) -> None:
     """创建或继续一个日常代码变更，直到完成或遇到授权边界。"""
 
+    target = None
+    driver = None
     try:
         workspace = Path.cwd()
         if run is not None:
@@ -118,30 +123,62 @@ def agent_change(
                 None if json_output else report_execution_progress
             ),
         )
-        result = driver.change(text=text, run=run, task=task)
+        result = driver.change(
+            text=text, run=run, task=task,
+            **({"acceptance_file": acceptance_file} if acceptance_file is not None else {}),
+        )
     except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
-        if json_output:
-            typer.echo(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "run_id": None,
-                        "phase": None,
-                        "outcome": "error",
-                        "reason_code": "change.request_failed",
-                        "message": redact_change_message(str(exc)),
-                        "safe_actions": [],
-                    },
-                    ensure_ascii=False,
-                )
-            )
-        else:
-            typer.echo(f"错误：{redact_change_message(str(exc))}", err=True)
+        if driver is not None and driver.selected_run is not None:
+            current = driver.selected_run
+            target = AgentCliRun(current.run_dir.parent.parent, current.run_dir, "explicit")
+        error = _change_error_payload(target, exc)
+        _render_change_error(target, error, json_output=json_output)
         raise typer.Exit(code=1) from exc
 
     _render_change_result(workspace, result, json_output=json_output)
     if result.exit_code:
         raise typer.Exit(code=result.exit_code)
+
+
+def _render_change_error(
+    target: AgentCliRun | None, error: dict[str, object], *, json_output: bool,
+) -> None:
+    if json_output:
+        typer.echo(
+            json.dumps(
+                error,
+                ensure_ascii=False,
+            )
+        )
+    else:
+        typer.echo(f"错误：{error['message']}", err=True)
+        if "current_state" in error:
+            typer.echo(f"当前状态：{error['current_state']['message']}", err=True)
+        if target is not None:
+            typer.echo(f"运行：{target.run_dir.name}；下一步：vega explain --run {target.run_dir.name}", err=True)
+
+
+def _change_error_payload(target: AgentCliRun | None, exc: Exception) -> dict[str, object]:
+    """只投影已解析 Run 的当前拒绝，不把异常写回状态或猜测其他 Run。"""
+    payload: dict[str, object] = {
+        "schema_version": 1, "run_id": target.run_dir.name if target else None,
+        "phase": None, "outcome": "error", "reason_code": "change.request_failed",
+        "message": redact_change_message(str(exc)),
+        "safe_actions": ["status.view", "human.review"] if target else [],
+    }
+    if target is not None:
+        try:
+            explanation = build_agent_cli_snapshot(target).explanation
+            if explanation is not None:
+                payload["current_state"] = {
+                    "phase": explanation.phase, "reason_code": explanation.reason_code,
+                    "message": redact_change_message(explanation.reason),
+                    "safe_actions": explanation.safe_actions,
+                }
+                payload["phase"] = explanation.phase
+        except (OSError, RuntimeError, ValueError):
+            pass  # 状态证据无法读取时保留原拒绝，不给出继续执行的建议。
+    return payload
 
 
 def agent_replan(

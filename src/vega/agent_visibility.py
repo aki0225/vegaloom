@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .agent_status_history import verification_label
 from .agent_contract import (
     AgentObservation,
     AgentPlan,
@@ -10,6 +11,7 @@ from .agent_contract import (
     AgentStatusCard,
 )
 from .agent_repository_binding import bound_repo, load_run_metadata
+from .finish_presentation import group_verification_checks, render_verification_history
 from .git_read import run_git_text
 from .redaction import write_redacted_json, write_redacted_text
 from .review_impact import project_final_change_impacts, render_change_impacts
@@ -52,7 +54,7 @@ _ACTION_LABELS = {
     "finalize": "进入 Finish",
 }
 
-def render_agent_status_card(card: AgentStatusCard) -> str:
+def render_agent_status_card(card: AgentStatusCard, *, candidate_transition: bool = False) -> str:
     checkpoint = "尚无"
     if card.latest_checkpoint:
         status = (
@@ -95,7 +97,7 @@ def render_agent_status_card(card: AgentStatusCard) -> str:
         ),
         f"- Workspace：{changed_files}；未知文件 {card.unknown_file_count} 个",
         f"- 最近 Checkpoint：{checkpoint}",
-        f"- Verification：{_GATE_LABELS[card.verification]}",
+        f"- Verification：{verification_label(card.verification, candidate_transition=candidate_transition)}",
         f"- Risk：{_GATE_LABELS[card.risk]}",
         f"- Reviewer：{_GATE_LABELS[card.review]}",
         *(
@@ -428,6 +430,8 @@ def _render_verification_summary(verification: dict[str, object]) -> list[str]:
     ]
     if not checks:
         return [*lines, "- 未记录可展示的验证命令；请检查 child Finish Artifact。"]
+    heading, checks, history = group_verification_checks(checks)
+    lines.append(heading)
     for item in checks:
         if not isinstance(item, dict):
             continue
@@ -436,6 +440,7 @@ def _render_verification_summary(verification: dict[str, object]) -> list[str]:
             f"`{item.get('command', '<unknown>')}`；"
             f"exit={item.get('returncode')}"
         )
+    lines.extend(render_verification_history(history))
     return lines
 def _render_risk_summary(risk: dict[str, object]) -> list[str]:
     gate = _mapping(risk.get("gate"))

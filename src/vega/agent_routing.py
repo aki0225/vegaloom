@@ -95,6 +95,7 @@ def _route(
     if precondition is not None:
         return precondition
 
+
     blocked_gate = _human_blocked_gate(observation)
     if blocked_gate is not None:
         label, code = blocked_gate
@@ -281,7 +282,7 @@ def _precondition_route(
         ),
     )
     matched_route = next((route for matched, route in checks if matched), None)
-    return matched_route or _reviewer_timeout_route(observation)
+    return matched_route or _reviewer_timeout_route(observation) or _pending_risk_repair_route(plan, observation)
 
 
 def _finalization_claim_matches_plan(
@@ -341,3 +342,18 @@ def decision_input_digest(plan: AgentPlan, observation: AgentObservation) -> str
             "observation": observation.model_dump(mode="json"),
         }
     )
+
+
+def _pending_risk_repair_route(
+    plan: AgentPlan, observation: AgentObservation,
+) -> tuple[list[AgentAction], AgentAction, str, str] | None:
+    if (
+        plan.allow_pending_risk_repair and observation.risk == "blocked"
+        and observation.verification == "passed" and observation.review == "failed"
+        and observation.core_evidence == "passed" and observation.repairable_in_scope
+        and observation.reviewer_runner_status == "success"
+    ):
+        return (["repair", "human"], "repair", "risk.pending_authorized_repair",
+                "仅返修已批准范围内明确缺陷；风险仍待人工确认，不允许 next 或 finalize")
+
+    return None

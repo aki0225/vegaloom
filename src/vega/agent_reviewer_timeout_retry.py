@@ -103,6 +103,7 @@ def auto_retry_reviewer_timeout(
 def prepare_reviewer_timeout_source(
     workspace: Path,
     run: str,
+    *, acceptance: bool = False,
 ) -> ReviewerTimeoutRetrySource:
     """验证 Core Reviewer timeout 现场，不运行命令也不修改状态。"""
 
@@ -113,10 +114,12 @@ def prepare_reviewer_timeout_source(
         or state.phase != "needs_human"
         or state.active_child_run
         or state.active_operation_id
+        or state.active_planning_execution_id
         or state.operation_started
         or state.active_candidate_sha is None
     ):
         raise ValueError("当前状态不是可恢复的 Reviewer timeout")
+    require_child_quiescent(run_dir)
     context = load_change_run_context(run_dir, state, plan, metadata)
     if context is None:
         raise ValueError("Reviewer timeout 自动恢复只支持 ChangeRun")
@@ -124,6 +127,7 @@ def prepare_reviewer_timeout_source(
         context.contract.side_effect_policy.model_dump(
             mode="json",
             exclude={"schema_version"},
+            include={"external_write_during_validation", "deployment_action"} if acceptance else None,
         ).values()
     ):
         raise ValueError("当前合同声明了高影响副作用，禁止自动恢复 Reviewer")
@@ -139,9 +143,6 @@ def prepare_reviewer_timeout_source(
         raise ValueError("Reviewer timeout 自动恢复只接受无外部副作用的 Work Item")
     repo = bound_repo(run_dir)
     require_verification_commands_preflight(repo, work_item.verification)
-    before = capture_bound_workspace(run_dir)
-    if before.fingerprint != state.workspace_fingerprint:
-        raise ValueError("Reviewer timeout 恢复前 Workspace 已漂移")
     checkpoint = _reviewer_timeout_checkpoint(run_dir, state)
     child_dir = resolve_run_dir(workspace, checkpoint.failed_attempts[0])
     child_state = load_child_state(child_dir, repo)
@@ -150,11 +151,11 @@ def prepare_reviewer_timeout_source(
     if (
         child_state.automation_mode != "assist"
         or child_state.status != "needs_human"
-        or child_state.current_step != "timed_out"
+        or (not acceptance and child_state.current_step != "timed_out")
         or child_state.current_iteration >= child_state.max_iterations
         or latest is None
         or latest.lifecycle != "completed"
-        or latest.reviewer_status != "timed_out"
+        or latest.reviewer_status != ("success" if acceptance else "timed_out")
         or latest.verification_status != "passed"
         or latest.verification_failed_count
         or latest.risk_gate_status != "success"
@@ -163,12 +164,16 @@ def prepare_reviewer_timeout_source(
         or not latest.review_run
     ):
         raise ValueError("Core child 不是可自动恢复的 Reviewer timeout")
-    _require_review_execution_quiescent(
-        workspace,
-        child_dir,
-        latest.iteration,
-        latest.review_run,
-    )
+    before = capture_bound_workspace(run_dir)
+    if before.fingerprint != state.workspace_fingerprint:
+        raise ValueError("Reviewer timeout 恢复前 Workspace 已漂移")
+    if not acceptance:
+        _require_review_execution_quiescent(
+            workspace,
+            child_dir,
+            latest.iteration,
+            latest.review_run,
+        )
     source_operation_id = _source_operation_id(run_dir, state, child_dir.name)
     source_observation = _checkpoint_observation(
         run_dir,
@@ -179,10 +184,10 @@ def prepare_reviewer_timeout_source(
     _require_timeout_decision(
         run_dir,
         checkpoint.evidence_refs,
-        source_observation,
+        source_observation, acceptance=acceptance,
     )
     if (
-        source_observation.reviewer_runner_status != "timed_out"
+        source_observation.reviewer_runner_status != ("success" if acceptance else "timed_out")
         or source_observation.reviewer_retry_attempt != 0
         or source_observation.verification != "passed"
         or source_observation.risk != "passed"
@@ -216,7 +221,7 @@ def prepare_reviewer_timeout_source(
             plan,
             source_observation,
             child_dir,
-            source_operation_id,
+            source_operation_id, acceptance=acceptance,
         )
     )
     evidence = validate_loop_evidence_snapshot(
@@ -225,12 +230,7 @@ def prepare_reviewer_timeout_source(
         child_dir,
         state=child_state,
     )
-    if (
-        not evidence.artifact_integrity.valid
-        or not evidence.evidence_freshness.fresh
-        or not _trusted_verification_before_timeout(child_state, evidence)
-    ):
-        raise ValueError("Reviewer timeout 前没有可复用的可信 Verification 证据")
+    _require_retry_source_evidence(child_state, evidence, acceptance=acceptance)
     return ReviewerTimeoutRetrySource(
         run_dir=run_dir,
         state=state,
@@ -325,7 +325,7 @@ def _checkpoint_observation(
 def _require_timeout_decision(
     run_dir: Path,
     refs: list[str],
-    observation: AgentObservation,
+    observation: AgentObservation, *, acceptance: bool = False,
 ) -> None:
     decision_refs = [ref for ref in refs if ref.startswith("decisions/")]
     if len(decision_refs) != 1:
@@ -340,7 +340,7 @@ def _require_timeout_decision(
         decision_refs[0] != f"decisions/{decision.decision_id}.json"
         or decision.observation_id != observation.observation_id
         or decision.selected_action != "human"
-        or decision.reason_code != "review.runner_timed_out"
+        or decision.reason_code != ("gate.review.blocked" if acceptance else "review.runner_timed_out")
     ):
         raise ValueError("Reviewer timeout Decision 不允许自动恢复")
 
@@ -384,7 +384,7 @@ def _reviewer_timeout_source_artifacts(
     plan: AgentPlan,
     observation: AgentObservation,
     child_dir: Path,
-    operation_id: str,
+    operation_id: str, *, acceptance: bool = False,
 ) -> tuple[str, WorkerClaim, str]:
     evidence = build_supervisor_evidence(run_dir, state, observation, plan)
     if len(evidence) < 3 or any(item.status != "passed" for item in evidence[:3]):
@@ -406,7 +406,7 @@ def _reviewer_timeout_source_artifacts(
     ):
         raise ValueError("Reviewer timeout child 摘要身份不一致")
     finish, finish_sha256 = load_bound_source_finish(summary, child_dir)
-    if not reviewer_timeout_finish_is_valid(finish):
+    if not reviewer_timeout_finish_is_valid(finish, acceptance=acceptance):
         raise ValueError("Reviewer timeout Finish 不满足自动恢复前提")
     return summary_ref, claim, finish_sha256
 
@@ -473,3 +473,18 @@ def _trusted_verification_before_timeout(
         and payload.get("workspace_fingerprint")
         == evidence.evidence_freshness.trusted_workspace_fingerprint
     )
+
+
+def _require_retry_source_evidence(
+    child_state: LoopAutomationState, evidence: LoopEvidenceValidationSnapshot, *, acceptance: bool,
+) -> None:
+    if (
+        not evidence.artifact_integrity.valid
+        or not evidence.evidence_freshness.fresh
+        or not _trusted_verification_before_timeout(child_state, evidence)
+    ):
+        raise ValueError("Reviewer timeout 前没有可复用的可信 Verification 证据")
+    if acceptance:
+        from .acceptance_submission import require_acceptance_verdict
+
+        require_acceptance_verdict(evidence)

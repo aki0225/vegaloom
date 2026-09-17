@@ -5,7 +5,29 @@ import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from typing import TYPE_CHECKING
+
 from .redaction import redact_text
+
+if TYPE_CHECKING:
+    from .project_config import ProjectConfig
+
+
+def preparation_policy_issue(config: ProjectConfig, commands: list[str]) -> str | None:
+    """只比较准备授权来源，不执行命令，不输出命令原文或配置内容。"""
+    registered = config.verification.prepare_commands
+    if commands == registered:
+        return None
+    differing = [str(index + 1) for index in range(max(len(commands), len(registered)))
+                 if commands[index:index + 1] != registered[index:index + 1]]
+    source = "项目 .vega.yaml" if config.source_path is not None else "项目未登记 .vega.yaml（准备列表为空）"
+    return (
+        "环境准备命令与已批准 Contract 不完全一致，拒绝执行；"
+        f"Contract.prepare_commands 共 {len(commands)} 项，{source}共 {len(registered)} 项，"
+        f"差异项序号：{', '.join(differing)}。"
+        "请核对项目 verification.prepare_commands，通过 revise 修订合同后重新 approve；"
+        "不得临时执行未登记命令或在批准后自行安装依赖。"
+    )
 
 
 _COREPACK_PNPM_PATTERN = re.compile(

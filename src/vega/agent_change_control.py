@@ -74,6 +74,21 @@ def requires_final_integration_review(
     )
 
 
+def retry_integration_attempts(
+    retry_reason: str, iteration: int, run_dir: Path, state: AgentState, plan: AgentPlan,
+) -> int:
+    """补验不新增 Writer；无法取得正计数时保留集成审查。"""
+    from .agent_repository_binding import load_run_metadata
+
+    if retry_reason != "acceptance_supplement":
+        return iteration if retry_reason == "reviewer_timeout" else 2
+    context = load_change_run_context(run_dir, state, plan, load_run_metadata(run_dir))
+    if context is None:
+        return 2
+    attempts = change_budget_snapshot(run_dir, state, context.contract).worker_attempts_used
+    return attempts if attempts > 0 else 2
+
+
 def aggregate_final_review_verdict(
     verdicts: list[ReviewVerdict],
     *,

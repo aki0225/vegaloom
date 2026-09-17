@@ -70,12 +70,15 @@ def prepare_core_recheck(workspace: Path, run: str) -> PreparedVerificationRetry
     candidate = load_candidate_artifact(run_dir, candidate_refs[0])
     if candidate.candidate_sha != state.active_candidate_sha:
         raise ValueError("核心证据重算 Candidate 已变化")
+    repo = bound_repo(run_dir)
+    child_dir = resolve_run_dir(workspace, observation.child_run)
+    require_child_quiescent(run_dir)
+    child_state, finish = _fresh_core_finish(workspace, repo, child_dir)
     validate_candidate_binding(
         context.worktree, candidate=candidate, contract=context.contract,
         execution_plan=context.execution_plan,
     )
     _require_not_rechecked(run_dir, candidate.candidate_sha)
-    repo = bound_repo(run_dir)
     before = capture_bound_workspace(run_dir)
     if (before.fingerprint != state.workspace_fingerprint
             or before.fingerprint != observation.workspace_fingerprint):
@@ -83,9 +86,6 @@ def prepare_core_recheck(workspace: Path, run: str) -> PreparedVerificationRetry
     source_evidence = build_supervisor_evidence(run_dir, state, observation, plan)
     if len(source_evidence) != 4 or any(item.status != "passed" for item in source_evidence[:3]):
         raise ValueError("原始 Worker 或范围证据不可复用")
-    child_dir = resolve_run_dir(workspace, observation.child_run)
-    require_child_quiescent(run_dir)
-    child_state, finish = _fresh_core_finish(workspace, repo, child_dir)
     summary_ref = child_summary_ref(child_dir.name, observation.operation_id)
     source = _read_ref(run_dir, summary_ref)
     claim = WorkerClaim.model_validate(source.get("worker", {}).get("claim"))

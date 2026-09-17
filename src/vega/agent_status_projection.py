@@ -26,6 +26,10 @@ from .agent_runtime_support import load_agent_bundle
 from .agent_status_card import _build_status_card, render_status_card
 from .agent_status_guidance import agent_artifact_names
 from .agent_status_sources import (
+    known_candidate_transition,
+    execution_for_display,
+    core_verification_stage_note,
+    preparation_issue_for_display,
     capture_live_workspace,
     load_provider_sessions_for_display,
     load_status_checkpoint_for_display,
@@ -38,7 +42,6 @@ from .models import LoopAutomationState
 from .provider_session import PendingInteraction, ProviderSessionState
 from .provider_session_projection import session_status_projection_from_state
 from .review_queue_contract import review_queue_status_payload
-from .run_execution_status import latest_execution_payload
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
@@ -166,14 +169,36 @@ def build_agent_status_projection(
             else None
         ),
     )
+    preparation_issue = None
+    if (
+        state.run_kind == "change" and state.execution_protocol == 2
+        and state.phase in {"ready", "awaiting_approval"}
+        and card.phase == state.phase
+        and not card.integrity_warning and not decision_issue
+        and not provider_warnings and not provider_interactions
+        and not state.active_child_run and not state.active_operation_id
+        and not state.active_planning_execution_id
+    ):
+        preparation_issue = preparation_issue_for_display(run_dir, state, plan)
+        if preparation_issue:
+            card = card.model_copy(update={
+                "phase": "needs_human", "next_step": preparation_issue,
+                "allowed_actions": ["replan", "human"],
+            })
+    operation_kind = bound_operation_kind(run_dir, state) if state.active_operation_id else None
+    execution, card = execution_for_display(
+        run_dir, state, child_status, operation_kind, card, _PHASE_STATUS[card.phase],
+    )
+    candidate_transition = bool(
+        card.workspace_current is False and not (workspace_issue or checkpoint_issue or observation_issue or decision_issue)
+        and known_candidate_transition(run_dir, state, plan, live_workspace, child_status, execution, operation_kind)
+    )
+    if candidate_transition:
+        card = card.model_copy(update={"integrity_warning": "绑定 Candidate 快照一致；旧 Observation/Checkpoint 待对账。"})
     guidance_state = _guidance_state(
         state,
         card,
         last_child_run=last_child_run,
-    )
-    execution = latest_execution_payload(
-        run_dir,
-        _PHASE_STATUS[card.phase],
     )
     review_queue = _review_queue_projection(run_dir, child_status)
     key_artifacts = tuple(
@@ -183,14 +208,15 @@ def build_agent_status_projection(
     payload.update(
         {
             "recorded_phase": state.phase,
+            "preparation_issue": preparation_issue,
             "recorded_terminal_status": state.terminal_status,
             "effective_phase": card.phase,
             "effective_terminal_status": card.terminal_status,
-            "active_operation_kind": (
-                bound_operation_kind(run_dir, state) if state.active_operation_id else None
-            ),
+            "active_operation_kind": operation_kind,
+            "candidate_transition": candidate_transition,
             "last_child_run": last_child_run,
             "execution": execution,
+            "core_stage_note": core_verification_stage_note(state, child_status),
             "key_artifacts": list(key_artifacts),
             **review_queue,
         }
@@ -299,7 +325,7 @@ def read_status_card(
     )
     if projection.state != state or projection.plan != plan:
         raise ValueError("状态卡投影与 Agent State/Plan 身份不一致。")
-    return render_status_card(projection.card)
+    return render_status_card(projection.card, candidate_transition=projection.payload["candidate_transition"])
 
 
 def build_agent_status_payload(

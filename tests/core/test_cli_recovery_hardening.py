@@ -690,6 +690,7 @@ def test_status_text_terminal_without_child_pid_reports_not_recorded_and_preserv
     assert "- 历史 owned child PID（仅供审计，不表示当前存活）：`未记录`" in text
     assert "尚未启动" not in text
     assert payload["execution"] == {
+        "run_id": run_dir.name,
         "status": "failed",
         "step": "worker",
         "iteration": None,
@@ -698,6 +699,7 @@ def test_status_text_terminal_without_child_pid_reports_not_recorded_and_preserv
         "termination_unconfirmed": False,
         "last_heartbeat": heartbeat,
         "deadline": heartbeat,
+        "lease_expires_at": heartbeat,
         "path": str((run_dir / "executions" / "worker" / "execution.json").resolve()),
     }
 
