@@ -213,8 +213,8 @@ def test_agent_status_waits_when_child_state_has_not_been_persisted(
         )
     payload = run_status_payload(workspace, parent.run_dir.name)
 
-    assert payload["agent_phase"] == "acting"
-    assert payload["current_step"] == "acting"
+    assert payload["agent_phase"] == ("needs_human" if case == "corrupt" else "acting")
+    assert payload["current_step"] == ("evidence_invalid" if case == "corrupt" else "acting")
     assert payload["live_child_stage"] == "等待子流程状态"
     assert payload["workspace_current"] is False
     assert payload["commit_recommended"] is False
@@ -522,3 +522,39 @@ def _git(repo: Path, *args: str) -> None:
         encoding="utf-8",
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("phase", ["ready", "completed"])
+def test_corrupt_execution_downgrades_ready_and_completed_display(tmp_path, monkeypatch, phase):
+    from vega import agent_status_projection as projection
+    from vega.agent_contract import AgentState, AgentStatusCard
+    from vega.agent_explain import build_agent_explanation
+
+    run_dir = tmp_path / "runs" / "parent"
+    run_dir.mkdir(parents=True)
+    state = AgentState(run_id="parent", task_id="task", repository_id="repo", phase=phase,
+                       terminal_status="ready_to_commit" if phase == "completed" else None,
+                       allowed_actions=["next"])
+    original = state.model_dump()
+    monkeypatch.setattr(projection, "trusted_worker_status", lambda *a, **k: ("已结束", None))
+    plan = AgentPlan(task_id="task", user_goal="修复", work_items=[AgentWorkItem(work_item_id="W1", objective="修复")])
+    card = AgentStatusCard(run_id="parent", task_id="task", phase=phase, task_goal="修复", work_item_label="W1",
+                           worker_label="已结束", next_step="继续", terminal_status=state.terminal_status,
+                           allowed_actions=["next"], commit_recommended=phase == "completed")
+    monkeypatch.setattr(projection, "_build_status_card", lambda *a, **k: card)
+    def corrupt(*args):
+        raise ValueError("损坏的 execution")
+    monkeypatch.setattr("vega.agent_status_sources.latest_execution_payload", corrupt)
+    guidance = []
+    monkeypatch.setattr(projection, "_existing_agent_artifacts", lambda run, current: guidance.append(current) or [])
+    view = projection.build_agent_status_projection(run_dir, state, plan, workspace_capture=(None, None))
+    explanation = build_agent_explanation(run_dir, state, plan, status_projection=view)
+    assert view.payload["effective_phase"] == "needs_human"
+    assert view.payload["terminal_status"] is None
+    assert view.payload["commit_recommended"] is False
+    assert view.payload["allowed_actions"] == ["human"]
+    assert view.payload["integrity_warning"]
+    assert explanation.outcome == "attention_required"
+    assert "run.continue" not in explanation.safe_actions
+    assert guidance[0]["agent_phase"] == "needs_human"
+    assert state.model_dump() == original

@@ -185,11 +185,6 @@ def build_agent_status_projection(
                 "phase": "needs_human", "next_step": preparation_issue,
                 "allowed_actions": ["replan", "human"],
             })
-    guidance_state = _guidance_state(
-        state,
-        card,
-        last_child_run=last_child_run,
-    )
     operation_kind = bound_operation_kind(run_dir, state) if state.active_operation_id else None
     execution, card = execution_for_display(
         run_dir, state, child_status, operation_kind, card, _PHASE_STATUS[card.phase],
@@ -200,6 +195,11 @@ def build_agent_status_projection(
     )
     if candidate_transition:
         card = card.model_copy(update={"integrity_warning": "绑定 Candidate 快照一致；旧 Observation/Checkpoint 待对账。"})
+    guidance_state = _guidance_state(
+        state,
+        card,
+        last_child_run=last_child_run,
+    )
     review_queue = _review_queue_projection(run_dir, child_status)
     key_artifacts = tuple(
         _existing_agent_artifacts(run_dir, guidance_state)

@@ -301,6 +301,11 @@ def execution_for_display(
         return execution, card
     except (OSError, ValueError):
         return None, card.model_copy(update={
+            "phase": "needs_human",
+            "terminal_status": None,
+            "commit_recommended": False,
+            "allowed_actions": ["human"],
+            "next_step": "执行记录无法验证，请人工核对当前证据。",
             "integrity_warning": card.integrity_warning or "执行记录缺失、损坏或无法验证；请人工核对。",
         })
 
