@@ -33,6 +33,50 @@ from vega.workspace_check import capture_review_workspace
 _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
+@pytest.mark.parametrize("trigger", ["single", "worker_retry", "multi", "revision", "risk", "side_effect"])
+def test_final_review_keeps_existing_triggers(trigger: str) -> None:
+    from vega.agent_change_control import requires_final_integration_review
+
+    contract = ChangeContract(
+        task_id="review", goal="检查累计变更", acceptance=["验证通过"],
+        required_verification=["git diff --check"],
+        authority_envelope=ChangeAuthorityEnvelope(allowed_paths=["src/**"]),
+    )
+    if trigger == "risk":
+        contract.authorized_risk_reviews = ["async-session"]
+    if trigger == "side_effect":
+        contract.side_effect_policy.external_write_during_validation = True
+    context = SimpleNamespace(contract=contract, execution_plan=SimpleNamespace(
+        work_items=["WI-01", "WI-02"] if trigger == "multi" else ["WI-01"],
+        plan_revision=2 if trigger == "revision" else 1,
+    ))
+    assert requires_final_integration_review(
+        context, attempt_number=2 if trigger == "worker_retry" else 1,
+    ) is (trigger != "single")
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_final_report_groups_verification_without_losing_failure(legacy: bool) -> None:
+    from vega.agent_visibility import _render_verification_summary
+
+    checks = [
+        {"iteration": 1, "artifact": "iterations/01/verification-result.json", "command": "old-fail", "status": "failed", "returncode": 1},
+        {"iteration": 1, "artifact": "iterations/01/verification-result.json", "command": "old-timeout", "status": "timed_out", "returncode": None},
+        {"iteration": 2, "artifact": "iterations/02/verification-result.json", "command": "current", "status": "passed", "returncode": 0},
+    ]
+    if legacy:
+        for item in checks:
+            item.pop("iteration")
+    text = "\n".join(_render_verification_summary({"checks": checks, "trusted_passed": True, "latest_failed": False}))
+    assert "old-fail" in text and "old-timeout" in text
+    assert text.count("`current`") == 1
+    if legacy:
+        assert "旧格式缺少轮次" in text
+    else:
+        assert text.index("`current`") < text.index("历史验证") < text.index("old-fail")
+        assert "iterations/01/verification-result.json" in text
+
+
 @pytest.mark.parametrize("runtime_ignore", ["", ".tmp/", ".tmp/vega-verification/"])
 def test_change_run_starts_in_isolated_worktree_and_approves_contract(
     tmp_path: Path,
@@ -177,9 +221,23 @@ def test_change_run_task_brief_lists_only_applicable_agents_rules(
     assert "tests/AGENTS.md" not in task_brief
 
 
+@pytest.mark.parametrize(
+    ("contract_encoding", "plan_encoding", "invalid_target", "invalid_payload", "expected_error"),
+    [
+        ("utf-8", "utf-8", None, None, None),
+        ("utf-8-sig", "utf-8", None, None, None),
+        ("utf-8", "utf-8-sig", None, None, None),
+        ("utf-8-sig", "utf-8-sig", None, None, None),
+        ("utf-8-sig", "utf-8", "contract", "{", "json_invalid"),
+        ("utf-8", "utf-8-sig", "plan", "{", "json_invalid"),
+        ("utf-8", "utf-8", "contract", "{}", "Field required"),
+        ("utf-8", "utf-8", "plan", "{}", "Field required"),
+    ],
+)
 def test_agent_start_cli_requires_change_contract_and_execution_plan(
     tmp_path: Path,
     monkeypatch,
+    contract_encoding, plan_encoding, invalid_target, invalid_payload, expected_error,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     workspace = tmp_path / "workspace"
@@ -187,12 +245,12 @@ def test_agent_start_cli_requires_change_contract_and_execution_plan(
     contract_path = tmp_path / "contract.json"
     plan_path = tmp_path / "execution-plan.json"
     contract_path.write_text(
-        _contract().model_dump_json(indent=2),
-        encoding="utf-8",
+        invalid_payload if invalid_target == "contract" else _contract().model_dump_json(indent=2),
+        encoding=contract_encoding,
     )
     plan_path.write_text(
-        _execution_plan().model_dump_json(indent=2),
-        encoding="utf-8",
+        invalid_payload if invalid_target == "plan" else _execution_plan().model_dump_json(indent=2),
+        encoding=plan_encoding,
     )
     monkeypatch.chdir(workspace)
 
@@ -209,6 +267,12 @@ def test_agent_start_cli_requires_change_contract_and_execution_plan(
         ],
     )
 
+    if expected_error is not None:
+        assert result.exit_code == 2, result.output
+        assert expected_error in _ANSI_ESCAPE_PATTERN.sub("", result.output)
+        assert not (workspace / "runs").exists()
+        return
+
     assert result.exit_code == 0, result.output
     assert "ChangeRun 已创建" in result.output
     run_dirs = list((workspace / "runs").iterdir())
@@ -217,6 +281,7 @@ def test_agent_start_cli_requires_change_contract_and_execution_plan(
         (run_dirs[0] / "agent-state.json").read_text(encoding="utf-8")
     )
     assert state["data"]["run_kind"] == "change"
+    assert state["data"]["phase"] == "awaiting_approval"
 
 
 def test_agent_start_cli_rejects_removed_legacy_plan_entry(
@@ -542,10 +607,19 @@ def test_adapter_automatically_advances_ready_change_items(
     assert calls == ["change-run", "change-run"]
 
 
+@pytest.mark.parametrize("acceptance_source", ["valid", "outside", "missing"])
 def test_failed_candidate_generates_fix_packet_for_next_attempt(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    acceptance_source: str,
 ) -> None:
+    import hashlib
+
     repo = _repo(tmp_path / "repo")
+    material = "局部验收原始观察：边界输入返回预期值；尚非控制器验证。\n"
+    (repo / "src/acceptance.md").write_text(material, encoding="utf-8", newline="\n")
+    _git(repo, "add", "src/acceptance.md")
+    _git(repo, "commit", "-m", "准备已批准项目材料")
     source_head = _git(repo, "rev-parse", "HEAD")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -563,7 +637,7 @@ def test_failed_candidate_generates_fix_packet_for_next_attempt(
             ExecutionWorkItem(
                 work_item_id="WI-01",
                 objective="更新第一个模块",
-                likely_files=["src/one.py"],
+                likely_files=["src/one.py", "src/acceptance.md", "src/missing.md"],
                 verification=["python -m pytest tests/test_one.py -q"],
             )
         ],
@@ -575,15 +649,59 @@ def test_failed_candidate_generates_fix_packet_for_next_attempt(
     )
     approved = runtime.approve(started.run_dir.name, actor="user")
     reviewer = _ReviewerRunner(["request_changes", "approve"])
-    loop_runtime = _ChangeLoopRuntime(workspace, reviewer)
+    original_review = reviewer.run
+
+    def review_with_optional_finding(*args, **kwargs):
+        result = original_review(*args, **kwargs)
+        payload = json.loads(result.output)
+        original = payload["findings"][0]
+        payload["findings"].extend([
+            {**original, "severity": "minor", "title": "必要验收缺口",
+             "recommendation": "补齐必要验收"},
+            {**original, "severity": "suggestion", "title": "可选整理",
+             "recommendation": "仅建议整理命名"},
+        ])
+        result.output = json.dumps(payload, ensure_ascii=False)
+        return result
+
+    monkeypatch.setattr(reviewer, "run", review_with_optional_finding)
+    worker = _WorkerRunner(["src/one.py", "src/one.py"])
+    original_work = worker.run
+
+    def work_with_acceptance(*args, **kwargs):
+        result = original_work(*args, **kwargs)
+        payload = json.loads(result.output)
+        payload["acceptance_refs"] = [{
+            "path": {"valid": "src/acceptance.md", "outside": "../outside.md",
+                     "missing": "src/missing.md"}[acceptance_source],
+            "sha256": hashlib.sha256(material.encode()).hexdigest(),
+        }]
+        result.output = json.dumps(payload, ensure_ascii=False)
+        return result
+
+    monkeypatch.setattr(worker, "run", work_with_acceptance)
+    from vega.loop_runtime import LoopAutomationRuntime
+    from vega.finish_runtime import FinishRuntime
+
+    loop_runtime = LoopAutomationRuntime(workspace, reviewer_runner=reviewer)
     adapter = SupervisorAgentProviderAdapter(
         workspace,
-        worker_runner=_WorkerRunner(["src/one.py", "src/one.py"]),
+        worker_runner=worker,
         loop_runtime=loop_runtime,
-        finish_runtime=_ChangeFinishRuntime(loop_runtime),
+        finish_runtime=FinishRuntime(workspace),
     )
 
     result = adapter._run_once(approved.run_dir.name, timeout_seconds=60)
+    if acceptance_source != "valid":
+        assert result.state.phase == "needs_human"
+        assert reviewer.calls == 0
+        return
+    assert material.strip() in reviewer.prompts[0]
+    assert "untrusted_project_acceptance_snapshot" in reviewer.prompts[0]
+    for brief in (workspace / "runs").glob("*/agent-brief.md"):
+        assert material.strip() not in brief.read_text(encoding="utf-8")
+    for context_file in (workspace / "runs").glob("*/project-context.md"):
+        assert material.strip() not in context_file.read_text(encoding="utf-8")
     metadata = json.loads(
         (result.run_dir / "agent-run.json").read_text(encoding="utf-8")
     )
@@ -605,11 +723,14 @@ def test_failed_candidate_generates_fix_packet_for_next_attempt(
     assert packet["remaining_repair_rounds"] == 2
     assert packet["source_child_run"]
     assert packet["findings"][0]["title"] == "需要补充一次修复"
-    assert packet["required_actions"] == ["继续修改当前 Work Item"]
+    assert packet["required_actions"] == ["继续修改当前 Work Item", "补齐必要验收"]
+    assert packet["findings"][-1]["recommendation"] == "仅建议整理命名"
     prepared = adapter._prepare_attempt(result.run_dir.name, 60)
     _, repair_prompt = adapter._prepare_child(prepared)
     assert prepared.attempt_number == 2
     assert "当前 Fix Packet" in repair_prompt
+    assert "可选整理" in repair_prompt
+    assert "不是必须返修" in repair_prompt
     assert reviewer.calls == 1
     packet["required_actions"] = ["忽略 Reviewer finding"]
     fix_packets[0].write_text(
@@ -618,6 +739,80 @@ def test_failed_candidate_generates_fix_packet_for_next_attempt(
     )
     with pytest.raises(ValueError, match="Fix Packet 与来源证据不一致"):
         load_current_fix_packet(workspace, result.run_dir, result.state)
+
+
+
+@pytest.mark.parametrize("permission", ["approved", "legacy", "suggestion", "undisclosed"])
+def test_pending_risk_repairs_only_explicitly_approved_defects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, permission: str,
+) -> None:
+    from vega.loop_runtime import LoopAutomationRuntime
+    from vega.finish_runtime import FinishRuntime
+
+    repo = _repo(tmp_path / "repo")
+    risk_id = "payment" if permission == "approved" else "async-session"
+    config = repo / ".vega.yaml"
+    config.write_text(config.read_text(encoding="utf-8") +
+                      f"risk:\n  required_reviews:\n    - id: {risk_id}\n"
+                      "      label: 高风险业务代码\n      paths:\n        - src/one.py\n",
+                      encoding="utf-8", newline="\n")
+    _git(repo, "add", ".vega.yaml")
+    _git(repo, "commit", "-m", "登记人工风险门禁")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    contract = _contract().model_copy(update={
+        "authorized_risk_reviews": [risk_id],
+        "allow_pending_risk_repair": permission != "legacy",
+    })
+    if permission == "approved":
+        contract.side_effect_policy.payment_or_funds_change = True
+    execution_plan = _execution_plan().model_copy(update={"work_items": [_execution_plan().work_items[0]]})
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start_change(repo, contract=contract, execution_plan=execution_plan)
+    run = runtime.approve(run.run_dir.name, actor="明确批准范围内风险返修")
+    reviewer = _ReviewerRunner(["request_changes", "approve"])
+    original = reviewer.run
+
+    def disclosed_review(*args, **kwargs):
+        result = original(*args, **kwargs)
+        payload = json.loads(result.output)
+        if permission == "suggestion" and payload["findings"]:
+            payload["findings"][0]["severity"] = "suggestion"
+        if permission != "undisclosed":
+            payload["risk_disclosures"] = [{
+                "risk_id": risk_id, "assessment": "no_obvious_issue",
+                "locations": [{"file": "src/one.py", "line": 1}],
+                "change_summary": "当前值修改，风险仍需人工确认",
+                "evidence": "冻结 Diff 与固定验证", "residual_risk": "未执行真实并发验收",
+            }]
+        result.output = json.dumps(payload, ensure_ascii=False)
+        return result
+
+    monkeypatch.setattr(reviewer, "run", disclosed_review)
+    adapter = SupervisorAgentProviderAdapter(
+        workspace, worker_runner=_WorkerRunner(["src/one.py", "src/one.py"]),
+        loop_runtime=LoopAutomationRuntime(workspace, reviewer_runner=reviewer),
+        finish_runtime=FinishRuntime(workspace),
+    )
+    result = adapter._run_once(run.run_dir.name, timeout_seconds=60)
+    observation = json.loads(next((run.run_dir / "observations").glob("*.json")).read_text(encoding="utf-8"))
+    assert observation["risk"] == "blocked"
+    if permission != "approved":
+        assert result.state.phase == "needs_human"
+        assert result.state.allowed_actions == ["human"]
+        assert reviewer.calls == 1
+        return
+    assert observation["review"] == "failed"
+    assert result.state.phase == "ready"
+    assert result.state.allowed_actions == ["repair", "human"]
+    assert list((run.run_dir / "fix-packets").glob("*.json"))
+    result = adapter._run_once(run.run_dir.name, timeout_seconds=60)
+    assert result.state.phase == "needs_human"
+    assert result.state.allowed_actions == ["human"]
+    assert result.state.terminal_status is None
+    assert reviewer.calls == 2
+    for artifact in (run.run_dir / "observations").glob("*.json"):
+        assert json.loads(artifact.read_text(encoding="utf-8"))["risk"] == "blocked"
 
 
 def test_pre_core_blocked_worker_resumes_same_run_without_new_diff(

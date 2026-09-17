@@ -734,6 +734,52 @@
         "affected-interaction-tests", "architecture-growth", "repository-hygiene",
         "plan-state", "real-codex-smoke", "pr-ci"
       ]
+    },
+    {
+      "id": "DAILY-02",
+      "title": "工作主会话推进与送审前验收材料接线",
+      "summary": "改进既有 Vega Skill 的主会话职责，受限接入项目验收补充，区分必要返修与可选建议；不改变风险路由或实现增量审查。",
+      "depends_on": [
+        "EXEC-02"
+      ],
+      "acceptance": [
+        "主会话自行调用两条既有入口、读取材料并直接汇报技术结果；已有 Plan 不重复 Planning，执行权限尊重显式绑定",
+        "必要项目验收在送审前完成，固定 Verification 不要求 Worker 重复；合法补充材料在任务与规则编译后进入首次 Review Pack，复用输入完整性绑定，不把自述当机器通过",
+        "材料引用限制来源、数量、大小并脱敏；缺失、越界、漂移不放行，不向 Worker 开放 Run 写权限，无合法来源时披露缺口和项目适用限制",
+        "仅 suggestion 不作强制返修，保留原 finding，minor 与必要验收缺口仍可阻断；独立 Reviewer、风险门禁和成功语义不变",
+        "定向回归与正常主会话日用验收分别报告，不以回归通过代替真实日用效果"
+      ],
+      "required_checks": [
+        "affected-tests",
+        "architecture-growth",
+        "repository-hygiene",
+        "plan-state",
+        "daily-session-acceptance",
+        "pr-ci"
+      ]
+    },
+    {
+      "id": "DAILY-03",
+      "title": "区分高风险范围内返修与最终交付确认",
+      "summary": "使用默认保守且绑定人工批准合同的窄授权，在证据完整时允许高风险范围内返修，最终交付仍交人工。",
+      "depends_on": [
+        "DAILY-02"
+      ],
+      "acceptance": [
+        "仅当前人工批准合同显式启用风险待确认返修，旧任务和 bounded 批准不静默扩大授权",
+        "固定验证通过、当前证据完整、无外部副作用、已授权风险领域、明确非 suggestion 缺陷且预算允许才自动 repair；复用 Fix Packet 与新鲜度检查",
+        "Risk blocked/human-review 原值不改，Reviewer approve 后仍 human，不能自动 next/finalize；范围或业务约束变化重新批准",
+        "缺失披露、新风险、越界、证据无效、超时或进程未确认、needs_human verdict 不允许自动返修",
+        "用代表流程与少数关键拒绝回归证明边界，正常主会话日用验收和 PR CI 独立报告"
+      ],
+      "required_checks": [
+        "affected-tests",
+        "architecture-growth",
+        "repository-hygiene",
+        "plan-state",
+        "daily-session-acceptance",
+        "pr-ci"
+      ]
     }
   ]
 }

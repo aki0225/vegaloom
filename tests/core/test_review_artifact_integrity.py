@@ -94,6 +94,8 @@ def test_review_evidence_binds_all_reviewer_inputs(tmp_path: Path) -> None:
 
     assert len(runner.prompts) == 1
     assert "完整变更文件清单" in runner.prompts[0]
+    assert "实际缺陷、必要验收缺口与可选建议" in runner.prompts[0]
+    assert "不得把 Worker 自述 passed" in runner.prompts[0]
     assert '"reviewed_files"' in runner.prompts[0]
     assert _read_json(review_run / "state.json")["status"] == "success"
 
@@ -149,6 +151,9 @@ def test_standalone_review_propagates_progress_reporter(tmp_path: Path) -> None:
         ("diff-summary.md", "missing", "diff_summary_missing"),
         ("full-diff.patch", "tamper", "full_diff_hash_mismatch"),
         ("test-summary.md", "missing", "test_summary_missing"),
+        ("acceptance-supplement.json", "tamper", "acceptance_supplement_hash_mismatch"),
+        ("acceptance-supplement.json", "host_tamper", "acceptance_supplement_hash_mismatch"),
+        ("acceptance-supplement.json", "host_missing", "acceptance_supplement_invalid"),
     ],
 )
 def test_review_rejects_tampered_or_missing_consumed_artifacts(
@@ -160,14 +165,32 @@ def test_review_rejects_tampered_or_missing_consumed_artifacts(
     repo = tmp_path / "repo"
     _init_changed_repo(repo)
     brief_run = _make_brief_run(tmp_path)
-    reflect_run = ReflectRuntime(tmp_path).run(repo, source_run=brief_run.name)
+    if artifact_name == "acceptance-supplement.json":
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+        (brief_run / artifact_name).write_text(json.dumps({
+            "candidate_sha": head, "authority": "untrusted_project_acceptance_snapshot",
+            "sources": "[]",
+        }), encoding="utf-8")
+        state = BriefState.model_validate_json((brief_run / "state.json").read_text(encoding="utf-8"))
+        state.artifacts.append(artifact_name)
+        state.save(brief_run / "state.json")
+    reflect_run = ReflectRuntime(tmp_path).run(
+        repo, source_run=brief_run.name,
+        acceptance_supplement="宿主补验辅助陈述" if mutation.startswith("host_") else "",
+    )
     target = (
         brief_run / artifact_name
-        if artifact_name == "agent-brief.md"
+        if artifact_name in {"agent-brief.md", "acceptance-supplement.json"}
         else reflect_run / artifact_name
     )
-    if mutation == "missing":
+    if mutation.startswith("host_"):
+        target = reflect_run / artifact_name
+    if mutation in {"missing", "host_missing"}:
         target.unlink()
+    elif artifact_name == "acceptance-supplement.json":
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        payload["sources"] = "已替换的材料，不应正常消费"
+        target.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     else:
         target.write_text("tampered\n", encoding="utf-8")
     runner = RecordingRunner()
@@ -823,3 +846,29 @@ def _sha256_json(value: object) -> str:
         separators=(",", ":"),
     )
     return _sha256_text(serialized)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "tamper", "legacy"])
+def test_review_freshness_rechecks_acceptance_after_review(tmp_path, mutation):
+    from vega.loop_evidence import validate_review_evidence_freshness
+
+    repo = tmp_path / "repo"
+    _init_changed_repo(repo)
+    brief_run = _make_brief_run(tmp_path)
+    reflect_run = ReflectRuntime(tmp_path).run(
+        repo, source_run=brief_run.name,
+        acceptance_supplement="宿主辅助材料" if mutation != "legacy" else "",
+    )
+    review_run = ReviewRuntime(tmp_path, runner=RecordingRunner()).run(repo, reflect_run.name)
+    assert _read_json(review_run / "review-verdict.json")["verdict"] == "approve"
+    target = reflect_run / "acceptance-supplement.json"
+    if mutation == "missing":
+        target.unlink()
+    elif mutation == "tamper":
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        payload["host"] = "替换材料"
+        target.write_text(json.dumps(payload), encoding="utf-8")
+    freshness = validate_review_evidence_freshness(tmp_path, repo, review_run.name)
+    assert freshness.fresh is (mutation == "legacy")
+    if mutation != "legacy":
+        assert any("acceptance_supplement" in issue for issue in freshness.issues)

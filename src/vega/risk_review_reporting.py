@@ -287,6 +287,7 @@ def verdict_schema_example(
 ) -> dict[str, Any]:
     return {
         "verdict": "approve | request_changes | needs_human",
+        "needs_human_reason": "acceptance_missing | human_decision | null",
         "summary": "简短中文结论",
         "findings": [
             {

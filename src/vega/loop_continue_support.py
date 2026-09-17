@@ -427,3 +427,18 @@ def _validate_interruption_event(
         or interruption.get("previous_step") != latest.interrupted_step
     ):
         raise ValueError("loop interruption trace 与最新 interrupted state 不一致。")
+
+
+def require_assist_continue_identity(
+    run_dir: Path, state: LoopAutomationState, repo: Path,
+) -> None:
+    """续做与补验共用身份前置校验，不改变执行状态。"""
+    if state.run_id != run_dir.name:
+        raise ValueError("loop state.run_id 与 run 目录身份不一致；为避免错误证据链已拒绝 continue。")
+    if state.automation_mode not in {"assist", "auto"}:
+        raise ValueError("只有 assist/auto loop 可以使用 continue")
+    expected_repo = Path(state.repo_path).resolve()
+    if repo != expected_repo:
+        raise ValueError(f"loop continue 目标仓库不匹配：run={expected_repo}，传入={repo}")
+    if state.status != "needs_human":
+        raise ValueError(f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}")

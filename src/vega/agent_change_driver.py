@@ -6,9 +6,10 @@ from typing import Literal
 
 from .agent_change_execution import ProviderOperationBoundary, ensure_change_provider_ready
 from .agent_change_execution import run_provider_operation, run_change_worker
-from .agent_change_task_card import TaskCardSelection, confirm_task_card_selection
+from .agent_change_task_card import confirm_task_card_selection
 from .agent_change_task_card import select_unique_task_card
 from .agent_change_presentation import (
+    task_card_attention,
     ChangeDriverResult,
     build_change_approval_snapshot,
     redact_change_message,
@@ -24,8 +25,7 @@ from .agent_repository_change_lock import (
     RepositoryChangeLock,
 )
 from .agent_run import AgentRun
-from .agent_explain import AgentExplanation
-from .agent_cli_snapshot import AgentCliRun, build_agent_cli_snapshot
+from .agent_cli_snapshot import explain_selected_run
 from .agent_verification_retry import SupervisorAgentVerificationRetry
 from .agent_verification_retry_preparation import verification_retry_requested
 from .agent_run_selection import (
@@ -77,20 +77,30 @@ class AgentChangeDriver:
         self.interaction_reporter = interaction_reporter
         self.progress_reporter = progress_reporter
         self.runtime = SupervisorAgentRuntime(self.workspace)
+        self.selected_run: AgentRun | None = None
         if not 60 <= timeout_seconds <= 3600:
             raise ValueError("--timeout 必须在 60..3600 秒之间")
 
     def change(
-        self, *, text: str | None = None, run: str | None = None, task: Path | None = None
+        self, *, text: str | None = None, run: str | None = None, task: Path | None = None,
+        acceptance_file: Path | None = None,
     ) -> ChangeDriverResult:
         """创建或继续当前仓库的唯一 ChangeRun。"""
 
+        self.selected_run = None
         normalized_text = text.strip() if text is not None else None
         if text is not None and not normalized_text:
             raise ValueError("TEXT 不能为空")
         selected_modes = sum(value is not None for value in (normalized_text, run, task))
         if selected_modes > 1:
             raise ValueError("TEXT、--run 与 --task 必须且只能选择一种输入方式")
+        if acceptance_file is not None:
+            from .acceptance_submission import continue_acceptance
+
+            if run is None or normalized_text is not None or task is not None:
+                raise ValueError("--acceptance-file 仅支持显式 --run 的原 Candidate 补验再审")
+            self.selected_run = self._explicit_run(run)
+            return continue_acceptance(self, self.selected_run, acceptance_file)
         try:
             if normalized_text is not None:
                 return self._start_new(normalized_text)
@@ -124,6 +134,7 @@ class AgentChangeDriver:
                 )
             ensure_change_startup_config(self.repo)
             started = self.runtime.start_planning(self.repo, goal=text)
+        self.selected_run = started
         self._event(f"Planning ChangeRun 已创建：{started.run_dir.name}")
         return self._drive(started)
 
@@ -140,6 +151,7 @@ class AgentChangeDriver:
                     "当前仓库已有未完成 ChangeRun，拒绝恢复第二个 Writer。",
                 )
             restored = self.runtime.resume_task_card(self.repo, task_path)
+        self.selected_run = restored
         self._event(f"已从 Task Card 恢复：{restored.run_dir.name}")
         return self._drive(restored)
 
@@ -152,6 +164,7 @@ class AgentChangeDriver:
         return self._resume_implicit_task_card()
 
     def _drive(self, current: AgentRun) -> ChangeDriverResult:
+        self.selected_run = current
         current.state.require_current_execution()
         selected_provider = resolve_run_provider(current.run_dir, self.requested_provider)
         if self.worker_permissions is not None or (
@@ -166,6 +179,7 @@ class AgentChangeDriver:
             if isinstance(advanced, ChangeDriverResult):
                 return advanced
             current = advanced
+            self.selected_run = current
         raise ValueError("ChangeRun 主路径超过允许的阶段推进次数")
 
     def _advance_phase(
@@ -197,7 +211,7 @@ class AgentChangeDriver:
     def _completed(
         self, current: AgentRun, _provider: AgentProvider
     ) -> ChangeDriverResult:
-        explanation = self._explanation(current)
+        explanation = explain_selected_run(current)
         completed = explanation.phase == "completed" and explanation.outcome == "completed"
         return ChangeDriverResult(
             run=current,
@@ -269,7 +283,7 @@ class AgentChangeDriver:
             self._event("bounded 策略已批准当前 Contract")
             return approved
         confirm = self.confirm if self.interactive else None
-        snapshot = build_change_approval_snapshot(current) if confirm is not None else None
+        snapshot = build_change_approval_snapshot(current, provider_timeout_seconds=self.timeout_seconds) if confirm is not None else None
         if snapshot is None or confirm is None or not confirm(snapshot.prompt):
             return self._attention(
                 current,
@@ -362,7 +376,7 @@ class AgentChangeDriver:
     def _resume_implicit_task_card(self) -> ChangeDriverResult:
         selection = select_unique_task_card(self.repo)
         if not selection.selected:
-            return self._task_card_attention(selection)
+            return task_card_attention(selection)
         assert selection.task is not None
         assert selection.relative_path is not None
         if (
@@ -393,24 +407,11 @@ class AgentChangeDriver:
                 )
             current = confirm_task_card_selection(self.repo, selection)
             if not current.selected:
-                return self._task_card_attention(current)
+                return task_card_attention(current)
             assert current.task is not None
             restored = self.runtime.resume_task_card(self.repo, current.task)
         self._event(f"已从 Task Card 恢复：{restored.run_dir.name}")
         return self._drive(restored)
-
-    def _task_card_attention(
-        self,
-        selection: TaskCardSelection,
-    ) -> ChangeDriverResult:
-        assert selection.reason_code is not None
-        assert selection.message is not None
-        return self._attention(
-            None,
-            selection.reason_code,
-            selection.message,
-            selection.safe_actions,
-        )
 
     def _explicit_run(self, run: str) -> AgentRun:
         run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
@@ -460,7 +461,7 @@ class AgentChangeDriver:
             outcome="attention_required",
             reason_code=reason_code,
             message=redact_change_message(message),
-            safe_actions=tuple(self._explanation(run).safe_actions) if run is not None else safe_actions,
+            safe_actions=tuple(explain_selected_run(run).safe_actions) if run is not None else safe_actions,
         )
 
     def _reconcile_planning(self, current: AgentRun, provider: AgentProvider) -> ChangeDriverResult:
@@ -477,22 +478,11 @@ class AgentChangeDriver:
     def _verification_retry(self, provider: AgentProvider) -> SupervisorAgentVerificationRetry:
         return SupervisorAgentVerificationRetry(
             self.workspace, provider=provider,
+            timeout_seconds=self.timeout_seconds,
             persistent_sessions=self.persistent_sessions,
             progress_reporter=self.progress_reporter,
             event_reporter=self.event_reporter,
         )
-
-    def _explanation(self, current: AgentRun) -> AgentExplanation:
-        # 与 status、explain 复用同一证据快照，不能把阶段名称再推导成另一套建议。
-        snapshot = build_agent_cli_snapshot(AgentCliRun(
-            workspace=current.run_dir.parent.parent,
-            run_dir=current.run_dir,
-            selection_source="explicit",
-        ))
-        assert snapshot.explanation is not None
-        if snapshot.status_projection is None or snapshot.status_projection.state != current.state:
-            raise ValueError("ChangeRun 在结果展示期间已变化；请重新查看 status")
-        return snapshot.explanation
 
     def _event(self, message: str) -> None:
         if self.event_reporter is not None:

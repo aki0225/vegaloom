@@ -29,6 +29,7 @@ from .redaction import redact_text, write_redacted_json_once
 from .run_lock import RunMutationLock
 from .run_utils import resolve_run_dir
 from .workspace_snapshot import ReviewWorkspaceSnapshot
+from .verification_command_preflight import preparation_policy_issue
 
 
 @dataclass(frozen=True)
@@ -130,8 +131,9 @@ def _bind_preparation(workspace: Path, run_dir: Path) -> PreparedEnvironment | N
 def _requires_preparation(context: ChangeRunContext, repo: Path, config: ProjectConfig) -> bool:
     contract = context.contract
     commands = contract.prepare_commands
-    if commands != config.verification.prepare_commands:
-        raise ValueError("环境准备命令与已批准 Contract 不完全一致，拒绝执行")
+    issue = preparation_policy_issue(config, commands)
+    if issue:
+        raise ValueError(issue)
     if not commands:
         return False
     if not contract.approval_is_current():

@@ -107,3 +107,12 @@ def _issue_name(
 ) -> str:
     suffix = ":".join(item for item in (risk_id, file) if item)
     return f"{prefix}_{code}" + (f":{suffix}" if suffix else "")
+
+
+def review_run_allows_verdict(status: str, verdict: ReviewVerdict) -> bool:
+    if status == "success":
+        return True
+    return status == "needs_human" and verdict.verdict in {
+        "request_changes",
+        "needs_human",
+    }

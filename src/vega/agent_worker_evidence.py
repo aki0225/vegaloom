@@ -10,6 +10,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from .agent_core_observation import (
+    pending_risk_repair_is_authorized,
     finish_evidence_untrusted as _finish_evidence_untrusted,
     review_status as _review_status,
     risk_status as _risk_status,
@@ -37,7 +38,10 @@ from .execution_control import (
     inspect_execution_for_recovery,
 )
 from .models import LoopAutomationState
-from .redaction import write_redacted_json_once
+from .redaction import assert_not_sensitive_path, redact_text, write_redacted_json_once
+from .execution_paths import ExecutionPathGuard
+from .tracked_workspace import normalize_comparison_paths
+from .scope_path_matching import matching_patterns, scope_paths_are_case_insensitive
 from .run_utils import resolve_run_dir
 from .runner import Runner, RunnerResult
 from .workspace_check import ReviewWorkspaceSnapshot
@@ -51,6 +55,14 @@ ClaimListItem = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=1000),
 ]
+
+
+class AcceptanceReference(BaseModel):
+    """仅引用批准范围内已有项目材料，不授予额外写入权限。"""
+
+    model_config = ConfigDict(extra="forbid")
+    path: ClaimListItem
+    sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
 
 class WorkerClaim(BaseModel):
@@ -68,6 +80,7 @@ class WorkerClaim(BaseModel):
     summary: ClaimSummary
     tests_claimed: list[ClaimListItem] = Field(max_length=20)
     remaining_questions: list[ClaimListItem] = Field(max_length=20)
+    acceptance_refs: list[AcceptanceReference] = Field(default_factory=list, max_length=4)
 
 
 @dataclass(frozen=True)
@@ -90,6 +103,38 @@ class PreparedWorkerAttempt:
     change_context: ChangeRunContext | None = None
     timeout_seconds: int = 900
     resumed_before_core: bool = False
+    acceptance_supplement: str = ""
+
+
+def read_acceptance_references(prepared: PreparedWorkerAttempt, claim: WorkerClaim) -> str:
+    """只捕获限量文本快照；来源散列不证明验收动作发生或命令成功。"""
+    entries = []
+    scope = prepared.plan_scope_baseline
+    case_sensitive = not scope_paths_are_case_insensitive(prepared.repo)
+    for ref in claim.acceptance_refs:
+        paths = normalize_comparison_paths((ref.path,))
+        if paths != (ref.path,) or any(item["path"] == ref.path for item in entries):
+            raise ValueError("验收材料路径不规范或重复")
+        if not matching_patterns(ref.path, list(scope.allowed_paths), case_sensitive=case_sensitive) or matching_patterns(
+            ref.path, list(scope.forbidden_paths), case_sensitive=case_sensitive,
+        ):
+            raise ValueError("验收材料不在当前已批准项目范围内")
+        assert_not_sensitive_path(ref.path)
+        path = prepared.repo / ref.path
+        if path.suffix.lower() not in {".md", ".txt", ".log", ".json"}:
+            raise ValueError("验收材料仅支持 UTF-8 md/txt/log/json 文本")
+        guard = ExecutionPathGuard(prepared.repo.parent, path.parent)
+        guard.validate_artifact(path)
+        with path.open("rb") as stream:
+            content = stream.read(4097)
+        guard.validate_artifact(path)
+        if len(content) > 4096 or hashlib.sha256(content).hexdigest() != ref.sha256:
+            raise ValueError("验收材料超限或内容已漂移")
+        text = content.decode("utf-8")
+        if "\x00" in text:
+            raise ValueError("验收材料不是可用文本")
+        entries.append({"path": ref.path, "sha256": ref.sha256, "text": redact_text(text)})
+    return json.dumps(entries, ensure_ascii=False) if entries else ""
 
 
 @dataclass(frozen=True)
@@ -345,6 +390,7 @@ def observation_from_child(
     evidence_refs: list[str],
     external_side_effects: Literal["none", "known", "unknown"],
     reviewer_retry_attempt: int = 0,
+    change_contract=None,
 ) -> AgentObservation:
     latest = child_state.iterations[-1] if child_state.iterations else None
     finish_status = finish_summary.get("finish_status")
@@ -373,6 +419,8 @@ def observation_from_child(
             )
         )
     )
+    if risk == "blocked":
+        repairable = pending_risk_repair_is_authorized(change_contract, latest, finish_summary)
     snapshot = capture_bound_workspace(agent_run_dir)
     return AgentObservation(
         observation_id=f"observation-{uuid4().hex[:12]}",

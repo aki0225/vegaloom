@@ -24,6 +24,7 @@ from .review_queue_contract import (
     MAX_REVIEW_QUEUE_ITEMS,
     ReviewQueue,
     ReviewQueueItem,
+    aggregate_needs_human_reason,
     render_redacted_queue_verdict,
 )
 from .review_queue_plan import PreparedReviewTask, prepare_review_queue
@@ -314,6 +315,7 @@ def _aggregate_verdict(
     )
     return ReviewVerdict(
         verdict=selected,
+        needs_human_reason=aggregate_needs_human_reason(queue, verdicts),
         summary=(
             f"Review Queue 已完成 {len(queue.items)} 个独立审查任务；"
             f"覆盖 {len(queue.covered)} 个变更文件。"

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "event_id": "20260917T025425Z-DAILY-02-completed",
+  "plan_id": "vega-agent-evolution",
+  "item_id": "DAILY-02",
+  "transition": "completed",
+  "recorded_at": "2026-09-17T02:54:25Z",
+  "summary": "本地实现、定向回归及正常主会话日用验收完成；与实现同PR提交。pr-ci为合并前必过门禁，记录写入时尚未运行，不表示CI已通过；事件合并后才成为主线事实。",
+  "evidence": {
+    "pull_requests": [],
+    "commits": [],
+    "checks": [
+      "affected-tests",
+      "architecture-growth",
+      "repository-hygiene",
+      "plan-state",
+      "daily-session-acceptance",
+      "pr-ci"
+    ],
+    "artifacts": [
+      "docs/DAILY-DELIVERY-0917.md",
+      "docs/PRODUCT-CONTRACT.md",
+      "tests/supervisor/test_agent_change_run.py",
+      "tests/supervisor/test_agent_reviewer_timeout_retry.py"
+    ]
+  }
+}

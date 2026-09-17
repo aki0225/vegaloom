@@ -7,6 +7,7 @@ from typing import Literal
 from .agent_cli_snapshot_token import read_agent_snapshot_token
 from .agent_explain import AgentExplanation, build_agent_explanation
 from .agent_runtime_support import load_agent_bundle
+from .agent_run import AgentRun
 from .agent_run_selection import (
     ACTIVE_CHANGE_PHASES,
     ChangeRunSelectionError,
@@ -241,3 +242,16 @@ def selected_run_payload(
             else None
         ),
     }
+
+
+def explain_selected_run(current: AgentRun) -> AgentExplanation:
+    # 与 status、explain 复用同一证据快照，不能把阶段名称再推导成另一套建议。
+    snapshot = build_agent_cli_snapshot(AgentCliRun(
+        workspace=current.run_dir.parent.parent,
+        run_dir=current.run_dir,
+        selection_source="explicit",
+    ))
+    assert snapshot.explanation is not None
+    if snapshot.status_projection is None or snapshot.status_projection.state != current.state:
+        raise ValueError("ChangeRun 在结果展示期间已变化；请重新查看 status")
+    return snapshot.explanation

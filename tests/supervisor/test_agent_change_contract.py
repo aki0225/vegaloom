@@ -42,6 +42,11 @@ def test_execution_plan_revision_does_not_invalidate_approved_contract() -> None
 
 def test_contract_change_requires_new_human_approval() -> None:
     current_contract = _approved_contract()
+    legacy = current_contract.model_dump(mode="json", exclude={"allow_pending_risk_repair"})
+    restored = ChangeContract.model_validate(legacy)
+    assert not restored.allow_pending_risk_repair
+    assert restored.approval_is_current()
+    assert restored.approved_digest == current_contract.approved_digest
     proposed_contract = ChangeContract.model_validate(
         {
             **current_contract.model_dump(
@@ -49,6 +54,7 @@ def test_contract_change_requires_new_human_approval() -> None:
                 exclude=CHANGE_APPROVAL_METADATA_FIELDS,
             ),
             "contract_revision": 2,
+            "allow_pending_risk_repair": True,
             "side_effect_policy": {
                 **current_contract.side_effect_policy.model_dump(mode="json"),
                 "database_schema_change": True,
@@ -67,9 +73,19 @@ def test_contract_change_requires_new_human_approval() -> None:
     )
 
     assert assessment.decision == "requires_approval"
-    assert assessment.changed_fields == [
-        "side_effect_policy.database_schema_change"
-    ]
+    assert set(assessment.changed_fields) == {
+        "side_effect_policy.database_schema_change", "allow_pending_risk_repair",
+    }
+    assert not current_contract.model_copy(update={"allow_pending_risk_repair": True}).approval_is_current()
+    permission_only = classify_declared_revision(
+        current_contract=current_contract,
+        proposed_contract=proposed_contract.model_copy(update={
+            "side_effect_policy": current_contract.side_effect_policy,
+        }),
+        current_plan=_execution_plan(), proposed_plan=proposed_plan,
+    )
+    assert permission_only.decision == "requires_approval"
+    assert permission_only.changed_fields == ["allow_pending_risk_repair"]
 
 
 def test_contract_change_without_revision_increment_is_rejected() -> None:

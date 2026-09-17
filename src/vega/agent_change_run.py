@@ -70,6 +70,7 @@ def project_agent_plan(
         "observed_facts": list(execution_plan.observed_facts),
         "hypotheses": list(execution_plan.hypotheses),
         "unresolved_decisions": list(execution_plan.unresolved_decisions),
+        "allow_pending_risk_repair": contract.allow_pending_risk_repair,
         "work_items": [
             item.model_dump(mode="json")
             for item in work_items

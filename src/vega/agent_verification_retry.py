@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,9 +19,10 @@ from .agent_provider_factory import runner_name
 from .agent_plan_scope import (
     evaluate_plan_scope,
     plan_scope_failure,
-    write_plan_scope_evidence,
+    write_plan_scope_pair,
 )
 from .agent_contract import AgentObservation
+from .agent_change_control import retry_integration_attempts
 from .agent_operation import operation_ref, reserve_operation_identity
 from .agent_persistence import (
     append_agent_trace,
@@ -35,7 +37,7 @@ from .agent_runtime_support import (
     save_agent_plan,
     write_status_card,
 )
-from .agent_verification_retry_archive import archive_retry_source_finish
+from .agent_verification_retry_archive import archive_retry_inputs
 from .agent_verification_retry_evidence import (
     PreparedVerificationRetry,
     load_optional_child_state,
@@ -68,10 +70,13 @@ class SupervisorAgentVerificationRetry:
         event_reporter=None,
         provider: AgentProvider = "codex",
         persistent_sessions: bool = True,
+        timeout_seconds: int = 900,
     ) -> None:
         self.workspace = workspace.resolve()
+        self.timeout_seconds = timeout_seconds
         self.loop_runtime = loop_runtime or LoopAutomationRuntime(
             self.workspace,
+            timeout_seconds=timeout_seconds,
             progress_reporter=progress_reporter,
         )
         self.finish_runtime = finish_runtime or FinishRuntime(self.workspace)
@@ -85,10 +90,11 @@ class SupervisorAgentVerificationRetry:
         run: str,
         *,
         retry_reason: VerificationRetryReason = "verification_failure",
+        acceptance_file: Path | None = None,
     ) -> AgentRun:
         prepared, operation_id, bound = self._prepare_and_bind(
             run,
-            retry_reason=retry_reason,
+            retry_reason=retry_reason, acceptance_file=acceptance_file,
         )
         return self._run_core(prepared, operation_id, bound)
     def run_reviewer_timeout_if_eligible(self, run: str) -> AgentRun | None:
@@ -130,9 +136,12 @@ class SupervisorAgentVerificationRetry:
         run: str,
         *,
         retry_reason: VerificationRetryReason = "verification_failure",
+        acceptance_file: Path | None = None,
     ) -> tuple[PreparedVerificationRetry, str, AgentRun]:
         run_dir = resolve_run_dir(self.workspace, run)
         with RunMutationLock.acquire(run_dir, "agent.retry-verification"):
+            if (retry_reason == "acceptance_supplement") != (acceptance_file is not None):
+                raise ValueError("补验再审必须显式提交验收 JSON，其他恢复不接受该材料")
             prepared = prepare_verification_retry(
                 self.workspace,
                 run,
@@ -142,6 +151,12 @@ class SupervisorAgentVerificationRetry:
                 retry_reason=retry_reason,
             )
             operation_id = uuid4().hex
+            if acceptance_file is not None:
+                from .acceptance_submission import archive_submission, read_submission
+
+                content = read_submission(self.workspace, acceptance_file, run_dir.name, prepared.candidate_sha or "")
+                archive_submission(run_dir, operation_id, content)
+                prepared = replace(prepared, acceptance_supplement=content)
             bound = self._bind(prepared, operation_id)
         return prepared, operation_id, bound
     def _bind(
@@ -151,6 +166,7 @@ class SupervisorAgentVerificationRetry:
     ) -> AgentRun:
         state = prepared.state
         label = {"reviewer_timeout": "Reviewer timeout 自动恢复",
+                 "acceptance_supplement": "验收补充再审",
                  "core_evidence_recheck": "核心证据重算"}.get(prepared.retry_reason, "验证专用恢复")
         next_step = ("正在同一 Candidate 上重新读取已有核心证据，不运行测试或 Reviewer"
                      if prepared.retry_reason == "core_evidence_recheck"
@@ -165,21 +181,8 @@ class SupervisorAgentVerificationRetry:
         )
         state_committed = False
         try:
-            source_finish_ref = archive_retry_source_finish(
-                prepared.run_dir,
-                prepared.child_dir,
-                operation_id,
-                prepared.source_finish_sha256,
-            )
-            details = {
-                "source_operation_id": prepared.source_operation_id,
-                "source_finish_ref": source_finish_ref,
-                "source_finish_sha256": prepared.source_finish_sha256,
-                "retry_reason": prepared.retry_reason,
-                "reviewer_retry_attempt": prepared.reviewer_retry_attempt,
-            }
-            if prepared.candidate_sha is not None:
-                details["candidate_sha"] = prepared.candidate_sha
+            details = archive_retry_inputs(prepared, operation_id)
+            source_finish_ref = details["source_finish_ref"]
             operation_relative = reserve_operation_identity(
                 prepared.run_dir,
                 state,
@@ -197,7 +200,7 @@ class SupervisorAgentVerificationRetry:
                 operation_started=True,
                 allowed_actions=["human"],
             )
-            if prepared.retry_reason in {"reviewer_timeout", "core_evidence_recheck"}:
+            if prepared.retry_reason in {"reviewer_timeout", "core_evidence_recheck", "acceptance_supplement"}:
                 save_agent_plan(prepared.run_dir, prepared.plan)
             save_agent_state(prepared.run_dir / "agent-state.json", observing)
             state_committed = True
@@ -255,6 +258,8 @@ class SupervisorAgentVerificationRetry:
                     verify=True,
                     verification_commands=list(prepared.work_item.verification),
                     verification_retry_baseline=prepared.core_workspace_baseline,
+                    **({"acceptance_supplement": prepared.acceptance_supplement}
+                       if prepared.acceptance_supplement else {}),
                 )
             self.finish_runtime.run(child_run)
             require_child_quiescent(prepared.child_dir)
@@ -305,17 +310,8 @@ class SupervisorAgentVerificationRetry:
                 post_core_scope=post_core_scope,
                 plan_contradicted=True,
             )
-        pre_scope_ref = write_plan_scope_evidence(
-            prepared.run_dir,
-            operation_id,
-            prepared.pre_core_scope,
-            stage="post-worker",
-        )
-        post_scope_ref = write_plan_scope_evidence(
-            prepared.run_dir,
-            operation_id,
-            post_core_scope,
-            stage="post-core",
+        pre_scope_ref, post_scope_ref = write_plan_scope_pair(
+            prepared.run_dir, operation_id, prepared.pre_core_scope, post_core_scope,
         )
         summary_ref = write_retry_child_summary(
             prepared,
@@ -347,10 +343,9 @@ class SupervisorAgentVerificationRetry:
 
             observation = reuse_core_integration_review(prepared, observation)
         elif observation.all_work_items_completed:
-            attempt_number = (
-                prepared.child_state.current_iteration
-                if prepared.retry_reason == "reviewer_timeout"
-                else 2
+            attempt_number = retry_integration_attempts(
+                prepared.retry_reason, prepared.child_state.current_iteration,
+                prepared.run_dir, bound.state, prepared.plan,
             )
             observation = provider_preparation.review_final_candidate(
                 self.workspace,
@@ -359,7 +354,7 @@ class SupervisorAgentVerificationRetry:
                 load_project_config(prepared.repo),
                 persistent_session=self.persistent_sessions,
                 attempt_number=attempt_number,
-                timeout_seconds=900,
+                timeout_seconds=self.timeout_seconds,
                 progress_reporter=self.progress_reporter,
                 event_reporter=self._event,
                 provider=self.provider,
@@ -438,17 +433,8 @@ class SupervisorAgentVerificationRetry:
             comparison_base_sha=prepared.comparison_base_sha,
             comparison_paths=prepared.comparison_paths,
         )
-        pre_scope_ref = write_plan_scope_evidence(
-            prepared.run_dir,
-            operation_id,
-            prepared.pre_core_scope,
-            stage="post-worker",
-        )
-        post_scope_ref = write_plan_scope_evidence(
-            prepared.run_dir,
-            operation_id,
-            post_core_scope,
-            stage="post-core",
+        pre_scope_ref, post_scope_ref = write_plan_scope_pair(
+            prepared.run_dir, operation_id, prepared.pre_core_scope, post_core_scope,
         )
         summary_ref = write_retry_child_summary(
             prepared,

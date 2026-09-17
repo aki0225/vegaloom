@@ -16,6 +16,8 @@ from .comparison_binding import (
 from .execution_control import ExecutionLease
 from .workspace_inventory import compact_verification_identity
 from .loop_evidence_support import (
+    acceptance_supplement_freshness_issues,
+    validate_text_artifact_hash as _validate_text_artifact_hash,
     EvidenceFreshness as EvidenceFreshness,
     capture_current_workspace_snapshot as _capture_current_workspace_snapshot,
     freshness as _freshness,
@@ -158,6 +160,10 @@ def validate_reflect_evidence_freshness(
             issue_prefix,
             issues,
         )
+
+    issues.extend(acceptance_supplement_freshness_issues(
+        workspace, upstream_source_run, source_dir.name, evidence, current_snapshot,
+    ))
 
     source_brief_issues = evidence.get("source_brief_evidence_issues")
     if not isinstance(source_brief_issues, list) or not all(
@@ -1230,27 +1236,6 @@ def _read_text(path: Path) -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8", errors="replace")
-
-
-def _validate_text_artifact_hash(
-    path: Path,
-    evidence: dict[str, Any],
-    hash_key: str,
-    issue_prefix: str,
-    issues: list[str],
-) -> str:
-    if not path.is_file():
-        issues.append(f"{issue_prefix}_missing")
-        text = ""
-    else:
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            issues.append(f"{issue_prefix}_unreadable")
-            text = ""
-    if str(evidence.get(hash_key) or "") != _sha256_text(text):
-        issues.append(f"{issue_prefix}_hash_mismatch")
-    return text
 
 
 def _load_source_brief_artifact(

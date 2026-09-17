@@ -41,7 +41,7 @@ _ALLOWED_RETRY_ENVIRONMENT_DRIFT_ISSUES = frozenset(
         "ignored_content_complete_mismatch",
     }
 )
-VerificationRetryMode = Literal["verification_failure", "reviewer_timeout", "core_evidence_recheck"]
+VerificationRetryMode = Literal["verification_failure", "reviewer_timeout", "core_evidence_recheck", "acceptance_supplement"]
 
 
 @dataclass(frozen=True)
@@ -72,6 +72,7 @@ class PreparedVerificationRetry:
     candidate_ref: str | None = None
     reviewer_retry_attempt: int = 0
     reviewer_role_key: str | None = None
+    acceptance_supplement: str = ""
 
 
 def load_source_observation(

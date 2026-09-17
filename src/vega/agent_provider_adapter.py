@@ -353,6 +353,9 @@ class SupervisorAgentProviderAdapter:
         prompt += (
             "\n\n## 实现与验证交接\n"
             "控制器会在受管 Worktree 执行本轮已批准的全部验证命令，随后进行独立审查。"
+            "返回前完成任务必要的项目验收，不重复控制器固定全套；无法验收时如实报告缺口。"
+            "acceptance_refs 可引用当前批准范围内已有 md/txt/log/json 材料（path、原文 sha256），"
+            "最多4份、每份4096字节；不含凭据、完整聊天或推理，不得为此写 Run 目录或扩大范围。"
             "先只读检查测试工具；缺失时禁止 Worker 安装或重建依赖（含离线），已登记的准备命令交由控制器执行。"
             "实现完成、仅测试工具或依赖不可用时，claimed_status 使用 completed，"
             "在 tests_claimed 如实列出失败或未运行的命令及原因；这只表示提交验证，不表示测试通过。"
@@ -430,6 +433,7 @@ class SupervisorAgentProviderAdapter:
             ),
             comparison_base_sha=candidate.parent_sha,
             comparison_paths=tuple(candidate.changed_files),
+            acceptance_supplement=prepared.acceptance_supplement,
         )
         if initialized.resolve() != child_dir.resolve():
             raise ValueError("预留 child 初始化到了不同目录")

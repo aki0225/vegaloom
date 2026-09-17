@@ -180,6 +180,8 @@ def render_plan_card(
         *_render_side_effect_policy(contract),
         "",
         "## 风险审查",
+        f"范围内风险返修：{'允许' if contract.allow_pending_risk_repair else '不允许'}",
+        "最终高风险交付仍需人工确认；返修授权不替代该确认。",
         "",
         (
             "- 合同声明："

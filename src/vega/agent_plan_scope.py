@@ -367,3 +367,14 @@ def _read_head(repo: Path) -> str:
         repo,
         ["git", "rev-parse", "--verify", "HEAD"],
     ).decode("utf-8", errors="replace").strip()
+
+
+def write_plan_scope_pair(
+    run_dir: Path, operation_id: str,
+    post_worker: ScopeGateResult, post_core: ScopeGateResult,
+) -> tuple[str, str]:
+    """成功与失败路径保留同一组作用域证据及顺序。"""
+    return (
+        write_plan_scope_evidence(run_dir, operation_id, post_worker, stage="post-worker"),
+        write_plan_scope_evidence(run_dir, operation_id, post_core, stage="post-core"),
+    )

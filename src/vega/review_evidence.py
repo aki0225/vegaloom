@@ -14,6 +14,8 @@ REVIEW_EVIDENCE_SCHEMA_VERSION = 5
 LEGACY_REVIEW_EVIDENCE_SCHEMAS = frozenset({2, 3, 4})
 
 
+
+
 def review_evidence_schema_issues(
     evidence: dict[str, Any],
     current_snapshot: ReviewWorkspaceSnapshot | None,
@@ -61,6 +63,7 @@ def make_review_evidence(
     diff_summary: str,
     source_brief_issues: list[str],
     source_brief_diagnostics: list[str],
+    acceptance_supplement: str = "",
 ) -> dict[str, object]:
     evidence = redact_value(
         {
@@ -88,6 +91,7 @@ def make_review_evidence(
             "changed_files": changed_files,
             "changed_files_sha256": _sha256_json_value(changed_files),
             "source_brief_sha256": _sha256_text(source_brief),
+            "acceptance_supplement_sha256": _sha256_text(acceptance_supplement),
             "source_brief_evidence_issues": source_brief_issues,
             "source_brief_evidence_diagnostics": source_brief_diagnostics,
             "reflection_sha256": _sha256_text(reflection),
@@ -110,6 +114,7 @@ def review_evidence_issues(
     full_diff: str,
     test_summary: str,
     current_snapshot: ReviewWorkspaceSnapshot,
+    acceptance_supplement: str = "",
 ) -> list[str]:
     issues = _initial_evidence_issues(
         source_run,
@@ -122,6 +127,8 @@ def review_evidence_issues(
         return _unique(issues)
 
     issues.extend(review_evidence_schema_issues(source_evidence, current_snapshot))
+    if source_evidence.get("acceptance_supplement_sha256", _sha256_text("")) != _sha256_text(acceptance_supplement):
+        issues.append("acceptance_supplement_hash_mismatch")
     issues.extend(
         _source_identity_issues(
             repo_path,

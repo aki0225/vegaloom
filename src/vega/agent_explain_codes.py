@@ -24,12 +24,15 @@ PublicActionId = Literal[
     "provider.steer",
     "provider.takeover",
     "run.continue",
+    "review.supplement",
     "run.stop",
     "status.view",
     "status.view_full",
 ]
 
 _BLOCK_CATEGORIES: dict[str, BlockCategory] = {
+    "review.acceptance_missing": "evidence",
+    "environment.prepare_policy_mismatch": "configuration",
     "approval.contract_required": "authorization",
     "approval.plan_contradicted": "authorization",
     "approval.plan_stale": "authorization",
@@ -59,6 +62,7 @@ _BLOCK_CATEGORIES: dict[str, BlockCategory] = {
     "workspace.unexplained_change": "evidence",
 }
 _PUBLIC_ACTIONS: dict[str, PublicActionId] = {
+    "review.supplement": "review.supplement",
     "approve": "plan.approve",
     "change": "change.start",
     "finalize": "run.continue",

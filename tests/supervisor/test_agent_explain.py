@@ -127,17 +127,27 @@ def test_provider_interaction_actions_match_request_method(
     )
 
 
+@pytest.mark.parametrize("stage_note,warning", [(None, None), ("Core verify 记录待对账，不证明健康", None),
+                                               ("Core verify 记录待对账，不证明健康", "当前 Workspace 漂移")])
 def test_active_worker_only_lists_supported_actions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    stage_note: str | None,
+    warning: str | None,
 ) -> None:
     run_dir = _run_dir(tmp_path)
     state = _state(phase="acting", active=True)
-    _stub_status(monkeypatch, state)
+    _stub_status(monkeypatch, state, core_stage_note=stage_note, integrity_warning=warning,
+                 workspace_current=False if warning else True)
 
     result = build_agent_explanation(run_dir, state, _plan())
 
-    assert result.reason_code == "execution.worker_active"
+    if warning:
+        assert result.reason_code == "workspace.snapshot_stale"
+        assert result.reason.startswith(warning)
+        assert stage_note in result.reason
+        return
+    assert result.reason_code == ("execution.core_pending" if stage_note else "execution.worker_active")
     assert result.safe_actions == [
         "status.view",
         "provider.steer",
@@ -247,6 +257,7 @@ def test_completed_core_ignores_stale_pending_interaction(
     ("reason_code", "expected_code", "expected_category"),
     [
         ("side_effects.unknown", "side_effects.unknown", "authorization"),
+        ("evidence.core_untrusted", "evidence.core_untrusted", "evidence"),
         (None, "decision.legacy", None),
     ],
 )
@@ -264,13 +275,16 @@ def test_checkpoint_decision_uses_stable_code_with_legacy_compatibility(
         state,
         reason_code=reason_code,
     )
-    _stub_status(monkeypatch, state, allowed_actions=["human"])
+    _stub_status(monkeypatch, state, allowed_actions=["human"], supervisor_evidence=[
+        {"status": "failed", "detail": "Core 验证中断：timed_out；后续 4 条验证未运行"},
+    ])
 
     result = build_agent_explanation(run_dir, state, _plan())
 
     assert result.reason_code == expected_code
     assert result.block_category == expected_category
-    assert result.reason == "需要人工确认外部副作用"
+    assert result.reason.startswith("需要人工确认外部副作用")
+    assert ("timed_out" in result.reason) == (reason_code == "evidence.core_untrusted")
     assert f"checkpoints/{checkpoint.checkpoint_id}.json" in result.evidence_refs
 
 

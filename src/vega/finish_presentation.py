@@ -247,6 +247,10 @@ def _next_steps(
     latest_verification_failed: bool,
     verification_passed: bool,
 ) -> list[str]:
+    risk_steps = (
+        ["人工逐项检查高风险命中、Reviewer 关键位置和剩余风险。"]
+        if gate and (gate.recommendation == "human-review" or gate.required_reviews) else []
+    )
     if finish_status == "ready_to_commit":
         return [
             "人工检查完整 staged/unstaged diff、验证命令和高风险位置，不只查看 Reviewer 重点。",
@@ -256,6 +260,7 @@ def _next_steps(
         return [
             "按 Reviewer findings 或最新 `fix-prompt.md` 完成最小修复。",
             "回到所属 ChangeRun 继续 Repair 和门禁，不要直接提交。",
+            *risk_steps,
         ]
     if finish_status != "needs_human":
         return ["继续所属 ChangeRun；终态证据完整后再读取最终报告。"]
@@ -269,8 +274,7 @@ def _next_steps(
         steps.append("修复失败或超时的验证命令，再重新执行验证。")
     elif not verification_passed:
         steps.append("补充并运行至少一条受信的项目验证命令。")
-    if gate and (gate.recommendation == "human-review" or gate.required_reviews):
-        steps.append("人工逐项检查高风险命中、Reviewer 关键位置和剩余风险。")
+    steps.extend(risk_steps)
     if not steps:
         steps.append("阅读 handoff 原因和关键产物，人工决定继续修复、重跑或停止。")
     steps.append("人工处理完成后回到所属 ChangeRun 获取新的裁决。")
@@ -445,3 +449,33 @@ def _render_details(summary: dict[str, Any]) -> list[str]:
         )
     )
     return lines
+
+
+def render_verification_history(history: list[dict[str, Any]]) -> list[str]:
+    """历史按原轮次分组；失败和未执行结果不能被最新通过遮蔽。"""
+    lines: list[str] = []
+    if history:
+        lines.extend(["", "### 历史验证（不替代最新结论）"])
+        for iteration in sorted({item["iteration"] for item in history}):
+            group = [item for item in history if item["iteration"] == iteration]
+            statuses = dict.fromkeys(str(item.get("status", "unknown")) for item in group)
+            refs = dict.fromkeys(str(item["artifact"]) for item in group if item.get("artifact"))
+            lines.append(
+                f"- 第 {iteration} 轮：{len(group)} 条，状态：{', '.join(statuses)}；"
+                + ("证据：" + "、".join(f"`{ref}`" for ref in refs) if refs else "未记录证据引用")
+            )
+            for item in group:
+                if item.get("status") not in {"passed", "success"}:
+                    lines.append(f"  - `{item.get('status', 'unknown')}`：`{item.get('command')}`；exit={item.get('returncode')}")
+    return lines
+
+
+def group_verification_checks(checks: list[dict[str, Any]]) -> tuple[str, list, list]:
+    """只按显式轮次区分最新与历史，旧格式不猜测。"""
+    rows = [item for item in checks if isinstance(item, dict)]
+    if rows and all(type(item.get("iteration")) is int for item in rows):
+        latest = max(item["iteration"] for item in rows)
+        return (f"### 最新验证（第 {latest} 轮；有效性以上述门禁为准）",
+                [item for item in rows if item["iteration"] == latest],
+                [item for item in rows if item["iteration"] != latest])
+    return "### 验证记录（旧格式缺少轮次，不推断最新命令）", rows, []

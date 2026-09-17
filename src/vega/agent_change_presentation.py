@@ -4,12 +4,14 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
+from .agent_change_task_card import TaskCardSelection
 from .agent_change_contract import ExecutionWorkItem
 from .agent_change_run import load_change_run_context
 from .agent_contract import canonical_digest
 from .agent_run import AgentRun
 from .agent_runtime_support import load_agent_bundle
 from .redaction import redact_text
+from .project_config import load_project_config
 
 
 _WINDOWS_ABSOLUTE_PATH = re.compile(
@@ -64,7 +66,9 @@ class ChangeApprovalSnapshot:
     execution_plan_digest: str
 
 
-def build_change_approval_snapshot(current: AgentRun) -> ChangeApprovalSnapshot:
+def build_change_approval_snapshot(
+    current: AgentRun, *, provider_timeout_seconds: int | None = None,
+) -> ChangeApprovalSnapshot:
     """生成批准页及其机器绑定，供确认返回后做原子校验。"""
 
     run_dir, state, plan, metadata = load_agent_bundle(
@@ -76,6 +80,11 @@ def build_change_approval_snapshot(current: AgentRun) -> ChangeApprovalSnapshot:
         raise ValueError("当前 Run 缺少 Change Contract")
     contract = context.contract
     execution_plan = context.execution_plan
+    config = load_project_config(context.worktree.worktree_path)
+    timeout_source = (
+        "项目 verification.timeout_seconds"
+        if "timeout_seconds" in config.verification.model_fields_set else "Vega 默认值"
+    )
     plan_digest = canonical_digest(execution_plan.model_dump(mode="json"))
     envelope = contract.authority_envelope
     lines = [
@@ -106,12 +115,17 @@ def build_change_approval_snapshot(current: AgentRun) -> ChangeApprovalSnapshot:
         ],
         "风险复核：",
         *_items(contract.authorized_risk_reviews),
+        f"范围内风险返修：{'允许' if contract.allow_pending_risk_repair else '不允许'}",
+        "最终高风险交付仍需人工确认；返修授权不替代该确认。",
         "验证命令：",
         *_items(contract.required_verification),
         "控制器环境准备（每个批准版本最多一次，失败不重试）：",
         *_items(contract.prepare_commands),
         "",
         "二、执行细节（不改变上述授权范围）",
+        "分阶段超时（不是共享总预算）：",
+        f"- Provider 单次调用：{str(provider_timeout_seconds) + 's（本次调用）' if provider_timeout_seconds is not None else '由调用决定；当前批准入口未提供'}",
+        f"- 固定验证每条命令 / 已登记环境准备每条命令：{config.verification.timeout_seconds}s（来源：{timeout_source}）",
         "已确认事实：",
         *_items(execution_plan.observed_facts),
         "待验证假设：",
@@ -179,3 +193,15 @@ def redact_change_message(value: str) -> str:
     safe = redact_text(value)
     safe = _WINDOWS_ABSOLUTE_PATH.sub("<redacted-path>", safe)
     return _POSIX_ABSOLUTE_PATH.sub("<redacted-path>", safe)
+
+
+def task_card_attention(selection: TaskCardSelection) -> ChangeDriverResult:
+    assert selection.reason_code is not None
+    assert selection.message is not None
+    return ChangeDriverResult(
+        run=None,
+        outcome="attention_required",
+        reason_code=selection.reason_code,
+        message=redact_change_message(selection.message),
+        safe_actions=selection.safe_actions,
+    )

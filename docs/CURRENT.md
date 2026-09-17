@@ -5,12 +5,31 @@
 
 - 计划：Vega Agent 演进计划
 - 计划 ID：`vega-agent-evolution`
-- 已完成：35 / 35
-- 最近事件：`20260914T111348Z-EXEC-02-completed`
+- 已完成：36 / 37
+- 最近事件：`20260917T025426Z-DAILY-03-started`
 
 ## 当前事项
 
-当前没有可执行事项；计划已经完成，或剩余事项处于阻塞/已替代状态。
+### 进行中：`DAILY-03` 区分高风险范围内返修与最终交付确认
+
+使用默认保守且绑定人工批准合同的窄授权，在证据完整时允许高风险范围内返修，最终交付仍交人工。
+
+验收条件：
+
+- 仅当前人工批准合同显式启用风险待确认返修，旧任务和 bounded 批准不静默扩大授权
+- 固定验证通过、当前证据完整、无外部副作用、已授权风险领域、明确非 suggestion 缺陷且预算允许才自动 repair；复用 Fix Packet 与新鲜度检查
+- Risk blocked/human-review 原值不改，Reviewer approve 后仍 human，不能自动 next/finalize；范围或业务约束变化重新批准
+- 缺失披露、新风险、越界、证据无效、超时或进程未确认、needs_human verdict 不允许自动返修
+- 用代表流程与少数关键拒绝回归证明边界，正常主会话日用验收和 PR CI 独立报告
+
+要求检查：
+
+- `affected-tests`
+- `architecture-growth`
+- `repository-hygiene`
+- `plan-state`
+- `daily-session-acceptance`
+- `pr-ci`
 
 ## 全部事项
 
@@ -51,6 +70,8 @@
 | 已完成 | `DAILY-01` | 精简日常变更主路径 | `RELEASE-05` |
 | 已完成 | `EXEC-01` | 尊重 Worker 已选择的有效执行权限 | `DAILY-01` |
 | 已完成 | `EXEC-02` | 接通有限的 Codex 原生审批响应 | `EXEC-01` |
+| 已完成 | `DAILY-02` | 工作主会话推进与送审前验收材料接线 | `EXEC-02` |
+| 进行中 | `DAILY-03` | 区分高风险范围内返修与最终交付确认 | `DAILY-02` |
 
 ## 状态规则
 

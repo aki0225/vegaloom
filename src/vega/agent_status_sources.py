@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import UTC, datetime
 
 from .agent_candidate_evidence import matches_accepted_candidate_transition
 from .agent_contract import (
@@ -8,6 +9,7 @@ from .agent_contract import (
     AgentDecision,
     AgentObservation,
     AgentState,
+    AgentPlan,
 )
 from .agent_repository_binding import capture_bound_workspace
 from .agent_status_artifacts import (
@@ -18,6 +20,102 @@ from .agent_status_artifacts import (
 )
 from .provider_session import ProviderSessionState, load_provider_sessions
 from .workspace_snapshot import ReviewWorkspaceSnapshot
+from .agent_change_run import load_candidate_artifact, load_change_run_context
+from .agent_child_status import AgentChildStatusSnapshot
+from .agent_repository_binding import load_run_metadata
+from .project_config import load_project_config
+from .verification_command_preflight import preparation_policy_issue
+
+
+def known_candidate_transition(
+    run_dir: Path, state: AgentState, plan: AgentPlan,
+    workspace: ReviewWorkspaceSnapshot | None, child: AgentChildStatusSnapshot,
+    execution: dict | None, operation_kind: str | None,
+) -> bool:
+    """识别同口径的 Candidate 绑定快照；不证明进程存活或 Core 通过。"""
+    if (
+        state.run_kind != "change" or state.execution_protocol != 2
+        or state.phase not in {"acting", "observing"} or operation_kind != "worker"
+        or not state.active_candidate_sha or not state.active_operation_id
+        or workspace is None or workspace.head_sha != state.active_candidate_sha
+        or workspace.fingerprint != state.workspace_fingerprint
+        or child.child_run != state.active_child_run or child.child_state is None
+        or child.child_state.status != "running" or child.live_stage != "verify"
+        or child.child_state.initial_head_sha != state.active_candidate_sha
+        or not execution or execution.get("run_id") != child.child_run
+        or execution.get("step") != "verification"
+        or execution.get("iteration") != child.child_state.current_iteration
+        or execution.get("status") not in {"starting", "running"}
+        or execution.get("termination_unconfirmed") is not False
+    ):
+        return False
+    try:
+        expiry = min(datetime.fromisoformat(execution[key]) for key in ("deadline", "lease_expires_at"))
+        if datetime.now(UTC) >= expiry:
+            return False
+        context = load_change_run_context(run_dir, state, plan, load_run_metadata(run_dir))
+        candidate = load_candidate_artifact(run_dir, f"candidates/{state.active_operation_id}.json")
+        return bool(
+            context is not None and candidate.run_id == state.run_id
+            and candidate.operation_id == state.active_operation_id
+            and candidate.work_item_id == state.current_work_item
+            and candidate.candidate_sha == state.active_candidate_sha
+            and candidate.parent_sha == state.accepted_checkpoint_sha
+            and candidate.branch == context.worktree.branch
+            and candidate.contract_revision == context.contract.contract_revision
+            and candidate.approved_contract_digest == context.contract.approved_digest
+            and candidate.execution_plan_revision == context.execution_plan.plan_revision
+        )
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
+def verification_interruption_detail(finish: dict, observation: AgentObservation) -> str | None:
+    """只解释已由调用方核对身份和摘要的 Finish，不改变门禁结果。"""
+    try:
+        latest = finish["iterations"][-1]
+        matches = [item for item in finish["verification_results"]
+                   if item["iteration"] == latest["iteration"]]
+        if len(matches) != 1 or finish["artifact_integrity"]["valid"] is not True:
+            return None
+        result = matches[0]
+        # 父 Agent 的 comparison binding 不同；这里只核对同一 Core Finish 的采集口径。
+        core_fingerprint = finish["evidence_freshness"]["current_workspace_fingerprint"]
+        if (result["run_id"] != observation.child_run
+                or not isinstance(core_fingerprint, str) or not core_fingerprint
+                or result["workspace_fingerprint"] != core_fingerprint
+                or observation.external_side_effects == "unknown"
+                or set(finish["evidence_freshness"]["issues"]) - {"trusted_review_missing"}):
+            return None
+        interruption = result.get("interruption_status")
+        if any(item.get("interruption_status") == "termination-unconfirmed" for item in result.get("results", [])):
+            interruption = "termination-unconfirmed"
+        if interruption not in {"timed_out", "stopped", "termination-unconfirmed"}:
+            return None
+        remaining = len(result["skipped_commands"])
+        review = "；本轮 Reviewer 未运行" if latest["reviewer_status"] == "skipped" else ""
+        return f"Core 验证中断：{interruption}；后续 {remaining} 条验证未运行{review}（已绑定的历史记录）。"
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return None
+
+
+def explanation_detail(status: dict, fallback: str) -> str:
+    """保留首要告警；阶段和门禁明细只补充上下文，不推导新动作。"""
+    details = [item["detail"] for item in status.get("supervisor_evidence", [])
+               if item.get("status") != "passed"]
+    note = status.get("core_stage_note")
+    return " ".join([fallback, *details, *([note] if note else [])])
+
+
+def preparation_issue_for_display(run_dir: Path, state: AgentState, plan: AgentPlan) -> str | None:
+    """调用方先排除证据和活动执行异常；这里只读当前绑定的准备策略。"""
+    metadata = load_run_metadata(run_dir)
+    context = load_change_run_context(run_dir, state, plan, metadata)
+    if context is None:
+        return None
+    return preparation_policy_issue(
+        load_project_config(context.worktree.worktree_path), context.contract.prepare_commands,
+    )
 
 
 def load_provider_sessions_for_display(

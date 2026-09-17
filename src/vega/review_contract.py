@@ -110,6 +110,7 @@ class ReviewVerdict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     verdict: Literal["approve", "request_changes", "needs_human"] = "needs_human"
+    needs_human_reason: Literal["acceptance_missing", "human_decision"] | None = None
     summary: str
     findings: list[ReviewFinding] = Field(default_factory=list)
     # 保持默认空列表，确保升级后仍能读取历史 review-verdict.json。
@@ -132,6 +133,8 @@ class ReviewVerdict(BaseModel):
 
     @model_validator(mode="after")
     def validate_decision_contract(self) -> "ReviewVerdict":
+        if self.verdict != "needs_human" and self.needs_human_reason is not None:
+            raise ValueError("只有 needs_human 可以声明阻断原因")
         if not self.summary.strip():
             raise ValueError("review summary 不能为空")
         if any(not item.strip() for item in self.checked_items):

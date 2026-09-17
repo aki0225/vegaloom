@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .brief_runtime import read_acceptance_supplement
 from .runtime_workspace import capture_runtime_workspace
 from .workspace_check import ReviewWorkspaceSnapshot
 
@@ -95,3 +96,41 @@ def sha256_json(payload: Any) -> str:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def validate_text_artifact_hash(
+    path: Path,
+    evidence: dict[str, Any],
+    hash_key: str,
+    issue_prefix: str,
+    issues: list[str],
+) -> str:
+    if not path.is_file():
+        issues.append(f"{issue_prefix}_missing")
+        text = ""
+    else:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            issues.append(f"{issue_prefix}_unreadable")
+            text = ""
+    if str(evidence.get(hash_key) or "") != sha256_text(text):
+        issues.append(f"{issue_prefix}_hash_mismatch")
+    return text
+
+
+
+def acceptance_supplement_freshness_issues(
+    workspace: Path, source_run: object, reflect_run: str,
+    evidence: dict[str, Any], snapshot: ReviewWorkspaceSnapshot | None,
+) -> list[str]:
+    try:
+        supplement = read_acceptance_supplement(
+            workspace, source_run, snapshot.head_sha if snapshot else "",
+            reflect_run=reflect_run,
+        )
+    except (OSError, ValueError):
+        return ["acceptance_supplement_invalid"]
+    if evidence.get("acceptance_supplement_sha256", sha256_text("")) != sha256_text(supplement):
+        return ["acceptance_supplement_hash_mismatch"]
+    return []

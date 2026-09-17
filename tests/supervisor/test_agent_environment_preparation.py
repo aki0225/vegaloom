@@ -5,6 +5,7 @@ import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -25,6 +26,27 @@ from vega.execution_feedback import ExecutionProgressTicker
 from vega.cli_entrypoint import app
 from vega.project_config import ProjectConfig, validate_project_config
 from vega.run_status import run_status_payload
+
+
+@pytest.mark.parametrize("provider_timeout,configured", [(None, None), (120, 45)])
+def test_approval_shows_separate_timeout_sources(tmp_path, monkeypatch, provider_timeout, configured):
+    contract = ChangeContract(task_id="budget", goal="修改示例", acceptance=["正确"], required_verification=["check"],
+                              authority_envelope=ChangeAuthorityEnvelope(allowed_paths=["sample.py"]))
+    plan = ExecutionPlan(task_id="budget", contract_revision=1, work_items=[
+        ExecutionWorkItem(work_item_id="WI-01", objective="修改示例", likely_files=["sample.py"]),
+    ])
+    state = SimpleNamespace(state_version=1)
+    current = SimpleNamespace(run_dir=tmp_path / "runs" / "budget")
+    context = SimpleNamespace(contract=contract, execution_plan=plan,
+                              worktree=SimpleNamespace(worktree_path=tmp_path))
+    monkeypatch.setattr("vega.agent_change_presentation.load_agent_bundle", lambda *_: (current.run_dir, state, None, {}))
+    monkeypatch.setattr("vega.agent_change_presentation.load_change_run_context", lambda *_: context)
+    if configured is not None:
+        (tmp_path / ".vega.yaml").write_text(f"verification:\n  timeout_seconds: {configured}\n", encoding="utf-8")
+    prompt = build_change_approval_snapshot(current, provider_timeout_seconds=provider_timeout).prompt
+    assert ("由调用决定" if provider_timeout is None else "120s（本次调用）") in prompt
+    assert ("180s（来源：Vega 默认值）" if configured is None else "45s（来源：项目 verification.timeout_seconds）") in prompt
+    assert "900" not in prompt
 
 
 @pytest.mark.parametrize("outcome", ["success", "failed", "tracked_mutation"])
@@ -79,12 +101,45 @@ def test_preparation_is_owned_once_and_never_verification_success(
         assert len(find_execution_records(run_dir)) == 1
 
 
-def test_preparation_rejects_unapproved_exact_command(tmp_path: Path) -> None:
-    workspace, run_dir = _approved_run(tmp_path, authorized=False)
+def test_preparation_rejects_unapproved_exact_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace, run_dir = _approved_run(tmp_path, authorized=False, approve=False, in_source=True)
+    runtime = SupervisorAgentRuntime(workspace)
+    before = (run_dir / "agent-state.json").read_bytes()
+    with pytest.raises(ValueError, match="差异项序号：1"):
+        runtime.approve(run_dir.name, actor="user")
+    assert (run_dir / "agent-state.json").read_bytes() == before
+    # 模拟旧版已经批准的不一致合同，不改写或伪造任何持久化 Artifact。
+    with monkeypatch.context() as legacy:
+        legacy.setattr("vega.agent_change_runtime.preparation_policy_issue", lambda *_: None)
+        runtime.approve(run_dir.name, actor="旧版批准夹具")
     with pytest.raises(ValueError, match="不完全一致"):
         prepare_change_environment(workspace, run_dir.name)
     assert find_execution_records(run_dir) == []
     assert not (bound_repo(run_dir) / ".prepared").exists()
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr("vega.agent_change_driver.ensure_change_provider_ready", lambda *_: None)
+    cli = CliRunner()
+    result = cli.invoke(app, ["change", "--worker-permissions", "full-access", "--json"])
+    assert result.exit_code == 1, result.output
+    error = json.loads(result.stdout)
+    assert error["run_id"] == run_dir.name
+    assert error["reason_code"] == "change.request_failed"
+    assert error["current_state"]["reason_code"] == "environment.prepare_policy_mismatch"
+    assert error["current_state"]["safe_actions"] == ["plan.revise", "run.stop"]
+    assert "python prepare.py" not in error["message"]
+    for command in ("status", "explain"):
+        shown = cli.invoke(app, [command, "--run", run_dir.name])
+        assert shown.exit_code == 0, shown.output
+        assert error["message"] in shown.output
+        assert "vega revise --run" in shown.output
+        assert "可以继续" not in shown.output
+    assert find_execution_records(run_dir) == []
+    # 真实源码漂移优先于准备错误，展示不得借准备提示放行。
+    (bound_repo(run_dir) / "sample.py").write_text("value = 2\n", encoding="utf-8")
+    shown = cli.invoke(app, ["explain", "--run", run_dir.name])
+    assert shown.exit_code == 0, shown.output
+    assert "workspace.snapshot_stale" in shown.output
+    assert "environment.prepare_policy_mismatch" not in shown.output
 
 
 def test_preparation_started_without_terminal_is_not_replayed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,7 +225,7 @@ def test_preparation_config_reuses_validation_and_budget(commands: list[str], ma
     assert any(issue.severity == "error" for issue in validate_project_config(config))
 
 
-def _approved_run(tmp_path: Path, *, outcome: str = "success", authorized: bool = True) -> tuple[Path, Path]:
+def _approved_run(tmp_path: Path, *, outcome: str = "success", authorized: bool = True, approve: bool = True, in_source: bool = False) -> tuple[Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-b", "main")
@@ -192,8 +247,8 @@ def _approved_run(tmp_path: Path, *, outcome: str = "success", authorized: bool 
     }), encoding="utf-8")
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "测试：初始化准备命令")
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+    workspace = repo if in_source else tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
     contract = ChangeContract(
         task_id="prepare-test", goal="修改示例", acceptance=["示例正确"],
         required_verification=["python -m compileall -q sample.py"],
@@ -209,7 +264,7 @@ def _approved_run(tmp_path: Path, *, outcome: str = "success", authorized: bool 
         approval = build_change_approval_snapshot(started)
         assert "控制器环境准备" in approval.prompt and "python prepare.py" in approval.prompt
         assert approval.contract_digest != contract.model_copy(update={"prepare_commands": []}).expected_approval_digest()
-    approved = runtime.approve(started.run_dir.name, actor="user")
+    approved = runtime.approve(started.run_dir.name, actor="user") if approve else started
     return workspace, approved.run_dir
 
 

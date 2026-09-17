@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -18,6 +20,129 @@ from vega.execution_process import ProcessProbe
 from vega.models import LoopAutomationState, LoopIterationState
 from vega.review_queue_contract import ReviewQueue, ReviewQueueItem
 from vega.run_status import render_run_status, run_status_payload
+
+
+def test_real_candidate_transition_is_pending_in_public_status_and_explain(tmp_path, monkeypatch):
+    from vega.agent_change_contract import ChangeContract, ChangeAuthorityEnvelope, ExecutionPlan, ExecutionWorkItem
+    from vega.agent_change_run import load_change_run_context
+    from vega.agent_runtime_support import load_agent_bundle
+    from vega.agent_git_candidate import freeze_candidate_commit
+
+    repo = _git_repo(tmp_path / "repo")
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+    contract = ChangeContract(task_id="transition", goal="修改说明", acceptance=["说明已更新"],
+        required_verification=["git diff --check"], authority_envelope=ChangeAuthorityEnvelope(allowed_paths=["README.md"]))
+    plan = ExecutionPlan(task_id="transition", contract_revision=1, work_items=[
+        ExecutionWorkItem(work_item_id="WI-01", objective="修改说明", likely_files=["README.md"]),
+    ])
+    runtime = SupervisorAgentRuntime(workspace)
+    started = runtime.start_change(repo, contract=contract, execution_plan=plan)
+    approved = runtime.approve(started.run_dir.name, actor="test")
+    run_dir, state, agent_plan, metadata = load_agent_bundle(workspace, approved.run_dir.name)
+    context = load_change_run_context(run_dir, state, agent_plan, metadata)
+    child_dir = workspace / "runs" / "transition-child"
+    child_dir.mkdir()
+    SupervisorAgentWorker(workspace).bind(approved.run_dir.name, child_run=child_dir.name, operation_id="transition-operation")
+    (context.worktree.worktree_path / "README.md").write_text("候选说明\n", encoding="utf-8")
+    candidate = freeze_candidate_commit(context.worktree, expected_parent_sha=context.worktree.base_sha,
+        contract=context.contract, execution_plan=context.execution_plan, work_item_id="WI-01", operation_id="transition-operation")
+    bound, _ = runtime.bind_candidate(approved.run_dir.name, candidate=candidate)
+    LoopAutomationState(run_id=child_dir.name, task_mode="bug", automation_mode="assist",
+        repo_path=str(context.worktree.worktree_path), input_source="受控验证阶段", status="running",
+        current_step="verify", current_iteration=1, initial_head_sha=candidate.candidate_sha).save(child_dir / "state.json")
+    now = datetime.now(UTC)
+    lease = ExecutionLease(run_id=child_dir.name, execution_id="verification-01", step="verification", iteration=1,
+        owner_pid=os.getpid(), started_at=now.isoformat(), last_heartbeat=now.isoformat(),
+        lease_expires_at=(now + timedelta(minutes=5)).isoformat(), deadline=(now + timedelta(minutes=5)).isoformat(), status="running")
+    execution = child_dir / "executions/verification/execution.json"
+    execution.parent.mkdir(parents=True)
+    execution.write_text(lease.model_dump_json(), encoding="utf-8")
+    before = (run_dir / "agent-state.json").read_bytes()
+    monkeypatch.chdir(workspace)
+    for command in ("status", "explain"):
+        result = CliRunner().invoke(app, [command, "--run", bound.run_dir.name, "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        explanation = payload["explanation"]
+        assert explanation["phase"] == "acting"
+        assert explanation["reason_code"] == "workspace.candidate_transition"
+        assert explanation["outcome"] == "in_progress"
+        assert explanation["safe_actions"] == ["status.view", "run.stop"]
+    assert (run_dir / "agent-state.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("case", ["known", "cumulative", "parent", "drift", "candidate", "operation", "child", "revision", "unconfirmed", "stopping", "failed", "expired"])
+def test_candidate_transition_uses_bound_snapshot_without_hiding_faults(tmp_path, monkeypatch, case):
+    from vega import agent_status_projection as projection
+    from vega.agent_child_status import AgentChildStatusSnapshot
+    from vega.agent_contract import AgentState, AgentStatusCard
+    from vega.agent_git_candidate import CandidateCommit
+    from vega.agent_operation import reserve_operation_identity
+    from vega.agent_explain import build_agent_explanation
+
+    run_dir = tmp_path / "runs" / "parent"
+    run_dir.mkdir(parents=True)
+    child_dir = run_dir.parent / "child"
+    child_dir.mkdir()
+    state = AgentState(run_id="parent", task_id="task", repository_id="repo", run_kind="change",
+        execution_protocol=2, phase="acting", current_work_item="W1", active_operation_id="operation",
+        active_child_run="child", active_candidate_sha="a" * 40, workspace_fingerprint="b" * 64,
+        contract_revision=1, execution_plan_revision=1, approved_contract_digest="c" * 64, accepted_checkpoint_sha="d" * 40)
+    plan = AgentPlan(task_id="task", user_goal="修复", work_items=[AgentWorkItem(work_item_id="W1", objective="修复")])
+    reserve_operation_identity(run_dir, state, child_run="foreign" if case == "operation" else "child", operation_id="operation")
+    candidate = CandidateCommit(run_id="parent", work_item_id="W1", operation_id="operation",
+        branch="vega/task", candidate_ref="HEAD", parent_sha=("e" if case == "parent" else "d") * 40, candidate_sha="a" * 40,
+        contract_revision=2 if case == "revision" else 1, approved_contract_digest="c" * 64,
+        execution_plan_revision=1, changed_files=["sample.py"], created_at="2026-09-16T00:00:00Z")
+    (run_dir / "candidates").mkdir()
+    (run_dir / "candidates/operation.json").write_text("{}" if case == "candidate" else candidate.model_dump_json(), encoding="utf-8")
+    child = LoopAutomationState(run_id="child", task_mode="bug", automation_mode="assist", repo_path=str(tmp_path),
+        input_source="测试", status="failed" if case == "failed" else "running", current_step="verify",
+        initial_head_sha="a" * 40, current_iteration=1)
+    snapshot = AgentChildStatusSnapshot("foreign" if case == "child" else "child", child_dir, child, "verify")
+    expiry = datetime.now(UTC) + timedelta(minutes=-1 if case == "expired" else 5)
+    execution = dict(run_id="child", step="verification", iteration=1, status="stop_requested" if case == "stopping" else "running",
+                     termination_unconfirmed=case == "unconfirmed", deadline=expiry.isoformat(), lease_expires_at=expiry.isoformat())
+    card = AgentStatusCard(run_id="parent", task_id="task", phase="acting", task_goal="修复", work_item_label="W1",
+        worker_label="已结束", risk="not_run", next_step="对账", workspace_current=False,
+        integrity_warning="当前 Workspace 与旧证据不一致。")
+    monkeypatch.setattr(projection, "load_status_checkpoint_for_display", lambda *_: (None, None))
+    monkeypatch.setattr(projection, "load_status_observation_for_display", lambda *_: (None, None))
+    monkeypatch.setattr(projection, "trusted_worker_status", lambda *a, **k: ("已结束", "child"))
+    monkeypatch.setattr(projection, "capture_trusted_child_status", lambda *_: snapshot)
+    monkeypatch.setattr(projection, "_build_status_card", lambda *a, **k: card)
+    def execution_projection(directory, _):
+        assert directory == child_dir
+        return execution
+    monkeypatch.setattr(projection, "latest_execution_payload", execution_projection)
+    monkeypatch.setattr("vega.agent_status_sources.load_run_metadata", lambda *_: {})
+    monkeypatch.setattr("vega.agent_status_sources.load_change_run_context", lambda *_: SimpleNamespace(
+        contract=SimpleNamespace(contract_revision=1, approved_digest="c" * 64), execution_plan=SimpleNamespace(plan_revision=1),
+        worktree=SimpleNamespace(branch="vega/task")))
+    workspace = SimpleNamespace(head_sha="a" * 40, fingerprint="e" * 64 if case == "drift" else "b" * 64,
+                                changed_files=["earlier.py", "sample.py"] if case == "cumulative" else ["sample.py"])
+    if case == "operation":
+        with pytest.raises(ValueError, match="身份或类型不一致"):
+            projection.build_agent_status_projection(run_dir, state, plan, workspace_capture=(workspace, None))
+        return
+    view = projection.build_agent_status_projection(run_dir, state, plan, workspace_capture=(workspace, None))
+    explained = build_agent_explanation(run_dir, state, plan, status_projection=view)
+    assert view.payload["workspace_current"] is False and not view.card.commit_recommended
+    assert view.state == state and view.card.allowed_actions == card.allowed_actions
+    assert view.payload["candidate_transition"] is (case in {"known", "cumulative"})
+    assert explained.reason_code == ("workspace.candidate_transition" if case in {"known", "cumulative"} else "workspace.snapshot_stale")
+    from vega.agent_cli_snapshot import AgentCliRun, AgentCliSnapshot
+    from vega.agent_cli_status import render_compact_agent_status
+    from vega.agent_status_projection import read_status_card
+
+    snapshot = AgentCliSnapshot(target=AgentCliRun(tmp_path, run_dir, "explicit"), status=view.payload, explanation=explained)
+    expected = "已进入验证阶段，结果待对账" if case in {"known", "cumulative"} else "尚未运行"
+    assert f"Verification：{expected}" in render_compact_agent_status(snapshot)
+    assert f"Verification：{expected}" in read_status_card(run_dir, state, plan, status_projection=view)
+    assert view.payload["verification"] == "not_run"
+    if case in {"known", "cumulative"}:
+        assert explained.safe_actions == ["status.view", "run.stop"]
 
 
 @pytest.mark.parametrize(
@@ -53,6 +178,10 @@ def test_agent_status_projects_live_child_stage_without_changing_parent(
     assert payload["agent_phase"] == phase
     assert payload["current_step"] == phase
     assert payload["live_child_stage"] == current_step
+    if current_step == "verify":
+        assert "绑定 Core 最近记录为验证阶段" in payload["core_stage_note"]
+        assert payload["explanation"]["reason_code"] == "execution.core_pending"
+        assert "进程状态及最终结果待核对" in payload["explanation"]["reason"]
     assert f"- Core 子流程：`{current_step}`" in text
     assert "next_steps" not in payload
     assert payload["explanation"]["safe_actions"]

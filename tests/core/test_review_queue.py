@@ -5,6 +5,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from vega.reflect_runtime import ReflectRuntime
 from vega.review_contract import ReviewVerdict
 from vega.review_queue import _write_task_result
@@ -12,6 +14,50 @@ from vega.review_queue_contract import ReviewQueueItem
 from vega.review_runtime import ReviewRuntime
 from vega.run_status import render_run_status, run_status_payload
 from vega.runner import RunnerResult
+
+
+@pytest.mark.parametrize(
+    ("other", "complete", "expected"),
+    [
+        ("acceptance_missing", True, "acceptance_missing"),
+        ("approve", True, "acceptance_missing"),
+        ("human_decision", True, None),
+        ("legacy", True, None),
+        ("request_changes", True, None),
+        ("acceptance_missing", False, None),
+    ],
+)
+def test_queue_preserves_only_complete_acceptance_blockers(other, complete, expected) -> None:
+    from vega.review_queue import _complete_item, _finish_queue
+    from vega.review_queue_contract import ReviewQueue, render_redacted_queue_verdict
+
+    verdicts = []
+    items = []
+    for index, reason in enumerate(["acceptance_missing", other]):
+        path = f"src/file_{index}.py"
+        verdict = ReviewVerdict(
+            verdict=reason if reason in {"approve", "request_changes"} else "needs_human",
+            needs_human_reason=reason if reason in {"acceptance_missing", "human_decision"} else None,
+            summary="队列审查结果", reviewed_files=[path] if complete or index == 0 else [],
+            checked_items=["文件覆盖"],
+        )
+        # 使用既有保存格式往返，原因不依赖 ReviewQueueItem 的额外字段。
+        verdict = ReviewVerdict.model_validate_json(render_redacted_queue_verdict(verdict))
+        verdicts.append(verdict)
+        items.append(_complete_item(
+            ReviewQueueItem(item_id=f"RQ-{index}", target_files=[path], artifact_dir=f"rq-{index}"),
+            RunnerResult(status="success", output="", command=["fake-reviewer"]),
+            verdict, trusted=True,
+        ))
+    queue = ReviewQueue(
+        source_run="reflect-fixture", candidate_sha="a" * 40, workspace_fingerprint="b" * 64,
+        trigger=["diff_budget"], status="running", max_items=2,
+        max_prompt_chars=10000, max_diff_chars=1000, items=items,
+    )
+    finished, aggregate = _finish_queue(queue, verdicts)
+    assert aggregate.verdict == "needs_human"
+    assert aggregate.needs_human_reason == expected
+    assert finished.status == ("completed" if complete else "blocked")
 
 
 class QueueReviewer:

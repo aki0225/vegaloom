@@ -188,6 +188,10 @@ def test_contract_compiler_derives_registered_risk_ids_from_candidate_files(
     plan_card = render_plan_card(proposal, compiled)
     assert "Planner 风险提示（仅供人工阅读，不作为机器风险 ID）" in plan_card
     assert "数据库迁移与并发风险" in plan_card
+    assert "范围内风险返修：不允许" in plan_card
+    assert "最终高风险交付仍需人工确认" in plan_card
+    compiled.contract.allow_pending_risk_repair = True
+    assert "范围内风险返修：允许" in render_plan_card(proposal, compiled)
 
 
 def test_contract_compiler_fails_closed_when_source_revision_drifts(

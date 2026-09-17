@@ -49,13 +49,13 @@ def agent_start(
 
 def _load_change_contract(path: Path) -> ChangeContract:
     try:
-        return ChangeContract.model_validate_json(path.read_text(encoding="utf-8"))
+        return ChangeContract.model_validate_json(path.read_text(encoding="utf-8-sig"))
     except OSError as exc:
         raise ValueError(f"无法读取 Change Contract：{path.name}") from exc
 
 
 def _load_execution_plan(path: Path) -> ExecutionPlan:
     try:
-        return ExecutionPlan.model_validate_json(path.read_text(encoding="utf-8"))
+        return ExecutionPlan.model_validate_json(path.read_text(encoding="utf-8-sig"))
     except OSError as exc:
         raise ValueError(f"无法读取 Execution Plan：{path.name}") from exc

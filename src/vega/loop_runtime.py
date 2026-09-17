@@ -7,12 +7,14 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from .brief_runtime import BriefRuntime
+from .risk_review_evidence import review_run_allows_verdict as _review_run_allows_verdict
 from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk, render_gate_report
 from .loop_continue_support import (
     next_iteration_number,
     plan_recovered_auto_worker,
     require_execution_recoverable,
+    require_assist_continue_identity,
     require_loop_initialization,
     require_recovery_trace_binding,
 )
@@ -380,6 +382,7 @@ class LoopAutomationRuntime:
         rerun_worker: bool = False,
         verification_commands: list[str] | None = None,
         verification_retry_baseline: WorkspaceSnapshot | None = None,
+        acceptance_supplement: str = "",
     ) -> Path:
         if rerun_worker and (test_log is not None or note is not None):
             raise ValueError("--rerun-worker 不能与 --test-log 或 --note 同时使用。")
@@ -406,6 +409,7 @@ class LoopAutomationRuntime:
                 rerun_worker=rerun_worker,
                 verification_commands=verification_commands,
                 verification_retry_baseline=verification_retry_baseline,
+                acceptance_supplement=acceptance_supplement,
             )
 
     def _continue_assist_locked(
@@ -420,20 +424,13 @@ class LoopAutomationRuntime:
         rerun_worker: bool = False,
         verification_commands: list[str] | None = None,
         verification_retry_baseline: WorkspaceSnapshot | None = None,
+        acceptance_supplement: str = "",
     ) -> Path:
         state = LoopAutomationState.model_validate_json(
             run_dir.joinpath("state.json").read_text(encoding="utf-8")
         )
-        if state.run_id != run_dir.name:
-            raise ValueError("loop state.run_id 与 run 目录身份不一致；为避免错误证据链已拒绝 continue。")
-        if state.automation_mode not in {"assist", "auto"}:
-            raise ValueError("只有 assist/auto loop 可以使用 continue")
         repo = repo_path.resolve()
-        expected_repo = Path(state.repo_path).resolve()
-        if repo != expected_repo:
-            raise ValueError(f"loop continue 目标仓库不匹配：run={expected_repo}，传入={repo}")
-        if state.status != "needs_human":
-            raise ValueError(f"只有 needs_human 状态的 loop 可以 continue，当前状态：{state.status}")
+        require_assist_continue_identity(run_dir, state, repo)
         require_assist_workspace_baseline_continuable(state)
         require_execution_recoverable(run_dir)
         require_recovery_trace_binding(run_dir, state)
@@ -556,6 +553,7 @@ class LoopAutomationRuntime:
             note=note,
             verification_commands=verification_commands,
             automation_mode="assist",
+            acceptance_supplement=acceptance_supplement,
         )
         return run_dir
 
@@ -1100,6 +1098,7 @@ class LoopAutomationRuntime:
         note: str | None,
         verification_commands: list[str] | None,
         automation_mode: Literal["assist", "auto"],
+        acceptance_supplement: str = "",
     ) -> LoopPostWorkerResult:
         """在 Worker 结束后执行唯一的确定性门禁与独立审查链。"""
         context = LoopPostWorkerContext(
@@ -1158,6 +1157,7 @@ class LoopAutomationRuntime:
             workspace_new_files_count=workspace_new_files_count,
             note=note,
             automation_mode=automation_mode,
+            acceptance_supplement=acceptance_supplement,
         ):
             return LoopPostWorkerResult(stop=True)
         if self._run_post_worker_scope_gate(
@@ -1384,6 +1384,7 @@ class LoopAutomationRuntime:
         workspace_new_files_count: int,
         note: str | None,
         automation_mode: Literal["assist", "auto"],
+        acceptance_supplement: str = "",
     ) -> bool:
         state.current_step = "reflect"
         state.save(run_dir / "state.json")
@@ -1393,6 +1394,7 @@ class LoopAutomationRuntime:
         reflect_run = ReflectRuntime(self.workspace).run(
             repo_path,
             source_run=state.brief_run,
+            acceptance_supplement=acceptance_supplement,
             test_log=reflect_test_log,
             note=note,
             comparison_base_sha=state.comparison_base_sha,
@@ -1600,7 +1602,10 @@ class LoopAutomationRuntime:
                 current_step="review_run_failed",
             )
             return LoopPostWorkerResult(stop=True, verdict=verdict)
-        if automation_mode == "auto" and verdict.verdict == "request_changes":
+        if (
+            automation_mode == "auto" and verdict.verdict == "request_changes"
+            and context.iteration_state.risk_gate_recommendation != "human-review"
+        ):
             _write_text_artifact(
                 iteration_dir / "fix-prompt.md",
                 render_fix_prompt(verdict, iteration_number + 1),
@@ -2569,13 +2574,6 @@ def _read_review_run_status(review_run: Path) -> str:
     return status if isinstance(status, str) else "failed"
 
 
-def _review_run_allows_verdict(status: str, verdict: ReviewVerdict) -> bool:
-    if status == "success":
-        return True
-    return status == "needs_human" and verdict.verdict in {
-        "request_changes",
-        "needs_human",
-    }
 
 
 def _write_final_report(

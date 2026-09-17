@@ -3,8 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .agent_contract import canonical_digest
+
+if TYPE_CHECKING:
+    from .agent_verification_retry_evidence import PreparedVerificationRetry
 
 
 def retry_source_finish_ref(operation_id: str) -> str:
@@ -36,7 +40,7 @@ def archive_retry_source_finish(
     return relative
 
 
-def reviewer_timeout_finish_is_valid(finish: object) -> bool:
+def reviewer_timeout_finish_is_valid(finish: object, *, acceptance: bool = False) -> bool:
     """确认 Finish 描述的是验证已过、Core Reviewer 明确超时。"""
 
     if not isinstance(finish, dict):
@@ -51,7 +55,7 @@ def reviewer_timeout_finish_is_valid(finish: object) -> bool:
         and isinstance(gates, dict)
         and gates.get("verification") == "passed"
         and isinstance(latest, dict)
-        and latest.get("reviewer_status") == "timed_out"
+        and latest.get("reviewer_status") == ("success" if acceptance else "timed_out")
         and latest.get("verdict") == "needs_human"
     )
 
@@ -92,8 +96,10 @@ def retry_source_finish_archive_issue(
             finish.get("finish_status") == "needs_fix"
             and finish.get("latest_verification_failed") is True
         )
-    elif retry_reason == "reviewer_timeout":
-        valid_source = reviewer_timeout_finish_is_valid(finish)
+    elif retry_reason in {"reviewer_timeout", "acceptance_supplement"}:
+        valid_source = reviewer_timeout_finish_is_valid(
+            finish, acceptance=retry_reason == "acceptance_supplement",
+        )
     elif retry_reason == "core_evidence_recheck":
         integrity = finish.get("artifact_integrity")
         freshness = finish.get("evidence_freshness")
@@ -106,3 +112,22 @@ def retry_source_finish_archive_issue(
     if not valid_source:
         return "原始失败 Finish 归档身份或状态不一致"
     return None
+
+
+def archive_retry_inputs(prepared: PreparedVerificationRetry, operation_id: str) -> dict:
+    """归档原 Finish 并形成既有 operation 的输入绑定。"""
+    source_finish_ref = archive_retry_source_finish(
+        prepared.run_dir, prepared.child_dir, operation_id, prepared.source_finish_sha256,
+    )
+    details = {
+        "source_operation_id": prepared.source_operation_id,
+        "source_finish_ref": source_finish_ref,
+        "source_finish_sha256": prepared.source_finish_sha256,
+        "retry_reason": prepared.retry_reason,
+        "reviewer_retry_attempt": prepared.reviewer_retry_attempt,
+    }
+    if prepared.candidate_sha is not None:
+        details["candidate_sha"] = prepared.candidate_sha
+    if prepared.acceptance_supplement:
+        details["acceptance_ref"] = str(Path(source_finish_ref).with_name("acceptance.json")).replace("\\", "/")
+    return details

@@ -61,10 +61,10 @@ def write_status_card(
     )
 
 
-def render_status_card(card: AgentStatusCard) -> str:
+def render_status_card(card: AgentStatusCard, *, candidate_transition: bool = False) -> str:
     """渲染当前只读卡片，并统一应用动态脱敏。"""
 
-    return redact_text(render_agent_status_card(card))
+    return redact_text(render_agent_status_card(card, candidate_transition=candidate_transition))
 
 
 def _build_status_card(

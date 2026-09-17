@@ -386,10 +386,10 @@ def validated_review_workspace_fingerprint(
 ) -> str:
     """返回可与验证证据绑定的工作区指纹，不改变最终审查裁决。"""
 
-    # 风险门禁会把只读审查后的 verdict 固定为 needs_human；此处只恢复
+    # 风险待确认时只读审查也可保留 request_changes；此处只恢复
     # “验证与审查针对同一工作区”的事实，最终状态仍必须交由人工确认。
     trusted_verdict = verdict == "approve" or (
-        verdict == "needs_human"
+        verdict in {"needs_human", "request_changes"}
         and risk_gate_result is not None
         and risk_gate_result.recommendation == "human-review"
     )
