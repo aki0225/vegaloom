@@ -392,10 +392,12 @@ jobs:
             --durations=30 `
             --durations-min=0.20 `
             --basetemp=.tmp/pytest/runs/windows-boundaries `
+            tests/security/test_ci_windows_fail_closed.py `
             tests/security/test_adapter_realpath_boundary.py `
             tests/security/test_workspace_manifest_containment.py::test_parent_junction_does_not_read_outside_file `
             tests/security/test_runtime_safety_integration.py::test_windows_verification_preserves_nested_python_quotes `
             tests/security/test_project_config_hardening.py::test_windows_config_check_rejects_unsafe_cmd_grouping_and_single_pipe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           python -m pytest -q `
             --timeout=58 `
@@ -405,6 +407,7 @@ jobs:
             --basetemp=.tmp/pytest/runs/windows-process-tree `
             tests/security/test_execution_control_safety.py `
             -k "windows or linked_descendant or revalidates_directory"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           python -m pytest -q `
             --timeout=58 `
@@ -413,26 +416,36 @@ jobs:
             --durations-min=0.20 `
             --basetemp=.tmp/pytest/runs/windows-lock `
             tests/security/test_run_mutation_lock.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: 构建并安装 Windows wheel
         shell: pwsh
         run: |
           python -m build --wheel --outdir dist
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m venv .tmp/release-validation/windows-venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $venvPython = Resolve-Path .tmp/release-validation/windows-venv/Scripts/python.exe
           & $venvPython -m pip install dist/vegaloom-0.6.0-py3-none-any.whl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $vegaCli = Resolve-Path .tmp/release-validation/windows-venv/Scripts/vega.exe
           & $venvPython -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $version = & $venvPython -I -c "import vega; print(vega.__version__)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($version.Trim() -ne "0.6.0") {
             throw "Windows wheel 版本不一致：$version"
           }
           & $venvPython -I -c "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & $venvPython -I -c "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); print(AdequacyResult.__name__)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Push-Location $env:RUNNER_TEMP
           try {
             & $vegaCli --help | Out-Null
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $capabilities = (& $vegaCli capabilities) -join "`n" | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             if (
               $capabilities.schema_version -ne 4 -or
               -not $capabilities.daily_change_entry -or
@@ -453,7 +466,9 @@ jobs:
             $adapterRepo = Join-Path $env:RUNNER_TEMP "vega-adapter-smoke"
             New-Item -ItemType Directory -Force -Path $adapterRepo | Out-Null
             git -C $adapterRepo init | Out-Null
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             & $vegaCli adapters init codex --repo $adapterRepo
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             if (-not (Test-Path (Join-Path $adapterRepo ".agents/skills/vega-agent/SKILL.md"))) {
               throw "Windows wheel 未包含 vega-agent Skill"
             }
