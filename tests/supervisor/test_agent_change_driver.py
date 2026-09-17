@@ -763,7 +763,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
     assert result.reason_code == "provider.interaction_requires_advanced_response"
     assert result.run is not None
-    assert result.safe_actions == tuple(driver_module.AgentChangeDriver(repo, repo)._explanation(result.run).safe_actions)
+    assert result.safe_actions == tuple(driver_module.explain_selected_run(result.run).safe_actions)
     assert load_provider_sessions(result.run.run_dir).interactions[0].status == "closed"
     assert [update.status for update in updates] == ["attention"]
     visible = repr([result.message, updates, events])

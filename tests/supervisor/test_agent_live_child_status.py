@@ -115,7 +115,7 @@ def test_candidate_transition_uses_bound_snapshot_without_hiding_faults(tmp_path
     def execution_projection(directory, _):
         assert directory == child_dir
         return execution
-    monkeypatch.setattr(projection, "latest_execution_payload", execution_projection)
+    monkeypatch.setattr("vega.agent_status_sources.latest_execution_payload", execution_projection)
     monkeypatch.setattr("vega.agent_status_sources.load_run_metadata", lambda *_: {})
     monkeypatch.setattr("vega.agent_status_sources.load_change_run_context", lambda *_: SimpleNamespace(
         contract=SimpleNamespace(contract_revision=1, approved_digest="c" * 64), execution_plan=SimpleNamespace(plan_revision=1),

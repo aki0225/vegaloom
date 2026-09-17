@@ -27,6 +27,8 @@ from .agent_status_card import _build_status_card, render_status_card
 from .agent_status_guidance import agent_artifact_names
 from .agent_status_sources import (
     known_candidate_transition,
+    execution_for_display,
+    core_verification_stage_note,
     preparation_issue_for_display,
     capture_live_workspace,
     load_provider_sessions_for_display,
@@ -40,7 +42,6 @@ from .models import LoopAutomationState
 from .provider_session import PendingInteraction, ProviderSessionState
 from .provider_session_projection import session_status_projection_from_state
 from .review_queue_contract import review_queue_status_payload
-from .run_execution_status import latest_execution_payload
 from .workspace_snapshot import ReviewWorkspaceSnapshot
 
 
@@ -190,8 +191,9 @@ def build_agent_status_projection(
         last_child_run=last_child_run,
     )
     operation_kind = bound_operation_kind(run_dir, state) if state.active_operation_id else None
-    execution_dir = child_status.child_dir if state.active_child_run and operation_kind != "environment_prepare" else run_dir
-    execution = latest_execution_payload(execution_dir, _PHASE_STATUS[card.phase]) if execution_dir else None
+    execution, card = execution_for_display(
+        run_dir, state, child_status, operation_kind, card, _PHASE_STATUS[card.phase],
+    )
     candidate_transition = bool(
         card.workspace_current is False and not (workspace_issue or checkpoint_issue or observation_issue or decision_issue)
         and known_candidate_transition(run_dir, state, plan, live_workspace, child_status, execution, operation_kind)
@@ -203,11 +205,6 @@ def build_agent_status_projection(
         _existing_agent_artifacts(run_dir, guidance_state)
     )
     payload = card.model_dump(mode="json")
-    core_stage_note = (
-        "绑定 Core 最近记录为验证阶段；进程状态及最终结果待核对。"
-        if state.active_child_run == child_status.child_run and state.active_operation_id
-        and child_status.live_stage == "verify" else None
-    )
     payload.update(
         {
             "recorded_phase": state.phase,
@@ -219,7 +216,7 @@ def build_agent_status_projection(
             "candidate_transition": candidate_transition,
             "last_child_run": last_child_run,
             "execution": execution,
-            "core_stage_note": core_stage_note,
+            "core_stage_note": core_verification_stage_note(state, child_status),
             "key_artifacts": list(key_artifacts),
             **review_queue,
         }

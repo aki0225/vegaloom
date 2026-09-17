@@ -1797,7 +1797,9 @@ def test_adapters_init_codex_writes_vega_skills(tmp_path, monkeypatch) -> None:
     from vega.cli_entrypoint import app as public_app
     help_result = CliRunner().invoke(public_app, ["change", "--help"])
     assert help_result.exit_code == 0
-    assert "--acceptance-file" in help_result.output
+    from typer.main import get_command
+    change_command = get_command(public_app).commands["change"]
+    assert any("--acceptance-file" in parameter.opts for parameter in change_command.params)
     assert "--acceptance-file acceptance/checks.json" in agent_skill_text
     assert "不能拆命令规避权限" in agent_skill_text
     assert "未分类历史 needs_human" in agent_skill_text

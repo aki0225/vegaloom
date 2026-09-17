@@ -9,6 +9,7 @@ from .agent_contract import (
     AgentDecision,
     AgentObservation,
     AgentState,
+    AgentStatusCard,
     AgentPlan,
 )
 from .agent_repository_binding import capture_bound_workspace
@@ -24,6 +25,7 @@ from .agent_change_run import load_candidate_artifact, load_change_run_context
 from .agent_child_status import AgentChildStatusSnapshot
 from .agent_repository_binding import load_run_metadata
 from .project_config import load_project_config
+from .run_execution_status import latest_execution_payload
 from .verification_command_preflight import preparation_policy_issue
 
 
@@ -287,3 +289,25 @@ def load_status_observation_for_display(
         return load_status_observation(run_dir, state, checkpoint), None
     except ValueError:
         return None, "最近 Observation 缺失、损坏或与 Checkpoint 绑定不一致。"
+
+
+def execution_for_display(
+    run_dir: Path, state: AgentState, child: AgentChildStatusSnapshot,
+    operation_kind: str | None, card: AgentStatusCard, run_status: str,
+) -> tuple[dict | None, AgentStatusCard]:
+    execution_dir = child.child_dir if state.active_child_run and operation_kind != "environment_prepare" else run_dir
+    try:
+        execution = latest_execution_payload(execution_dir, run_status) if execution_dir else None
+        return execution, card
+    except (OSError, ValueError):
+        return None, card.model_copy(update={
+            "integrity_warning": card.integrity_warning or "执行记录缺失、损坏或无法验证；请人工核对。",
+        })
+
+
+def core_verification_stage_note(state: AgentState, child: AgentChildStatusSnapshot) -> str | None:
+    return (
+        "绑定 Core 最近记录为验证阶段；进程状态及最终结果待核对。"
+        if state.active_child_run == child.child_run and state.active_operation_id
+        and child.live_stage == "verify" else None
+    )
