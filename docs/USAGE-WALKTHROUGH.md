@@ -1,7 +1,7 @@
 # 使用说明
 
-本文对应 v0.6.0。安装与发布状态见 [README](../README.md#快速开始)；使用 v0.5.1 时请查阅
-[对应版本的说明](https://github.com/aki0225/vegaloom/blob/v0.5.1/docs/USAGE-WALKTHROUGH.md)。
+本文对应尚未发布的源码准备版本 v0.7.0。正式稳定版仍为 v0.6.0；安装稳定包后请查阅
+[对应版本的说明](https://github.com/aki0225/vegaloom/blob/v0.6.0/docs/USAGE-WALKTHROUGH.md)，不要将本文新增能力视为稳定包已提供。
 旧 Run 只能查看、停止或可信交接，不能原地继续执行。升级前先按
 [发布说明](RELEASE-NOTES-0.6.0.md#升级前先看)处理未完成任务。
 

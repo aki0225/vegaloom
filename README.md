@@ -28,9 +28,9 @@ Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言
 实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。合同内问题可以自动回到
 Worker；越出批准、授权或证据边界时停下来问人。
 
-> 本页对应 v0.6.0，变更与升级限制见 [发布说明](docs/RELEASE-NOTES-0.6.0.md)。
+> 本页对应尚未发布的源码准备版本 v0.7.0，变更与限制见 [发布准备说明](docs/RELEASE-NOTES-0.7.0.md)。
 > 发布状态以 [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.6.0) 为准；
-> 制品尚未发布时，请使用 [v0.5.1 及其使用文档](https://github.com/aki0225/vegaloom/blob/v0.5.1/README.md)。
+> 正式稳定版仍为 v0.6.0；安装该包后请使用 [v0.6.0 对应文档](https://github.com/aki0225/vegaloom/blob/v0.6.0/README.md)，本页新增能力尚未随稳定包提供。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega ChangeRun：计划批准、Worker、验证、独立 Reviewer 和最终报告">
