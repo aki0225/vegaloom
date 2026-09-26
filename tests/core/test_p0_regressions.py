@@ -1906,7 +1906,7 @@ def test_legacy_loop_without_scope_evidence_cannot_be_ready_to_commit(
     assert "legacy_scope_gate_unverified" in summary["artifact_integrity"]["issues"]
 
 
-def test_scope_gate_root_policy_and_trace_bindings_are_enforced(tmp_path: Path) -> None:
+def _scope_run_with_corrupt_root_policy(tmp_path: Path) -> tuple[Path, Path, dict]:
     config = "\n".join(
         [
             "version: 1",
@@ -1939,13 +1939,17 @@ def test_scope_gate_root_policy_and_trace_bindings_are_enforced(tmp_path: Path) 
         encoding="utf-8",
         newline="\n",
     )
+    return workspace, run_dir, state
+
+
+def test_scope_gate_root_policy_and_trace_bindings_are_enforced(tmp_path: Path) -> None:
+    _, run_dir, state = _scope_run_with_corrupt_root_policy(tmp_path)
     trace_path = run_dir / "trace.jsonl"
     events = [
         json.loads(line)
         for line in trace_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    original_events = json.loads(json.dumps(events))
     pre_index = next(
         index
         for index, event in enumerate(events)
@@ -1984,6 +1988,15 @@ def test_scope_gate_root_policy_and_trace_bindings_are_enforced(tmp_path: Path) 
     assert "FAIL: scope_gate_trace_failure_code_mismatch" in results
     assert "FAIL: pre_review_scope_gate_trace_phase_order_invalid" in results
 
+
+def test_scope_gate_parent_trace_order_and_finish_rejection(tmp_path: Path) -> None:
+    workspace, run_dir, state = _scope_run_with_corrupt_root_policy(tmp_path)
+    trace_path = run_dir / "trace.jsonl"
+    original_events = [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     scope_events = [
         event
         for event in original_events
