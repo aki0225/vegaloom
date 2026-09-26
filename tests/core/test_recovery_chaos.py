@@ -12,6 +12,10 @@ import vega.recovery_runtime as recovery_runtime_module
 import vega.worker_rerun_planning as worker_rerun_planning_module
 import vega.worker_rerun_transaction as worker_rerun_transaction_module
 from vega.loop_evidence import validate_loop_artifact_integrity
+from vega.loop_integrity import (
+    brief_initialization_binding_issues,
+    load_brief_initialization_evidence,
+)
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput, LoopAutomationState, LoopIterationState
 from vega.recovery_runtime import RecoveryRuntime
@@ -1851,6 +1855,54 @@ def test_recovery_transaction_temp_path_preserves_windows_path_budget(
     assert len(str(temp_path)) < 260
 
 
+@pytest.mark.parametrize("line_endings", [b"\n", b"\r\n", b"\r\nsecond\rthird\n"])
+def test_assist_brief_copy_preserves_bytes_and_rejects_tampering(
+    tmp_path: Path, line_endings: bytes,
+) -> None:
+    # 受控Git规则输入，经真实Brief/start生成；不调用Provider。
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    secret = b"sk-proj-VEGA-FAKE-SECRET"
+    (repo / "AGENTS.md").write_bytes(b"# rules" + line_endings + b"api_key=" + secret + b"\n")
+    _git(repo, "add", "AGENTS.md")
+    _git(repo, "-c", "user.name=Vega Tests", "-c", "user.email=test@example.invalid",
+         "commit", "-m", "rules fixture")
+    workspace = tmp_path / "workspace"
+    run_dir = LoopAutomationRuntime(workspace).start(
+        BriefInput(mode="bug", text="验证可信Brief字节绑定", source="controlled-fixture",
+                   repo_path=str(repo)),
+        "assist",
+    )
+    state = LoopAutomationState.model_validate_json((run_dir / "state.json").read_text(encoding="utf-8"))
+    evidence, issues = load_brief_initialization_evidence(workspace, state)
+    assert evidence is not None and issues == []
+    for name in ("agent-brief.md", "project-context.md"):
+        original = (evidence.run_dir / name).read_bytes()
+        assert (run_dir / name).read_bytes() == original
+        assert secret not in original
+    assert brief_initialization_binding_issues(evidence, run_dir, state, repo) == []
+    target = run_dir / "project-context.md"
+    target.write_bytes(target.read_bytes() + b"x")
+    assert "project-context.md_source_mismatch" in brief_initialization_binding_issues(
+        evidence, run_dir, state, repo,
+    )
+    target.unlink()
+    assert "project-context.md_missing_or_unreadable" in brief_initialization_binding_issues(
+        evidence, run_dir, state, repo,
+    )
+
+
+@pytest.mark.parametrize("preserve_bytes", [False, True])
+def test_generic_artifact_copy_keeps_redaction(tmp_path: Path, preserve_bytes: bool) -> None:
+    source, target = tmp_path / "source.md", tmp_path / "target.md"
+    loop_runtime_module._copy_if_exists(source, target, preserve_bytes=preserve_bytes)
+    assert not target.exists()
+    source.write_bytes(b"api_key=sk-proj-VEGA-FAKE-SECRET\r\n")
+    loop_runtime_module._copy_if_exists(source, target, preserve_bytes=preserve_bytes)
+    assert b"sk-proj-VEGA-FAKE-SECRET" not in target.read_bytes()
+    assert b"[REDACTED]" in target.read_bytes()
+
+
 def test_recovery_after_partial_initialization_rejects_continue_before_iteration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1861,9 +1913,11 @@ def test_recovery_after_partial_initialization_rejects_continue_before_iteration
     original_copy = loop_runtime_module._copy_if_exists
     copy_count = 0
 
-    def crash_after_first_copy(source: Path, target: Path) -> None:
+    def crash_after_first_copy(
+        source: Path, target: Path, *, preserve_bytes: bool = False,
+    ) -> None:
         nonlocal copy_count
-        original_copy(source, target)
+        original_copy(source, target, preserve_bytes=preserve_bytes)
         copy_count += 1
         if copy_count == 1:
             raise RuntimeError("simulated crash during root initialization")
