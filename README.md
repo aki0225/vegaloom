@@ -28,9 +28,9 @@ Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言
 实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。合同内问题可以自动回到
 Worker；越出批准、授权或证据边界时停下来问人。
 
-> 本页对应尚未发布的源码准备版本 v0.7.0，变更与限制见 [发布准备说明](docs/RELEASE-NOTES-0.7.0.md)。
-> 发布状态以 [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.6.0) 为准；
-> 正式稳定版仍为 v0.6.0；安装该包后请使用 [v0.6.0 对应文档](https://github.com/aki0225/vegaloom/blob/v0.6.0/README.md)，本页新增能力尚未随稳定包提供。
+> 本页面向 v0.7.0，能力与限制见 [版本摘要](docs/RELEASE-SUMMARY-0.7.0.md) 和 [发布说明](docs/RELEASE-NOTES-0.7.0.md)。
+> 发布准备不代表资产已上传；安装前请确认 [v0.7.0 Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.0) 实际存在对应资产。
+> 尚未提供时请使用 [最新正式版](https://github.com/aki0225/vegaloom/releases/latest) 及其对应 Tag 文档，不将源码能力等同于旧稳定包。
 
 <p align="center">
   <img src="docs/assets/vega-pipeline.svg" width="100%" alt="Vega ChangeRun：计划批准、Worker、验证、独立 Reviewer 和最终报告">
@@ -41,10 +41,10 @@ Worker；越出批准、授权或证据边界时停下来问人。
 要求 Python `>=3.11`、Git，以及已安装的 Codex CLI 或 Claude Code CLI。Vega 只能确认命令是否存在；
 Provider 是否已登录，要在实际启动会话时确认。
 
-确认 v0.6.0 Release 已提供 wheel 后，在用于运行 Vega 的 Python 环境中安装，无需克隆开发工作区：
+确认 v0.7.0 Release 已提供下列 wheel 后，在用于运行 Vega 的 Python 环境中安装，无需克隆开发工作区：
 
 ```powershell
-python -m pip install "https://github.com/aki0225/vegaloom/releases/download/v0.6.0/vegaloom-0.6.0-py3-none-any.whl"
+python -m pip install "https://github.com/aki0225/vegaloom/releases/download/v0.7.0/vegaloom-0.7.0-py3-none-any.whl"
 ```
 
 然后进入**自己的目标 Git 项目**。自然语言任务需要项目提交一份 `.vega.yaml`，登记实际验证
@@ -63,6 +63,9 @@ verification:
 ## 日常主路径
 
 进入目标 Git 仓库后，日常任务不需要复制 Run ID 或手工串起多个阶段：
+
+也可先运行 `vega adapters init codex --repo .`，让加载生成 Skill 的工作主会话自行调查、
+推进验证和审查并直接汇报；用户负责关键授权，无需在 Worker 与 Reviewer 之间搬运材料。
 
 ```powershell
 vega change "导出按钮点击后没有反应" --worker-permissions auto-review

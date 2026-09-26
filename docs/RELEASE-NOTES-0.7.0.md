@@ -1,8 +1,9 @@
-# Vega v0.7.0 发布准备
+# Vega v0.7.0 发布说明
 
-源码包版本为 `0.7.0`，尚未打 Tag 或发布。正式稳定版仍为 `v0.6.0`；
-安装与使用请查看 [v0.6.0 文档](https://github.com/aki0225/vegaloom/blob/v0.6.0/README.md)。
-本说明依据 `v0.6.0..ded05b8` 的实现差异，不将准备状态表述为已发布。
+源码包版本为 `0.7.0`，发布状态及可下载资产以 GitHub Release 为准。
+安装前核对 [v0.7.0 Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.0)
+实际资产；能力概览见 [版本摘要](RELEASE-SUMMARY-0.7.0.md)。
+本说明概述 v0.6.0 之后的实现与发布前修复，最终提交与制品以正式发布记录为准。
 
 ## 主要变化
 
@@ -18,12 +19,17 @@
   Candidate 过渡和真正证据问题，损坏执行记录不能保留继续或提交建议。
 - 显式 start 合同与计划兼容 UTF-8 BOM；报告优先展示最新验证、保留历史失败。
 - Windows CI 每条 native 命令检查退出码，防止早期失败被后续成功覆盖。
+- 可信 Brief 复制保留已脱敏原始字节，避免 Windows 换行转换破坏绑定；
+  完整性检查仍拒绝篡改。证据完整且验证通过的人工确认终点不再误报为验证中断。
 
 ## 边界与历史证据
 
-DAILY-03 的真实高风险 `request_changes → repair → approve → needs_human`
-链路仍缺验收，不能用 fake Runner、预设 Reviewer 或低风险任务替代。
-本阶段不追加计划完成事件，也不改变成功语义、风险门禁或执行授权。
+受控本地权限样例已实际经过 Worker、Candidate、固定验证（15项测试及diff检查）、
+独立只读Reviewer及预期高风险人工确认边界；这不是生产权限系统安全证明。
+Reviewer自然给出 needs_human，没有自然触发 request_changes、repair 或 approve。
+范围内返修有定向测试覆盖，但上述真实完整链仍未覆盖，不宣称 DAILY-03 完成；
+当前计划仍为36/37。发布不强迫独立 Reviewer 产生预设的审查结论序列，不以假Runner补造真实结论。
+人工确认不等于自动成功，既有验证、风险、范围和完整性底线不变。
 
 [日用交付记录](DAILY-DELIVERY-0917.md) 和
 [权限改造计划及验收](WORKER-PERMISSIONS-PLAN.md) 记录各自当时范围：
@@ -34,14 +40,14 @@ DAILY-03 的真实高风险 `request_changes → repair → approve → needs_hu
 改成成功。更新生成 Skill 前核对项目定制内容，不默认强制覆盖。
 Full Access 的 worktree 不是 OS 隔离；Vega 不自动 push、合并、部署或解除人工风险。
 
-## 发布前待核对
+## 发布核对流程
 
-1. 完成 DAILY-03 缺失的真实验收；不能强迫独立 Reviewer 产生指定结论。
+1. 复核代表主路径的真实运行结果与未覆盖限制；保留失败记录，不强迫 Reviewer 产生指定结论。
 2. 对最终提交执行完整验证、编译、Ruff、架构、卫生、计划及 diff 检查；核对精确
    PR HEAD CI 和合并后 main CI，不引用旧版本绿勾代替。
 3. 从最终干净提交构建 wheel/sdist，检查内容、元数据、内置资源和敏感文件；
    在独立环境分别安装，核对 pip check、隔离导入来源、版本、CLI 与生成 Skill。
-4. 核对 Tag 与最终提交、制品 SHA256、上传后的下载与安装。当前没有 0.7.0 下载承诺。
+4. 核对 Tag 与最终提交、制品 SHA256、上传后的下载与安装。下载前核对 Release 实际资产。
 
-本次准备 PR 只做直接受影响回归与静态门禁；完整 pytest 和最终干净打包留待审阅提交后。
-安全支持窗口仍待单独决定，本说明不替代 SECURITY.md 的支持政策。
+历史准备提交已有全量CI与独立安装证据，但不替代最终提交的CI和干净制品验收。
+安全支持策略见 [SECURITY.md](../SECURITY.md)。

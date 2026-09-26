@@ -418,12 +418,15 @@ def _core_evidence(
         return _item("核心完成", "stale", "child Finish 摘要不匹配")
     if isinstance(finish, dict) and finish.get("run_id") == observation.child_run and finish.get("finish_status") == finish_status != "ready_to_commit":
         detail = verification_interruption_detail(finish, observation)
-        return _item("核心完成", "failed", detail or f"finish_status={finish_status!r}；中断详情未验证")
+        if detail or finish.get("verification_passed") is not True:
+            return _item("核心完成", "failed", detail or f"finish_status={finish_status!r}；验证未通过，未取得可信中断详情")
     if (
         not isinstance(finish, dict)
-        or core_status != "success"
+        or core_status not in {"success", "needs_human"}
         or finish.get("run_id") != observation.child_run
-        or finish.get("finish_status") != "ready_to_commit"
+        or finish.get("finish_status") != finish_status
+        or finish_status not in {"ready_to_commit", "needs_human"}
+        or (finish_status == "ready_to_commit" and core_status != "success")
         or finish.get("verification_passed") is not True
         or finish.get("latest_verification_failed") is not False
         or not _nested_flag(finish, "artifact_integrity", "valid")
@@ -437,6 +440,8 @@ def _core_evidence(
     return _item(
         "核心完成",
         "passed",
+        "验证通过、完成证据完整且新鲜；等待人工确认，不代表允许提交或自动继续"
+        if finish_status == "needs_human" else
         "finish_status=ready_to_commit；Core 报告中的 worker/scope=skipped 仅表示 assist Core 未自行执行这些步骤",
     )
 

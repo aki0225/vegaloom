@@ -67,7 +67,7 @@ def test_supervisor_evidence_requires_bound_success_artifacts(tmp_path: Path) ->
     ]
 
 
-@pytest.mark.parametrize("case", ["timed_out", "stopped", "termination-unconfirmed", "unconfirmed_command", "corrupt", "drift", "old_iteration"])
+@pytest.mark.parametrize("case", ["human", "human_stale", "human_corrupt", "timed_out", "stopped", "termination-unconfirmed", "unconfirmed_command", "corrupt", "drift", "old_iteration"])
 def test_bound_core_interruption_remains_visible_without_success(tmp_path: Path, case: str) -> None:
     run_dir = _run_dir(tmp_path)
     state = _state()
@@ -84,6 +84,9 @@ def test_bound_core_interruption_remains_visible_without_success(tmp_path: Path,
     finish["evidence_freshness"] = {"fresh": False, "issues": ["trusted_review_missing"],
                                    "current_workspace_fingerprint": "1" * 64}
     assert observation.workspace_fingerprint != "1" * 64
+    if case.startswith("human"):
+        finish.update(verification_passed=True, verification_results=[], iterations=[])
+        finish["evidence_freshness"] = {"fresh": case != "human_stale"}
     finish_path.write_text(json.dumps(finish), encoding="utf-8")
     summary_path = run_dir / _child_ref(observation)
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -93,12 +96,17 @@ def test_bound_core_interruption_remains_visible_without_success(tmp_path: Path,
     observation = observation.model_copy(update={"evidence_sha256": {
         **observation.evidence_sha256, _child_ref(observation): hashlib.sha256(summary_path.read_bytes()).hexdigest(),
     }})
-    if case == "corrupt":
+    if case in {"corrupt", "human_corrupt"}:
         finish_path.write_text("{}", encoding="utf-8")
     evidence = build_supervisor_evidence(run_dir, state, observation, _plan())
     core = evidence[-1]
+    if case == "human":
+        assert core.status == "passed"
+        assert "等待人工确认" in core.detail
+        assert "中断" not in core.detail
+        return
     assert core.status != "passed"
-    if case in {"corrupt", "drift", "old_iteration"}:
+    if case in {"corrupt", "drift", "old_iteration", "human_stale", "human_corrupt"}:
         assert "Core 验证中断" not in core.detail
     else:
         expected = "termination-unconfirmed" if case == "unconfirmed_command" else case
