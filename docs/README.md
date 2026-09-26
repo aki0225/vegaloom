@@ -25,6 +25,10 @@
 
 ## 发布
 
+源码 `0.7.0` 尚未发布，准备范围与待验收项见
+[`RELEASE-NOTES-0.7.0.md`](RELEASE-NOTES-0.7.0.md)。正式稳定版仍为 `v0.6.0`，
+安装稳定包后使用 [tag v0.6.0 的使用说明](https://github.com/aki0225/vegaloom/blob/v0.6.0/docs/USAGE-WALKTHROUGH.md)。
+
 `v0.6.0` 的变更、升级限制和发布核对项见
 [`RELEASE-NOTES-0.6.0.md`](RELEASE-NOTES-0.6.0.md)。制品是否已发布以
 [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.6.0) 为准。
