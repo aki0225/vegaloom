@@ -10,6 +10,10 @@ from .brief_runtime import BriefRuntime
 from .risk_review_evidence import review_run_allows_verdict as _review_run_allows_verdict
 from .execution_control import RunnerExecutionContext
 from .gate_runtime import evaluate_risk, render_gate_report
+from .loop_artifact_io import (
+    copy_if_exists as _copy_if_exists,
+    write_text_artifact as _write_text_artifact,
+)
 from .loop_continue_support import (
     next_iteration_number,
     plan_recovered_auto_worker,
@@ -283,8 +287,8 @@ class LoopAutomationRuntime:
         # brief 子 run 已形成后立即绑定根状态。若随后崩溃，recovery 至少能判断
         # 原始任务身份；若在此保存前崩溃，continue 会因缺少绑定而 fail closed。
         state.save(run_dir / "state.json")
-        _copy_if_exists(brief_run / "agent-brief.md", run_dir / "agent-brief.md")
-        _copy_if_exists(brief_run / "project-context.md", run_dir / "project-context.md")
+        _copy_if_exists(brief_run / "agent-brief.md", run_dir / "agent-brief.md", preserve_bytes=True)
+        _copy_if_exists(brief_run / "project-context.md", run_dir / "project-context.md", preserve_bytes=True)
         trace.write("brief_finished", brief_run=state.brief_run)
         _write_text_artifact(
             run_dir / "loop-plan.md",
@@ -2653,14 +2657,6 @@ def _write_final_report(
     )
 
 
-def _copy_if_exists(source: Path, target: Path) -> None:
-    if source.exists():
-        _write_text_artifact(
-            target,
-            source.read_text(encoding="utf-8", errors="replace"),
-        )
-
-
 def _copy_verification_summary_if_available(
     verification_status: str,
     verification_log: Path | None,
@@ -2678,11 +2674,6 @@ def _read_optional_text(path: Path) -> str:
 
 def _reflect_has_tracked_diff(reflect_run: Path) -> bool:
     return bool(_read_optional_text(reflect_run / "full-diff.patch").strip())
-
-
-def _write_text_artifact(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(redact_text(text), encoding="utf-8")
 
 
 def _finalize_loop_eval(
