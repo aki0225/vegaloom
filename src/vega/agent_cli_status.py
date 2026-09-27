@@ -154,20 +154,25 @@ def _recommended_action_text(snapshot: AgentCliSnapshot) -> str:
 def _delivery_lines(status: dict[str, object], phase: str) -> list[str]:
     """在终态第一屏指出现有报告和 Candidate，不创建新的交付状态。"""
 
-    if phase != "completed":
-        return []
-    lines: list[str] = []
     delivery = status.get("delivery")
+    inspection = phase == "needs_human" and isinstance(delivery, dict) and delivery.get("inspection_only") is True
+    if phase != "completed" and not inspection:
+        return []
+    lines: list[str] = ["", "## 人工检查入口（非交付成功）"] if inspection else []
     if isinstance(delivery, dict):
         for key, label in (("worktree_path", "代码目录"), ("branch", "任务分支"), ("base_revision", "累计 Diff 基线")):
             value = delivery.get(key)
             if isinstance(value, str) and value:
                 lines.append(f"- {label}：`{value}`")
-    candidate = status.get("accepted_checkpoint_sha") or status.get(
-        "active_candidate_sha"
-    )
+    candidate = (status.get("active_candidate_sha") if inspection else
+                 status.get("accepted_checkpoint_sha") or status.get("active_candidate_sha"))
     if isinstance(candidate, str) and candidate:
         lines.append(f"- Candidate：`{candidate}`")
+    if inspection:
+        base = delivery.get("base_revision")
+        if base and candidate:
+            lines.append(f"- 查看 Diff：在代码目录运行 `git diff {base} {candidate} --`（只读）")
+        lines.extend(f"- 审查/风险报告：`{path}`" for path in delivery.get("reports", []))
     artifacts = status.get("key_artifacts")
     if isinstance(artifacts, list):
         reports = [
@@ -223,6 +228,7 @@ def render_agent_explanation(
         "",
         *_bullet_lines(explanation.evidence_refs, empty="暂无。", code=True),
     ]
+    lines.extend(_delivery_lines(snapshot.status, explanation.phase))
     if full:
         if snapshot.full_status is None:
             raise ValueError("当前 CLI 快照未包含完整状态卡。")

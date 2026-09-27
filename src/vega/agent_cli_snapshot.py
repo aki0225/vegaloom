@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -79,7 +80,7 @@ def resolve_agent_cli_run(
         )
     selected = select_repository_change_run(location)
     if selected is None:
-        raise ChangeRunSelectionError("当前仓库没有可读取的 ChangeRun。")
+        raise ChangeRunSelectionError("当前仓库没有可读取的 ChangeRun。", reason_code="run.not_found")
     return AgentCliRun(
         workspace=selected.run_dir.parent.parent,
         run_dir=selected.run_dir,
@@ -143,6 +144,10 @@ def build_agent_cli_snapshot(
                 key: change_metadata.get(key)
                 for key in ("worktree_path", "branch", "base_revision")
             }
+        elif isinstance(change_metadata, dict):
+            inspection = _manual_inspection(projection, target, change_metadata)
+            if inspection:
+                payload["delivery"] = inspection
         projection.payload.update(payload)
         explanation = build_agent_explanation(
             target.run_dir,
@@ -176,6 +181,36 @@ def build_agent_cli_snapshot(
         "Agent State 在状态快照构建期间持续变化；"
         "已拒绝拼接不同版本的 status 与 explain，请稍后重试。"
     )
+
+
+def _manual_inspection(projection: AgentStatusProjection, target: AgentCliRun, metadata: dict) -> dict:
+    """只定位已完成对账的人工检查材料，不授予继续或提交权限。"""
+    card, state = projection.card, projection.state
+    if (card.phase != "needs_human" or card.evidence_health != "passed"
+            or card.workspace_current is not True or card.integrity_warning
+            or state.active_child_run or state.active_operation_id or state.active_planning_execution_id
+            or (projection.execution and (projection.execution.get("status") != "completed"
+                                          or projection.execution.get("termination_unconfirmed")))
+            or projection.observation is None or projection.observation.external_side_effects != "none"
+            or projection.provider_warnings or not projection.last_child_run):
+        return {}
+    try:
+        child = resolve_run_dir(target.workspace, projection.last_child_run)
+        finish = json.loads((child / "finish-summary.json").read_text(encoding="utf-8"))
+        if not isinstance(finish, dict) or finish.get("run_id") != projection.last_child_run:
+            return {}
+        reports = []
+        for ref in finish.get("key_artifacts", []):
+            path = Path(ref).resolve()
+            if path.is_relative_to(child.resolve()) and path.name == "review-findings.md" and path.is_file():
+                reports.append(str(path))
+                risk = path.with_name("risk-gate-report.md")
+                if risk.resolve().is_relative_to(child.resolve()) and risk.is_file():
+                    reports.append(str(risk))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return {**{key: metadata.get(key) for key in ("worktree_path", "branch", "base_revision")},
+            "inspection_only": True, "reports": reports}
 
 
 def _agent_status_payload(

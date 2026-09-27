@@ -247,8 +247,11 @@ def test_change_rejects_missing_fixed_config_before_creating_run(
         lambda *a, **kw: pytest.fail("配置缺失时不应创建调查或调用模型"),
     )
 
-    with pytest.raises(ValueError, match="自然语言 Change 需要"):
+    with pytest.raises(ValueError, match="自然语言 Change 需要") as error:
         driver.change(text="修复示例函数")
+    if config_text is None:
+        assert "HEAD 中缺少已提交配置" in str(error.value)
+        assert "vega config check --repo . --change" in str(error.value)
 
 
 @pytest.mark.parametrize(
