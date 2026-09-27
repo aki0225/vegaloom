@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import vega.agent_explain as explain_module
+import vega.agent_recovery_display as recovery_display
 from vega.agent_contract import (
     AgentCheckpoint,
     AgentDecision,
@@ -452,6 +453,71 @@ def test_completed_checkpoint_accepts_bound_finalize_decision(
 
     assert loaded == decision
     assert issue is None
+
+
+@pytest.mark.parametrize(
+    "risk,reason,expected_calls",
+    [("blocked", "gate.risk.blocked", []),
+     ("passed", "evidence.core_untrusted", ["acceptance", "recheck"]),
+     (None, None, ["acceptance", "recheck"])],
+)
+def test_recovery_explanation_skips_only_proven_ineligible_queries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    risk: str | None, reason: str | None, expected_calls: list[str],
+) -> None:
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="needs_human", checkpoint_id="checkpoint-001")
+    _write_checkpoint_decision(run_dir, state, reason_code=reason)
+    _stub_status(monkeypatch, state)
+    projection = explain_module.build_agent_status_projection(run_dir, state, _plan())
+    projection.observation = SimpleNamespace(risk=risk) if risk else None
+    calls: list[str] = []
+    monkeypatch.setattr(
+        recovery_display, "acceptance_explanation",
+        lambda *args: calls.append("acceptance"),
+    )
+    monkeypatch.setattr(
+        recovery_display, "core_recheck_available",
+        lambda *args: calls.append("recheck") or False,
+    )
+
+    result = build_agent_explanation(run_dir, state, _plan(), status_projection=projection)
+
+    assert calls == expected_calls
+    assert result.phase == "needs_human"
+    assert "run.continue" not in result.safe_actions
+    assert "review.supplement" not in result.safe_actions
+
+
+@pytest.mark.parametrize("eligible", ["acceptance", "recheck"])
+def test_recovery_explanation_keeps_full_admission_for_possible_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, eligible: str,
+) -> None:
+    import vega.agent_core_recheck as recheck
+    import vega.agent_reviewer_timeout_retry as acceptance
+
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="needs_human", checkpoint_id="checkpoint-001")
+    _write_checkpoint_decision(run_dir, state, reason_code="evidence.core_untrusted")
+    _stub_status(monkeypatch, state)
+    projection = explain_module.build_agent_status_projection(run_dir, state, _plan())
+    projection.observation = SimpleNamespace(risk="passed")
+    calls: list[str] = []
+
+    def prepare_acceptance(*args, **kwargs):
+        calls.append("acceptance")
+        assert kwargs == {"acceptance": True}
+        if eligible != "acceptance":
+            raise ValueError("受控完整准入拒绝补验")
+
+    monkeypatch.setattr(acceptance, "prepare_reviewer_timeout_source", prepare_acceptance)
+    monkeypatch.setattr(recheck, "prepare_core_recheck", lambda *args: calls.append("recheck"))
+    result = build_agent_explanation(run_dir, state, _plan(), status_projection=projection)
+
+    assert calls == (["acceptance"] if eligible == "acceptance" else ["acceptance", "recheck"])
+    assert result.reason_code == (
+        "review.acceptance_missing" if eligible == "acceptance" else "evidence.core_recheck_available"
+    )
 
 
 def _write_checkpoint_decision(

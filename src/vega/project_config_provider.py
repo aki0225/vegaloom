@@ -83,8 +83,9 @@ def validate_change_startup_config(
             ProjectConfigIssue(
                 code="change_project_config_missing",
                 severity="error",
-                message="自然语言 Change 需要已跟踪的 `.vega.yaml`，其中登记固定验证命令。",
-                evidence="请先登记 verification.commands；不会从项目画像猜测验证命令。",
+                message=("自然语言 Change 需要固定验证命令，但 HEAD 中缺少已提交配置 `.vega.yaml`。"
+                         "请核对并提交配置，运行 `vega config check --repo . --change` 后再重试。"),
+                evidence="只读取 HEAD；仅创建或 git add 尚未生效，不会从项目画像猜测验证命令。",
             )
         ]
     if not config.verification.commands:

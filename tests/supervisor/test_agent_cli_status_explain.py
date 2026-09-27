@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -144,6 +145,63 @@ def test_status_rejects_multiple_active_change_runs(
     assert "拒绝自动选择" in result.output
     assert first.run_dir.name in result.output
     assert second.run_dir.name in result.output
+    for command in ("status", "explain"):
+        structured = CliRunner().invoke(app, [command, "--json"])
+        assert structured.exit_code == 2
+        payload = json.loads(structured.stdout)
+        assert payload["run_id"] is None
+        assert payload["reason_code"] == "run.multiple_active"
+        assert all("--run" in action for action in payload["safe_actions"])
+
+
+@pytest.mark.parametrize("command", ["status", "explain"])
+def test_empty_repository_query_returns_json_and_next_step(tmp_path, monkeypatch, command) -> None:
+    repo = _repo(tmp_path / "repo")
+    monkeypatch.chdir(repo)
+    result = CliRunner().invoke(app, [command, "--json"])
+    assert result.exit_code == 2
+    payload = json.loads(result.stdout)
+    assert payload["reason_code"] == "run.not_found"
+    assert 'vega change "<需求>"' in payload["safe_actions"]
+    text = CliRunner().invoke(app, [command])
+    assert text.exit_code == 2
+    assert "下一步" in text.output
+
+
+@pytest.mark.parametrize("case", ["human", "active", "stale", "unconfirmed", "missing_report"])
+def test_manual_inspection_locates_only_existing_bound_reports(tmp_path, case) -> None:
+    child = tmp_path / "runs" / "child"
+    review = child / "iterations/01/review-findings.md"
+    review.parent.mkdir(parents=True)
+    review.write_text("审查结论", encoding="utf-8")
+    risk = review.with_name("risk-gate-report.md")
+    risk.write_text("风险披露", encoding="utf-8")
+    (child / "finish-summary.json").write_text(json.dumps({
+        "run_id": "child", "key_artifacts": [str(review)],
+    }), encoding="utf-8")
+    if case == "missing_report":
+        review.unlink()
+    projection = SimpleNamespace(
+        card=SimpleNamespace(phase="needs_human", evidence_health="stale" if case == "stale" else "passed",
+                             workspace_current=True, integrity_warning=None),
+        state=SimpleNamespace(active_child_run="child" if case == "active" else None,
+                              active_operation_id=None, active_planning_execution_id=None),
+        execution={"status": "completed", "termination_unconfirmed": True} if case == "unconfirmed" else None,
+        provider_warnings=(), last_child_run="child",
+        observation=SimpleNamespace(external_side_effects="none"),
+    )
+    target = AgentCliRun(tmp_path, tmp_path / "runs/parent", "explicit")
+    delivery = cli_snapshot_module._manual_inspection(projection, target, {"worktree_path": "code", "base_revision": "a" * 40})
+    if case in {"active", "stale", "unconfirmed"}:
+        assert delivery == {}
+        return
+    assert delivery["reports"] == ([] if case == "missing_report" else [str(review.resolve()), str(risk.resolve())])
+    snapshot = AgentCliSnapshot(target, {"agent_phase": "needs_human", "delivery": delivery,
+        "active_candidate_sha": "b" * 40}, AgentExplanation(run_id="parent", phase="needs_human",
+        outcome="attention_required", source="phase", actor="runtime", reason_code="example", reason="需人工"))
+    rendered = render_compact_agent_status(snapshot)
+    assert "人工检查入口（非交付成功）" in rendered
+    assert "git diff" in rendered and "b" * 40 in rendered
 
 
 def test_status_default_full_and_explain_share_read_only_snapshot(

@@ -43,9 +43,11 @@ class ChangeRunSelectionError(ValueError):
         message: str,
         *,
         candidates: tuple[RepositoryChangeRun, ...] = (),
+        reason_code: str = "run.selection_failed",
     ) -> None:
         super().__init__(message)
         self.candidates = candidates
+        self.reason_code = reason_code
 
 
 def resolve_repository_root(location: Path) -> Path:

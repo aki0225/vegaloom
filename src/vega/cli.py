@@ -29,6 +29,7 @@ from .project_config import check_project_config, render_project_config_check
 from .run_progress import progress_items_for_run
 from .run_status import latest_run_dir, render_run_status, run_status_payload
 from .run_utils import resolve_run_dir
+from .redaction import redact_text
 
 
 app = typer.Typer(
@@ -144,10 +145,11 @@ def status(
         else:
             typer.echo(render_status_snapshot(snapshot, full=full))
     except ChangeRunSelectionError as exc:
-        typer.echo(f"无法选择 ChangeRun：{exc}", err=True)
+        _render_query_error(exc, json_output=json_output)
         raise typer.Exit(code=2) from exc
     except (FileNotFoundError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
+        _render_query_error(exc, json_output=json_output)
+        raise typer.Exit(code=2) from exc
 
 
 @app.command("explain", rich_help_panel="日常使用")
@@ -183,10 +185,25 @@ def explain(
         else:
             typer.echo(render_agent_explanation(snapshot, full=full))
     except ChangeRunSelectionError as exc:
-        typer.echo(f"无法选择 ChangeRun：{exc}", err=True)
+        _render_query_error(exc, json_output=json_output)
         raise typer.Exit(code=2) from exc
     except (FileNotFoundError, ValueError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
+        _render_query_error(exc, json_output=json_output)
+        raise typer.Exit(code=2) from exc
+
+
+def _render_query_error(exc: Exception, *, json_output: bool) -> None:
+    candidates = getattr(exc, "candidates", ())
+    reason = "run.multiple_active" if candidates else getattr(exc, "reason_code", "run.selection_failed")
+    actions = (["vega config check --repo . --change", 'vega change "<需求>"']
+               if reason == "run.not_found" else ["vega status --run <run-id>", "vega explain --run <run-id>"])
+    message = redact_text(f"无法选择 ChangeRun：{exc}")
+    if json_output:
+        typer.echo(json.dumps({"schema_version": 1, "run_id": None, "phase": None,
+                              "outcome": "error", "reason_code": reason, "message": message,
+                              "safe_actions": actions}, ensure_ascii=False))
+    else:
+        typer.echo(f"{message}\n下一步：{'；'.join(actions)}", err=True)
 
 
 @app.command("watch")
