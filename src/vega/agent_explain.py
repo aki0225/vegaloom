@@ -6,8 +6,7 @@ from typing import Literal, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import agent_explain_codes as explain_codes
-from .agent_core_recheck import core_recheck_available
-from .acceptance_submission import acceptance_explanation
+from .agent_recovery_display import acceptance_for_display, core_recheck_for_display
 from .agent_contract import AgentCheckpoint, AgentDecision, AgentPhase, AgentPlan, AgentState
 from .agent_planning_handoff import can_offer_handoff
 from .agent_provider_explain import with_provider_warnings
@@ -141,7 +140,7 @@ def build_agent_explanation(
     if active is not None:
         return with_provider_warnings(active, provider_warnings)
 
-    phase = acceptance_explanation(run_dir, state) or _phase_explanation(
+    phase = acceptance_for_display(run_dir, state, getattr(inputs, "observation", None)) or _phase_explanation(
         run_dir, state, plan, status, checkpoint, decision,
     )
     if phase is not None:
@@ -331,7 +330,7 @@ def _phase_explanation(
             safe_actions=safe_actions,
             evidence_refs=_checkpoint_refs(state, checkpoint),
         )
-    if state.phase == "needs_human" and core_recheck_available(run_dir.parent.parent, run_dir.name):
+    if state.phase == "needs_human" and core_recheck_for_display(run_dir, decision):
         return _explanation(
             state, phase=state.phase, outcome="ready", source="evidence",
             reason_code="evidence.core_recheck_available", actor="Core 证据对账",
