@@ -1,7 +1,7 @@
 # 架构
 
-> 本文描述已发布的 `v0.7.0` 架构，在同一 ChangeRun 合同内支持 Codex 和 Claude Code。
-> 能力与限制见 [`RELEASE-NOTES-0.7.0.md`](RELEASE-NOTES-0.7.0.md)，资产见 [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.0)。
+> 本文描述 `v0.7.1` 源码架构，在同一 ChangeRun 合同内支持 Codex 和 Claude Code。
+> 能力与限制见 [`RELEASE-NOTES-0.7.1.md`](RELEASE-NOTES-0.7.1.md)，发布状态和资产以 [GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.1) 为准。
 > [`RELEASE-CHECKLIST.md`](RELEASE-CHECKLIST.md) 仅记录 v0.5.0 的历史验收。演进计划见
 > [`BOUNDED-AUTONOMY-V1-PLAN.md`](BOUNDED-AUTONOMY-V1-PLAN.md)；当前事项见
 > [`CURRENT.md`](CURRENT.md)。

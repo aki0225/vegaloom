@@ -1,7 +1,7 @@
 # 使用说明
 
-本文对应已发布的 v0.7.0；安装资产见
-[GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.0)，能力与限制见[当前发布说明](RELEASE-NOTES-0.7.0.md)。
+本文对应 v0.7.1；安装前请确认对应 Release 已提供资产，见
+[GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.1)，能力与限制见[当前发布说明](RELEASE-NOTES-0.7.1.md)。
 旧 Run 只能查看、停止或可信交接，不能原地继续执行。升级前先按
 [发布说明](RELEASE-NOTES-0.6.0.md#升级前先看)处理未完成任务。
 
