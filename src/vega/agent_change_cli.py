@@ -226,7 +226,12 @@ def agent_recover(
         help="结构化 Recovery Request JSON。",
     ),
 ) -> None:
-    """Worker 失去可信终态后，对账进程、Workspace 和副作用。"""
+    """Worker 失去可信终态后，对账进程、Workspace 和副作用。
+
+    请求示例与核对要求：
+    https://github.com/aki0225/vegaloom/blob/main/docs/USAGE-WALKTHROUGH.md#11-worker-异常
+    现场与副作用必须实际核对，不可直接照抄示例的 true/none。
+    """
 
     try:
         request = AgentRecoveryRequest.model_validate_json(

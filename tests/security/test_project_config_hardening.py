@@ -14,6 +14,22 @@ from vega.project_profile import ProjectProfileRuntime
 from vega.reflect_runtime import ReflectRuntime
 
 
+@pytest.mark.parametrize("broken", [False, True], ids=["unborn", "broken-ref"])
+def test_change_config_distinguishes_unborn_head(tmp_path, broken):
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    if broken:
+        ref = subprocess.check_output(["git", "symbolic-ref", "HEAD"], cwd=tmp_path, text=True).strip()
+        target = tmp_path / ".git" / ref
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("e" * 40 + "\n", encoding="ascii")
+    result = check_project_config(tmp_path, require_change_config=True)
+    assert result.status == "failed"
+    assert result.issues[0].code == ("invalid_project_config" if broken else "unborn_head")
+    if not broken:
+        assert "首次本地提交" in result.issues[0].message
+        assert "vega config check --repo . --change" in result.issues[0].message
+
+
 @pytest.mark.parametrize(
     ("content", "expected_commands"),
     [

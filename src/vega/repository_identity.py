@@ -12,6 +12,19 @@ from .git_read import coerce_git_output_bytes, run_git_capture
 _RESOLVED_GIT_REVISION_PROOF = object()
 
 
+class UnbornHeadError(RuntimeError):
+    """HEAD指向一个尚未建立提交的分支，而非损坏的已有引用。"""
+
+
+def _head_is_unborn(repo: Path) -> bool:
+    symbolic = run_git_capture(repo, ["git", "symbolic-ref", "--quiet", "HEAD"])
+    ref = coerce_git_output_bytes(symbolic.stdout).decode("utf-8", errors="strict").strip()
+    if symbolic.returncode != 0 or not ref.startswith("refs/heads/"):
+        return False
+    exists = run_git_capture(repo, ["git", "show-ref", "--verify", "--quiet", ref])
+    return exists.returncode == 1
+
+
 @dataclass(frozen=True, init=False)
 class ResolvedGitRevision:
     """绑定仓库根目录的已校验 commit，仅在同一次读取事务中复用。"""
@@ -94,6 +107,8 @@ def resolve_git_revision(
         errors="replace",
     )
     if result.returncode != 0 or not stdout.strip():
+        if revision == "HEAD" and _head_is_unborn(repo):
+            raise UnbornHeadError("当前分支HEAD尚无可用的已提交版本。")
         raise RuntimeError("无法解析 tracked 项目上下文 revision；已拒绝使用空画像继续。")
     commit = stdout.strip()
     if not _is_full_object_id(commit):

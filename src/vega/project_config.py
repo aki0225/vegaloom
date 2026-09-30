@@ -249,6 +249,7 @@ def check_project_config(
     verification runtime 控制，避免 config check 本身变成隐式 CI。
     """
     from .project_config_provider import (
+        project_config_load_issue,
         provider_cli_available,
         select_provider,
         validate_change_startup_config,
@@ -262,12 +263,7 @@ def check_project_config(
             tracked_revision="HEAD" if require_change_config else None,
         )
     except Exception as exc:  # noqa: BLE001 - 这里要把 YAML/Pydantic 错误统一转为用户可读问题
-        issue = ProjectConfigIssue(
-            code="invalid_project_config",
-            severity="error",
-            message="`.vega.yaml` 解析或 schema 校验失败，runtime 无法安全使用该配置。",
-            evidence=str(exc)[:1000],
-        )
+        issue = project_config_load_issue(exc)
         return ProjectConfigCheckResult(
             repo_path=str(repo),
             source_path=_find_config_path(repo),

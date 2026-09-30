@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import json
 import subprocess
 from pathlib import Path
@@ -517,3 +518,17 @@ def _artifact_snapshot(run_dir: Path) -> dict[str, tuple[int, bytes]]:
         for path in sorted(run_dir.rglob("*"))
         if path.is_file()
     }
+
+
+def test_latest_empty_json_keeps_exit_one(tmp_path, monkeypatch):
+    import json
+    from typer.testing import CliRunner
+    from vega.cli_entrypoint import app
+
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(app, ["latest", "--json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["reason_code"] == "run.not_found"
+    assert payload["run_id"] is None and payload["outcome"] == "error"
+    assert CliRunner().invoke(app, ["latest"]).stdout.strip() == "未找到 Agent run。"

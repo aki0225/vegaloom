@@ -421,19 +421,21 @@ jobs:
       - name: 构建并安装 Windows wheel
         shell: pwsh
         run: |
+          $expectedVersion = python scripts/project_version.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m build --wheel --outdir dist
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m venv .tmp/release-validation/windows-venv
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $venvPython = Resolve-Path .tmp/release-validation/windows-venv/Scripts/python.exe
-          & $venvPython -m pip install dist/vegaloom-0.7.1-py3-none-any.whl
+          & $venvPython -m pip install "dist/vegaloom-$expectedVersion-py3-none-any.whl"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $vegaCli = Resolve-Path .tmp/release-validation/windows-venv/Scripts/vega.exe
           & $venvPython -m pip check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $version = & $venvPython -I -c "import vega; print(vega.__version__)"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if ($version.Trim() -ne "0.7.1") {
+          if ($version.Trim() -ne $expectedVersion) {
             throw "Windows wheel 版本不一致：$version"
           }
           & $venvPython -I -c "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
@@ -461,7 +463,7 @@ jobs:
               $capabilities.reviewer_isolation -ne "per-work-item" -or
               $capabilities.automatic_commit_push_release
             ) {
-              throw "Windows wheel 的 Agent 能力声明不符合 v0.7.1 合同"
+              throw "Windows wheel 的 Agent 能力声明不符合 v$expectedVersion 合同"
             }
             $adapterRepo = Join-Path $env:RUNNER_TEMP "vega-adapter-smoke"
             New-Item -ItemType Directory -Force -Path $adapterRepo | Out-Null
@@ -543,30 +545,32 @@ jobs:
       - name: 构建 wheel 与 sdist
         run: |
           python -m pip install build twine
+          version="$(python scripts/project_version.py)"
+          printf 'VEGA_PACKAGE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
           python -m build --outdir dist
-          test -f dist/vegaloom-0.7.1-py3-none-any.whl
-          test -f dist/vegaloom-0.7.1.tar.gz
+          test -f "dist/vegaloom-${version}-py3-none-any.whl"
+          test -f "dist/vegaloom-${version}.tar.gz"
           python -m twine check dist/*
 
       - name: 在干净环境安装并验证 wheel
         shell: bash
         run: |
           python -m venv .tmp/release-validation/venv
-          .tmp/release-validation/venv/bin/python -m pip install dist/vegaloom-0.7.1-py3-none-any.whl
+          .tmp/release-validation/venv/bin/python -m pip install "dist/vegaloom-${VEGA_PACKAGE_VERSION}-py3-none-any.whl"
           .tmp/release-validation/venv/bin/python -m pip check
           test "$(
             .tmp/release-validation/venv/bin/python -I -c \
               "from importlib.metadata import version; print(version('vegaloom'))"
-          )" = "0.7.1"
+          )" = "$VEGA_PACKAGE_VERSION"
           test "$(
             .tmp/release-validation/venv/bin/python -I -c \
               "import vega; print(vega.__version__)"
-          )" = "0.7.1"
+          )" = "$VEGA_PACKAGE_VERSION"
           .tmp/release-validation/venv/bin/python -I -c \
             "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
           .tmp/release-validation/venv/bin/python -I -c \
             "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); print(AdequacyResult.__name__)"
-          test "$(.tmp/release-validation/venv/bin/vega --version)" = "0.7.1"
+          test "$(.tmp/release-validation/venv/bin/vega --version)" = "$VEGA_PACKAGE_VERSION"
           .tmp/release-validation/venv/bin/vega --help >/dev/null
 
           vega_cli="${GITHUB_WORKSPACE}/.tmp/release-validation/venv/bin/vega"
@@ -625,12 +629,12 @@ jobs:
         run: |
           python -m venv .tmp/release-validation/sdist-venv
           .tmp/release-validation/sdist-venv/bin/python -m pip install \
-            dist/vegaloom-0.7.1.tar.gz
+            "dist/vegaloom-${VEGA_PACKAGE_VERSION}.tar.gz"
           .tmp/release-validation/sdist-venv/bin/python -m pip check
           test "$(
             .tmp/release-validation/sdist-venv/bin/python -I -c \
               "import vega; print(vega.__version__)"
-          )" = "0.7.1"
+          )" = "$VEGA_PACKAGE_VERSION"
           .tmp/release-validation/sdist-venv/bin/python -I -c \
             "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
           .tmp/release-validation/sdist-venv/bin/python -I -c \

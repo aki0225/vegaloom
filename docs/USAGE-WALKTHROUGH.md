@@ -498,3 +498,7 @@ runs/<run_id>/agent-final-report.json
 - 未证明事项。
 
 Vega 到这里结束。Git push、PR、merge 和 release 由人执行。
+
+检查累计 Diff 后，可以人工使用任务分支交付，或在干净的目标分支采纳完整改动。
+先排除任务准备文件和无关历史提交，不要机械 cherry-pick 最后一条 Candidate：多 Work Item
+的修改可能分布于多个提交。源基线已变化或存在冲突时，由人决定如何整合并复验，Vega 不自动采纳。
