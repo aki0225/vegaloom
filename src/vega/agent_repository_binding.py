@@ -77,12 +77,14 @@ def validate_run_repository_binding(
     repo = _validate_repo_identity(state, metadata)
     _validate_revision_binding(repo, metadata, "base_revision", "base revision")
     _validate_task_card_binding(repo, metadata)
-    _validate_revision_binding(
-        repo,
-        metadata,
-        "comparison_base_revision",
-        "comparison base",
-    )
+    # base已验证为本仓库的完整固定OID；仅同次相同值复用，不复用可变引用。
+    if metadata.get("comparison_base_revision") != metadata["base_revision"]:
+        _validate_revision_binding(
+            repo,
+            metadata,
+            "comparison_base_revision",
+            "comparison base",
+        )
     return repo
 
 

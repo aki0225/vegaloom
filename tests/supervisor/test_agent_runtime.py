@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from vega import agent_runtime as agent_runtime_module
+from vega import agent_repository_binding as repository_binding_module
 from vega import agent_repository_guard as agent_repository_guard_module
 from vega import agent_runtime_support as agent_runtime_support_module
 from vega import agent_status_card as agent_status_card_module
@@ -18,6 +19,7 @@ from vega.agent_cli import _interaction_response
 from vega.agent_contract import (
     AgentObservation,
     AgentPlan,
+    AgentState,
     AgentWorkItem,
 )
 from vega.agent_persistence import (
@@ -97,6 +99,56 @@ def test_comparison_paths_require_comparison_base() -> None:
         require_comparison_binding_from_mapping(
             {"comparison_paths": ["src/example.py"]}
         )
+
+
+@pytest.mark.parametrize(
+    "comparison",
+    ["same", "different", "missing", "invalid", "foreign", "mutable", "missing-base"],
+)
+def test_repository_binding_reuses_only_current_fixed_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, comparison: str,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    base = _head(repo)
+    _git(repo, "commit", "--allow-empty", "-m", "测试：另一个固定版本")
+    head = _head(repo)
+    metadata = {
+        "schema_version": 1, "run_id": "binding-fixture", "repo_path": str(repo),
+        "base_revision": base,
+    }
+    revisions = {"same": base, "different": head, "invalid": "not-a-revision",
+                 "foreign": "e" * 40, "mutable": "HEAD", "missing-base": base}
+    if comparison != "missing":
+        metadata["comparison_base_revision"] = revisions[comparison]
+    if comparison == "mutable":
+        metadata["base_revision"] = "HEAD"
+    if comparison == "missing-base":
+        del metadata["base_revision"]
+    state = AgentState(run_id="binding-fixture", task_id="binding-fixture",
+                       repository_id=repository_binding_module.repository_scope(repo))
+    original = repository_binding_module.resolve_git_revision
+    calls = []
+
+    def resolve(*args):
+        calls.append(args[1])
+        return original(*args)
+
+    monkeypatch.setattr(repository_binding_module, "resolve_git_revision", resolve)
+    for _ in range(2):
+        calls.clear()
+        if comparison in {"invalid", "foreign", "mutable", "missing-base"}:
+            with pytest.raises((ValueError, RuntimeError)):
+                repository_binding_module.validate_run_repository_binding(
+                    tmp_path / state.run_id, state, metadata,
+                )
+        else:
+            assert repository_binding_module.validate_run_repository_binding(
+                tmp_path / state.run_id, state, metadata,
+            ) == repo.resolve()
+        expected = [] if comparison == "missing-base" else [metadata["base_revision"]]
+        if comparison in {"different", "invalid", "foreign"}:
+            expected.append(metadata["comparison_base_revision"])
+        assert calls == expected
 
 
 def test_agent_run_rejects_repo_binding_redirect(
