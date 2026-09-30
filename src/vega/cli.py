@@ -96,7 +96,13 @@ def latest(
     try:
         run_dir = latest_run_dir(Path.cwd(), "agent")
         if run_dir is None:
-            typer.echo("未找到 Agent run。")
+            if json_output:
+                _render_query_error(
+                    ChangeRunSelectionError("未找到 Agent run。", reason_code="run.not_found"),
+                    json_output=True,
+                )
+            else:
+                typer.echo("未找到 Agent run。")
             raise typer.Exit(code=1)
         if json_output:
             typer.echo(

@@ -4,6 +4,8 @@ import shutil
 from pathlib import Path
 from typing import Literal
 
+from .repository_identity import UnbornHeadError
+
 from .project_config import (
     ProjectConfig,
     ProjectConfigIssue,
@@ -13,6 +15,20 @@ from .project_config import (
 
 
 ProviderName = Literal["codex", "claude"]
+
+
+def project_config_load_issue(exc: Exception) -> ProjectConfigIssue:
+    """区分首次提交前置条件与原有配置加载失败，不放宽启动检查。"""
+    unborn = isinstance(exc, UnbornHeadError)
+    message = (
+        "当前分支尚无可用的已提交版本；请核对实际项目配置并完成首次本地提交，"
+        "再运行 `vega config check --repo . --change`。"
+        if unborn else "`.vega.yaml` 解析或 schema 校验失败，runtime 无法安全使用该配置。"
+    )
+    return ProjectConfigIssue(
+        code="unborn_head" if unborn else "invalid_project_config",
+        severity="error", message=message, evidence=str(exc)[:1000],
+    )
 
 
 def select_provider(

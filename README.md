@@ -208,6 +208,7 @@ vega revise --run <run_id> `
 - 按 `explain` 给出的安全动作继续：`vega change --run <run_id>`。证据或授权不满足时保持停止。
 - Worker 失去可信终态：准备 Recovery Request，再运行
   `vega recover --run <run_id> --input <recovery.json>`。
+  请求示例见[Worker 异常](docs/USAGE-WALKTHROUGH.md#11-worker-异常)；现场和副作用必须实际核对，不能默认填 `true` / `none`。
 - Core Work Item Reviewer 明确 `timed_out`，且 Candidate、Workspace、Verification、Risk、
   副作用和预算均可重新证明时，Vega 会使用新的独立 Reviewer Session 自动恢复一次；
   它复用原 Candidate 和 child，完整重跑 Verification、Risk 和 Reviewer，不启动新的

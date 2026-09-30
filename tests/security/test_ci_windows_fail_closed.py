@@ -11,8 +11,51 @@ import yaml
 
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/ci.yml"
-NATIVE = re.compile(r"^(?:python |git |& \$|\$\w+ = (?:&|\(&))")
+NATIVE = re.compile(r"^(?:python |git |& \$|\$\w+ = (?:&|\(&|python ))")
 GUARD = "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
+
+
+@pytest.mark.parametrize("version", ["0.7.1", "1.2.3rc1", None, "../bad"])
+def test_ci_reads_declared_version(tmp_path, version):
+    reader = WORKFLOW.parents[2] / "scripts/project_version.py"
+    content = "[project]\n" + (f'version = "{version}"\n' if version is not None else "")
+    (tmp_path / "pyproject.toml").write_text(content, encoding="utf-8")
+    result = subprocess.run([sys.executable, str(reader)], cwd=tmp_path, capture_output=True, text=True)
+    if version in ("0.7.1", "1.2.3rc1"):
+        assert result.returncode == 0 and result.stdout.strip() == version
+    else:
+        assert result.returncode != 0 and not result.stdout
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows安装版本断言")
+@pytest.mark.parametrize("case", ["match", "missing-wheel", "wrong-version"])
+def test_windows_artifact_name_and_installed_version_follow_project(tmp_path, case):
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    body = next(s["run"] for s in workflow["jobs"]["windows"]["steps"]
+                if s["name"] == "构建并安装 Windows wheel")
+    assert '$expectedVersion = python scripts/project_version.py\n' + GUARD in body
+    artifact = re.search(r'pip install "(dist/[^"\n]+)"', body).group(1)
+    check = re.search(r'if \(\$version.Trim\(\).*?\n}', body, re.S).group(0)
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "2.3.4"\n', encoding="utf-8")
+    (tmp_path / "dist").mkdir()
+    if case != "missing-wheel":
+        (tmp_path / "dist/vegaloom-2.3.4-py3-none-any.whl").touch()
+    reader = WORKFLOW.parents[2] / "scripts/project_version.py"
+    script = (
+        f"$expectedVersion = & '{sys.executable}' '{reader}'\n{GUARD}\n"
+        f'if (!(Test-Path "{artifact}")) {{ exit 8 }}\n'
+        f'$version = "{"0.0.0" if case == "wrong-version" else "2.3.4"}"\n'
+        + check + '\nWrite-Output "OK"\n'
+    )
+    result = subprocess.run([shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command", script],
+                            cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert (result.returncode == 0) is (case == "match")
+    # Linux其他安装step从构建step写出的同一期望值读取，保留确定制品及安装后断言。
+    linux = "\n".join(s.get("run", "") for job in workflow["jobs"].values() for s in job.get("steps", [])
+                      if s.get("shell", "bash") == "bash")
+    assert 'VEGA_PACKAGE_VERSION=%s' in linux
+    assert 'dist/vegaloom-${VEGA_PACKAGE_VERSION}.tar.gz' in linux
+    assert linux.count('= "$VEGA_PACKAGE_VERSION"') == 4
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows pwsh 原生命令退出语义")
@@ -27,7 +70,7 @@ def test_windows_native_chain_fails_closed(tmp_path, step_index, failure):
     body = steps[step_index]["run"]
     lines = [line.strip() for line in body.replace("`\n", " ").splitlines() if line.strip()]
     positions = [index for index, line in enumerate(lines) if NATIVE.match(line)]
-    assert len(positions) == (3 if step_index == 0 else 11)
+    assert len(positions) == (3 if step_index == 0 else 12)
     assert "tests/security/test_ci_windows_fail_closed.py" in steps[0]["run"]
     assert "catch" not in body
     # 保留 YAML 的逐命令门禁及调用形态，仅替换有安装/构建副作用的 native 载荷。
