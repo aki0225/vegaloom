@@ -474,9 +474,7 @@ class SupervisorAgentRecovery:
             plan,
             checkpoint=checkpoint,
             next_step=(
-                "任务已停止；代码、Goal、Plan 和现场均保留。人工可使用 "
-                "vega resume --run <run-id> 重新检查 safe Checkpoint 后恢复调度，"
-                "或创建 Handoff"
+                None
                 if phase == "stopped"
                 else "停止前 Workspace 控制信息不完整；任务仍等待人工处理"
                 if stopped

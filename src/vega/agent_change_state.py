@@ -11,6 +11,19 @@ class ChangeStateView(Protocol):
     execution_plan_revision: int | None
     accepted_checkpoint_sha: str | None
     active_candidate_sha: str | None
+    approved_plan_digest: str | None
+
+
+def is_unapproved_cancellation(state: ChangeStateView) -> bool:
+    """仅识别尚未获得任何批准摘要的已编译取消记录。"""
+    return (
+        state.run_kind == "change" and state.phase == "stopped"
+        and state.contract_revision is not None
+        and state.execution_plan_revision is not None
+        and state.approved_contract_digest is None
+        and state.approved_plan_digest is None
+        and state.active_candidate_sha is None
+    )
 
 
 def validate_change_state_bindings(state: ChangeStateView) -> None:
@@ -41,6 +54,7 @@ def validate_change_state_bindings(state: ChangeStateView) -> None:
         return
     if (
         state.phase not in {"planning", "awaiting_approval"}
+        and not is_unapproved_cancellation(state)
         and state.approved_contract_digest is None
     ):
         raise ValueError("已启动的 ChangeRun 缺少 Approved Contract digest")

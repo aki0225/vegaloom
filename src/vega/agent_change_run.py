@@ -7,6 +7,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .agent_approval_policy import validate_bounded_approval_freshness
+from .agent_change_state import is_unapproved_cancellation
 from .agent_change_contract import (
     ChangeContract,
     ExecutionPlan,
@@ -246,7 +247,12 @@ def load_change_run_context(
         or execution_plan.contract_revision != contract.contract_revision
     ):
         raise ValueError("ChangeRun State 与合同或执行计划 revision 不一致")
-    if state.phase not in {"planning", "awaiting_approval"} and (
+    unapproved_cancellation = (
+        is_unapproved_cancellation(state) and not contract.approved
+        and contract.approved_digest is None and not plan.approved
+        and plan.approved_digest is None
+    )
+    if state.phase not in {"planning", "awaiting_approval"} and not unapproved_cancellation and (
         not contract.approval_is_current()
         or state.approved_contract_digest != contract.approved_digest
     ):
@@ -255,7 +261,7 @@ def load_change_run_context(
     worktree = managed_worktree_from_metadata(metadata)
     if worktree.run_id != state.run_id:
         raise ValueError("ChangeRun Worktree 与 State run_id 不一致")
-    if state.phase not in {"planning", "awaiting_approval"}:
+    if state.phase not in {"planning", "awaiting_approval"} and not unapproved_cancellation:
         validate_bounded_approval_freshness(
             worktree.worktree_path,
             contract,

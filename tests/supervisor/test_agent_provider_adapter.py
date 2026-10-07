@@ -528,7 +528,8 @@ class _FakeWorkerRunner:
         timeout_seconds: int,
         execution_context: RunnerExecutionContext | None = None,
     ) -> RunnerResult:
-        del prompt, timeout_seconds
+        self.last_prompt = prompt
+        del timeout_seconds
         assert sandbox == "workspace-write"
         assert execution_context is not None
         self.run_count += 1
@@ -1292,6 +1293,9 @@ def test_blocked_worker_claim_skips_core_and_routes_human(
     )
     assert child_summary["worker"]["claim"]["claimed_status"] == "blocked"
     assert child_summary["core"]["status"] == "not_run"
+    assert "不得派生子代理" in adapter.worker_runner.last_prompt
+    assert "以 blocked 报告规则位置和冲突" in adapter.worker_runner.last_prompt
+    assert "不得自行改成 inline" in adapter.worker_runner.last_prompt
 
 
 def test_reviewer_request_changes_routes_back_to_repair(

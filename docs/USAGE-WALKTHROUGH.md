@@ -18,6 +18,13 @@ vega config check --repo . --change
 使用 Claude Code 时，预检和首次执行都加 `--provider claude`。`config check --change`
 只检查已提交配置、仓库准备状态和所选 CLI 是否存在，不运行测试或验证登录态。
 
+pytest 固定验证应使用 Runtime 独占临时目录，例如：
+```text
+python -m pytest tests/test_example.py --basetemp={{vega_verification_temp}}/pytest -o cache_dir={{vega_verification_temp}}/cache
+```
+`{{vega_verification_temp}}` 由 Runtime 按本次验证展开，不由 Worker 直接执行。
+Worker 必要的局部自检应使用自己的独立临时目录，不复用或清理正式门禁目录。
+
 Codex 宿主接入可选：`vega adapters init codex --repo .` 生成
 `.agents/skills/vega-agent/SKILL.md`。已有同名文件默认保留；升级 Vega 后核对定制内容，
 确认可以覆盖时再加 `--force`。普通终端使用可以跳过。
@@ -46,6 +53,16 @@ Reviewer 和 Finish。省略文本时，它继续当前仓库唯一未完成的 
 分类的请求不能只凭摘要接受。
 
 ### 2.1 高级：拆开调查、批准和执行
+
+长操作默认在终端显示进度。需要机器读取最终结果时，可用
+`vega change --run <run_id> --json --progress`：stdout 仍只有最终 JSON，stderr
+显示环境准备、实现、项目验证和独立审查的已知事件及耗时。周期性“运行中”仅表示等待，
+不代表取得新进展或验证通过；“等待人工响应”不会自动批准，也不会在 JSON 模式读取 stdin。
+不加 `--progress` 的 `--json` 保持静默进度行为。
+
+环境准备失败时，`status --run <run_id>` 的下一步会显示失败命令序号、执行终态与退出码，
+并列出实际存在的记录/日志路径（相对该 Run 目录）。日志位置不代表内容已验证；请先查记录
+核对环境，再由人工决定后续。准备失败不启动 Worker、不自动重试，也不保证再次 `change` 可重跑。
 
 在 Codex 主会话中调用 `$vega-agent`，或从 Codex、Claude Code、普通终端直接使用 CLI。
 只要根因、范围或验收仍有一项不明确，就先建立只读 Planning ChangeRun：
@@ -173,6 +190,10 @@ vega change --run <run_id> --timeout 900 --fresh-session
 ```
 
 当前 Provider 不可用时默认报错，不会静默切换到另一个 Provider 或 fresh session。
+
+Codex Worker 保持单 Writer，不支持派生子代理。项目若强制子角色工作流，需人工决定兼容方式；
+Worker 应报告规则冲突，不得自行切换为 inline，也不能用 Vega 只读 Reviewer 代替可写检查角色。
+这不是自动规则冲突检测，不能仅凭提示词保证模型遵守。
 
 ## 5. 看进度
 

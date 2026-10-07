@@ -11,7 +11,7 @@ from .agent_contract import AgentCheckpoint, AgentDecision, AgentPhase, AgentPla
 from .agent_planning_handoff import can_offer_handoff
 from .agent_provider_explain import with_provider_warnings
 from .agent_status_projection import AgentStatusProjection, build_agent_status_projection
-from .agent_status_sources import explanation_detail
+from .agent_status_sources import decision_explanation_detail, explanation_detail
 from .provider_session import PROVIDER_SESSIONS_ARTIFACT
 
 
@@ -403,7 +403,7 @@ def _decision_explanation(
             "supervisor": "Supervisor",
             "human": "人工",
         }[decision.source],
-        reason=explanation_detail(status, decision.reason) if reason_code == "evidence.core_untrusted" else decision.reason,
+        reason=decision_explanation_detail(status, decision.reason, reason_code, category),
         facts=[
             f"选择动作为 {decision.selected_action}",
             f"允许动作为 {', '.join(decision.allowed_actions)}",

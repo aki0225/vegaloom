@@ -24,6 +24,7 @@ from .project_profile import build_project_profile
 from .redaction import redact_text, redact_value
 from .runtime_workspace import capture_runtime_workspace
 from .workspace_inventory import create_verification_temp_dir
+from .verification_summary import bounded_output, render_verification_summary
 
 MAX_OUTPUT_CHARS = 8000
 VerificationInterruptionStatus = Literal[
@@ -302,101 +303,6 @@ def _write_verification_config_failure(
     )
 
 
-def render_verification_summary(payload: dict[str, Any]) -> str:
-    lines = ["# 验证摘要", "", f"- 仓库：`{payload['repo_path']}`", ""]
-    if payload.get("config_path"):
-        lines.append(f"- 项目策略：`{payload['config_path']}`")
-        lines.append("")
-    workspace_capture_failed = (
-        payload.get("failure_kind") == "workspace_capture_failed"
-    )
-    if workspace_capture_failed:
-        lines.extend(
-            [
-                "- `FAIL`：验证结束后的工作区指纹采集失败，不能绑定或复用本轮验证证据。",
-                f"- 错误类型：`{payload.get('workspace_capture_error_type') or 'unknown'}`",
-                "",
-            ]
-        )
-    if not payload["commands"]:
-        if workspace_capture_failed:
-            lines.extend(
-                [
-                    "## 结果",
-                    "",
-                    "- `FAIL`：未获得可信工作区快照，已停止 Reflect 和 reviewer。",
-                ]
-            )
-            return "\n".join(lines).rstrip() + "\n"
-        lines.extend(
-            [
-                "- 未识别自动验证命令；请人工补充最小验证结果。",
-                "",
-                "## 结果",
-                "",
-                "- `SKIP`：project profile 未给出 test/lint 命令。",
-            ]
-        )
-        return "\n".join(lines).rstrip() + "\n"
-
-    lines.extend(
-        [
-            f"- 命令数：{payload['command_count']}",
-            f"- 失败数：{payload['failed_count']}",
-            "",
-            "## 命令结果",
-            "",
-        ]
-    )
-    if payload.get("interruption_status"):
-        lines.extend(
-            [
-                f"- 中断状态：`{payload['interruption_status']}`",
-                f"- 未执行命令数：{len(payload.get('skipped_commands', []))}",
-                "",
-            ]
-        )
-    for index, item in enumerate(payload["results"], start=1):
-        interruption_status = item.get("interruption_status")
-        badge = {
-            "timed_out": "TIMEOUT",
-            "stopped": "STOPPED",
-            "termination-unconfirmed": "TERMINATION-UNCONFIRMED",
-        }.get(interruption_status, "PASS" if item["status"] == "passed" else "FAIL")
-        configured_command = item.get("configured_command", item["command"])
-        executed_command = item.get("executed_command", item["command"])
-        lines.extend(
-            [
-                f"### {index}. `{configured_command}`",
-                "",
-                *(
-                    [f"- 实际执行：`{executed_command}`"]
-                    if executed_command != configured_command
-                    else []
-                ),
-                *(
-                    [f"- 临时目录：`{item['verification_temp']}`"]
-                    if item.get("verification_temp")
-                    else []
-                ),
-                f"- 结果：`{badge}`",
-                f"- 退出码：`{item['returncode']}`",
-                f"- 耗时：`{item['duration_seconds']:.2f}s`",
-                *(
-                    [f"- 中断类型：`{interruption_status}`"]
-                    if interruption_status is not None
-                    else []
-                ),
-                "",
-                "```text",
-                item["output"].strip() or "<empty>",
-                "```",
-                "",
-            ]
-        )
-    return "\n".join(lines).rstrip() + "\n"
-
-
 def _run_command(
     repo_path: Path,
     configured_command: str,
@@ -434,7 +340,12 @@ def _run_command(
     output = _redact_process_output(result.output, result.error)
     if not output and result.status == "timed_out":
         output = redact_text(f"命令超时：{timeout_seconds}s")
+    output_log = execution_context.execution_dir / "process-output.txt"
+    log_reference = None
+    if output_log.is_file() and output_log.resolve().is_relative_to(execution_context.execution_root.resolve()):
+        log_reference = output_log.resolve().relative_to(execution_context.execution_root.resolve()).as_posix()
     return {
+        "output_log": log_reference,
         "command": redact_text(configured_command),
         "configured_command": redact_text(configured_command),
         "executed_command": redact_text(executed_command),
@@ -482,7 +393,7 @@ def _redact_process_output(
     stderr: str | bytes | None,
 ) -> str:
     output = _decode_process_output(stdout) + _decode_process_output(stderr)
-    return redact_text(output)[:MAX_OUTPUT_CHARS]
+    return bounded_output(output, MAX_OUTPUT_CHARS)
 
 
 def _decode_process_output(output: str | bytes | None) -> str:

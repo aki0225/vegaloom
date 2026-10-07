@@ -128,7 +128,7 @@ def render_agent_status_card(card: AgentStatusCard, *, candidate_transition: boo
             [
                 "",
                 "## 计划风险提示",
-                "- 以下内容来自当前 Work Item 的批准 Plan，仅供人工关注，不改变 Risk Gate 结果。",
+                "- 以下是当前执行计划中的风险提示，仅供人工关注，不能代替风险审查，不改变 Risk Gate 结果。",
                 *[f"- {note}" for note in card.plan_risk_notes],
             ]
         )
