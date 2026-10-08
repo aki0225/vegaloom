@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from .agent_checkpoint_history import inherited_failed_attempts
+from .agent_change_state import is_unapproved_cancellation
 from .agent_context import (
     DEFAULT_TASK_BRIEF_MAX_BYTES,
     TaskBrief,
@@ -83,8 +84,10 @@ def load_agent_bundle(
         if (
             state.goal_revision != plan.goal_revision
             or state.plan_revision != plan.plan_revision
-            or state.approved_plan_digest != plan.approved_digest
-            or not plan.approval_is_current()
+            or ((state.approved_plan_digest != plan.approved_digest
+                 or not plan.approval_is_current())
+                and not (is_unapproved_cancellation(state) and not plan.approved
+                         and plan.approved_digest is None))
         ):
             raise ValueError("Agent State 与当前批准 Plan 不一致")
     validate_run_repository_binding(run_dir, state, metadata)

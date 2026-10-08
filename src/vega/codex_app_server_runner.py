@@ -215,6 +215,8 @@ class CodexAppServerRunner:
 
     def _server_args(self, resolved: str, repo_path: Path) -> list[str]:
         args: list[str] = []
+        if self.role_key == "worker" and not self.isolate_session:
+            args.extend(["--disable", "multi_agent", "--disable", "multi_agent_v2"])
         if not self.isolate_session:
             return args
         args.extend([

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +16,7 @@ from vega.agent_contract import (
     canonical_digest,
 )
 from vega.agent_status_evidence import build_supervisor_evidence
+from vega.agent_status_card import _build_status_card
 from vega.agent_visibility import render_agent_status_card
 from vega.execution_control import ExecutionLease
 from vega.project_config import ScopeConfig, scope_policy_sha256
@@ -39,6 +41,9 @@ def test_status_card_renders_plan_risk_notes_without_changing_risk_gate() -> Non
     assert "## 计划风险提示" in rendered
     assert "涉及并发状态，需要人工关注" in rendered
     assert "不改变 Risk Gate 结果" in rendered
+    assert "当前执行计划中的风险提示" in rendered
+    assert "不能代替风险审查" in rendered
+    assert "批准 Plan" not in rendered
     assert "- Risk：尚未运行" in rendered
 
     without_notes = render_agent_status_card(card.model_copy(update={"plan_risk_notes": []}))
@@ -67,7 +72,7 @@ def test_supervisor_evidence_requires_bound_success_artifacts(tmp_path: Path) ->
     ]
 
 
-@pytest.mark.parametrize("case", ["human", "human_stale", "human_corrupt", "timed_out", "stopped", "termination-unconfirmed", "unconfirmed_command", "corrupt", "drift", "old_iteration"])
+@pytest.mark.parametrize("case", ["human", "human_stale", "human_corrupt", "failed", "timed_out", "stopped", "termination-unconfirmed", "unconfirmed_command", "corrupt", "drift", "old_iteration"])
 def test_bound_core_interruption_remains_visible_without_success(tmp_path: Path, case: str) -> None:
     run_dir = _run_dir(tmp_path)
     state = _state()
@@ -75,6 +80,8 @@ def test_bound_core_interruption_remains_visible_without_success(tmp_path: Path,
     finish_path = run_dir.parent / observation.child_run / "finish-summary.json"
     finish = json.loads(finish_path.read_text(encoding="utf-8"))
     status = case if case in {"timed_out", "stopped", "termination-unconfirmed"} else "timed_out"
+    if case == "failed":
+        status = None
     finish.update(finish_status="needs_human", verification_passed=False,
                   iterations=[{"iteration": 2 if case == "old_iteration" else 1, "reviewer_status": "skipped"}],
                   verification_results=[{"iteration": 1, "run_id": observation.child_run,
@@ -106,6 +113,21 @@ def test_bound_core_interruption_remains_visible_without_success(tmp_path: Path,
         assert "中断" not in core.detail
         return
     assert core.status != "passed"
+    if case == "failed":
+        assert "验证未通过，请查看该次验证日志" in core.detail
+        assert "中断" not in core.detail
+        card = _build_status_card(
+            run_dir, state, _plan(), observation=observation, checkpoint=None,
+            next_step=None, workspace_checked=True,
+            live_workspace=SimpleNamespace(fingerprint="3" * 64, changed_files=[], untracked_files=[]),
+            provider_rows=[], worker_label="已结束", live_child_checked=True,
+        )
+        assert card.workspace_current is False
+        assert card.phase == "needs_human"
+        assert card.allowed_actions == ["human"]
+        assert card.commit_recommended is False
+        assert card.integrity_warning
+        return
     if case in {"corrupt", "drift", "old_iteration", "human_stale", "human_corrupt"}:
         assert "Core 验证中断" not in core.detail
     else:

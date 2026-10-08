@@ -289,6 +289,38 @@ def test_checkpoint_decision_uses_stable_code_with_legacy_compatibility(
     assert f"checkpoints/{checkpoint.checkpoint_id}.json" in result.evidence_refs
 
 
+@pytest.mark.parametrize("verification,health,workspace,warning,items,expected", [
+    ("failed", "failed", True, None, ["passed", "failed"], True),
+    ("passed", "passed", True, None, ["passed", "passed"], False),
+    ("failed", "stale", False, "快照不一致", ["passed", "failed"], False),
+    ("failed", "failed", True, None, ["stale", "failed"], False),
+    ("failed", "unverified", True, "摘要无法验证", [], False),
+])
+def test_risk_explanation_mentions_only_confirmed_current_verification_failure(
+    tmp_path, monkeypatch, verification, health, workspace, warning, items, expected,
+):
+    run_dir = _run_dir(tmp_path)
+    state = _state(phase="needs_human", checkpoint_id="checkpoint-001")
+    _write_checkpoint_decision(run_dir, state, reason_code="gate.risk.blocked")
+    _stub_status(monkeypatch, state, verification=verification, evidence_health=health,
+                 workspace_current=workspace, integrity_warning=warning, allowed_actions=["human"],
+                 supervisor_evidence=[{"status": item, "detail": "fixture"} for item in items])
+    projection = explain_module.build_agent_status_projection(run_dir, state, _plan())
+    before = dict(projection.payload)
+    result = build_agent_explanation(run_dir, state, _plan(), status_projection=projection)
+    assert ("同时验证未通过" in result.reason) is expected
+    if expected:
+        assert "人工确认风险不等于验证通过" in result.reason
+    if warning is None:
+        assert result.reason_code == "gate.risk.blocked"
+    else:
+        assert result.block_category == "evidence"
+    assert result.phase == "needs_human"
+    assert result.safe_actions == ["human.review"]
+    assert projection.payload == before
+    assert projection.payload["commit_recommended"] is False
+
+
 def test_checkpoint_reason_is_used_when_no_decision_exists(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

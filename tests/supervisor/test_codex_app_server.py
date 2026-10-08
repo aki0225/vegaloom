@@ -92,6 +92,12 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
         ),
     )
     assert first.status == "success"
+    first_args = json.loads(
+        (repo / ".fake-app-server-state.json").read_text(encoding="utf-8")
+    )["server_args"]
+    assert first_args == [
+        "--listen", "stdio://", "--disable", "multi_agent", "--disable", "multi_agent_v2",
+    ]
     first_state = load_provider_sessions(run_dir)
     assert first_state.handles["worker"].thread_id == "thread-1"
     assert first_state.handles["worker"].compaction_pending is True
@@ -122,7 +128,7 @@ def test_app_server_reuses_thread_and_injects_pending_anchor(
     assert fake_state["resume_params"][0]["sandbox"] == sandbox
     assert fake_state["resume_params"][0]["approvalPolicy"] == approval
     assert fake_state["resume_params"][0]["approvalsReviewer"] == reviewer
-    assert fake_state["server_args"] == ["--listen", "stdio://"]
+    assert fake_state["server_args"] == first_args
     opt_out = fake_state["initialize_params"]["capabilities"][
         "optOutNotificationMethods"
     ]
@@ -363,6 +369,9 @@ def test_app_server_read_only_roles_do_not_inherit_worker_full_access(
     observed = json.loads((repo / ".fake-app-server-state.json").read_text(encoding="utf-8"))
     assert len(observed["prompts"]) == 1
     assert observed["thread_start_params"]["approvalsReviewer"] == "user"
+    assert observed["server_args"] == [
+        "--listen", "stdio://", "--disable", "hooks", "--disable", "memories", "--disable", "plugins",
+    ]
 
 
 @pytest.mark.parametrize(("prompt", "decision"), [

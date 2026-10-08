@@ -12,6 +12,7 @@ from .agent_contract import (
     ProviderSessionStatus,
 )
 from .agent_child_status import read_live_child_stage
+from .agent_change_state import is_unapproved_cancellation
 from .agent_operation import bound_operation_kind
 from .agent_run_status import (
     latest_worker_dispatch_binding,
@@ -179,7 +180,11 @@ def _build_status_card(
             evidence_issue,
         )
         if projection_requires_human
-        else next_step or default_next_step(state.phase, current_index)
+        else next_step or (
+            "未批准任务已取消；需要继续则重新发起任务并确认计划。"
+            if is_unapproved_cancellation(state)
+            else default_next_step(state.phase, current_index)
+        )
     )
     integrity_warning = _integrity_warning(
         terminal_evidence_invalid=terminal_evidence_invalid,

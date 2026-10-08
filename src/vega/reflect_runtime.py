@@ -20,6 +20,7 @@ from .repository_identity import repository_scope, resolve_git_revision
 from .run_utils import create_run_dir, resolve_run_dir
 from .runtime_workspace import capture_runtime_workspace
 from .trace import TraceWriter
+from .verification_summary import bounded_output
 from .workspace_check import ReviewWorkspaceSnapshot
 
 REFLECT_ARTIFACTS = [
@@ -305,7 +306,7 @@ def render_test_summary(test_text: str | None) -> str:
     if not test_text:
         lines.append("- 未提供测试日志；请在最终交付中明确实际验证命令和结果。")
     else:
-        excerpt = redact_text(test_text).strip()[:5000]
+        excerpt = bounded_output(test_text.strip(), 5000)
         lines.extend(["```text", excerpt, "```"])
     return redact_text("\n".join(lines).rstrip() + "\n")
 

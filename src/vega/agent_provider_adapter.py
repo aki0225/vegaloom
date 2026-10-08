@@ -352,6 +352,8 @@ class SupervisorAgentProviderAdapter:
         # 宿主和 Worker 沙箱的依赖缓存不同；检查职责不能因此退回给用户。
         prompt += (
             "\n\n## 实现与验证交接\n"
+            "当前仅允许单 Writer，不得派生子代理；项目强制子角色时以 blocked 报告规则位置和冲突，"
+            "不得自行改成 inline，也不得把 Vega 只读 Reviewer 当作可写 check。"
             "控制器会在受管 Worktree 执行本轮已批准的全部验证命令，随后进行独立审查。"
             "返回前完成任务必要的项目验收，不重复控制器固定全套；无法验收时如实报告缺口。"
             "acceptance_refs 可引用当前批准范围内已有 md/txt/log/json 材料（path、原文 sha256），"

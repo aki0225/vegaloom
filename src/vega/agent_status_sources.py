@@ -109,6 +109,19 @@ def explanation_detail(status: dict, fallback: str) -> str:
     return " ".join([fallback, *details, *([note] if note else [])])
 
 
+def decision_explanation_detail(status: dict, fallback: str, reason_code: str, category: str | None) -> str:
+    """仅补充同次可信投影的并列失败，不改主因、优先级或动作。"""
+    if reason_code == "evidence.core_untrusted":
+        return explanation_detail(status, fallback)
+    evidence = status.get("supervisor_evidence", [])
+    if (category == "authorization" and status.get("verification") == "failed"
+            and status.get("workspace_current") is True and not status.get("integrity_warning")
+            and status.get("evidence_health") == "failed" and evidence
+            and all(item.get("status") in {"passed", "failed"} for item in evidence)):
+        return f"{fallback} 同时验证未通过；人工确认风险不等于验证通过，请查看该次验证日志。"
+    return fallback
+
+
 def preparation_issue_for_display(run_dir: Path, state: AgentState, plan: AgentPlan) -> str | None:
     """调用方先排除证据和活动执行异常；这里只读当前绑定的准备策略。"""
     metadata = load_run_metadata(run_dir)

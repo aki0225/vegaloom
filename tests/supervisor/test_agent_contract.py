@@ -580,3 +580,33 @@ def _approved_plan() -> AgentPlan:
         actor="user",
         approved_at="2026-08-13T00:00:00+00:00",
     )
+
+
+@pytest.mark.parametrize(
+    "phase", ["stopped", "ready", "acting", "observing", "finalizing", "completed", "needs_human"],
+)
+def test_unapproved_compiled_change_only_allows_cancellation(phase: str) -> None:
+    values = dict(
+        run_id="cancel-fixture", task_id="cancel-fixture", repository_id="repo",
+        run_kind="change", contract_revision=1, execution_plan_revision=1,
+        accepted_checkpoint_sha="a" * 40, phase=phase,
+    )
+    if phase == "acting":
+        values.update(active_child_run="child", active_operation_id="operation")
+    if phase == "completed":
+        values["terminal_status"] = "ready_to_commit"
+    if phase == "stopped":
+        state = AgentState(**values)
+        assert state.approved_contract_digest is None
+        assert state.terminal_status is None
+        assert state.allowed_actions == []
+        for broken in ({"contract_revision": None}, {"execution_plan_revision": None},
+                       {"run_kind": "legacy"}, {"approved_plan_digest": "b" * 64},
+                       {"active_candidate_sha": "b" * 40},
+                       {"active_child_run": "child", "active_operation_id": "operation"},
+                       {"active_planning_execution_id": "planning"}):
+            with pytest.raises(ValueError):
+                AgentState(**(values | broken))
+    else:
+        with pytest.raises(ValueError, match="Approved Contract digest"):
+            AgentState(**values)

@@ -33,6 +33,65 @@ from vega.workspace_check import capture_review_workspace
 _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 
+@pytest.mark.parametrize("approved", [False, True])
+def test_compiled_change_public_stop_keeps_approval_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, approved: bool,
+) -> None:
+    from vega.agent_persistence import load_agent_state, save_agent_state
+
+    repo = _repo(tmp_path / "repo")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runtime = SupervisorAgentRuntime(workspace)
+    run = runtime.start_change(repo, contract=_contract(), execution_plan=_execution_plan())
+    if approved:
+        run = runtime.approve(run.run_dir.name, actor="测试批准人")
+    contract_path = run.run_dir / "change-contract.json"
+    contract_before = contract_path.read_bytes()
+    monkeypatch.chdir(workspace)
+    args = ["stop", "--run", run.run_dir.name, "--reason", "用户取消未执行任务"]
+    first = CliRunner().invoke(app, args)
+    if first.exception:
+        raise first.exception
+    assert first.exit_code == 0, first.output
+    stopped = load_agent_state(run.run_dir / "agent-state.json")
+    assert stopped.phase == "stopped"
+    assert stopped.approved_contract_digest == run.state.approved_contract_digest
+    assert stopped.terminal_status is None and stopped.allowed_actions == []
+    assert stopped.active_child_run is None and stopped.active_operation_id is None
+    assert contract_path.read_bytes() == contract_before
+    assert json.loads(contract_before)["approved"] is approved
+    assert not (run.run_dir / "executions").exists()
+    again = CliRunner().invoke(app, args)
+    assert again.exit_code == 0, again.output
+    assert load_agent_state(run.run_dir / "agent-state.json") == stopped
+    status = CliRunner().invoke(app, ["status", "--run", run.run_dir.name, "--json"])
+    assert status.exit_code == 0, status.output
+    assert json.loads(status.output)["phase"] == "stopped"
+    next_step = json.loads(status.output)["next_step"]
+    if approved:
+        assert "vega resume" in next_step
+    else:
+        assert "未批准任务已取消" in next_step
+        assert "重新发起任务并确认计划" in next_step
+        assert "vega resume" not in next_step
+    if not approved:
+        resume = CliRunner().invoke(app, ["resume", "--run", run.run_dir.name])
+        assert resume.exit_code != 0
+        assert load_agent_state(run.run_dir / "agent-state.json") == stopped
+    if approved:
+        state_path = run.run_dir / "agent-state.json"
+        original = state_path.read_bytes()
+        for field, message in (
+            ("approved_plan_digest", "Agent State 与当前批准 Plan 不一致"),
+            ("approved_contract_digest", "ChangeRun Approved Contract 已过期"),
+        ):
+            save_agent_state(state_path, stopped.model_copy(update={field: "e" * 64}))
+            with pytest.raises(ValueError, match=message):
+                runtime.status(run.run_dir.name)
+        state_path.write_bytes(original)
+
+
 @pytest.mark.parametrize("trigger", ["single", "worker_retry", "multi", "revision", "risk", "side_effect"])
 def test_final_review_keeps_existing_triggers(trigger: str) -> None:
     from vega.agent_change_control import requires_final_integration_review

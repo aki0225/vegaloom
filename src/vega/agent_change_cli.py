@@ -19,7 +19,7 @@ from .agent_recovery_request import AgentRecoveryRequest
 from .agent_run_selection import resolve_repository_root
 from .agent_runtime import SupervisorAgentRuntime
 from .agent_side_effect_adjudication import SupervisorAgentSideEffectAdjudicator
-from .cli_support import report_execution_progress
+from .cli_support import report_execution_progress, report_change_event
 from .redaction import redact_text
 
 
@@ -70,6 +70,9 @@ def agent_change(
         "--json",
         help="只输出一个稳定 JSON object，不读取 stdin。",
     ),
+    progress: bool = typer.Option(
+        False, "--progress", help="为 --json 模式开启 stderr 阶段与耗时提示；不启用交互。",
+    ),
 ) -> None:
     """创建或继续一个日常代码变更，直到完成或遇到授权边界。"""
 
@@ -107,12 +110,7 @@ def agent_change(
             worker_permissions=worker_permissions,
             confirm=_confirm if interactive else None,
             event_reporter=(
-                None
-                if json_output
-                else lambda message: typer.echo(
-                    f"[vega] {message}",
-                    err=True,
-                )
+                report_change_event if not json_output or progress else None
             ),
             interaction_reporter=(
                 None if json_output else
@@ -120,7 +118,7 @@ def agent_change(
                 if interactive and _stream_is_tty(sys.stderr) else _render_interaction_update
             ),
             progress_reporter=(
-                None if json_output else report_execution_progress
+                report_execution_progress if not json_output or progress else None
             ),
         )
         result = driver.change(

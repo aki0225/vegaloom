@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -8,7 +9,14 @@ import typer
 from .redaction import redact_text
 
 
+_TERMINAL_SEQUENCE = re.compile(
+    r"(?:\x1b\]|\x9d)[\s\S]*?(?:\x07|\x1b\\|\x9c|\Z)"
+    r"|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]|\x1b[@-_]"
+)
+
+
 _PROGRESS_STEP_LABELS = {
+    "environment_prepare": "环境准备",
     "worker": "worker",
     "reviewer": "reviewer",
     "verification": "verification",
@@ -45,7 +53,24 @@ def report_execution_progress(step: str, elapsed_seconds: int) -> None:
         message = f"[vega] {label} {event_message}，已用时 {max(0, elapsed_seconds)} 秒"
     else:
         message = f"[vega] {label} 运行中，已用时 {max(0, elapsed_seconds)} 秒"
-    typer.echo(message, err=True)
+    stage = {"worker": "实现", "verification": "项目验证", "reviewer": "独立审查"}.get(base_step)
+    if stage:
+        message += f"（{stage}）"
+    _safe_progress_echo(message)
+
+
+def report_change_event(message: str) -> None:
+    """先规范化最终可见文本再脱敏，避免控制字符拼接出敏感字段。"""
+    safe = _TERMINAL_SEQUENCE.sub("", message)
+    safe = " ".join("".join(char for char in safe if char.isprintable() or char == "\n").split())
+    _safe_progress_echo(f"[vega] {redact_text(safe)}")
+
+
+def _safe_progress_echo(message: str) -> None:
+    try:
+        typer.echo(message, err=True)
+    except Exception:  # noqa: BLE001 - 展示故障不能改变真实执行结果
+        pass
 
 
 def require_repo_directory(repo: Path) -> Path:

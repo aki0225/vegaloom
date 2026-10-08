@@ -419,7 +419,7 @@ def _core_evidence(
     if isinstance(finish, dict) and finish.get("run_id") == observation.child_run and finish.get("finish_status") == finish_status != "ready_to_commit":
         detail = verification_interruption_detail(finish, observation)
         if detail or finish.get("verification_passed") is not True:
-            return _item("核心完成", "failed", detail or f"finish_status={finish_status!r}；验证未通过，未取得可信中断详情")
+            return _item("核心完成", "failed", detail or f"finish_status={finish_status!r}；验证未通过，请查看该次验证日志")
     if (
         not isinstance(finish, dict)
         or core_status not in {"success", "needs_human"}

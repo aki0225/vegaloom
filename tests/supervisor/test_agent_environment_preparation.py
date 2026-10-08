@@ -11,7 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from vega.agent_change_contract import ChangeAuthorityEnvelope, ChangeContract, ExecutionPlan, ExecutionWorkItem
-from vega.agent_environment_preparation import prepare_change_environment
+from vega.agent_environment_preparation import prepare_change_environment, _preparation_failure_detail
 from vega.agent_change_presentation import build_change_approval_snapshot
 from vega.agent_change_driver import AgentChangeDriver, ChangeDriverResult
 from vega.agent_provider_adapter import SupervisorAgentProviderAdapter
@@ -96,9 +96,42 @@ def test_preparation_is_owned_once_and_never_verification_success(
     else:
         assert result is not None
         assert current.phase == "needs_human"
+        if outcome == "tracked_mutation":
+            record = next((run_dir / "environment-preparations").glob("*.json"))
+            assert "修改了业务文件" in json.loads(record.read_text(encoding="utf-8"))["reason"]
+        if outcome == "failed":
+            monkeypatch.chdir(workspace)
+            shown = CliRunner().invoke(app, ["status", "--run", run_dir.name, "--full"])
+            assert shown.exit_code == 0, shown.output
+            assert "第 1/1 条准备命令" in shown.stdout
+            assert "failed" in shown.stdout and "退出码 7" in shown.stdout
+            assert "execution.json" in shown.stdout and "process-output.txt" in shown.stdout
+            assert "不会自动重试" in shown.stdout
         with pytest.raises(ValueError, match="禁止自动重放"):
             prepare_change_environment(workspace, run_dir.name)
         assert len(find_execution_records(run_dir)) == 1
+
+
+@pytest.mark.parametrize("status,code,output", [
+    ("failed", 7, True), ("stopped", None, False), ("timed_out", None, True),
+])
+def test_preparation_failure_display_only_uses_existing_records(tmp_path, status, code, output):
+    execution = tmp_path / "executions" / "environment-prepare" / "controlled" / "01"
+    execution.mkdir(parents=True)
+    (execution / "execution.json").write_text("{}", encoding="utf-8")
+    if output:
+        (execution / "process-output.txt").write_text("secret-body\x1b[31m", encoding="utf-8")
+    lease = SimpleNamespace(status=status, returncode=code)
+    shown = _preparation_failure_detail(tmp_path, execution, 1, 3, lease)
+    assert "第 2/3 条" in shown and status in shown
+    assert f"退出码 {code if code is not None else '未知'}" in shown
+    assert "相对本 Run 目录" in shown and "execution.json" in shown
+    assert ("process-output.txt" in shown) == output
+    assert "secret-body" not in shown and "\x1b" not in shown
+    (execution / "execution.json").unlink()
+    if output:
+        (execution / "process-output.txt").unlink()
+    assert "未找到可引用记录" in _preparation_failure_detail(tmp_path, execution, 1, 3, lease)
 
 
 def test_preparation_rejects_unapproved_exact_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -186,10 +186,29 @@ def _execute_preparation(
         evidence[lease_path.relative_to(run_dir).as_posix()] = hashlib.sha256(lease_path.read_bytes()).hexdigest()
         if result.status != "success" or result.returncode != 0 or lease.status != "completed":
             succeeded = False
-            reason = "环境准备失败或停止；未启动 Worker，不会自动重试"
+            reason = _preparation_failure_detail(run_dir, execution_dir, index, len(commands), lease)
             break
 
     return evidence, succeeded, reason
+
+
+def _preparation_failure_detail(
+    run_dir: Path, execution_dir: Path, index: int, total: int, lease: ExecutionLease,
+) -> str:
+    status = {"failed": "失败", "stopped": "停止", "timed_out": "超时",
+              "completed": "执行结束但准备结果不成功"}[lease.status]
+    code = str(lease.returncode) if lease.returncode is not None else "未知"
+    refs = []
+    for name in ("execution.json", "process-output.txt"):
+        path = execution_dir / name
+        if path.is_file() and path.resolve().is_relative_to(run_dir.resolve()):
+            refs.append(path.relative_to(run_dir).as_posix())
+    records = "、".join(refs) if refs else "未找到可引用记录"
+    return (
+        f"第 {index + 1}/{total} 条准备命令未通过：{status}（{lease.status}），退出码 {code}；"
+        f"记录位置（相对本 Run 目录，日志内容未作验证）：{records}。"
+        "未启动 Worker，不会自动重试；请先查看记录核对环境，再由人工决定后续。"
+    )
 
 
 def _publish_preparation(
