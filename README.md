@@ -28,8 +28,8 @@ Vega 管一次代码变更的外层流程。只读 Planner 先调查自然语言
 实现，把 Git Candidate 交给项目验证、风险门禁和独立 Reviewer。合同内问题可以自动回到
 Worker；越出批准、授权或证据边界时停下来问人。
 
-> 本页面向 v0.7.1，能力与限制见 [发布说明](docs/RELEASE-NOTES-0.7.1.md)；总体能力见 [v0.7.0版本摘要](docs/RELEASE-SUMMARY-0.7.0.md)。
-> 发布准备不代表资产已上传；安装前请确认 [v0.7.1 Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.1) 实际存在对应资产。
+> 本页面向 v0.7.2，能力与限制见 [发布说明](docs/RELEASE-NOTES-0.7.2.md)；总体能力见 [v0.7.0版本摘要](docs/RELEASE-SUMMARY-0.7.0.md)。
+> 发布准备不代表资产已上传；安装前请确认 [v0.7.2 Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.2) 实际存在对应资产。
 > 尚未提供时请使用 [最新正式版](https://github.com/aki0225/vegaloom/releases/latest) 及其对应 Tag 文档，不将源码能力等同于旧稳定包。
 
 <p align="center">
@@ -41,10 +41,10 @@ Worker；越出批准、授权或证据边界时停下来问人。
 要求 Python `>=3.11`、Git，以及已安装的 Codex CLI 或 Claude Code CLI。Vega 只能确认命令是否存在；
 Provider 是否已登录，要在实际启动会话时确认。
 
-确认 v0.7.1 Release 已提供下列 wheel 后，在用于运行 Vega 的 Python 环境中安装，无需克隆开发工作区：
+确认 v0.7.2 Release 已提供下列 wheel 后，在用于运行 Vega 的 Python 环境中安装，无需克隆开发工作区：
 
 ```powershell
-python -m pip install "https://github.com/aki0225/vegaloom/releases/download/v0.7.1/vegaloom-0.7.1-py3-none-any.whl"
+python -m pip install "https://github.com/aki0225/vegaloom/releases/download/v0.7.2/vegaloom-0.7.2-py3-none-any.whl"
 ```
 
 然后进入**自己的目标 Git 项目**。自然语言任务需要项目提交一份 `.vega.yaml`，登记实际验证
