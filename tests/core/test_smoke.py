@@ -63,7 +63,7 @@ def test_python_package_public_api_is_version_only() -> None:
     assert vega.__version__ == "0.7.2"
     assert vega.__all__ == ["__version__"]
     assert importlib.util.find_spec("vega.assurance") is None
-    assert importlib.util.find_spec("vega.experimental.assurance") is not None
+    assert importlib.util.find_spec("vega.host_skills") is not None
 
 
 def _clear_vega_env(monkeypatch) -> None:

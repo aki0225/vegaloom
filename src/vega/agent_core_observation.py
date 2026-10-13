@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from .agent_contract import GateStatus
-from .models import LoopIterationState
+from .models import GateResult, LoopIterationState
 from .agent_change_contract import ChangeContract
-from .review_contract import RequiredReviewHit, ReviewVerdict
+from .review_contract import ReviewVerdict
 from .risk_review import validate_required_risk_disclosures
 
 
@@ -30,24 +30,29 @@ def pending_risk_repair_is_authorized(
     ):
         return False
     try:
-        screen = finish["first_screen"]
-        changes = screen["actual_changes"]
-        required = [RequiredReviewHit.model_validate(item) for item in changes["required_reviews"]]
+        # Finish 从完整性核验结果投影原始 GateResult；first_screen 仅供展示。
+        # 缺少这份 Core 材料的旧记录拒绝返修，不能用报告首屏补齐。
+        gate = GateResult.model_validate(finish["risk_gate_results"][-1])
+        required = gate.required_reviews
         review = ReviewVerdict.model_validate(finish["latest_verdict"])
-        findings = changes["high_risk_findings"]
         allowed = set(contract.authorized_risk_reviews)
         return (
             bool(required) and {hit.id for hit in required}.issubset(allowed)
-            and not changes["budget_findings"]
-            and all(item["code"] == "required_risk_review" for item in findings)
+            and gate.recommendation == "human-review"
+            and not any(reason.code in {
+                "budget_changed_files", "budget_diff_lines", "budget_new_files",
+                "new_dependencies", "large_generated_files",
+            } for reason in gate.reasons)
+            and all(reason.code == "required_risk_review"
+                    for reason in gate.reasons if reason.severity == "high")
             and review.verdict == "request_changes"
-            and any(item.severity != "suggestion" and item.file in changes["changed_files"]
+            and any(item.severity != "suggestion" and item.file in gate.changed_files
                     and item.line > 0 and item.evidence.strip() and item.recommendation.strip()
                     for item in review.findings)
             and all(item.assessment != "insufficient_evidence" for item in review.risk_disclosures)
             and validate_required_risk_disclosures(required, review.risk_disclosures, review.findings).valid
         )
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, IndexError, TypeError, ValueError):
         return False
 
 

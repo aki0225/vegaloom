@@ -23,11 +23,12 @@ dev = [
 [project.scripts]
 vega = "vega.cli_entrypoint:app"
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-vega = ["resources/loops/*.yaml"]
+exclude = ["vega.experimental", "vega.experimental.*"]
 
 [tool.ruff]
 line-length = 100

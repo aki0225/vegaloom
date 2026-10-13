@@ -350,6 +350,11 @@ vega resume
 内部 Runtime、Artifact helper 和 `vega.experimental.*` 不是稳定 Python SDK。稳定程序化导出
 只有 `vega.__version__`。
 
+分发的 wheel 仅包含产品实现，宿主 Skill 由 `vega.host_skills` 提供；不包含
+`vega.experimental` 或历史 Loop YAML。sdist 保留实验 Python 源码、适用规则和历史
+YAML 供查阅，但从 sdist 安装仍构建相同的产品 wheel。sdist 不是完整实验重放包；
+实验执行与历史重放须使用仓库及其规则、测试和登记材料。
+
 ## 行为边界
 
 - 新建任务与可信 Task Card 恢复使用 `execution_protocol=2`。旧 Run 缺失该字段时按协议 1

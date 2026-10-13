@@ -283,7 +283,7 @@ def adapters_init(
 ) -> None:
     """生成宿主侧 Skill，不安装 Hook 或修改全局配置。"""
 
-    from .experimental.adapter_runtime import (
+    from .host_skills import (
         init_adapter,
         render_adapter_init_summary,
     )

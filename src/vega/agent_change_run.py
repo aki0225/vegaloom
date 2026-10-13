@@ -18,6 +18,7 @@ from .agent_contract import (
     AgentPlan,
     AgentState,
     AgentWorkItem,
+    WorkItemStatus,
     canonical_digest,
 )
 from .agent_git_candidate import CandidateCommit
@@ -41,6 +42,7 @@ def project_agent_plan(
     execution_plan: ExecutionPlan,
     *,
     current: AgentPlan | None = None,
+    work_item_statuses: dict[str, WorkItemStatus] | None = None,
 ) -> AgentPlan:
     """把新合同投影到既有 Core 需要的窄 Plan，不赋予第二套成功语义。"""
 
@@ -49,6 +51,8 @@ def project_agent_plan(
         item.work_item_id: item.status
         for item in current.work_items
     } if current is not None else {}
+    if work_item_statuses is not None:
+        statuses = work_item_statuses
     work_items = [
         _project_work_item(
             contract,
@@ -72,10 +76,7 @@ def project_agent_plan(
         "hypotheses": list(execution_plan.hypotheses),
         "unresolved_decisions": list(execution_plan.unresolved_decisions),
         "allow_pending_risk_repair": contract.allow_pending_risk_repair,
-        "work_items": [
-            item.model_dump(mode="json")
-            for item in work_items
-        ],
+        "work_items": work_items,
         "approved": False,
         "approved_at": None,
         "approved_by": None,

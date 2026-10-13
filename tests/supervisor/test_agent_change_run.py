@@ -808,6 +808,8 @@ def test_pending_risk_repairs_only_explicitly_approved_defects(
     from vega.loop_runtime import LoopAutomationRuntime
     from vega.finish_runtime import FinishRuntime
 
+    # 真实 Core 仍核验 Artifact；省略报告首屏不应改变返修裁决。
+    monkeypatch.setattr("vega.finish_runtime.build_finish_first_screen", lambda *args, **kwargs: {})
     repo = _repo(tmp_path / "repo")
     risk_id = "payment" if permission == "approved" else "async-session"
     config = repo / ".vega.yaml"

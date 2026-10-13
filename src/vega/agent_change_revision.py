@@ -18,6 +18,7 @@ from .agent_contract import (
     AgentPlan,
     NonEmptyText,
     StrictAgentModel,
+    WorkItemStatus,
 )
 from .agent_change_run import project_agent_plan
 from .project_config import load_project_config
@@ -143,13 +144,13 @@ def project_revised_agent_plan(
         for item in current_plan.work_items
         if item.status == "completed"
     }
-    seed = current_plan.model_copy(deep=True)
-    seed_by_id = {item.work_item_id: item for item in seed.work_items}
     proposed_by_id = {
         item.work_item_id: item
         for item in proposed_execution_plan.work_items
     }
-    for item_id, item in seed_by_id.items():
+    statuses: dict[str, WorkItemStatus] = {}
+    for item in current_plan.work_items:
+        item_id = item.work_item_id
         same_completed_item = (
             item_id in completed
             and item_id in previous_items
@@ -157,11 +158,11 @@ def project_revised_agent_plan(
             and previous_items[item_id].model_dump(mode="json")
             == proposed_by_id[item_id].model_dump(mode="json")
         )
-        item.status = "completed" if same_completed_item else "pending"
+        statuses[item_id] = "completed" if same_completed_item else "pending"
     return project_agent_plan(
         proposed_contract,
         proposed_execution_plan,
-        current=seed,
+        work_item_statuses=statuses,
     )
 
 

@@ -17,7 +17,11 @@ from vega.agent_cli_snapshot import (
     build_agent_cli_snapshot,
     resolve_agent_cli_run,
 )
-from vega.agent_cli_status import render_compact_agent_status, render_agent_explanation
+from vega.agent_cli_status import (
+    explanation_json_payload,
+    render_compact_agent_status,
+    render_agent_explanation,
+)
 from vega.agent_explain import AgentExplanation
 from vega.agent_child_status import AgentChildStatusSnapshot
 from vega.agent_contract import AgentCheckpoint, canonical_digest
@@ -65,6 +69,46 @@ def test_compact_status_requires_authorization_review_and_locates_delivery(
     else:
         assert "累计 Diff 基线" not in status
         assert "- 报告：" not in status
+
+
+@pytest.mark.parametrize(
+    ("verification", "reason"),
+    [
+        ("passed", "高风险修改需要人工检查。"),
+        ("failed", "高风险修改需要人工检查；同时验证未通过。"),
+        ("not_run", "证据缺失，无法确认审查结果。"),
+    ],
+)
+def test_status_review_gate_label_preserves_shared_reason_and_next_step(
+    tmp_path: Path, verification: str, reason: str,
+) -> None:
+    snapshot = AgentCliSnapshot(
+        target=AgentCliRun(tmp_path, tmp_path / "runs/example", "explicit"),
+        status={
+            "run_id": "example", "selected_run": {"run_id": "example"},
+            "agent_phase": "needs_human", "review": "blocked", "risk": "blocked",
+            "verification": verification, "allowed_actions": ["human"],
+            "commit_recommended": False,
+        },
+        explanation=AgentExplanation(
+            run_id="example", phase="needs_human", outcome="attention_required",
+            source="evidence", actor="runtime", reason_code="example", reason=reason,
+            safe_actions=["human.review"],
+        ),
+    )
+    original = explanation_json_payload(snapshot, full=True)
+    compact = render_compact_agent_status(snapshot)
+    explained = render_agent_explanation(snapshot, full=False)
+
+    assert "审查门禁（有效结论）：阻断" in compact
+    assert "- Reviewer：" not in compact
+    assert reason in compact and reason in explained
+    next_step = compact.split("- 下一步：", 1)[1].splitlines()[0]
+    assert next_step in explained
+    assert "人工检查" in next_step
+    assert explanation_json_payload(snapshot, full=True) == original
+    assert snapshot.status["allowed_actions"] == ["human"]
+    assert snapshot.status["commit_recommended"] is False
 
 
 def test_status_selects_unique_change_run_from_repository_subdirectory(

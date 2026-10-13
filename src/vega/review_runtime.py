@@ -35,6 +35,7 @@ from .prompt_metrics import (
 )
 from .progress import make_execution_progress_reporter
 from .redaction import redact_text, redact_value
+from .review_checks import review_checks_failed
 from .review_coverage import (
     review_file_coverage_issues_for_verdict,
 )
@@ -289,7 +290,7 @@ class ReviewPackRuntime:
         run_dir.joinpath("eval.md").write_text("# Eval\n\n(pending)\n", encoding="utf-8")
         eval_results = run_review_pack_eval(run_dir, REVIEW_PACK_ARTIFACTS)
         run_dir.joinpath("eval.md").write_text(render_eval(eval_results), encoding="utf-8")
-        state.eval_results = eval_results
+        state.eval_results = [str(item) for item in eval_results]
         state.artifacts = REVIEW_PACK_ARTIFACTS
         if inputs["evidence_issues"]:
             state.status = "needs_human"
@@ -303,10 +304,10 @@ class ReviewPackRuntime:
             state.status = "needs_human"
             state.current_step = "risk_gate_failed"
         else:
-            state.status = "failed" if _has_failures(eval_results) else "success"
+            state.status = "failed" if review_checks_failed(eval_results) else "success"
             state.current_step = "done"
         state.save(run_dir / "state.json")
-        trace.write("eval_written", results=eval_results)
+        trace.write("eval_written", results=state.eval_results)
         trace.write("run_finished", status=state.status)
         return run_dir
 
@@ -568,7 +569,7 @@ class ReviewRuntime:
             risk_disclosure_issues=risk_disclosure_issues,
         )
         run_dir.joinpath("eval.md").write_text(render_eval(eval_results), encoding="utf-8")
-        state.eval_results = eval_results
+        state.eval_results = [str(item) for item in eval_results]
         state.artifacts = [
             *review_artifacts,
             *([interruption_artifact] if interruption_artifact else []),
@@ -613,17 +614,17 @@ class ReviewRuntime:
         elif risk_gate_result.recommendation == "human-review":
             state.status = "needs_human"
             state.current_step = "risk_gate_needs_human"
-        elif verdict.verdict == "approve" and not _has_failures(eval_results):
+        elif verdict.verdict == "approve" and not review_checks_failed(eval_results):
             state.status = "success"
             state.current_step = "done"
         elif verdict.verdict == "request_changes":
             state.status = "needs_human"
             state.current_step = "done"
         else:
-            state.status = "failed" if _has_failures(eval_results) else "needs_human"
+            state.status = "failed" if review_checks_failed(eval_results) else "needs_human"
             state.current_step = "done"
         state.save(run_dir / "state.json")
-        trace.write("eval_written", results=eval_results)
+        trace.write("eval_written", results=state.eval_results)
         trace.write("run_finished", status=state.status, verdict=verdict.verdict)
         return run_dir
 
@@ -1148,10 +1149,6 @@ def _truncate_with_status(
     if len(text) <= max_chars:
         return text, False
     return text[:max_chars] + "\n\n...（已截断）\n", True
-
-
-def _has_failures(results: list[str]) -> bool:
-    return any(item.startswith("FAIL:") for item in results)
 
 
 def _string_list(value: object) -> list[str]:

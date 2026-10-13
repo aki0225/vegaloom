@@ -22,9 +22,11 @@ from vega.agent_change_control import (
     guard_change_decision_budget,
     require_change_review_budget,
 )
-from vega.agent_change_revision import assess_change_revision
+from vega.agent_change_revision import assess_change_revision, project_revised_agent_plan
 from vega.agent_change_run import (
     load_change_run_context,
+    project_agent_plan,
+    validate_change_projection,
     write_candidate_artifact,
 )
 from vega.agent_contract import AgentDecision, AgentObservation, AgentState, canonical_digest
@@ -44,6 +46,51 @@ from vega.cli_entrypoint import app
 
 
 _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_multi_item_projection_preserves_serialization_and_revision_status(approved: bool) -> None:
+    contract = _contract()
+    if approved:
+        contract = approve_change_contract(contract, actor="test-reviewer")
+    execution = _execution_plan()
+    execution.work_items.extend([
+        ExecutionWorkItem(work_item_id="WI-02", objective="第二项", likely_files=["src/two.py"]),
+        ExecutionWorkItem(work_item_id="WI-03", objective="第三项", likely_files=["src/three.py"]),
+    ])
+    current = project_agent_plan(contract, execution)
+    current.work_items[0].status = "completed"
+    current.work_items[1].status = "completed"
+    current.work_items[2].status = "active"
+    before = current.model_dump(mode="json")
+    statuses = {item.work_item_id: item.status for item in current.work_items}
+    direct = project_agent_plan(contract, execution, work_item_statuses=statuses)
+    assert direct.model_dump(mode="json") == before
+    assert direct.model_dump(mode="json") == project_agent_plan(
+        contract, execution, current=current,
+    ).model_dump(mode="json")
+    assert direct.approved_digest == current.approved_digest
+    proposed = execution.model_copy(deep=True, update={"plan_revision": 2})
+    proposed.work_items[1].objective = "调整第二项"
+    proposed.work_items.append(ExecutionWorkItem(
+        work_item_id="WI-04", objective="新增项", likely_files=["src/four.py"],
+    ))
+    revised = project_revised_agent_plan(
+        current_plan=current, current_execution_plan=execution,
+        proposed_contract=contract, proposed_execution_plan=proposed,
+    )
+    expected = project_agent_plan(
+        contract, proposed, current=current,
+        work_item_statuses={"WI-01": "completed", "WI-02": "pending", "WI-03": "pending"},
+    )
+    assert revised.model_dump(mode="json") == expected.model_dump(mode="json")
+    assert [item.status for item in revised.work_items] == ["completed", "pending", "pending", "pending"]
+    assert revised.approved_digest == expected.approved_digest
+    assert revised.approval_is_current() is approved
+    validate_change_projection(contract, proposed, revised)
+    assert current.model_dump(mode="json") == before
+    with pytest.raises(ValueError):
+        project_agent_plan(contract, proposed, work_item_statuses={"WI-01": "invalid"})
 
 
 def test_unapproved_contract_can_be_revised_before_approval(

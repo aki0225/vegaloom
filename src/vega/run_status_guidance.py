@@ -166,19 +166,11 @@ def review_next_steps(run_dir: Path, state: dict[str, Any]) -> list[str]:
             "当前结果不能视为完整 approve。",
             "请缩小任务/diff 后重跑，或由人工检查完整证据。",
         ]
-    verdict = state.get("verdict")
-    if verdict == "approve":
-        return [
-            "reviewer 已通过；回到主会话整理交付结论，人工检查后再 commit。"
-        ]
-    if verdict == "request_changes":
-        return [
-            f"读取 `{run_dir / 'review-findings.md'}`，"
-            "按 findings 修复后重新 reflect + review。"
-        ]
     return [
-        f"读取 `{run_dir / 'review-runner-output.txt'}` 和 "
-        f"`{run_dir / 'review-findings.md'}`，人工判断或重跑 reviewer。"
+        f"读取 `{run_dir / 'review-findings.md'}` 了解审查材料。",
+        "回到所属 ChangeRun，用 `vega status --run <change-run>` 或 "
+        "`vega explain --run <change-run>` 查看阻断原因与允许的下一步；"
+        "单独的 Review 结论不授权提交或返修。",
     ]
 
 
