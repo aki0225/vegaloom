@@ -25,9 +25,9 @@
 
 ## 发布
 
-`v0.7.2` 的发布状态和资产以 GitHub Release 为准；能力与限制见
-[`RELEASE-NOTES-0.7.2.md`](RELEASE-NOTES-0.7.2.md)。安装资产见
-[GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.2)，
+`v0.7.3` 的发布状态和资产以 GitHub Release 为准；能力与限制见
+[`RELEASE-NOTES-0.7.3.md`](RELEASE-NOTES-0.7.3.md)。安装资产见
+[GitHub Release](https://github.com/aki0225/vegaloom/releases/tag/v0.7.3)，
 使用方式见 [当前使用说明](USAGE-WALKTHROUGH.md)。
 
 `v0.6.0` 的变更、升级限制和发布核对项见
