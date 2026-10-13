@@ -393,6 +393,10 @@ Core child 保留自己的 Verification、Risk、Reviewer 和 Finish Artifact。
 - `execution_*`：进程、超时、停止与输出；
 - `experimental/`：不参与当前公共成功语义的历史或实验实现。
 
+`host_skills` 拥有公开 `adapters init` 的宿主 Skill 安装与路径保护，不依赖实验包。
+wheel 排除 `experimental/` 和历史 Loop YAML；sdist 定向保留实验源码及规则/资源，
+但安装 sdist 得到的仍是产品 wheel。完整实验重放使用仓库，不以 sdist 代替历史材料。
+
 Core 不静态依赖 `vega.experimental`。新增模块受 500 行和增量 C901 门禁约束。
 
 ## 安全边界

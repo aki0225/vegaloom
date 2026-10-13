@@ -1,0 +1,5 @@
+# sdist 保留实验源码供查阅；安装时仍按 pyproject 只构建产品 wheel。
+recursive-include src/vega/experimental *.py AGENTS.md
+include AGENTS.md
+include src/vega/AGENTS.md
+include src/vega/resources/loops/engineering-change.loop.yaml

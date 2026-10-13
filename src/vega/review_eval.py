@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from .models import GateResult
 from .prompt_metrics import PromptMetrics
 from .redaction import redact_text
+from .review_checks import ReviewCheck, review_checks_failed
 from .review_contract import ReviewVerdict
 from .review_coverage import run_review_file_coverage_eval
 from .review_queue_contract import REVIEW_QUEUE_ARTIFACT
@@ -24,7 +25,7 @@ from .runner import RunnerResult
 
 
 def append_review_eval_outcome(
-    eval_results: list[str],
+    eval_results: list[ReviewCheck],
     *,
     result: RunnerResult,
     review_execution_issues: list[str],
@@ -36,7 +37,7 @@ def append_review_eval_outcome(
     risk_disclosure_issues: list[str],
 ) -> None:
     eval_results.extend(
-        f"FAIL: required risk disclosure：{issue}"
+        ReviewCheck("fail", f"FAIL: required risk disclosure：{issue}")
         for issue in risk_disclosure_issues
     )
     outcome = _review_execution_outcome(
@@ -55,7 +56,7 @@ def append_review_eval_outcome(
 
 
 def _review_execution_outcome(
-    eval_results: list[str],
+    eval_results: list[ReviewCheck],
     *,
     result: RunnerResult,
     review_execution_issues: list[str],
@@ -65,26 +66,26 @@ def _review_execution_outcome(
     risk_gate_result: GateResult | None,
     verdict: ReviewVerdict,
     risk_disclosure_issues: list[str],
-) -> str | None:
+) -> ReviewCheck | None:
     if result.termination_unconfirmed:
-        return (
-            "FAIL: reviewer owned process tree 终止未确认，"
-            "未读取或采用 runner 输出"
+        return ReviewCheck(
+            "fail", "FAIL: reviewer owned process tree 终止未确认，"
+            "未读取或采用 runner 输出",
         )
     if review_execution_issues:
-        return "FAIL: reviewer 执行期间工作区发生变化或无法完成快照校验"
+        return ReviewCheck("fail", "FAIL: reviewer 执行期间工作区发生变化或无法完成快照校验")
     if pre_review_evidence_issues:
         return None
     if prompt_budget_blocked:
-        return "FAIL: reviewer prompt 超过上下文预算，未启动外部 runner"
+        return ReviewCheck("fail", "FAIL: reviewer prompt 超过上下文预算，未启动外部 runner")
     if metrics.exceeded:
-        return "PASS: 超预算 reviewer 输入已由 Review Queue 完整覆盖"
+        return ReviewCheck("pass", "PASS: 超预算 reviewer 输入已由 Review Queue 完整覆盖")
     if risk_gate_result is None:
-        return "FAIL: review 风险门禁评估失败，未启动外部 runner"
+        return ReviewCheck("fail", "FAIL: review 风险门禁评估失败，未启动外部 runner")
     if not review_result_is_trusted(result):
-        return (
-            "FAIL: reviewer Runner 未形成可采信结论"
-            f"（{review_result_diagnostic(result)}），未读取或采用 runner 输出"
+        return ReviewCheck(
+            "fail", "FAIL: reviewer Runner 未形成可采信结论"
+            f"（{review_result_diagnostic(result)}），未读取或采用 runner 输出",
         )
     return _trusted_review_outcome(
         eval_results,
@@ -95,29 +96,32 @@ def _review_execution_outcome(
 
 
 def _trusted_review_outcome(
-    eval_results: list[str],
+    eval_results: list[ReviewCheck],
     risk_gate_result: GateResult,
     verdict: ReviewVerdict,
     risk_disclosure_issues: list[str],
-) -> str | None:
+) -> ReviewCheck | None:
     if risk_gate_result.recommendation == "human-review":
         return required_review_outcome_line(
             risk_gate_result,
             verdict,
             risk_disclosure_issues,
         )
-    if verdict.verdict == "needs_human" and not _has_failures(eval_results):
-        return "PASS: reviewer 输出可信的 needs_human 人工阻断结论"
+    if verdict.verdict == "needs_human" and not review_checks_failed(eval_results):
+        return ReviewCheck("pass", "PASS: reviewer 输出可信的 needs_human 人工阻断结论")
     if verdict.verdict != "needs_human":
-        return "PASS: reviewer 输出 verdict 可解析"
+        return ReviewCheck("pass", "PASS: reviewer 输出 verdict 可解析")
     return None
 
 
-def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
-    results = [
-        f"{'PASS' if (run_dir / item).exists() else 'FAIL'}: artifact 存在：{item}"
-        for item in artifacts
-    ]
+def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[ReviewCheck]:
+    results = []
+    for item in artifacts:
+        exists = (run_dir / item).exists()
+        results.append(ReviewCheck(
+            "pass" if exists else "fail",
+            f"{'PASS' if exists else 'FAIL'}: artifact 存在：{item}",
+        ))
     prompt_text = _review_prompt_eval(run_dir, results)
     queue = _read_json(run_dir / REVIEW_QUEUE_ARTIFACT)
     queue_completed = queue.get("status") == "completed"
@@ -137,15 +141,15 @@ def run_review_pack_eval(run_dir: Path, artifacts: list[str]) -> list[str]:
     return results
 
 
-def _review_prompt_eval(run_dir: Path, results: list[str]) -> str:
+def _review_prompt_eval(run_dir: Path, results: list[ReviewCheck]) -> str:
     prompt = run_dir / "review-prompt.md"
     if not prompt.exists():
         return ""
     prompt_text = prompt.read_text(encoding="utf-8", errors="replace")
     results.append(
-        "PASS: review prompt 标记不包含 worker 聊天"
+        ReviewCheck("pass", "PASS: review prompt 标记不包含 worker 聊天")
         if "worker 的完整聊天记录" in prompt_text
-        else "FAIL: review prompt 缺少隔离说明"
+        else ReviewCheck("fail", "FAIL: review prompt 缺少隔离说明")
     )
     return prompt_text
 
@@ -153,7 +157,7 @@ def _review_prompt_eval(run_dir: Path, results: list[str]) -> str:
 def _append_budget_eval(
     run_dir: Path,
     queue_completed: bool,
-    results: list[str],
+    results: list[ReviewCheck],
 ) -> None:
     metrics_path = run_dir / "review-prompt-metrics.json"
     if not metrics_path.exists():
@@ -162,18 +166,18 @@ def _append_budget_eval(
         metrics_path.read_text(encoding="utf-8")
     )
     if not metrics.exceeded:
-        results.append("PASS: review prompt 未超过上下文预算")
+        results.append(ReviewCheck("pass", "PASS: review prompt 未超过上下文预算"))
     elif queue_completed:
-        results.append("PASS: review prompt 超预算且 Review Queue 已完成")
+        results.append(ReviewCheck("pass", "PASS: review prompt 超预算且 Review Queue 已完成"))
     else:
-        results.append("FAIL: review prompt 超过上下文预算")
+        results.append(ReviewCheck("fail", "FAIL: review prompt 超过上下文预算"))
 
 
 def _append_context_eval(
     context: dict[str, object],
     queue: dict[str, object],
     queue_completed: bool,
-    results: list[str],
+    results: list[ReviewCheck],
 ) -> None:
     truncated = _string_list(context.get("truncated_sections"))
     unresolved = [
@@ -182,28 +186,30 @@ def _append_context_eval(
         if not (queue_completed and item == "full_diff")
     ]
     if unresolved:
-        results.append("WARN: review evidence 已截断：" + ", ".join(unresolved))
+        results.append(ReviewCheck("warn", "WARN: review evidence 已截断：" + ", ".join(unresolved)))
     elif truncated:
-        results.append("PASS: 完整 Diff 已由 Review Queue 分片覆盖")
+        results.append(ReviewCheck("pass", "PASS: 完整 Diff 已由 Review Queue 分片覆盖"))
     else:
-        results.append("PASS: review evidence 未截断")
+        results.append(ReviewCheck("pass", "PASS: review evidence 未截断"))
     if queue:
         results.append(
-            "PASS: Review Queue 已覆盖全部变更文件"
+            ReviewCheck("pass", "PASS: Review Queue 已覆盖全部变更文件")
             if queue_completed
-            else "FAIL: Review Queue 未完成；remaining="
-            + ",".join(_string_list(queue.get("remaining")))
+            else ReviewCheck(
+                "fail", "FAIL: Review Queue 未完成；remaining="
+                + ",".join(_string_list(queue.get("remaining"))),
+            )
         )
     evidence_issues = _string_list(context.get("evidence_issues"))
     if not evidence_issues:
-        results.append("PASS: review 证据与当前工作区属于同一快照")
+        results.append(ReviewCheck("pass", "PASS: review 证据与当前工作区属于同一快照"))
         return
-    results.append("FAIL: review 证据与当前工作区不属于同一快照")
+    results.append(ReviewCheck("fail", "FAIL: review 证据与当前工作区不属于同一快照"))
     results.extend(
-        f"FAIL: review evidence issue：{issue}" for issue in evidence_issues
+        ReviewCheck("fail", f"FAIL: review evidence issue：{issue}") for issue in evidence_issues
     )
     results.extend(
-        f"FAIL: review evidence diagnostic：{diagnostic}"
+        ReviewCheck("fail", f"FAIL: review evidence diagnostic：{diagnostic}")
         for diagnostic in _string_list(context.get("evidence_diagnostics"))
     )
 
@@ -213,21 +219,21 @@ def _append_risk_eval(
     run_dir: Path,
     artifacts: list[str],
     prompt_text: str,
-    results: list[str],
+    results: list[ReviewCheck],
 ) -> None:
     risk_gate = context.get("risk_gate")
     if risk_gate is None:
         return
     if not isinstance(risk_gate, dict):
-        results.append("FAIL: review 风险门禁记录格式不合法")
+        results.append(ReviewCheck("fail", "FAIL: review 风险门禁记录格式不合法"))
         return
     if risk_gate.get("status") != "success":
-        results.append("FAIL: review 风险门禁评估失败")
+        results.append(ReviewCheck("fail", "FAIL: review 风险门禁评估失败"))
         return
     try:
         result = GateResult.model_validate(risk_gate.get("result"))
     except ValidationError:
-        results.append("FAIL: review 风险门禁结果格式不合法")
+        results.append(ReviewCheck("fail", "FAIL: review 风险门禁结果格式不合法"))
         return
     if "review-verdict.json" in artifacts:
         results.extend(
@@ -240,7 +246,7 @@ def _append_risk_eval(
         results.extend(run_required_review_prompt_eval(result, prompt_text))
 
 
-def render_eval(results: list[str]) -> str:
+def render_eval(results: list[ReviewCheck]) -> str:
     return redact_text(
         "# Eval\n\n" + "\n".join(f"- {item}" for item in results) + "\n"
     )
@@ -260,7 +266,3 @@ def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, str)]
-
-
-def _has_failures(results: list[str]) -> bool:
-    return any(item.startswith("FAIL:") for item in results)

@@ -1,10 +1,63 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from .redaction import write_redacted_text
 from .verification import VerificationRunResult
+
+
+@dataclass(frozen=True)
+class VerificationPause:
+    event: str
+    current_step: str
+    conclusion: str
+    event_fields: dict[str, str | int | None]
+
+
+def classify_verification_pause(
+    verification: VerificationRunResult | None,
+) -> VerificationPause | None:
+    if verification is None:
+        return None
+    status = verification.interruption_status
+    if status is not None:
+        interruptions = {
+            "timed_out": ("timed_out", "verification 命令超时，已停止剩余验证、reflect 和 review。"),
+            "stopped": ("stopped", "verification 已按 stop request 停止，未继续 reflect 或 review。"),
+            "termination-unconfirmed": (
+                "verification_termination_unconfirmed",
+                "verification owned process tree 终止未确认，已保留现场并停止 reflect 和 review。",
+            ),
+        }
+        if status not in interruptions:
+            raise ValueError("verification interruption 缺少受支持的状态")
+        step, conclusion = interruptions[status]
+        return VerificationPause("verification_interrupted", step, conclusion, {
+            "status": status,
+            "command": verification.interruption_command,
+            "reason": verification.interruption_reason,
+        })
+    failure_kind = verification.failure_kind
+    if failure_kind is None:
+        return None
+    if failure_kind == "project_config_invalid":
+        event = failure_kind
+        conclusion = "项目配置预检失败，未执行任何验证命令，也未继续 Reflect 或 reviewer。"
+    elif failure_kind == "workspace_capture_failed":
+        event = "verification_workspace_capture_failed"
+        conclusion = (
+            "verification 工作区指纹采集失败，证据无法绑定当前现场，"
+            "已停止 Reflect 和 reviewer。"
+        )
+    else:
+        raise ValueError("verification failure 缺少受支持的 failure_kind")
+    return VerificationPause(event, event, conclusion, {
+        "failure_kind": failure_kind,
+        "commands": verification.command_count,
+        "failed": verification.failed_count,
+    })
 
 
 def write_execution_interruption_report(

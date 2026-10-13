@@ -120,6 +120,7 @@ def test_complete_required_risk_reviews_are_reported_and_kept_for_human(
     assert verdict["verdict"] == "needs_human"
     assert state["status"] == "needs_human"
     assert state["current_step"] == "risk_gate_needs_human"
+    assert verdict["change_impacts"][0]["summary"] == "调整幂等处理，仍需人工确认风险。"
     assert [item["risk_id"] for item in verdict["risk_disclosures"]] == [
         "payment",
         "database",
@@ -583,6 +584,7 @@ def test_required_risk_timeout_uses_real_stop_reason_and_drops_partial_output(
 
     assert state["status"] == "needs_human"
     assert state["current_step"] == "timed_out"
+    assert verdict["change_impacts"] == []
     assert [item["title"] for item in verdict["findings"]] == [
         "高风险审查证据不足"
     ]
@@ -623,6 +625,7 @@ def test_required_risk_truncation_uses_evidence_stop_reason(
     assert context["truncated_sections"] == ["full_diff"]
     assert state["status"] == "needs_human"
     assert state["current_step"] == "evidence_truncated"
+    assert verdict["change_impacts"] == []
     assert all(
         item["assessment"] == "insufficient_evidence"
         for item in verdict["risk_disclosures"]
@@ -634,6 +637,7 @@ def _complete_risk_verdict() -> str:
         {
             "verdict": "approve",
             "summary": "两类高风险均已检查，最终交由人工确认。",
+            "change_impacts": [{"summary": "调整幂等处理，仍需人工确认风险。", "locations": []}],
             "findings": [],
             "risk_disclosures": [
                 {
@@ -670,6 +674,64 @@ def _complete_risk_verdict() -> str:
         },
         ensure_ascii=False,
     )
+
+
+@pytest.mark.parametrize("path", ["risk", "request_changes", "coverage", "unknown_risk", "disclosure_gap"])
+def test_trusted_review_downgrade_preserves_material(path: str) -> None:
+    from vega.models import GateResult
+    from vega.review_contract import ReviewVerdict
+    from vega.risk_review_runtime import (
+        enforce_required_risk_review, enforce_review_file_coverage, redact_review_verdict,
+    )
+
+    payload = json.loads(_complete_risk_verdict())
+    payload["change_impacts"] = [{"summary": '兼容变更 api_key="synthetic-p2-secret"',
+                                  "locations": [{"file": "src/payments/charge.py", "line": 1}]}]
+    if path == "request_changes":
+        payload["verdict"] = "request_changes"
+    if path == "coverage":
+        payload.update(verdict="needs_human", needs_human_reason="acceptance_missing")
+    if path == "disclosure_gap":
+        payload["risk_disclosures"] = payload["risk_disclosures"][:1]
+    verdict = ReviewVerdict.model_validate(payload)
+    required = [{"id": key, "label": key, "matched_files": files} for key, files in (
+        ("payment", ["src/payments/charge.py", "src/payments/refund.py"]),
+        ("database", ["db/migrations/024_add_status.sql"]),
+    )]
+    gate = GateResult.model_validate({"risk": "high", "recommendation": "human-review",
+                                      "required_reviews": required})
+    if path == "coverage":
+        result, issues = enforce_review_file_coverage(verdict, [*verdict.reviewed_files, "other.py"],
+                                                     trusted=True)
+        assert issues
+    else:
+        result, _ = enforce_required_risk_review(
+            verdict, None if path == "unknown_risk" else gate, evidence_failures=[],
+        )
+    assert result.verdict == ("request_changes" if path == "request_changes" else "needs_human")
+    assert result.needs_human_reason is None
+    assert result.change_impacts == redact_review_verdict(verdict).change_impacts
+    assert result.change_impacts
+    assert "synthetic-p2-secret" not in result.model_dump_json()
+    assert verdict.model_dump() == ReviewVerdict.model_validate(payload).model_dump()
+
+
+@pytest.mark.parametrize("failure", ["workspace_changed", "reviewer_status:timed_out", "truncated:full_diff"])
+def test_untrusted_review_does_not_preserve_material(failure: str) -> None:
+    from vega.models import GateResult
+    from vega.review_contract import ReviewVerdict
+    from vega.risk_review_runtime import enforce_required_risk_review
+
+    payload = json.loads(_complete_risk_verdict_with_finding())
+    payload["change_impacts"] = [{"summary": "未经确认的影响", "locations": []}]
+    verdict = ReviewVerdict.model_validate(payload)
+    gate = GateResult.model_validate({"risk": "high", "recommendation": "human-review",
+        "required_reviews": [{"id": "payment", "label": "支付", "matched_files": ["src/payments/charge.py"]}]})
+    result, _ = enforce_required_risk_review(verdict, gate, evidence_failures=[failure])
+    assert result.verdict == "needs_human"
+    assert result.change_impacts == []
+    assert not any(item.title == "未完成 Runner 的部分判断" for item in result.findings)
+    assert result.reviewed_files == []
 
 
 def _complete_risk_verdict_with_finding() -> str:

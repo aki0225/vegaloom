@@ -28,6 +28,7 @@ from .loop_eval_checks import (
     loop_iteration_evidence_checks as _loop_iteration_evidence_checks_impl,
 )
 from .loop_failure_reporting import (
+    classify_verification_pause,
     write_execution_interruption_report as _write_execution_interruption_report,
     write_runner_error_report as _write_runner_error_report,
     write_verification_interruption_report as _write_verification_interruption_report,
@@ -1746,57 +1747,12 @@ class LoopAutomationRuntime:
         workspace_new_files_count: int = 0,
         scope_evidence: LoopScopeGateEvidence | None = None,
     ) -> bool:
-        if verification is None:
+        pause = classify_verification_pause(verification)
+        if pause is None:
             return False
+        assert verification is not None
         if verification.was_interrupted:
-            self._pause_for_verification_interruption(
-                run_dir,
-                state,
-                iteration_dir,
-                iteration_number,
-                verification,
-                trace,
-                worker_status=worker_status,
-                workspace_status=workspace_status,
-                workspace_new_files_count=workspace_new_files_count,
-                scope_evidence=scope_evidence,
-            )
-            return True
-        if verification.failure_kind is not None:
-            self._pause_for_verification_failure(
-                run_dir,
-                state,
-                iteration_dir,
-                iteration_number,
-                iteration_state,
-                verification,
-                trace,
-            )
-            return True
-        return False
-
-    def _pause_for_verification_interruption(
-        self,
-        run_dir: Path,
-        state: LoopAutomationState,
-        iteration_dir: Path,
-        iteration_number: int,
-        verification: VerificationRunResult,
-        trace: TraceWriter,
-        *,
-        worker_status: Literal["skipped", "success"],
-        workspace_status: Literal["skipped", "passed", "failed"] = "skipped",
-        workspace_new_files_count: int = 0,
-        scope_evidence: LoopScopeGateEvidence | None = None,
-    ) -> None:
-        interruption_status = verification.interruption_status
-        if interruption_status is None:
-            raise ValueError("verification interruption 缺少中断状态")
-
-        _copy_if_exists(verification.summary_path, iteration_dir / "test-summary.md")
-        state.current_iteration = iteration_number
-        state.iterations.append(
-            LoopIterationState(
+            iteration_state = LoopIterationState(
                 iteration=iteration_number,
                 worker_status=worker_status,
                 workspace_status=workspace_status,
@@ -1809,76 +1765,21 @@ class LoopAutomationRuntime:
                     else {}
                 ),
             )
-        )
-        trace.write(
-            "verification_interrupted",
-            iteration=iteration_number,
-            status=interruption_status,
-            command=verification.interruption_command,
-            reason=verification.interruption_reason,
-        )
-        _write_verification_interruption_report(iteration_dir, verification)
-        conclusion = {
-            "timed_out": "verification 命令超时，已停止剩余验证、reflect 和 review。",
-            "stopped": "verification 已按 stop request 停止，未继续 reflect 或 review。",
-            "termination-unconfirmed": (
-                "verification owned process tree 终止未确认，已保留现场并停止 reflect 和 review。"
-            ),
-        }[interruption_status]
-        _write_final_report(run_dir, state, None, conclusion)
-        current_step = {
-            "timed_out": "timed_out",
-            "stopped": "stopped",
-            "termination-unconfirmed": "verification_termination_unconfirmed",
-        }[interruption_status]
-        self._save_loop_done(
-            run_dir,
-            state,
-            "needs_human",
-            trace,
-            current_step=current_step,
-        )
-
-    def _pause_for_verification_failure(
-        self,
-        run_dir: Path,
-        state: LoopAutomationState,
-        iteration_dir: Path,
-        iteration_number: int,
-        iteration_state: LoopIterationState,
-        verification: VerificationRunResult,
-        trace: TraceWriter,
-    ) -> None:
-        failure_kind = verification.failure_kind
-        if failure_kind == "project_config_invalid":
-            event = failure_kind
-            conclusion = "项目配置预检失败，未执行任何验证命令，也未继续 Reflect 或 reviewer。"
-        elif failure_kind == "workspace_capture_failed":
-            event = "verification_workspace_capture_failed"
-            conclusion = (
-                "verification 工作区指纹采集失败，证据无法绑定当前现场，"
-                "已停止 Reflect 和 reviewer。"
-            )
-        else:
-            raise ValueError("verification failure 缺少受支持的 failure_kind")
         _copy_if_exists(verification.summary_path, iteration_dir / "test-summary.md")
         state.current_iteration = iteration_number
         state.iterations.append(iteration_state)
-        trace.write(
-            event,
-            iteration=iteration_number,
-            failure_kind=failure_kind,
-            commands=verification.command_count,
-            failed=verification.failed_count,
-        )
-        _write_final_report(run_dir, state, None, conclusion)
+        trace.write(pause.event, iteration=iteration_number, **pause.event_fields)
+        if verification.was_interrupted:
+            _write_verification_interruption_report(iteration_dir, verification)
+        _write_final_report(run_dir, state, None, pause.conclusion)
         self._save_loop_done(
             run_dir,
             state,
             "needs_human",
             trace,
-            current_step=event,
+            current_step=pause.current_step,
         )
+        return True
 
     def _run_review(
         self,

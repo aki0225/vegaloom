@@ -132,7 +132,7 @@ def render_compact_agent_status(snapshot: AgentCliSnapshot) -> str:
         f"- 修改文件：{_changed_files(changed_files)}",
         f"- Verification：{verification_label(str(status.get('verification')), candidate_transition=bool(status.get('candidate_transition')))}",
         f"- Risk：{_gate(status.get('risk'))}",
-        f"- Reviewer：{_gate(status.get('review'))}",
+        f"- 审查门禁（有效结论）：{_gate(status.get('review'))}",
         f"- 原因：{explanation.reason}",
         f"- 下一步：{next_step}",
     ]
@@ -172,7 +172,7 @@ def _delivery_lines(status: dict[str, object], phase: str) -> list[str]:
         base = delivery.get("base_revision")
         if base and candidate:
             lines.append(f"- 查看 Diff：在代码目录运行 `git diff {base} {candidate} --`（只读）")
-        lines.extend(f"- 审查/风险报告：`{path}`" for path in delivery.get("reports", []))
+        lines.extend(f"- 审查材料/风险报告：`{path}`" for path in delivery.get("reports", []))
     artifacts = status.get("key_artifacts")
     if isinstance(artifacts, list):
         reports = [

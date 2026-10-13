@@ -174,7 +174,7 @@ jobs:
             base_sha="${{ github.event.pull_request.base.sha }}"
             while IFS= read -r -d '' path; do
               case "$path" in
-                .github/workflows/*|pyproject.toml|tests/conftest.py|src/vega/experimental/*|tests/experimental/*|tests/test_crwp_v1_control.py|eval/*|examples/evidence/*|site/*|scripts/build_showcase_data.py|scripts/dogfood_eval.py|scripts/pilot/*|scripts/rcb01_*|scripts/run_assurance_*)
+                .github/workflows/*|pyproject.toml|MANIFEST.in|src/vega/resources/*|loops/*|tests/conftest.py|src/vega/experimental/*|tests/experimental/*|tests/test_crwp_v1_control.py|eval/*|examples/evidence/*|site/*|scripts/build_showcase_data.py|scripts/dogfood_eval.py|scripts/pilot/*|scripts/rcb01_*|scripts/run_assurance_*)
                   run_experimental=true
                   break
                   ;;
@@ -440,7 +440,7 @@ jobs:
           }
           & $venvPython -I -c "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & $venvPython -I -c "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); print(AdequacyResult.__name__)"
+          & $venvPython -I -c "import importlib.util, vega; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); assert importlib.util.find_spec('vega.experimental') is None; assert importlib.util.find_spec('vega.host_skills') is not None"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Push-Location $env:RUNNER_TEMP
           try {
@@ -569,7 +569,7 @@ jobs:
           .tmp/release-validation/venv/bin/python -I -c \
             "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
           .tmp/release-validation/venv/bin/python -I -c \
-            "import importlib.util, vega; from vega.experimental.assurance import AdequacyResult; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); print(AdequacyResult.__name__)"
+            "import importlib.util, vega; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); assert importlib.util.find_spec('vega.experimental') is None; assert importlib.util.find_spec('vega.host_skills') is not None"
           test "$(.tmp/release-validation/venv/bin/vega --version)" = "$VEGA_PACKAGE_VERSION"
           .tmp/release-validation/venv/bin/vega --help >/dev/null
 
@@ -638,4 +638,4 @@ jobs:
           .tmp/release-validation/sdist-venv/bin/python -I -c \
             "from vega.agent_handoff_digest import PORTABLE_WORKSPACE_DIGEST_KIND; assert PORTABLE_WORKSPACE_DIGEST_KIND == 'git-blob-v1'"
           .tmp/release-validation/sdist-venv/bin/python -I -c \
-            "import importlib.util, vega; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed)"
+            "import importlib.util, vega; removed=('adapter_runtime','assurance','context_loader','eval','goal_evidence','goal_runtime','llm_client','loop_spec','memory','reviewer','runtime','state','tool_broker'); assert vega.__all__ == ['__version__']; assert all(importlib.util.find_spec(f'vega.{name}') is None for name in removed); assert importlib.util.find_spec('vega.experimental') is None; assert importlib.util.find_spec('vega.host_skills') is not None"

@@ -53,6 +53,36 @@ class RecordingRunner:
         )
 
 
+@pytest.mark.parametrize("missing_artifact", [False, True])
+def test_review_terminal_uses_checks_not_eval_wording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_artifact: bool,
+) -> None:
+    import vega.review_runtime as runtime
+    from vega.review_checks import ReviewCheck
+
+    repo = tmp_path / "repo"
+    _init_changed_repo(repo)
+    reflect_run = ReflectRuntime(tmp_path).run(repo)
+    original_eval = runtime.run_review_pack_eval
+
+    def evaluate(run_dir: Path, artifacts: list[str]) -> list[ReviewCheck]:
+        if missing_artifact:
+            (run_dir / "review-checklist.md").unlink()
+        checks = original_eval(run_dir, artifacts)
+        message = "检查说明已本地化" if missing_artifact else "FAIL: 仅为展示引用"
+        return [ReviewCheck(check.status, message) for check in checks]
+
+    monkeypatch.setattr(runtime, "run_review_pack_eval", evaluate)
+    review_run = ReviewRuntime(tmp_path, runner=RecordingRunner()).run(
+        repo, reflect_run.name,
+    )
+
+    state = _read_json(review_run / "state.json")
+    assert state["verdict"] == "approve"
+    assert state["status"] == ("failed" if missing_artifact else "success")
+    assert state["current_step"] == "done"
+
+
 def test_review_evidence_binds_all_reviewer_inputs(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _init_changed_repo(repo)

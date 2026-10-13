@@ -1157,6 +1157,7 @@ def test_verification_continues_after_failure_and_short_circuits_on_interruption
     ("flow", "interruption_status", "report_name", "current_step", "worker_status"),
     [
         ("auto", "timed_out", "timeout-report.md", "timed_out", "success"),
+        ("continue", "stopped", "stop-report.md", "stopped", "skipped"),
         (
             "continue",
             "termination-unconfirmed",
@@ -1296,6 +1297,9 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
 
     assert state["status"] == "needs_human"
     assert state["current_step"] == current_step
+    assert len(state["iterations"]) == 1
+    assert state["iterations"][0]["verification_failure_kind"] is None
+    assert state["iterations"][0]["lifecycle"] == "completed"
     assert state["iterations"][0]["worker_status"] == worker_status
     assert state["iterations"][0]["verification_status"] == "failed"
     assert state["iterations"][0]["verification_failed_count"] == 1
@@ -1310,7 +1314,9 @@ def test_loop_persists_verification_interruption_before_reflect_and_review(
     assert "机器验证失败或中断" in run_dir.joinpath("final-report.md").read_text(
         encoding="utf-8"
     )
-    assert any(item.get("event") == "verification_interrupted" for item in trace_items)
+    events = [item["event"] for item in trace_items]
+    assert events.count("verification_interrupted") == 1
+    assert events.index("verification_finished") < events.index("verification_interrupted")
     assert trace_items[-1]["event"] == "run_paused"
     if interruption_status == "termination-unconfirmed":
         next_steps = run_status_payload(workspace, run_dir.name)["next_steps"]

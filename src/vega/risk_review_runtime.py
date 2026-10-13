@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from .models import GateResult
 from .redaction import redact_value
+from .review_checks import ReviewCheck
 from .review_contract import (
     RequiredReviewHit,
     ReviewFinding,
@@ -227,49 +228,49 @@ def empty_findings_line(verdict: ReviewVerdict) -> str:
 def run_required_review_pack_eval(
     result: GateResult,
     verdict_path: Path,
-) -> list[str]:
+) -> list[ReviewCheck]:
     if result.recommendation != "human-review":
-        return ["PASS: review 风险门禁允许隔离审查"]
+        return [ReviewCheck("pass", "PASS: review 风险门禁允许隔离审查")]
     if not result.required_reviews:
-        return ["FAIL: review 风险门禁要求人工审查"]
+        return [ReviewCheck("fail", "FAIL: review 风险门禁要求人工审查")]
     if not verdict_path.exists():
-        return ["FAIL: 必审高风险缺少 review-verdict.json"]
+        return [ReviewCheck("fail", "FAIL: 必审高风险缺少 review-verdict.json")]
     try:
         verdict = ReviewVerdict.model_validate_json(
             verdict_path.read_text(encoding="utf-8")
         )
     except (OSError, ValidationError, ValueError):
-        return ["FAIL: 必审高风险 verdict 格式不合法"]
+        return [ReviewCheck("fail", "FAIL: 必审高风险 verdict 格式不合法")]
     validation = validate_required_risk_disclosures(
         result.required_reviews,
         verdict.risk_disclosures,
         verdict.findings,
     )
     results = [
-        "FAIL: required risk disclosure：" + _format_issue(issue)
+        ReviewCheck("fail", "FAIL: required risk disclosure：" + _format_issue(issue))
         for issue in validation.issues
     ]
     if verdict.verdict != "needs_human":
-        results.append("FAIL: 必审高风险 verdict 必须为 needs_human")
+        results.append(ReviewCheck("fail", "FAIL: 必审高风险 verdict 必须为 needs_human"))
     if results:
         return results
     if any(
         disclosure.assessment == "insufficient_evidence"
         for disclosure in verdict.risk_disclosures
     ):
-        return ["WARN: 必审高风险披露结构完整，但审查证据不足，仍需人工确认"]
-    return ["PASS: 必审高风险披露结构完整且固定交由人工确认"]
+        return [ReviewCheck("warn", "WARN: 必审高风险披露结构完整，但审查证据不足，仍需人工确认")]
+    return [ReviewCheck("pass", "PASS: 必审高风险披露结构完整且固定交由人工确认")]
 
 
 def run_required_review_prompt_eval(
     result: GateResult,
     prompt_text: str,
-) -> list[str]:
+) -> list[ReviewCheck]:
     """Review Pack 只验证门禁范围已进入 prompt，不要求尚未生成的 verdict。"""
     if not result.required_reviews:
-        return ["PASS: Review Pack 已绑定风险门禁"]
+        return [ReviewCheck("pass", "PASS: Review Pack 已绑定风险门禁")]
     if result.risk != "high" or result.recommendation != "human-review":
-        return ["FAIL: 必审高风险未绑定 high/human-review 语义"]
+        return [ReviewCheck("fail", "FAIL: 必审高风险未绑定 high/human-review 语义")]
     required_markers = [
         *[f"`{item.id}`" for item in result.required_reviews],
         *[
@@ -282,25 +283,26 @@ def run_required_review_prompt_eval(
     missing = [marker for marker in required_markers if marker not in prompt_text]
     if missing:
         return [
-            "FAIL: Review Pack 缺少必审高风险提示："
-            + "、".join(missing)
+            ReviewCheck(
+                "fail", "FAIL: Review Pack 缺少必审高风险提示：" + "、".join(missing),
+            )
         ]
-    return ["PASS: 必审高风险已写入 Review Pack，等待逐类披露"]
+    return [ReviewCheck("pass", "PASS: 必审高风险已写入 Review Pack，等待逐类披露")]
 
 
 def required_review_outcome_line(
     risk_gate_result: GateResult,
     verdict: ReviewVerdict,
     disclosure_issues: Sequence[str],
-) -> str:
+) -> ReviewCheck:
     if not risk_gate_result.required_reviews or disclosure_issues:
-        return "FAIL: review 风险门禁要求人工审查，不能作为自动通过结论"
+        return ReviewCheck("fail", "FAIL: review 风险门禁要求人工审查，不能作为自动通过结论")
     if any(
         disclosure.assessment == "insufficient_evidence"
         for disclosure in verdict.risk_disclosures
     ):
-        return "WARN: 必审高风险审查证据不足，已固定交由人工确认"
-    return "PASS: 必审高风险披露结构完整；Review 结论固定交由人工确认"
+        return ReviewCheck("warn", "WARN: 必审高风险审查证据不足，已固定交由人工确认")
+    return ReviewCheck("pass", "PASS: 必审高风险披露结构完整；Review 结论固定交由人工确认")
 
 
 def redact_review_verdict(verdict: ReviewVerdict) -> ReviewVerdict:
@@ -358,8 +360,10 @@ def enforce_review_file_coverage(
     issues = review_file_coverage_issues(coverage)
     if not issues:
         return verdict, []
-    normalized = ReviewVerdict(
+    normalized = ReviewVerdict.model_validate(dict(
+        verdict.model_dump(),
         verdict="needs_human",
+        needs_human_reason=None,
         summary="Reviewer 未声明覆盖全部变更文件，现有结论不能作为完整独立审查。",
         findings=[
             *verdict.findings,
@@ -370,12 +374,11 @@ def enforce_review_file_coverage(
                 recommendation="人工检查缺失或未知路径，并重新取得覆盖完整变更清单的 Reviewer verdict。",
             ),
         ],
-        risk_disclosures=verdict.risk_disclosures,
         reviewed_files=coverage["reviewed_files"],
         checked_items=list(
             dict.fromkeys([*verdict.checked_items, "完整变更文件覆盖"])
         ),
-    )
+    ))
     return redact_review_verdict(normalized), issues
 
 
@@ -389,8 +392,10 @@ def _enforce_empty_risk_disclosures(
         for disclosure in verdict.risk_disclosures
     ]
     evidence = "；".join(issues)
-    normalized = ReviewVerdict(
+    normalized = ReviewVerdict.model_validate(dict(
+        verdict.model_dump(),
         verdict="needs_human",
+        needs_human_reason=None,
         summary="Reviewer 返回了未被 Gate 要求的风险披露，不能作为自动通过结论。",
         findings=[
             *verdict.findings,
@@ -402,11 +407,10 @@ def _enforce_empty_risk_disclosures(
             ),
         ],
         risk_disclosures=[],
-        reviewed_files=verdict.reviewed_files,
         checked_items=list(
             dict.fromkeys([*verdict.checked_items, "风险披露范围"])
         ),
-    )
+    ))
     return redact_review_verdict(normalized), issues
 
 
@@ -415,16 +419,14 @@ def _force_human_verdict(verdict: ReviewVerdict) -> ReviewVerdict:
     if verdict.verdict == "request_changes":
         return redact_review_verdict(verdict)
     return redact_review_verdict(
-        ReviewVerdict(
+        ReviewVerdict.model_validate(dict(
+            verdict.model_dump(),
             verdict="needs_human",
-            summary=verdict.summary,
-            findings=verdict.findings,
-            risk_disclosures=verdict.risk_disclosures,
-            reviewed_files=verdict.reviewed_files,
+            needs_human_reason=None,
             checked_items=list(
                 dict.fromkeys([*verdict.checked_items, "必须披露的高风险变更"])
             ),
-        )
+        ))
     )
 
 
@@ -446,19 +448,21 @@ def _build_insufficient_verdict(
             recommendation="人工检查全部命中文件，并重新取得完整、可采信的审查证据。",
         )
     )
-    normalized = ReviewVerdict(
+    # 只有可信材料可继承意见；漂移、截断或不可信 Runner 仍从空材料生成阻断。
+    normalized = ReviewVerdict.model_validate(dict(
+        verdict.model_dump() if preserve_runner_output else {},
         verdict="needs_human",
+        needs_human_reason=None,
         summary="必须披露的高风险审查证据不足，已保留命中范围并交由人工检查。",
         findings=findings,
         risk_disclosures=build_insufficient_evidence_disclosures(
             required_reviews,
             evidence=evidence,
         ),
-        reviewed_files=verdict.reviewed_files if preserve_runner_output else [],
         checked_items=list(
             dict.fromkeys([*checked_items, "必须披露的高风险变更"])
         ),
-    )
+    ))
     return redact_review_verdict(normalized)
 
 

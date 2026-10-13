@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from .review_checks import ReviewCheck
 from .review_contract import ReviewVerdict, normalize_review_path
 
 
@@ -56,7 +57,7 @@ def run_review_file_coverage_eval(
     artifacts: list[str],
     changed_files: list[str],
     prompt_text: str,
-) -> list[str]:
+) -> list[ReviewCheck]:
     verdict_path = run_dir / "review-verdict.json"
     if "review-verdict.json" not in artifacts or not verdict_path.exists():
         required_markers = ['"reviewed_files"', *changed_files]
@@ -65,23 +66,25 @@ def run_review_file_coverage_eval(
         ]
         if missing_markers:
             return [
-                "FAIL: review prompt 缺少完整变更文件覆盖约束："
-                + "、".join(missing_markers)
+                ReviewCheck(
+                    "fail", "FAIL: review prompt 缺少完整变更文件覆盖约束："
+                    + "、".join(missing_markers),
+                )
             ]
-        return ["PASS: review prompt 已绑定完整变更文件覆盖"]
+        return [ReviewCheck("pass", "PASS: review prompt 已绑定完整变更文件覆盖")]
     try:
         verdict = ReviewVerdict.model_validate_json(
             verdict_path.read_text(encoding="utf-8")
         )
     except (OSError, ValidationError, ValueError):
-        return ["FAIL: reviewer file coverage verdict 格式不合法"]
+        return [ReviewCheck("fail", "FAIL: reviewer file coverage verdict 格式不合法")]
     issues = review_file_coverage_issues_for_verdict(changed_files, verdict)
     if issues:
         return [
-            f"FAIL: reviewer file coverage：{issue}"
+            ReviewCheck("fail", f"FAIL: reviewer file coverage：{issue}")
             for issue in issues
         ]
-    return ["PASS: reviewer 已声明覆盖全部变更文件"]
+    return [ReviewCheck("pass", "PASS: reviewer 已声明覆盖全部变更文件")]
 
 
 def _normalized_unique(values: Iterable[str]) -> list[str]:
