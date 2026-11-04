@@ -68,6 +68,9 @@ def test_build_mcp_disable_overrides_disables_and_rechecks_all_servers(
     )
     assert calls[0] == [
         "codex",
+        "--disable", "hooks",
+        "--disable", "memories",
+        "--disable", "plugins",
         "--profile",
         "vega-safe",
         "mcp",
@@ -156,7 +159,13 @@ def test_mcp_probe_uses_shared_subprocess_compat_command(
         *,
         windows: bool,
     ) -> list[str] | str:
-        assert command == [logical_executable, "mcp", "list", "--json"]
+        assert command == [
+            logical_executable,
+            "--disable", "hooks",
+            "--disable", "memories",
+            "--disable", "plugins",
+            "mcp", "list", "--json",
+        ]
         assert windows is (os.name == "nt")
         return invocation
 
@@ -177,3 +186,45 @@ def test_mcp_probe_uses_shared_subprocess_compat_command(
         profile=None,
     ) == ()
     assert captured == [invocation]
+
+
+def test_plugin_mcp_is_excluded_before_top_level_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def probe(command, **kwargs):
+        del kwargs
+        disabled = {
+            command[index + 1]
+            for index, part in enumerate(command[:-1]) if part == "--disable"
+        }
+        servers = [{"name": "configured", "enabled": True}]
+        if "plugins" not in disabled:
+            servers.append({"name": "plugin_generated", "enabled": True})
+        if "mcp_servers.plugin_generated.enabled=false" in command:
+            return subprocess.CompletedProcess(command, 1, "", "invalid transport")
+        if "mcp_servers.configured.enabled=false" in command:
+            servers[0]["enabled"] = False
+        return subprocess.CompletedProcess(command, 0, json.dumps(servers), "")
+
+    monkeypatch.setattr("vega.codex_mcp_isolation.subprocess.run", probe)
+    assert build_mcp_disable_overrides("codex", tmp_path, profile=None) == (
+        "mcp_servers.configured.enabled=false",
+    )
+
+
+@pytest.mark.parametrize("verified", [
+    [{"name": "configured", "enabled": True}],
+    [{"name": "changed", "enabled": False}],
+])
+def test_isolated_mcp_probe_still_rejects_enabled_or_changed_servers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, verified: list[dict],
+) -> None:
+    responses = iter([[{"name": "configured", "enabled": True}], verified])
+    monkeypatch.setattr(
+        "vega.codex_mcp_isolation.subprocess.run",
+        lambda command, **kwargs: subprocess.CompletedProcess(
+            command, 0, json.dumps(next(responses)), "",
+        ),
+    )
+    with pytest.raises(CodexMcpIsolationError):
+        build_mcp_disable_overrides("codex", tmp_path, profile=None)

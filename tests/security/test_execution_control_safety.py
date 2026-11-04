@@ -20,6 +20,7 @@ import vega.execution_feedback as execution_feedback
 import vega.execution_process as execution_process
 import vega.windows_command as windows_command
 from vega.codex_mcp_isolation import CodexMcpIsolationError
+from vega.codex_app_server_runner import CodexAppServerRunner
 from vega.execution_control import (
     ExecutionController,
     ExecutionLease,
@@ -36,6 +37,7 @@ from vega.execution_output import (
 )
 from vega.execution_process import prepare_subprocess_command
 from vega.runner import CodexExecRunner
+from vega.provider_session import load_provider_sessions
 
 
 def _create_directory_link(link_path: Path, target_path: Path) -> None:
@@ -771,6 +773,48 @@ def test_codex_exec_runner_single_writer_fails_closed_when_mcp_isolation_fails(
     assert result.status == "error"
     assert "拒绝启动 Supervisor Worker" in (result.error or "")
     assert secret not in (result.error or "")
+
+
+def test_app_server_reviewer_never_starts_when_mcp_recheck_is_not_isolated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "runs" / "reviewer-isolation"
+    run_dir.mkdir(parents=True)
+    probes: list[list[str]] = []
+
+    def probe(command, **kwargs):
+        del kwargs
+        probes.append(command)
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps([{"name": "still_enabled", "enabled": True}]), "",
+        )
+
+    def unexpected_start(*args, **kwargs):
+        raise AssertionError("MCP 复查未隔离时不得启动 Reviewer")
+
+    monkeypatch.setattr("vega.codex_app_server_runner.shutil.which", lambda _: sys.executable)
+    monkeypatch.setattr("vega.codex_mcp_isolation.subprocess.run", probe)
+    monkeypatch.setattr("vega.codex_app_server_runner.run_owned_process", unexpected_start)
+    runner = CodexAppServerRunner(
+        run_dir, "reviewer:WI-01", work_item_id="WI-01",
+        contract_revision=1, plan_revision=1, isolate_session=True,
+    )
+    result = runner.run(
+        "只读审查", repo, sandbox="read-only", timeout_seconds=5,
+        execution_context=RunnerExecutionContext(
+            execution_root=run_dir, execution_dir=run_dir / "executions" / "reviewer",
+            run_id=run_dir.name, step="reviewer",
+        ),
+    )
+    assert len(probes) == 2, result.error
+    assert "mcp_servers.still_enabled.enabled=false" in probes[1]
+    assert result.status == "error"
+    assert "无法确认 Codex MCP 已全部关闭" in result.error
+    handle = load_provider_sessions(run_dir).handles["reviewer:WI-01"]
+    assert handle.lifecycle == "unavailable"
+    assert not handle.permissions_verified
 
 
 def test_codex_exec_runner_can_isolate_reviewer_mcp_without_writer_restrictions(

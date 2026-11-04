@@ -12,6 +12,7 @@ from .codex_app_server_process import AppServerInvocation
 from .codex_app_server_permissions import permissions_for_role
 from .codex_approval_context import cleanup_approval_contexts
 from .codex_mcp_isolation import (
+    ISOLATED_CODEX_FEATURE_ARGS,
     CodexMcpIsolationError,
     build_mcp_disable_overrides,
 )
@@ -219,14 +220,7 @@ class CodexAppServerRunner:
             args.extend(["--disable", "multi_agent", "--disable", "multi_agent_v2"])
         if not self.isolate_session:
             return args
-        args.extend([
-            "--disable",
-            "hooks",
-            "--disable",
-            "memories",
-            "--disable",
-            "plugins",
-        ])
+        args.extend(ISOLATED_CODEX_FEATURE_ARGS)
         for override in build_mcp_disable_overrides(
             resolved,
             repo_path,
