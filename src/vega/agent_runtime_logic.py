@@ -144,6 +144,23 @@ def _conservative_external_side_effects(
     return "none"
 
 
+def reactivate_current_work_item(
+    plan: AgentPlan,
+    work_item_id: str | None,
+) -> AgentPlan:
+    """只构造恢复校验用的内存副本，不改变来源证据或发布执行资格。"""
+
+    updated = plan.model_copy(deep=True)
+    current = next(
+        (item for item in updated.work_items if item.work_item_id == work_item_id),
+        None,
+    )
+    if current is None or current.status != "blocked":
+        raise ValueError("恢复目标的当前 Work Item 不是 blocked 状态")
+    current.status = "active"
+    return AgentPlan.model_validate(updated.model_dump(mode="json"))
+
+
 def apply_work_item_progress(
     plan: AgentPlan,
     state: AgentState,

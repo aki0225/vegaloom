@@ -284,6 +284,7 @@ def test_change_continues_unique_run_through_existing_approval_path(
             adapter_calls.append(run)
             state = AgentState.model_validate({
                 **state.model_dump(mode="json"),
+                "state_version": state.state_version + 1,
                 "phase": "needs_human", "allowed_actions": ["human"],
             })
             save_agent_state(run_dir / "agent-state.json", state)

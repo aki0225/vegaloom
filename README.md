@@ -283,6 +283,11 @@ Worker Thread 可以在 Repair 和后续 Work Item 中复用。Reviewer 不继�
 LLM 调查、写代码和找语义问题。确定性状态机决定 `next`、`repair`、`replan`、`human`
 和 `finalize`，并限制 Repair、Review、Replan 与验证重试次数。
 
+`change` 可自动修正机器证据确认的“当前工作项漏列合同内文件”，保留原授权和失败历史，
+继续执行完整门禁；首次派发前也会补齐固定 pytest 明确引用、合同精确允许的新测试文件，
+减少因计划漏项造成的中断。补验通过后会自动推进已授权的后续工作。复杂方案调整、授权变化与
+证据不足仍交还人工，具体条件见 [产品契约](docs/PRODUCT-CONTRACT.md)。
+
 ## 边界
 
 - 自动 Provider Adapter 支持 Codex 和 Claude Code；两者共用同一套成功语义。

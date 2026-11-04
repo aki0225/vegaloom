@@ -32,11 +32,12 @@ from .agent_runtime_support import (
 from .agent_status_evidence import build_supervisor_evidence
 from .agent_verification_retry_archive import reviewer_timeout_finish_is_valid
 from .agent_verification_retry_evidence import load_bound_source_finish
+from .agent_runtime_logic import reactivate_current_work_item
 from .agent_worker_evidence import (
     WorkerClaim,
     load_child_state,
     require_child_quiescent,
-    require_single_executable_work_item,
+    require_executable_work_item,
 )
 from .execution_control import find_execution_records
 from .loop_evidence import (
@@ -138,7 +139,9 @@ def prepare_reviewer_timeout_source(
         metadata,
     )
     _require_review_budget(budget)
-    work_item = require_single_executable_work_item(plan, state)
+    # 仅在内存中验证恢复后的当前项；来源 Plan 保持 blocked，供后续证据绑定。
+    active_plan = reactivate_current_work_item(plan, state.current_work_item)
+    work_item = require_executable_work_item(active_plan, state)
     if work_item.external_side_effects != "none":
         raise ValueError("Reviewer timeout 自动恢复只接受无外部副作用的 Work Item")
     repo = bound_repo(run_dir)

@@ -275,6 +275,21 @@ def _publish_preparation(
         return None if succeeded else AgentRun(run_dir=run_dir, state=next_state, plan=current_plan)
 
 
+def require_completed_change_environment(run_dir: Path, contract: ChangeContract) -> None:
+    """只核对已批准准备的机器终态；供执行前修订复用，不启动或重放准备。"""
+    if not contract.prepare_commands:
+        return
+    if not contract.approval_is_current() or contract.approved_digest is None:
+        raise ValueError("环境准备缺少有效批准")
+    operation_id = hashlib.sha256(
+        f"prepare:{run_dir.name}:{contract.approved_digest}".encode()
+    ).hexdigest()[:32]
+    _require_completed_preparation(
+        run_dir, f"environment-preparations/{contract.approved_digest}.json",
+        operation_id, contract.approved_digest, contract.prepare_commands,
+    )
+
+
 def _require_completed_preparation(
     run_dir: Path, result_ref: str, operation_id: str, approved_digest: str, commands: list[str],
 ) -> None:

@@ -28,7 +28,7 @@ from .agent_change_core import (
     reserve_change_core_child,
 )
 from .agent_git_candidate import CandidateCommit
-from .agent_environment_preparation import prepare_change_environment
+from .agent_verification_scope_replan import prepare_change_attempt, require_verification_scope_resume
 from .agent_operation import operation_ref
 from .agent_plan_scope import (
     capture_plan_scope_baseline,
@@ -40,6 +40,7 @@ from .agent_provider_factory import (
     worker_runner,
 )
 from .agent_reviewer_timeout_retry import auto_retry_reviewer_timeout
+from .agent_pre_core_resume import require_pre_core_resume
 from .agent_provider_preparation import (
     change_run_step_limit,
     next_attempt_context as _next_attempt_context,
@@ -47,7 +48,6 @@ from .agent_provider_preparation import (
     read_task_brief as _read_task_brief,
     review_final_candidate,
     validate_prepared_workspace,
-    require_pre_core_resume,
 )
 from .agent_contract import AgentObservation
 from .agent_run import AgentRun
@@ -127,8 +127,9 @@ class SupervisorAgentProviderAdapter:
         *,
         timeout_seconds: int,
     ) -> AgentRun:
-        preparation_failure = prepare_change_environment(
-            self.workspace, run, progress_reporter=self._report_preparation_progress,
+        preparation_failure = prepare_change_attempt(
+            self.workspace, run, complete_scope=self.runtime.complete_verification_scope_if_eligible,
+            progress_reporter=self.progress_reporter, event_reporter=self.event_reporter,
         )
         if preparation_failure is not None:
             return preparation_failure
@@ -145,13 +146,6 @@ class SupervisorAgentProviderAdapter:
             bound,
         )
         return self._reconcile_attempt(executed)
-
-    def _report_preparation_progress(self, step: str, elapsed_seconds: int) -> None:
-        if self.event_reporter is not None:
-            action = "已开始" if elapsed_seconds == 0 else "运行中"
-            self.event_reporter(f"环境准备{action}，已用时 {elapsed_seconds} 秒；Worker 尚未启动")
-        elif self.progress_reporter is not None:
-            self.progress_reporter(step, elapsed_seconds)
 
     def _prepare_and_bind(
         self,
@@ -181,6 +175,7 @@ class SupervisorAgentProviderAdapter:
             raise ValueError("Worker timeout 必须在 60..3600 秒之间")
         run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
         validate_dispatch_artifacts(run_dir, state, plan)
+        require_verification_scope_resume(self.workspace, run_dir, state, plan, metadata)
         work_item = require_executable_work_item(plan, state)
         change_context = load_change_run_context(
             run_dir,

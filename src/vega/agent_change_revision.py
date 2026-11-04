@@ -56,6 +56,7 @@ class ChangeRevisionAssessment(StrictAgentModel):
     approval_question: NonEmptyText | None = None
     reason: NonEmptyText
     budget: ChangeBudgetSnapshot
+    verification_scope_source: NonEmptyText | None = None
 
 
 def assess_change_revision(

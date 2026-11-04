@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .agent_cli_interaction import InteractionPumpUpdate, ProviderInteractionPump, TerminalApprovalPrompt
 from .agent_change_presentation import redact_change_message
+from .agent_change_run import load_change_run_context
 from .agent_provider import AgentProvider
 from .agent_provider_adapter import SupervisorAgentProviderAdapter
 from .agent_recovery import SupervisorAgentRecovery
@@ -21,6 +22,15 @@ from .run_utils import resolve_run_dir
 
 InteractionReporter = Callable[[InteractionPumpUpdate], None]
 EventReporter = Callable[[str], None]
+
+
+def change_phase_step_limit(workspace: Path, current: AgentRun) -> int:
+    """覆盖初始调查与收尾，并为合同内每次自动修订保留 planning/ready 两步。"""
+    if current.state.contract_revision is None:
+        return 12
+    context = load_change_run_context(*load_agent_bundle(workspace, current.run_dir.name))
+    assert context is not None
+    return 12 + 2 * context.contract.authority_envelope.max_auto_replans
 
 
 @dataclass(frozen=True)

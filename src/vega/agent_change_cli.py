@@ -39,7 +39,7 @@ def agent_change(
         help="从指定 Git Task Card 恢复。",
     ),
     acceptance_file: Path | None = typer.Option(
-        None, "--acceptance-file", help="显式 --run：提交 workspace 内相对 JSON，仅 acceptance_missing 原 Candidate 再审，不启动 Worker。",
+        None, "--acceptance-file", help="显式 --run：提交 workspace 内相对 JSON，补验原 Candidate；通过后继续已授权的后续工作。",
     ),
     provider: Literal["codex", "claude"] | None = typer.Option(
         None,

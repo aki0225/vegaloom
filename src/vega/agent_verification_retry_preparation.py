@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from . import agent_provider_preparation as provider_preparation
+from .agent_pre_core_resume import require_pre_core_resume
+from .agent_provider_preparation import comparison_binding_from_metadata
 from .agent_change_contract import ChangeContract, ExecutionPlan
 from .agent_change_control import require_change_verification_retry_budget
 from .agent_change_run import load_change_run_context, validate_change_projection
@@ -33,10 +34,11 @@ from .agent_verification_retry_evidence import (
     select_source_plan,
     validate_retry_source,
 )
+from .agent_runtime_logic import reactivate_current_work_item
 from .agent_worker_evidence import (
     load_child_state,
     require_child_quiescent,
-    require_single_executable_work_item,
+    require_executable_work_item,
 )
 from .loop_runtime import LoopAutomationRuntime
 from .models import LoopAutomationState
@@ -69,6 +71,12 @@ def verification_retry_requested(workspace: Path, run: str) -> bool:
         return False
     if _approved_implementation_revision(run_dir, state, plan, metadata):
         return False
+    trace = read_agent_trace(run_dir / "trace.jsonl")
+    if (trace and trace[-1].get("event") == "change_execution_plan_auto_applied"
+            and any(ref.startswith("checkpoints/") for ref in checkpoint.evidence_refs)):
+        # 多次范围修订保留累计失败历史；必须逐次核对最新来源，不能要求历史只剩一次。
+        require_pre_core_resume(workspace, run_dir, state)
+        return False
     if len(checkpoint.failed_attempts) == 1:
         child_dir = resolve_run_dir(workspace, checkpoint.failed_attempts[0])
         if not (child_dir / "state.json").exists():
@@ -76,7 +84,7 @@ def verification_retry_requested(workspace: Path, run: str) -> bool:
             if binding is None or binding[0] != child_dir.name:
                 raise ValueError("失败 Checkpoint 与原 Worker 绑定不一致")
             # 缺文件不是重跑依据；只有完整证明 Core 尚未启动的显式恢复才可继续 Worker。
-            provider_preparation.require_pre_core_resume(workspace, run_dir, state)
+            require_pre_core_resume(workspace, run_dir, state)
             return False
     # 有失败现场时不能因资格校验失败回退到新 Worker；由恢复路径明确拒绝。
     return True
@@ -241,25 +249,6 @@ def prepare_verification_retry(
     return prepared
 
 
-def reactivate_current_work_item(
-    plan: AgentPlan,
-    work_item_id: str | None,
-) -> AgentPlan:
-    updated = plan.model_copy(deep=True)
-    current = next(
-        (
-            item
-            for item in updated.work_items
-            if item.work_item_id == work_item_id
-        ),
-        None,
-    )
-    if current is None or current.status != "blocked":
-        raise ValueError("恢复目标的当前 Work Item 不是 blocked 状态")
-    current.status = "active"
-    return AgentPlan.model_validate(updated.model_dump(mode="json"))
-
-
 def _prepare_verification_failure(
     workspace: Path,
     run: str,
@@ -269,7 +258,7 @@ def _prepare_verification_failure(
         raise ValueError("当前 Agent 状态不允许验证专用恢复")
     validate_dispatch_artifacts(run_dir, state, plan)
     require_change_verification_retry_budget(run_dir, state, plan, metadata)
-    work_item = require_single_executable_work_item(plan, state)
+    work_item = require_executable_work_item(plan, state)
     if work_item.external_side_effects != "none":
         raise ValueError("验证专用恢复只接受 external_side_effects=none 的 Work Item")
     repo = bound_repo(run_dir)
@@ -365,7 +354,7 @@ def build_prepared_verification_retry(
         before,
     )
     comparison_base_sha, comparison_paths = (
-        provider_preparation.comparison_binding_from_metadata(metadata)
+        comparison_binding_from_metadata(metadata)
     )
     next_iteration = child_state.current_iteration + int(retry_reason != "core_evidence_recheck")
     plan_scope_baseline = capture_plan_scope_baseline(

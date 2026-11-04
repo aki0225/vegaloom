@@ -49,7 +49,8 @@ def test_acceptance_rejects_failed_verification_before_workspace_capture(tmp_pat
     monkeypatch.setattr(reviewer_timeout_retry, "require_child_quiescent", lambda *_: None)
     monkeypatch.setattr(reviewer_timeout_retry, "require_change_verification_retry_budget", lambda *_: None)
     monkeypatch.setattr(reviewer_timeout_retry, "_require_review_budget", lambda *_: None)
-    monkeypatch.setattr(reviewer_timeout_retry, "require_single_executable_work_item", lambda *_: AgentWorkItem(work_item_id="W1", objective="修复", external_side_effects="none"))
+    monkeypatch.setattr(reviewer_timeout_retry, "reactivate_current_work_item", lambda *_: None)
+    monkeypatch.setattr(reviewer_timeout_retry, "require_executable_work_item", lambda *_: AgentWorkItem(work_item_id="W1", objective="修复", external_side_effects="none"))
     monkeypatch.setattr(reviewer_timeout_retry, "bound_repo", lambda *_: tmp_path)
     monkeypatch.setattr(reviewer_timeout_retry, "require_verification_commands_preflight", lambda *_: None)
     monkeypatch.setattr(reviewer_timeout_retry, "_reviewer_timeout_checkpoint", lambda *_: SimpleNamespace(failed_attempts=["child"]))
@@ -157,10 +158,12 @@ class _Reviewer:
         )
 
 
+@pytest.mark.parametrize("work_item_count", [1, 2])
 def test_timeout_retries_once(
     tmp_path: Path,
+    work_item_count: int,
 ) -> None:
-    workspace, approved = _approved_change(tmp_path)
+    workspace, approved = _approved_change(tmp_path, work_item_count=work_item_count)
     reviewer = _Reviewer(["timed_out", "success", "success"])
     worker = _Worker()
     loop = LoopAutomationRuntime(workspace, reviewer_runner=reviewer)
@@ -174,8 +177,9 @@ def test_timeout_retries_once(
 
     assert result.state.phase == "completed"
     assert result.state.terminal_status == "ready_to_commit"
-    assert worker.calls == 1
-    assert reviewer.calls == 2
+    assert worker.calls == work_item_count
+    assert reviewer.calls == (2 if work_item_count == 1 else 4)
+    assert all(item.status == "completed" for item in result.plan.work_items)
     trace = read_agent_trace(result.run_dir / "trace.jsonl")
     retry_events = [
         item for item in trace if item["event"] == "verification_retry_committed"
@@ -326,8 +330,17 @@ def test_retry_role_is_independent(
 
 def _approved_change(
     tmp_path: Path,
+    *, work_item_count: int = 1, max_verification_retries: int = 1,
+    verification: str = "python -m compileall -q src",
 ) -> tuple[Path, object]:
     repo = _repo(tmp_path / "repo")
+    if verification != "python -m compileall -q src":
+        config_path = repo / ".vega.yaml"
+        config_path.write_text(config_path.read_text(encoding="utf-8").replace(
+            "  commands:\n", "  commands:\n    - " + verification + "\n",
+        ), encoding="utf-8")
+        _git(repo, "add", ".vega.yaml")
+        _git(repo, "commit", "-m", "测试：登记失败验证命令")
     workspace = tmp_path / "w"
     workspace.mkdir()
     runtime = SupervisorAgentRuntime(workspace)
@@ -340,7 +353,7 @@ def _approved_change(
             allowed_paths=["src/**"],
             max_changed_files=1,
             max_review_rounds=4,
-            max_verification_retries=1,
+            max_verification_retries=max_verification_retries,
         ),
     )
     plan = ExecutionPlan(
@@ -351,10 +364,16 @@ def _approved_change(
                 work_item_id="WI-01",
                 objective="更新 src/one.py",
                 likely_files=["src/one.py"],
-                verification=["python -m compileall -q src"],
+                verification=[verification],
             )
         ],
     )
+    if work_item_count == 2:
+        plan.work_items.append(ExecutionWorkItem(
+            work_item_id="WI-02", objective="继续更新 src/one.py",
+            likely_files=["src/one.py"], depends_on=["WI-01"],
+            verification=["python -m compileall -q src"],
+        ))
     started = runtime.start_change(
         repo,
         contract=contract,
@@ -521,6 +540,115 @@ def test_acceptance_submission_rechecks_candidate_without_worker(
         after = {p.relative_to(pending.run_dir): p.read_bytes() for p in pending.run_dir.rglob("*") if p.is_file()}
         assert after == before
         assert worker.calls == reviewer.calls == 1
+
+
+def test_multi_item_verification_revision_preserves_source_evidence_gate(tmp_path: Path):
+    from vega.agent_verification_retry import SupervisorAgentVerificationRetry
+
+    workspace, approved = _approved_change(
+        tmp_path, work_item_count=2, verification='python -c "raise SystemExit(1)"',
+    )
+    worker = _Worker()
+    reviewer = _Reviewer(["legacy", "success"])
+    loop = LoopAutomationRuntime(workspace, reviewer_runner=reviewer)
+    failed = SupervisorAgentProviderAdapter(
+        workspace, worker_runner=worker, loop_runtime=loop,
+        finish_runtime=FinishRuntime(workspace),
+    )._run_once(approved.run_dir.name, timeout_seconds=60)
+    assert failed.state.phase == "needs_human"
+    assert [item.status for item in failed.plan.work_items] == ["blocked", "pending"]
+    contract = ChangeContract.model_validate_json((failed.run_dir / "change-contract.json").read_text())
+    plan = ExecutionPlan.model_validate_json((failed.run_dir / "execution-plan.json").read_text())
+    proposed_plan = plan.model_copy(deep=True, update={"plan_revision": 2})
+    proposed_plan.work_items[0].verification = ["python -m compileall -q src"]
+    runtime = SupervisorAgentRuntime(workspace)
+    pending = runtime.revise_change(
+        failed.run_dir.name, proposed_contract=contract, proposed_execution_plan=proposed_plan,
+        request_approval=True,
+    )
+    reapproved = runtime.approve(pending.run_dir.name, actor="user")
+    before = {p.relative_to(reapproved.run_dir): p.read_bytes()
+              for p in reapproved.run_dir.rglob("*") if p.is_file()}
+    # 多项选择通过后仍需来源快照；此真实失败 Core 未提供受信快照，不能借恢复放行。
+    with pytest.raises(ValueError, match="原始 Finish 无法绑定受信审查快照"):
+        SupervisorAgentVerificationRetry(
+            workspace, loop_runtime=loop, timeout_seconds=60,
+        ).run(reapproved.run_dir.name)
+    after = {p.relative_to(reapproved.run_dir): p.read_bytes()
+             for p in reapproved.run_dir.rglob("*") if p.is_file()}
+    assert after == before
+    assert worker.calls == reviewer.calls == 1
+
+
+@pytest.mark.parametrize("blocker", [None, "workspace", "budget"])
+def test_multi_item_acceptance_retry_preserves_pending_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, blocker: str | None,
+):
+    import vega.agent_change_driver as driver_module
+    from vega.agent_change_driver import AgentChangeDriver
+    from vega.agent_runtime_support import bound_repo
+    from vega.agent_verification_retry import SupervisorAgentVerificationRetry
+    from vega.codex_app_server_permissions import bind_worker_permissions
+
+    workspace, approved = _approved_change(
+        tmp_path, work_item_count=2,
+        max_verification_retries=0 if blocker == "budget" else 1,
+    )
+    bind_worker_permissions(approved.run_dir, "ask")
+    worker = _Worker()
+    reviewer = _Reviewer(["acceptance_missing", "success"])
+    loop = LoopAutomationRuntime(workspace, reviewer_runner=reviewer)
+    adapter = SupervisorAgentProviderAdapter(
+        workspace, worker_runner=worker, loop_runtime=loop,
+        finish_runtime=FinishRuntime(workspace),
+    )
+    pending = adapter.run(approved.run_dir.name, timeout_seconds=60)
+    assert [item.status for item in pending.plan.work_items] == ["blocked", "pending"]
+    directory = workspace / "acceptance-input"
+    directory.mkdir()
+    path = directory / "checks.json"
+    path.write_text(json.dumps({
+        "run_id": pending.run_dir.name, "candidate_sha": pending.state.active_candidate_sha,
+        "records": [{"check": "第一项验收", "action": "查看输出", "result": "符合预期",
+                     "uncovered": "第二项尚未执行", "source": "host_observation"}],
+    }), encoding="utf-8")
+    if blocker == "workspace":
+        (bound_repo(pending.run_dir) / "src/one.py").write_text("value = 99\n", encoding="utf-8")
+    before = {p.relative_to(pending.run_dir): p.read_bytes()
+              for p in pending.run_dir.rglob("*") if p.is_file()}
+    retry = SupervisorAgentVerificationRetry(workspace, loop_runtime=loop, timeout_seconds=60)
+    if blocker:
+        with pytest.raises(ValueError, match="Workspace 已漂移" if blocker == "workspace" else "验证重试预算已用完"):
+            retry.run(pending.run_dir.name, retry_reason="acceptance_supplement", acceptance_file=path.relative_to(workspace))
+        after = {p.relative_to(pending.run_dir): p.read_bytes()
+                 for p in pending.run_dir.rglob("*") if p.is_file()}
+        assert after == before
+        assert worker.calls == reviewer.calls == 1
+        return
+    retry_run = retry.run
+
+    def recheck(*args, **kwargs):
+        result = retry_run(*args, **kwargs)
+        assert result.state.phase == "ready" and result.state.current_work_item == "WI-02"
+        assert [item.status for item in result.plan.work_items] == ["completed", "pending"]
+        assert worker.calls == 1 and reviewer.calls == 2
+        assert [item.status for item in pending.plan.work_items] == ["blocked", "pending"]
+        head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=bound_repo(result.run_dir), text=True, timeout=30,
+        ).strip()
+        assert head == pending.state.active_candidate_sha
+        return result
+
+    driver = AgentChangeDriver(workspace, tmp_path / "repo", json_output=True, timeout_seconds=60)
+    monkeypatch.setattr(retry, "run", recheck)
+    monkeypatch.setattr(driver, "_verification_retry", lambda provider: retry)
+    monkeypatch.setattr(driver_module, "ensure_change_provider_ready", lambda provider: None)
+    monkeypatch.setattr(driver_module, "run_change_worker", lambda workspace, current, provider, **kwargs:
+                        adapter.run(current.run_dir.name, timeout_seconds=kwargs["timeout_seconds"]))
+    result = driver.change(run=pending.run_dir.name, acceptance_file=path.relative_to(workspace))
+    assert result.outcome == "completed"
+    assert all(item.status == "completed" for item in result.run.plan.work_items)
+    assert worker.calls == 2 and reviewer.calls == 4
 
 
 def test_acceptance_submission_uses_git_object_id_formats():

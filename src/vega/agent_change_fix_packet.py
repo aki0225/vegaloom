@@ -15,7 +15,7 @@ from .agent_contract import (
     StrictAgentModel,
     utc_now,
 )
-from .agent_persistence import load_agent_checkpoint
+from .agent_checkpoint_history import ready_checkpoint_origin
 from .redaction import write_redacted_json_once
 from .review_contract import ReviewFinding
 from .run_utils import resolve_run_dir
@@ -123,9 +123,7 @@ def load_current_fix_packet(
 ) -> ChangeFixPacket:
     if state.latest_checkpoint_id is None or state.current_work_item is None:
         raise ValueError("当前 repair 缺少 Checkpoint 或 Work Item")
-    checkpoint = load_agent_checkpoint(
-        run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
-    )
+    state, checkpoint = ready_checkpoint_origin(run_dir, state)
     if (
         state.phase != "ready"
         or "repair" not in state.allowed_actions

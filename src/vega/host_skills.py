@@ -110,7 +110,7 @@ vega steer --run <run_id> --role worker --text "补充检查这个边界"
 验收补充仅支持 Worker 用 `acceptance_refs` 引用已批准项目范围内的现有 UTF-8 md/txt/log/json 材料（相对 path、原文 sha256，最多4份、每份4096字节）。由控制器作为独立审查数据冻结，不是机器通过证明；不包含完整自述或推理，不为此新开目录权限或写 Run。图片、任意控制器日志和其他来源不在此接口支持范围。
 
 若实际 Reviewer 将 `needs_human_reason` 明确标为 `acceptance_missing`，主会话可在验收后使用 `vega change --run <run-id> --acceptance-file acceptance/checks.json`。文件相对 Run Workspace，不能位于 runs/Git 控制目录或经符号链接；无需写目标业务仓库。JSON 包含 `run_id`、完整 `candidate_sha`、1..4 条 `records`；每条包含 `check/action/result/uncovered`（各最多2048字符）和 `source`（host_observation/tool_transcript/worker_report），总文件最多32768字节。仅提交明确提供且脱敏的记录，不扫描会话或读取凭据，不传完整对话。来源类型不是可信认证，passed 文本不等于机器验证。
-控制器保留旧审查，在原 Candidate 重跑既有门禁及独立审查，沿用预算，不启动 Coding Worker；新结论仍须经过正常 Finish。未分类历史 needs_human、人工决策/风险、代码或授权变化、活动进程、证据缺损不能借补验解除。没有该入口资格时照实报告，不代填 Reviewer 分类或修改旧 Artifact。
+控制器保留旧审查，在原 Candidate 重跑既有门禁及独立审查，沿用预算；补验阶段不重跑原 Coding Worker。补验得到允许继续的结论后，日常驱动器自动执行已授权的后续工作项或返修，新结论仍须经过正常 Finish。未分类历史 needs_human、人工决策/风险、代码或授权变化、活动进程、证据缺损不能借补验解除。没有该入口资格时照实报告，不代填 Reviewer 分类或修改旧 Artifact。
 
 遇到 `acceptance_missing`，主会话先自行核对本次绑定的现有产物；必要且获准时，按 Run/Provider 记录的精确 Thread 身份只读提取原生测试工具结果，再通过上述 acceptance-file 入口补交。只传必要命令、结果、时序和来源，不传完整对话或推理，不读其他 Thread，不要求用户搬运日志，不恢复第二个 Writer。找不到历史结果就如实报告，事后对照不得冒充原先执行，也不自动放宽人工业务条件。
 

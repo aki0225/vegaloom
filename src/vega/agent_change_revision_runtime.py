@@ -44,6 +44,8 @@ def revise_change_run(
     proposed_contract: ChangeContract,
     proposed_execution_plan: ExecutionPlan,
     request_approval: bool = False,
+    scope_replan_source: str | None = None,
+    verification_scope_source: str | None = None,
 ) -> AgentRun:
     """按真实 Diff、风险路径和冻结合同裁决 ChangeRun revision。"""
 
@@ -51,6 +53,7 @@ def revise_change_run(
         state.run_kind != "change"
         or state.active_child_run
         or state.active_operation_id
+        or state.active_planning_execution_id
     ):
         raise ValueError("当前状态不能修订 ChangeRun")
     if state.phase not in {
@@ -63,8 +66,7 @@ def revise_change_run(
     context = load_change_run_context(run_dir, state, plan, metadata)
     assert context is not None
     snapshot = capture_bound_workspace(run_dir)
-    if snapshot.unsafe_index_paths or not snapshot.git_control_complete:
-        raise ValueError("当前 Workspace 无法完整解释，拒绝自动 Replan")
+    _validate_revision_workspace(snapshot, state, scope_replan_source or verification_scope_source)
     budget = change_budget_snapshot(run_dir, state, context.contract)
     assessment = assess_change_revision(
         repo=bound_repo(run_dir),
@@ -76,6 +78,7 @@ def revise_change_run(
         budget=budget,
         request_approval=request_approval,
     )
+    assessment.verification_scope_source = verification_scope_source
     assessment_ref = write_revision_assessment(run_dir, assessment)
     restored_candidate_ref: str | None = None
     if state.active_candidate_sha and assessment.outcome != "unchanged":
@@ -121,6 +124,10 @@ def revise_change_run(
         execution_plan=context.execution_plan,
         projected_plan=plan,
     )
+    if scope_replan_source is not None:
+        archived_refs.append(scope_replan_source)
+    if verification_scope_source is not None:
+        archived_refs.append(verification_scope_source)
     if restored_candidate_ref is not None:
         archived_refs.append(restored_candidate_ref)
     revised_plan = project_revised_agent_plan(
@@ -161,7 +168,20 @@ def revise_change_run(
         archived_refs=archived_refs,
         current_work_item=current_work_item,
         reason=assessment.reason,
+        verification_scope_source=verification_scope_source,
     )
+
+
+def _validate_revision_workspace(
+    snapshot: ReviewWorkspaceSnapshot, state: AgentState, scope_replan_source: str | None,
+) -> None:
+    if snapshot.unsafe_index_paths or not snapshot.git_control_complete:
+        raise ValueError("当前 Workspace 无法完整解释，拒绝自动 Replan")
+    if scope_replan_source is not None and (
+        snapshot.fingerprint != state.workspace_fingerprint
+        or snapshot.head_sha != state.accepted_checkpoint_sha
+    ):
+        raise ValueError("自动范围修订发布前 Workspace 已漂移")
 
 
 def _publish_approval_revision(
@@ -244,6 +264,7 @@ def _publish_auto_revision(
     archived_refs: list[str],
     current_work_item: str,
     reason: str,
+    verification_scope_source: str | None = None,
 ) -> AgentRun:
     revised_state = update_state(
         state,
@@ -286,6 +307,7 @@ def _publish_auto_revision(
         event="change_execution_plan_auto_applied",
         state=revised_state,
         observation_summary=reason,
+        route_reason="verification.scope_completed" if verification_scope_source else None,
         artifact_refs=[
             assessment_ref,
             *archived_refs,

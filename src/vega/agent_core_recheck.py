@@ -45,10 +45,11 @@ def prepare_core_recheck(workspace: Path, run: str) -> PreparedVerificationRetry
     from .agent_git_candidate import validate_candidate_binding
     from .agent_operation import child_summary_ref
     from .agent_runtime_support import bound_repo, capture_bound_workspace, load_agent_bundle
+    from .agent_runtime_logic import reactivate_current_work_item
     from .agent_status_evidence import build_supervisor_evidence
     from .agent_verification_retry_evidence import load_bound_source_finish
     from .agent_verification_retry_preparation import (
-        build_prepared_verification_retry, reactivate_current_work_item,
+        build_prepared_verification_retry,
     )
     from .agent_worker_evidence import (
         WorkerClaim,

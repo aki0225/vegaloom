@@ -111,6 +111,10 @@ def continue_acceptance(
     driver.selected_run = result
     if result.state.phase == "completed":
         return driver._completed(result, provider)
+    if result.state.phase in {"ready", "finalizing"}:
+        # 补验只重跑原 Candidate 的门禁；通过后由日常驱动器继续已有授权，
+        # 不让多工作项任务停在需要宿主再次调用 change 的中间态。
+        return driver._drive(result)
     return driver._attention(
         result, "review.acceptance_rechecked",
         "补验再审已返回；未启动 Coding Worker。请按当前门禁处理未决事项。",

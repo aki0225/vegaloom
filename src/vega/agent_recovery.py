@@ -4,6 +4,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from .agent_contract import AgentObservation
+from .agent_checkpoint_history import LOCAL_RESUME_SOURCE
+from .agent_local_resume import hold_source_reference, resume_local_run
 from .agent_execution_bridge import (
     resolve_bound_execution_run_dir,
     resolve_bound_worker_execution,
@@ -38,8 +40,6 @@ from .agent_recovery_support import (
     latest_checkpoint,
     reconcile_missing_dispatch_trace,
     require_recovery_request,
-    resume_work_item_progress,
-    validate_resume_checkpoint,
     write_load_failure_report,
 )
 from .agent_run import AgentRun
@@ -48,10 +48,8 @@ from .agent_runtime_support import (
     bound_repo,
     capture_bound_workspace,
     load_agent_bundle,
-    save_agent_plan,
     write_checkpoint,
     write_status_card,
-    write_task_brief,
 )
 from .execution_control import ExecutionRecord, inspect_execution_for_recovery
 from .redaction import write_redacted_json_once
@@ -301,67 +299,12 @@ class SupervisorAgentRecovery:
 
     @agent_mutation("agent.resume")
     def resume_local(self, run: str) -> AgentRun:
-        run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
-        if state.run_kind == "change" and state.contract_revision is None:
-            raise ValueError(
-                "未编译的 Planning ChangeRun 不能恢复为 ready；"
-                "可重试调查请继续运行 `vega change --run <run-id>`，"
-                "Workspace 漂移或终止不明时请新建 Planning run 或生成可验证 Handoff"
-            )
-        if state.phase not in {"needs_human", "stopped"}:
-            raise ValueError("只有已暂停或停止且没有 active Writer 的 run 可以本机恢复")
-        if state.active_child_run or state.active_operation_id:
-            raise ValueError("Writer 仍处于 active binding，不能本机恢复")
-        # Task Card 发布后所有权已进入交接流程，不能复活旧 Run 形成两个调度入口。
-        if state.handoff_status != "none":
-            raise ValueError("当前 run 已发布 Handoff，不能本机恢复；请从 Task Card 恢复")
-        checkpoint = latest_checkpoint(run_dir, state)
-        actual = capture_bound_workspace(run_dir)
-        validate_resume_checkpoint(plan, checkpoint, actual)
-        plan = resume_work_item_progress(plan, state)
-        next_state = update_state(
-            state,
-            phase="ready",
-            state_version=state.state_version + 1,
-            workspace_fingerprint=actual.fingerprint,
-            allowed_actions=["next", "replan", "human"],
-        )
-        resumed = write_checkpoint(
-            run_dir,
-            next_state,
-            actual,
-            reason="人工从 safe Checkpoint 恢复本机调度",
-            status="safe",
-            pending_actions=["next", "replan", "human"],
-            operation_started=False,
-        )
-        next_state = update_state(
-            next_state,
-            latest_checkpoint_id=resumed.checkpoint_id,
-            state_version=next_state.state_version + 1,
-        )
-        write_task_brief(run_dir, plan, next_state, resumed)
-        save_agent_plan(run_dir, plan)
-        save_agent_state(run_dir / "agent-state.json", next_state)
-        append_agent_trace(
-            run_dir / "trace.jsonl",
-            event="agent_resumed",
-            state=next_state,
-            observation_summary="已重新采集 Workspace，并从 safe Checkpoint 恢复",
-            artifact_refs=[f"checkpoints/{resumed.checkpoint_id}.json", "task-brief.md"],
-        )
-        write_status_card(
-            run_dir,
-            next_state,
-            plan,
-            checkpoint=resumed,
-            next_step="人工确认后显式派发当前 Work Item",
-        )
-        return AgentRun(run_dir=run_dir, state=next_state, plan=plan)
+        return resume_local_run(self.workspace, run)
+
     def _hold(self, run: str, *, reason: str, stopped: bool) -> AgentRun:
         if not reason.strip():
             raise ValueError("pause/stop 必须提供原因")
-        run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
+        run_dir, state, plan, metadata = load_agent_bundle(self.workspace, run)
         action = "stop" if stopped else "pause"
         if state.phase == "completed":
             raise ValueError("已完成的 Agent run 不能改写为 pause/stop")
@@ -433,6 +376,8 @@ class SupervisorAgentRecovery:
             allowed_actions = ["human"]
             status = "safe" if safe else "blocked"
             pending_actions = ["human"]
+        source_ref = (hold_source_reference(self.workspace, run_dir, state, plan, metadata)
+                      if safe and external_side_effects == "none" else None)
         next_state = update_state(
             state,
             phase=phase,
@@ -449,7 +394,8 @@ class SupervisorAgentRecovery:
             pending_actions=pending_actions,
             operation_started=False,
             external_side_effects=external_side_effects,
-            evidence_refs=planning_refs,
+            evidence_refs=[*planning_refs, *([source_ref] if source_ref else [])],
+            resume_source_checkpoint=source_ref,
         )
         next_state = update_state(
             next_state,
@@ -465,8 +411,10 @@ class SupervisorAgentRecovery:
                 else "agent_paused"
             ),
             state=next_state,
-            route_reason=reason.strip(),
-            artifact_refs=[f"checkpoints/{checkpoint.checkpoint_id}.json"],
+            route_reason=LOCAL_RESUME_SOURCE if source_ref else reason.strip(),
+            observation_summary=reason.strip(),
+            artifact_refs=[f"checkpoints/{checkpoint.checkpoint_id}.json",
+                           *([source_ref] if source_ref else [])],
         )
         write_status_card(
             run_dir,
