@@ -70,6 +70,85 @@ def _files(run_dir: Path) -> dict[Path, bytes]:
             for path in run_dir.rglob("*") if path.is_file()}
 
 
+def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_path):
+    from vega.agent_change_fix_packet import load_current_fix_packet
+    from vega.execution_control import ExecutionController
+    from vega.loop_runtime import LoopAutomationRuntime
+    from vega.runner import RunnerResult
+
+    runtime, approved = _scenario(tmp_path)
+    workspace = tmp_path / "workspace"
+
+    class Worker:
+        calls = 0
+
+        def run(self, prompt, repo_path, *, sandbox, timeout_seconds, execution_context):
+            assert sandbox == "workspace-write"
+            self.calls += 1
+            controller = ExecutionController(execution_context)
+            controller.prepare(["fixture-worker"], 60)
+            (repo_path / "tests").mkdir(exist_ok=True)
+            (repo_path / "tests/test_new.py").write_text(
+                f"def test_value():\n    assert 0 == {self.calls}\n", encoding="utf-8",
+            )
+            controller.finish("success", reason=None, returncode=0)
+            return RunnerResult(status="success", command=["fixture-worker"], output=json.dumps({
+                "claimed_status": "completed", "summary": "新增测试", "tests_claimed": [],
+                "remaining_questions": [],
+            }))
+
+    class Reviewer:
+        def run(self, prompt, repo_path, *, sandbox, timeout_seconds, execution_context):
+            assert sandbox == "read-only"
+            controller = ExecutionController(execution_context)
+            controller.prepare(["fixture-reviewer"], 60)
+            controller.finish("success", reason=None, returncode=0)
+            return RunnerResult(status="success", command=["fixture-reviewer"], output=json.dumps({
+                "verdict": "approve", "summary": "测试仍由确定性验证裁决", "findings": [],
+                "reviewed_files": ["tests/test_new.py"], "checked_items": ["scope", "tests"],
+            }))
+
+    worker = Worker()
+    adapter = SupervisorAgentProviderAdapter(
+        workspace, worker_runner=worker,
+        loop_runtime=LoopAutomationRuntime(workspace, reviewer_runner=Reviewer()),
+    )
+    first = adapter._run_once(approved.run_dir.name, timeout_seconds=60)
+    first_checkpoint = load_agent_checkpoint(
+        first.run_dir / f"checkpoints/{first.state.latest_checkpoint_id}.json",
+    )
+    second = adapter._run_once(first.run_dir.name, timeout_seconds=60)
+    checkpoint_path = second.run_dir / f"checkpoints/{second.state.latest_checkpoint_id}.json"
+    checkpoint = load_agent_checkpoint(checkpoint_path)
+    packet = load_current_fix_packet(workspace, second.run_dir, second.state)
+    assert worker.calls == 2 and packet.repair_round == 2
+    assert len(checkpoint.failed_attempts) == 2
+    assert checkpoint.failed_attempts[-1] == packet.source_child_run
+    original = checkpoint_path.read_bytes()
+    # 包内每条证据仍有效，旧整组证据也不能冒充本轮最新失败。
+    for update in (
+        {"failed_attempts": list(reversed(checkpoint.failed_attempts))},
+        {"failed_attempts": first_checkpoint.failed_attempts,
+         "evidence_refs": first_checkpoint.evidence_refs},
+    ):
+        save_agent_checkpoint(checkpoint_path, checkpoint.model_copy(update=update))
+        before = _files(second.run_dir)
+        with pytest.raises(ValueError, match="repair 来源证据与 Checkpoint 不一致"):
+            load_current_fix_packet(workspace, second.run_dir, second.state)
+        assert _files(second.run_dir) == before
+        checkpoint_path.write_bytes(original)
+
+    trace_path = second.run_dir / "trace.jsonl"
+    trace = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    latest = next(row for row in reversed(trace) if row["event"] == "worker_dispatch_committed")
+    latest["operation_id"] = "different-operation"
+    trace_path.write_text("".join(json.dumps(row) + "\n" for row in trace), encoding="utf-8")
+    before = _files(second.run_dir)
+    with pytest.raises(ValueError, match="repair 来源证据与 Checkpoint 不一致"):
+        load_current_fix_packet(workspace, second.run_dir, second.state)
+    assert _files(second.run_dir) == before
+
+
 @pytest.mark.parametrize("blocker", ["symlink", "forbidden", "glob_authority", "risk", "file_budget"])
 def test_scope_completion_requires_exact_safe_authority_for_missing_file(tmp_path, blocker):
     runtime, approved = _scenario(tmp_path, blocker=blocker)

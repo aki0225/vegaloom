@@ -1589,3 +1589,61 @@ pause/resume 丢失修订来源，Core repair 暂停后也被误恢复为 next�
 WI-01 并继续 WI-02，通过全部固定验证、独立审查与最终集成审查。合同和预算保持不变。
 所有预设干预均明确记为故障注入，不称为自然出现的模型错误，也不计作无干预普通任务。
 人工不临时修补候选或状态；总上限 1800 秒，单模型 Turn 300 秒，失败现场完整保留。
+
+
+## 2026-11-05 REAL-AUTONOMY-04 故障注入与暂停恢复结果
+
+父 run `20261105-014829-1c83404b2646-agent`，326.71 秒后完成，终态为
+`completed / ready_to_commit`，最终 Candidate 为
+`74e3395dcf23199d5fa312149a4f68525480ef76`。控制器源码摘要在运行前后保持一致，
+批准合同逐字节不变，自动 Replan 2 次、Worker 派发 3 次、Repair 1 次。
+
+预注册的 RuntimeError 注入实际发生，修改后文件摘要与失败 Candidate
+`b4e609f646ecccb23e45c59117b9ac75e9c53bc6` 中 Git blob 一致。首 child
+`20261105-014832-275767-bug-loop` 的真实 pytest 为 8 failed，失败包含该注入异常；
+Ruff 通过。该失败保留为真实门禁结果，未以 Reviewer approve 覆盖。
+
+WI-01 进入 ready/repair 后，脚本执行一次公开 pause/resume，恢复动作仍为 repair，
+FixPacket 与暂停前相同，随后才再次派发 Worker。第二 child
+`20261105-015011-774019-bug-loop` 由真实 Worker 修复后为 8 passed；后续 WI-02 child
+`20261105-015116-434418-bug-loop` 为 15 passed、51 deselected，两项 Ruff 均通过。
+同一 Worker Thread 累计 3 Turn；WI-01 Reviewer 为 2 Turn，WI-02 Reviewer 与最终
+集成 Reviewer 各 1 Turn，均使用独立只读 Thread。最终 Artifact 完整且新鲜，集成审查 approve。
+
+本轮属于真实模型下的预设故障注入恢复：一次脚本改动和一次脚本暂停恢复已明确计入，
+不能称作模型自然犯错或无干预任务。没有运行中临时手改候选、状态或合同；事后审计核对了
+注入位置、失败 Candidate、失败验证、暂停恢复事件顺序、原修复包及后续真实派发。
+这证明该条件下可自动返修并推进后续工作项，不代表任意中断、真实 Reviewer 超时、
+Claude 或跨平台模型运行均已覆盖。
+
+本地完整证据入口为 `.tmp/real-agent-20261105-014630-repair-resume/experiment.json`。
+工具状态目录 `vega-autonomy-next/` 对应实验子目录保存 `driver.log`、`result.json`、
+`fault-injection.json`、`pause-injection.json`、`audit-summary.json`、
+`controller-source-sha256.json` 和控制器差异；公开记录不包含原始模型正文或认证配置。
+
+暂停恢复开发验证先得到 2 failed，修复后定向集合 3 passed、28 deselected；
+恢复相关完整文件集合 78 passed，repair/contract 选择 69 passed、46 deselected，
+独立交付工作区范围与恢复集合 33 passed。集合有重叠，不相加作为唯一用例数。
+Ruff、compileall、仓库卫生、计划状态、架构与 diff 检查均通过；完整职责分片交由 PR CI。
+本实验完成后另发现连续两次 Core 失败的修复包加载与 child 选择误要求仅一条失败历史，
+新增模拟代理加真实 pytest 回归分别在两道校验实际失败；此后续问题不改变本轮一次 Repair 的结论。
+
+
+## 2026-11-05 连续两次 Core 失败的返修回归
+
+新增模拟 Worker、真实 pytest 的回归先在 FixPacket 加载得到 1 failed、18 deselected；
+修复该处后又在 repair child 选择得到相同失败计数。两处都误把累计失败历史限制为单项。
+修复后 ChangeRun 从绑定最后失败及最新 child/operation 的 FixPacket 选择当前子运行，
+累计历史保留；legacy 仍要求唯一失败 child，Core 状态、仓库身份与进程静止检查不变。
+
+两次失败后第三次 Worker 完成，attempt=3、repair=2、replan=1，原合同保持不变。
+安全回归拒绝倒置最后失败、旧整组修复证据重放以及同 child 的 operation 错绑；
+拒绝过程中没有发布新状态。新增安全夹具首次因空测试目录未进入 Git 而失败，
+补齐夹具目录创建后通过，该夹具失败不算产品故障。
+
+独立交付工作区完整范围/恢复文件及既有 ChangeRun、legacy repair 节点为
+41 passed in 167.55s，单用例限时 60 秒、集合限时 300 秒。
+Ruff、compileall、仓库卫生、计划状态、架构门禁通过，C901 31→31、模块 247→251。
+日志为工具状态目录 `vega-delivery/autonomy-followup-validation.log`。
+此回归是模拟代理与真实机器门禁，不新增真实模型运行计数；连续多次失败后的验证专用恢复、
+Reviewer timeout retry 与 Core recheck 的累计历史兼容仍待单独实验，不从本轮结果推断通过。

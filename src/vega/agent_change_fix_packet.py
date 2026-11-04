@@ -16,6 +16,7 @@ from .agent_contract import (
     utc_now,
 )
 from .agent_checkpoint_history import ready_checkpoint_origin
+from .agent_run_status import latest_dispatch_binding
 from .redaction import write_redacted_json_once
 from .review_contract import ReviewFinding
 from .run_utils import resolve_run_dir
@@ -182,7 +183,10 @@ def load_current_fix_packet(
         or observation.worker_alive
         or observation.work_item_completed
         or not observation.repairable_in_scope
-        or checkpoint.failed_attempts != [observation.child_run]
+        # 失败历史按工作项累计；本轮修复必须绑定最后一次失败及最新执行。
+        or checkpoint.failed_attempts[-1:] != [observation.child_run]
+        or latest_dispatch_binding(run_dir, state)
+        != (observation.child_run, observation.operation_id)
     ):
         raise ValueError("当前 repair 来源证据与 Checkpoint 不一致")
     child_ref, finish, finish_sha256 = _load_bound_finish(

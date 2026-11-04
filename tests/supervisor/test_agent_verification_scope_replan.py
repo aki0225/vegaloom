@@ -64,6 +64,7 @@ def _scenario(tmp_path: Path, *, command: str | None = None, blocker: str = "", 
             allowed_paths=["src/one.py", "tests/test_new.py", "tests/test_existing.py", "src/two.py",
                            "tests/test_second.py"],
             max_auto_replans=0 if blocker == "budget" else 2 if blocker == "multi" else 1,
+            max_repair_rounds=2 if blocker == "two_repairs" else 3,
         ),
     )
     items = [ExecutionWorkItem(work_item_id="WI-01", objective="实现功能",
@@ -165,11 +166,12 @@ def test_scope_completion_does_not_guess_ambiguous_verification(tmp_path, comman
     (True, "verification_repair"),
     pytest.param(False, "pause_before_dispatch", id="scope-pause-resume-first-dispatch"),
     pytest.param(False, "pause_before_repair", id="core-failure-pause-resume-repair"),
+    pytest.param(False, "two_repairs", id="two-core-failures-two-repairs"),
 ])
 def test_adapter_completes_scope_for_each_work_item_before_dispatch(tmp_path, monkeypatch, with_prepare, worker_mode):
     workspace, runtime, approved = _scenario(
         tmp_path, command="python -m pytest -q tests/test_new.py",
-        blocker="multi" if worker_mode == "multi" else "", with_prepare=with_prepare,
+        blocker=worker_mode if worker_mode in {"multi", "two_repairs"} else "", with_prepare=with_prepare,
     )
     if with_prepare:
         before = _files(approved.run_dir)
@@ -181,7 +183,8 @@ def test_adapter_completes_scope_for_each_work_item_before_dispatch(tmp_path, mo
     recomputed = []
     repair_packets = []
     resumed_points = []
-    needs_repair = worker_mode in {"verification_repair", "pause_before_repair"}
+    needs_repair = worker_mode in {"verification_repair", "pause_before_repair", "two_repairs"}
+    failure_count = 2 if worker_mode == "two_repairs" else int(needs_repair)
     contract_before = (approved.run_dir / "change-contract.json").read_bytes()
 
     def complete_and_reenter(self, run):
@@ -190,6 +193,15 @@ def test_adapter_completes_scope_for_each_work_item_before_dispatch(tmp_path, mo
             packet = load_current_fix_packet(workspace, run_dir, state)
             assert packet.verification == "failed"
             assert packet.work_item_id == "WI-01" and packet.execution_plan_revision == 2
+            if worker_mode == "two_repairs":
+                dispatches = [row for row in read_agent_trace(run_dir / "trace.jsonl")
+                              if row["event"] == "worker_dispatch_committed" and row.get("work_item") == "WI-01"]
+                assert packet.source_child_run == dispatches[-1]["child_run"]
+                assert packet.source_operation_id == dispatches[-1]["operation_id"]
+                checkpoint = load_agent_checkpoint(run_dir / f"checkpoints/{state.latest_checkpoint_id}.json")
+                assert checkpoint.failed_attempts == [row["child_run"] for row in dispatches]
+                assert len(checkpoint.failed_attempts) == len(repair_packets) + 1
+                assert packet.repair_round == len(repair_packets) + 1
             if worker_mode == "pause_before_repair":
                 SupervisorAgentRecovery(workspace).pause(run, reason="在可信 Core 返修边界切换会话")
                 resumed = SupervisorAgentRecovery(workspace).resume_local(run)
@@ -235,7 +247,8 @@ def test_adapter_completes_scope_for_each_work_item_before_dispatch(tmp_path, mo
             controller = ExecutionController(execution_context)
             controller.prepare(["fixture-worker"], 60)
             # 由真实 pytest 产生失败和 Core FixPacket；不伪造 Observation/Decision。
-            expected = 999 if needs_repair and self.calls == 1 else 2
+            # 第二次失败也产生真实的新 Diff，避免无改动返修被其他门禁提前截住。
+            expected = (999 if self.calls == 1 else 9999) if self.calls <= failure_count else 2
             (repo_path / target).write_text(
                 f"def test_value():\n    assert 1 + 1 == {expected}\n", encoding="utf-8",
             )
@@ -264,10 +277,11 @@ def test_adapter_completes_scope_for_each_work_item_before_dispatch(tmp_path, mo
         workspace, worker_runner=worker,
         loop_runtime=LoopAutomationRuntime(workspace, reviewer_runner=Reviewer()),
     ).run(approved.run_dir.name, timeout_seconds=60)
-    assert worker.calls == (1 if worker_mode == "pause_before_dispatch" else 2)
+    assert worker.calls == (3 if worker_mode == "two_repairs" else
+                            1 if worker_mode == "pause_before_dispatch" else 2)
     item_ids = ("WI-01", "WI-02") if worker_mode == "multi" else ("WI-01",)
     assert recomputed == list(item_ids)
-    assert len(repair_packets) == int(needs_repair)
+    assert len(repair_packets) == failure_count
     assert resumed_points == ({"pause_before_dispatch": ["first_dispatch"],
                                "pause_before_repair": ["repair"]}.get(worker_mode, []))
     assert (result.run_dir / "change-contract.json").read_bytes() == contract_before
@@ -279,7 +293,7 @@ def test_adapter_completes_scope_for_each_work_item_before_dispatch(tmp_path, mo
         dispatched = [i for i, row in enumerate(trace)
                       if row["event"] == "worker_dispatch_committed" and row.get("work_item") == item_id]
         assert len(applied) == 1 and applied[0] < dispatched[0]
-        assert len(dispatched) == (2 if needs_repair else 1)
+        assert len(dispatched) == failure_count + 1
         assert trace[applied[0]]["route_reason"] == "verification.scope_completed"
         if with_prepare:
             prepared = [i for i, row in enumerate(trace) if row["event"] == "environment_prepare_completed"]
@@ -294,6 +308,11 @@ def test_adapter_completes_scope_for_each_work_item_before_dispatch(tmp_path, mo
     if needs_repair:
         contract = ChangeContract.model_validate_json((result.run_dir / "change-contract.json").read_text())
         budget = change_budget_snapshot(result.run_dir, result.state, contract)
-        assert budget.worker_attempts_used == 2 and budget.auto_replans_used == 1
-        assert budget.repair_rounds_used == 1
+        assert budget.worker_attempts_used == failure_count + 1 and budget.auto_replans_used == 1
+        assert budget.repair_rounds_used == failure_count
         assert any(row["event"] == "supervisor_repair" for row in trace)
+        if worker_mode == "two_repairs":
+            assert contract.authority_envelope.max_repair_rounds == 2
+            assert len({packet.source_child_run for packet in repair_packets}) == 2
+            checkpoint = load_agent_checkpoint(result.run_dir / f"checkpoints/{result.state.latest_checkpoint_id}.json")
+            assert checkpoint.failed_attempts == [packet.source_child_run for packet in repair_packets]
