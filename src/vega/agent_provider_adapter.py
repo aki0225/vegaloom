@@ -102,8 +102,7 @@ class SupervisorAgentProviderAdapter:
         self.worker = SupervisorAgentWorker(self.workspace)
 
     def run(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
-        result = self._run_once(run, timeout_seconds=timeout_seconds)
-        result = auto_retry_reviewer_timeout(self, result)
+        result = self.run_attempt(run, timeout_seconds=timeout_seconds)
         steps = 1
         while (
             getattr(getattr(result, "state", None), "run_kind", None) == "change"
@@ -114,12 +113,16 @@ class SupervisorAgentProviderAdapter:
             if steps >= max_steps:
                 raise ValueError("ChangeRun 自动推进超过合同允许的总 attempt 上限")
             steps += 1
-            result = self._run_once(
+            result = self.run_attempt(
                 result.run_dir.name,
                 timeout_seconds=timeout_seconds,
             )
-            result = auto_retry_reviewer_timeout(self, result)
         return result
+
+    def run_attempt(self, run: str, *, timeout_seconds: int = 900) -> AgentRun:
+        """执行一次 Worker 及其门禁恢复；后续 next/repair 由调用方调度。"""
+        result = self._run_once(run, timeout_seconds=timeout_seconds)
+        return auto_retry_reviewer_timeout(self, result)
 
     def _run_once(
         self,

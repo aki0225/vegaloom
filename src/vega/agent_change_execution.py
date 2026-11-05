@@ -25,12 +25,16 @@ EventReporter = Callable[[str], None]
 
 
 def change_phase_step_limit(workspace: Path, current: AgentRun) -> int:
-    """覆盖初始调查与收尾，并为合同内每次自动修订保留 planning/ready 两步。"""
+    """阶段保险上限覆盖逐次派发和恢复，不替代各入口的真实合同预算。"""
     if current.state.contract_revision is None:
         return 12
     context = load_change_run_context(*load_agent_bundle(workspace, current.run_dir.name))
     assert context is not None
-    return 12 + 2 * context.contract.authority_envelope.max_auto_replans
+    envelope = context.contract.authority_envelope
+    # 使用完整批准计划，避免随着工作项完成而缩小当前循环的上限。
+    items = len(context.execution_plan.work_items)
+    attempts = items * (1 + envelope.max_repair_rounds)
+    return 12 + 2 * (attempts + envelope.max_auto_replans) + items * envelope.max_verification_retries
 
 
 @dataclass(frozen=True)
@@ -60,7 +64,7 @@ def run_change_worker(
     )
     return run_provider_operation(
         workspace, current, provider,
-        lambda: adapter.run(current.run_dir.name, timeout_seconds=timeout_seconds),
+        lambda: adapter.run_attempt(current.run_dir.name, timeout_seconds=timeout_seconds),
         interaction_reporter=interaction_reporter, event_reporter=event_reporter,
     )
 

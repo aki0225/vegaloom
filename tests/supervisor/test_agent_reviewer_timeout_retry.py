@@ -246,6 +246,24 @@ def test_timeout_retries_once(
         assert budget.max_verification_retries == 1
 
 
+def test_run_attempt_recovers_timeout_without_starting_next_worker(tmp_path: Path) -> None:
+    workspace, approved = _approved_change(tmp_path, work_item_count=2)
+    worker = _Worker()
+    reviewer = _Reviewer(["timed_out", "success"])
+    adapter = SupervisorAgentProviderAdapter(
+        workspace, worker_runner=worker,
+        loop_runtime=LoopAutomationRuntime(workspace, reviewer_runner=reviewer),
+        finish_runtime=FinishRuntime(workspace),
+    )
+    result = adapter.run_attempt(approved.run_dir.name, timeout_seconds=60)
+    assert result.state.phase == "ready" and result.state.current_work_item == "WI-02"
+    assert [item.status for item in result.plan.work_items] == ["completed", "pending"]
+    assert worker.calls == 1 and reviewer.calls == 2
+    trace = read_agent_trace(result.run_dir / "trace.jsonl")
+    assert sum(row["event"] == "worker_dispatch_committed" for row in trace) == 1
+    assert sum(row["event"] == "verification_retry_committed" for row in trace) == 1
+
+
 @pytest.mark.parametrize(
     ("runner_status", "retry_attempt", "expected_reason_code"),
     [
@@ -692,8 +710,8 @@ def test_multi_item_acceptance_retry_preserves_pending_item(
     monkeypatch.setattr(retry, "run", recheck)
     monkeypatch.setattr(driver, "_verification_retry", lambda provider: retry)
     monkeypatch.setattr(driver_module, "ensure_change_provider_ready", lambda provider: None)
-    monkeypatch.setattr(driver_module, "run_change_worker", lambda workspace, current, provider, **kwargs:
-                        adapter.run(current.run_dir.name, timeout_seconds=kwargs["timeout_seconds"]))
+    monkeypatch.setattr("vega.agent_change_execution.SupervisorAgentProviderAdapter",
+                        lambda workspace, **kwargs: adapter)
     result = driver.change(run=pending.run_dir.name, acceptance_file=path.relative_to(workspace))
     assert result.outcome == "completed"
     assert all(item.status == "completed" for item in result.run.plan.work_items)

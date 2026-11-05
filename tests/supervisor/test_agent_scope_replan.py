@@ -111,8 +111,8 @@ def test_change_automatically_replans_scope_and_completes(tmp_path, monkeypatch,
     workspace, _, approved, adapter, worker, reviewer = _scenario(tmp_path, replan_rounds=replan_rounds)
     contract_before = (approved.run_dir / "change-contract.json").read_bytes()
     monkeypatch.setattr(driver_module, "ensure_change_provider_ready", lambda provider: None)
-    monkeypatch.setattr(driver_module, "run_change_worker", lambda workspace, current, provider, **kwargs:
-                        adapter.run(current.run_dir.name, timeout_seconds=60))
+    monkeypatch.setattr("vega.agent_change_execution.SupervisorAgentProviderAdapter",
+                        lambda workspace, **kwargs: adapter)
     result = AgentChangeDriver(workspace, tmp_path / "repo", provider="claude", timeout_seconds=60).change(
         run=approved.run_dir.name,
     )
