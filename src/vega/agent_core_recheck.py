@@ -192,6 +192,7 @@ def _finish_allows_recheck(state: LoopAutomationState, finish: dict[str, object]
 def _load_recheck_observation(run_dir: Path, state: AgentState) -> AgentObservation:
     from .agent_contract import AgentDecision, AgentObservation
     from .agent_persistence import load_agent_checkpoint
+    from .agent_run_status import latest_dispatch_binding
     from .agent_worker_evidence import hash_evidence_refs
 
     checkpoint = load_agent_checkpoint(
@@ -207,7 +208,7 @@ def _load_recheck_observation(run_dir: Path, state: AgentState) -> AgentObservat
         or checkpoint.state_version + 1 != state.state_version
         or checkpoint.workspace_fingerprint != state.workspace_fingerprint
         or checkpoint.external_side_effects != "none"
-        or len(checkpoint.failed_attempts) != 1
+        or not checkpoint.failed_attempts
     ):
         raise ValueError("核心证据重算缺少同现场的失败 Checkpoint")
     observation_refs = [ref for ref in checkpoint.evidence_refs if ref.startswith("observations/")]
@@ -225,8 +226,9 @@ def _load_recheck_observation(run_dir: Path, state: AgentState) -> AgentObservat
         or observation.worker_alive or not observation.operation_started
         or not observation.workspace_explained or observation.plan_contradicted
         or observation.external_side_effects != "none"
-        or observation.child_run != checkpoint.failed_attempts[0]
+        or observation.child_run != checkpoint.failed_attempts[-1]
         or observation.work_item_id != state.current_work_item or observation.operation_id is None
+        or latest_dispatch_binding(run_dir, state) != (observation.child_run, observation.operation_id)
         or hash_evidence_refs(run_dir, observation.evidence_refs) != observation.evidence_sha256
     ):
         raise ValueError("原始 Observation 不是可重算的核心证据失败")

@@ -1736,3 +1736,33 @@ Worker 复用同一 Thread 的 3 Turn；WI-01 原 Reviewer 为 2 Turn，重试 R
 开发验证由首次 1 failed 到定向 3 passed；完整受影响超时恢复与安全文件为
 40 passed in 197.34s。独立交付目录的 Ruff、compileall、仓库卫生、计划状态、架构门禁
 和 diff 检查通过，C901 31→31、模块 247→251。未运行本机全量 pytest，跨平台交给本次 PR CI。
+
+
+## 2026-11-05 CORE-RECHECK-01 返修后核心重算回归
+
+本轮为模拟代理集成回归，执行真实固定验证，并人为将通过后的 Finish 新鲜度标记设为 false；
+不修改底层验证、风险或审查 Artifact，不计作真实模型实验或自然证据故障。
+首次单项回归实际得到 1 failed in 12.95s，累计两个失败 child 时被
+`核心证据重算缺少同现场的失败 Checkpoint` 拒绝。修复移除错误的单条历史要求，
+改为绑定最后失败 child 和最近完整派发的精确 child/operation；原证据内容、Candidate、
+工作区、静止、合同与集成审查门禁保持有效。
+
+随后将中间项恢复与最终项拒绝分开验证：预先批准两个工作项，WI-01 首次固定验证失败，
+返修后验证和模拟审查通过、Finish 标记不新鲜。重算使 WI-01 完成并进入待执行 WI-02，
+没有新增 Worker、Reviewer、验证或 iteration；按 WI-01 身份比较的完整预算快照不变，
+原失败 Finish、Checkpoint、Observation 和底层证据逐字保留，旧 Finish 按摘要归档。
+单工作项返修后的最终项没有集成审查时，明确拒绝为
+`最终集成审查尚未形成受信证据`，拒绝前后父子运行产物不变。两节点为 2 passed in 34.79s。
+
+安全回归覆盖失败历史倒序、旧整组来源重放、operation 错绑以及同 child 新恢复操作后
+重放旧来源，拒绝时不写产物，定向节点为 1 passed in 15.36s。
+独立交付目录运行完整 Core recheck 与相关 Security 文件：29 passed in 161.75s；
+各用例限时 60 秒，集合限时 300 秒。Ruff、compileall、计划与架构门禁通过，
+C901 31→31、模块 247→251。Herdr 完成独立只读源码复核，未发现本批阻断问题；
+该复核不替代测试。日志为工具状态目录 `vega-timeout-recovery/core-recheck-*.log`。
+
+普通验证专用恢复仍要求原受信 Finish、审查快照与工作区连续性，尚无累计失败后该入口的
+正向真实证据，本批未放宽。最终集成审查缺失、损坏或新证据替换也不会通过核心重算。
+上一批真实 Reviewer 超时修复的远端提交 `6c593e38a3090e6f445e1bef4499c49c9dd3c235`
+已通过 CI #508，包含 Core、Core Heavy、Supervisor、Security、实验历史、Windows、
+POSIX、Python 3.11 兼容性及 wheel/sdist 安装；本批跨平台结果以新提交 CI 为准。

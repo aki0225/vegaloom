@@ -17,7 +17,7 @@ from vega.agent_persistence import load_agent_checkpoint, save_agent_checkpoint,
 from vega.agent_runtime_support import bound_repo
 
 
-def _scenario(tmp_path: Path, *, blocker: str = ""):
+def _scenario(tmp_path: Path, *, blocker: str = "", next_item: bool = False):
     repo = tmp_path / "repo"
     repo.mkdir()
     for args in (("init", "-b", "main"), ("config", "user.name", "Vega Test"),
@@ -60,7 +60,9 @@ def _scenario(tmp_path: Path, *, blocker: str = ""):
     started = runtime.start_change(repo, contract=contract, execution_plan=ExecutionPlan(
         task_id=contract.task_id, contract_revision=1, work_items=[ExecutionWorkItem(
             work_item_id="WI-01", objective="实现", likely_files=["src/one.py"], verification=[command],
-        )],
+        ), *([ExecutionWorkItem(
+            work_item_id="WI-02", objective="后续实现", likely_files=["src/one.py"], verification=[command],
+        )] if next_item else [])],
     ))
     return runtime, runtime.approve(started.run_dir.name)
 
@@ -70,15 +72,17 @@ def _files(run_dir: Path) -> dict[Path, bytes]:
             for path in run_dir.rglob("*") if path.is_file()}
 
 
-@pytest.mark.parametrize("source_kind", ["repair", "reviewer_timeout"])
+@pytest.mark.parametrize("source_kind", ["repair", "reviewer_timeout", "core_recheck"])
 def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_path, source_kind):
     from vega.agent_change_fix_packet import load_current_fix_packet
+    from vega.agent_core_recheck import prepare_core_recheck
     from vega.agent_reviewer_timeout_retry import prepare_reviewer_timeout_source
     from vega.execution_control import ExecutionController
+    from vega.finish_runtime import FinishRuntime
     from vega.loop_runtime import LoopAutomationRuntime
     from vega.runner import RunnerResult
 
-    runtime, approved = _scenario(tmp_path)
+    runtime, approved = _scenario(tmp_path, next_item=source_kind == "core_recheck")
     workspace = tmp_path / "workspace"
 
     class Worker:
@@ -90,7 +94,7 @@ def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_pa
             controller = ExecutionController(execution_context)
             controller.prepare(["fixture-worker"], 60)
             (repo_path / "tests").mkdir(exist_ok=True)
-            expected = 0 if source_kind == "reviewer_timeout" and self.calls == 2 else self.calls
+            expected = 0 if source_kind != "repair" and self.calls == 2 else self.calls
             (repo_path / "tests/test_new.py").write_text(
                 f"def test_value():\n    assert 0 == {expected}\n", encoding="utf-8",
             )
@@ -117,10 +121,23 @@ def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_pa
                 "reviewed_files": ["tests/test_new.py"], "checked_items": ["scope", "tests"],
             }))
 
+    class StaleFinish(FinishRuntime):
+        def run(self, run):
+            child = super().run(run)
+            path = child / "finish-summary.json"
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if source_kind == "core_recheck" and not any(
+                item["failed_count"] for item in payload["verification_results"]
+            ):
+                payload["evidence_freshness"]["fresh"] = False
+                path.write_text(json.dumps(payload), encoding="utf-8")
+            return child
+
     worker = Worker()
     adapter = SupervisorAgentProviderAdapter(
         workspace, worker_runner=worker,
         loop_runtime=LoopAutomationRuntime(workspace, reviewer_runner=Reviewer()),
+        finish_runtime=StaleFinish(workspace),
     )
     first = adapter._run_once(approved.run_dir.name, timeout_seconds=60)
     first_checkpoint = load_agent_checkpoint(
@@ -132,6 +149,8 @@ def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_pa
     def load_source():
         if source_kind == "repair":
             return load_current_fix_packet(workspace, second.run_dir, second.state)
+        if source_kind == "core_recheck":
+            return prepare_core_recheck(workspace, second.run_dir.name)
         return prepare_reviewer_timeout_source(workspace, second.run_dir.name)
 
     source = load_source()

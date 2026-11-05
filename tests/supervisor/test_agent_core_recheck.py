@@ -12,7 +12,7 @@ from vega.agent_change_contract import ChangeAuthorityEnvelope, ChangeContract, 
 from vega.agent_change_driver import AgentChangeDriver
 from vega.agent_change_control import change_budget_snapshot
 from vega.agent_core_recheck import core_recheck_available, prepare_core_recheck, require_rechecked_finish
-from vega.agent_persistence import load_agent_state, save_agent_state
+from vega.agent_persistence import load_agent_checkpoint, load_agent_state, read_agent_trace, save_agent_state
 from vega.agent_provider_adapter import SupervisorAgentProviderAdapter
 from vega.agent_repository_binding import bound_repo
 from vega.agent_runtime import SupervisorAgentRuntime
@@ -50,8 +50,9 @@ def test_recheck_rejects_core_failure_before_candidate_git_checks(tmp_path, monk
 
 
 class _Runner:
-    def __init__(self, verdict: str) -> None:
+    def __init__(self, verdict: str, *, first_failure: bool = False) -> None:
         self.verdict = verdict
+        self.first_failure = first_failure
         self.worker_calls = 0
         self.review_calls = 0
 
@@ -61,7 +62,8 @@ class _Runner:
         controller.prepare(["fake-runner"], 60)
         if sandbox == "workspace-write":
             self.worker_calls += 1
-            (repo_path / "src/one.py").write_text("value = 1\n", encoding="utf-8", newline="\n")
+            value = self.worker_calls if self.first_failure else 1
+            (repo_path / "src/one.py").write_text(f"value = {value}\n", encoding="utf-8", newline="\n")
             payload = {"claimed_status": "completed", "summary": "修改完成",
                        "tests_claimed": [], "remaining_questions": []}
         else:
@@ -82,16 +84,29 @@ class _Runner:
 class _StaleFinish(FinishRuntime):
     """模拟原 Finish 当时的完整性失败，不改变底层 Core Artifact。"""
 
+    def __init__(self, workspace: Path, *, first_failure: bool = False) -> None:
+        super().__init__(workspace)
+        self.first_failure = first_failure
+
     def run(self, run: str) -> Path:
         child = super().run(run)
         path = child / "finish-summary.json"
         payload = json.loads(path.read_text(encoding="utf-8"))
+        if self.first_failure and any(item["failed_count"] for item in payload["verification_results"]):
+            # 首次真实验证失败走原 repair，不用不新鲜标记覆盖失败原因。
+            return child
         payload["evidence_freshness"]["fresh"] = False
         path.write_text(json.dumps(payload), encoding="utf-8")
         return child
 
 
-def _blocked_change(tmp_path: Path, verdict: str = "approve"):
+def _blocked_change(
+    tmp_path: Path, verdict: str = "approve", *, first_failure: bool = False, next_item: bool = False,
+):
+    verification = (
+        'python -c "from pathlib import Path; exec(Path(\'src/one.py\').read_text()); assert value == 2"'
+        if first_failure else "python -m compileall -q src"
+    )
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "src").mkdir()
@@ -99,7 +114,7 @@ def _blocked_change(tmp_path: Path, verdict: str = "approve"):
     (repo / ".gitignore").write_text(".vega/\n__pycache__/\n", encoding="utf-8", newline="\n")
     (repo / ".vega.yaml").write_text(
         "version: 1\nscope:\n  allowed_paths: [src/**]\n"
-        "verification:\n  commands: [python -m compileall -q src]\n",
+        f"verification:\n  commands: [{json.dumps(verification)}]\n",
         encoding="utf-8", newline="\n",
     )
     for args in (["init", "-b", "main"], ["config", "user.name", "测试"],
@@ -110,41 +125,86 @@ def _blocked_change(tmp_path: Path, verdict: str = "approve"):
     workspace.mkdir()
     contract = ChangeContract(
         task_id="task-recheck", goal="修改模块", acceptance=["行为正确"],
-        required_verification=["python -m compileall -q src"],
+        required_verification=[verification],
         authority_envelope=ChangeAuthorityEnvelope(allowed_paths=["src/**"], max_review_rounds=4),
     )
     plan = ExecutionPlan(task_id=contract.task_id, contract_revision=1, work_items=[
         ExecutionWorkItem(work_item_id="WI-01", objective="更新模块", likely_files=["src/one.py"],
-                          verification=["python -m compileall -q src"]),
+                          verification=[verification]),
     ])
+    if next_item:
+        plan.work_items.append(ExecutionWorkItem(
+            work_item_id="WI-02", objective="继续更新模块", likely_files=["src/one.py"],
+            depends_on=["WI-01"], verification=[verification],
+        ))
     runtime = SupervisorAgentRuntime(workspace)
     started = runtime.start_change(repo, contract=contract, execution_plan=plan)
     approved = runtime.approve(started.run_dir.name, actor="user")
-    runner = _Runner(verdict)
+    runner = _Runner(verdict, first_failure=first_failure)
     result = SupervisorAgentProviderAdapter(
         workspace, worker_runner=runner,
         loop_runtime=LoopAutomationRuntime(workspace, reviewer_runner=runner),
-        finish_runtime=_StaleFinish(workspace),
+        finish_runtime=_StaleFinish(workspace, first_failure=first_failure),
     ).run(approved.run_dir.name, timeout_seconds=60)
     assert result.state.phase == "needs_human"
     return workspace, result, runner, contract
 
 
-@pytest.mark.parametrize("verdict", ["approve", "request_changes"])
+@pytest.mark.parametrize(
+    ("verdict", "first_failure"),
+    [("approve", False), ("request_changes", False),
+     pytest.param("approve", True, id="repair-before-stale-finish")],
+)
 def test_recheck_reuses_core_without_worker_review_or_verification(
-    tmp_path: Path, verdict: str, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, verdict: str, first_failure: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    workspace, blocked, runner, contract = _blocked_change(tmp_path, verdict)
+    workspace, blocked, runner, contract = _blocked_change(
+        tmp_path, verdict, first_failure=first_failure, next_item=first_failure,
+    )
+    contract_before = (blocked.run_dir / "change-contract.json").read_bytes()
+    calls_before = (runner.worker_calls, runner.review_calls)
+    checkpoint = load_agent_checkpoint(blocked.run_dir / f"checkpoints/{blocked.state.latest_checkpoint_id}.json")
+    checkpoint_path = blocked.run_dir / f"checkpoints/{blocked.state.latest_checkpoint_id}.json"
+    checkpoint_before = checkpoint_path.read_bytes()
+    trace = read_agent_trace(blocked.run_dir / "trace.jsonl")
+    dispatches = [row for row in trace if row["event"] == "worker_dispatch_committed"]
+    if first_failure:
+        assert [item.status for item in blocked.plan.work_items] == ["blocked", "pending"]
+        assert runner.worker_calls == 2
+        assert len(dispatches) == 2
+        assert len(set(row["child_run"] for row in dispatches)) == 2
+        assert checkpoint.failed_attempts == [row["child_run"] for row in dispatches]
+        assert sum(row["event"] == "supervisor_repair" for row in trace) == 1
+    child_evidence = {
+        path: path.read_bytes()
+        for row in dispatches
+        for path in (workspace / "runs" / row["child_run"] / "iterations").rglob("*")
+        if path.is_file()
+    }
+    first_finish_path = workspace / "runs" / dispatches[0]["child_run"] / "finish-summary.json"
+    first_finish = first_finish_path.read_bytes()
+    if first_failure:
+        assert json.loads(first_finish)["verification_results"][-1]["failed_count"] > 0
+        latest_finish = json.loads(
+            (workspace / "runs" / dispatches[-1]["child_run"] / "finish-summary.json").read_text()
+        )
+        assert latest_finish["verification_results"][-1]["failed_count"] == 0
+        assert latest_finish["iterations"][-1]["reviewer_status"] == "success"
+        assert latest_finish["evidence_freshness"]["fresh"] is False
     prepared = prepare_core_recheck(workspace, blocked.run_dir.name)
+    assert prepared.child_dir.name == dispatches[-1]["child_run"]
+    assert prepared.source_operation_id == dispatches[-1]["operation_id"]
     old_finish = (prepared.child_dir / "finish-summary.json").read_bytes()
     old_observations = {path: path.read_bytes() for path in (blocked.run_dir / "observations").glob("*.json")}
     old_iteration = prepared.child_state.current_iteration
     before_budget = change_budget_snapshot(blocked.run_dir, blocked.state, contract)
+    assert before_budget.worker_attempts_used == 1 + int(first_failure)
+    assert before_budget.repair_rounds_used == int(first_failure)
     assert core_recheck_available(workspace, blocked.run_dir.name)
     retry = SupervisorAgentVerificationRetry(workspace)
     retry.loop_runtime.continue_assist = lambda *args, **kwargs: pytest.fail("重算不得运行验证或模型")
 
-    if verdict == "approve":
+    if verdict == "approve" and not first_failure:
         # 覆盖公开推进接缝：引擎已完成时，本次 change 必须返回完成，而非要求再执行一次。
         driver = AgentChangeDriver(workspace, tmp_path / "repo")
         monkeypatch.setattr(driver, "_verification_retry", lambda _: retry)
@@ -156,20 +216,55 @@ def test_recheck_reuses_core_without_worker_review_or_verification(
         result = retry.recheck_core_if_eligible(blocked.run_dir.name)
 
     assert result is not None
-    assert result.state.phase == ("completed" if verdict == "approve" else "ready")
+    assert result.state.phase == ("completed" if verdict == "approve" and not first_failure else "ready")
+    if first_failure:
+        assert result.state.current_work_item == "WI-02"
+        assert "next" in result.state.allowed_actions
+        assert [item.status for item in result.plan.work_items] == ["completed", "pending"]
     if verdict != "approve":
         assert "repair" in result.state.allowed_actions
-    assert runner.worker_calls == runner.review_calls == 1
+    assert (runner.worker_calls, runner.review_calls) == calls_before
+    if not first_failure:
+        assert runner.worker_calls == runner.review_calls == 1
+    else:
+        assert first_finish_path.read_bytes() == first_finish
+        # 推进后当前项历史可重置，WI-01 原始 Checkpoint 必须完整保留。
+        assert checkpoint_path.read_bytes() == checkpoint_before
+    assert all(path.read_bytes() == content for path, content in child_evidence.items())
+    assert (result.run_dir / "change-contract.json").read_bytes() == contract_before
     assert len(list((result.run_dir / "observations").glob("*.json"))) == len(old_observations) + 1
     assert all(path.read_bytes() == content for path, content in old_observations.items())
     archives = list((result.run_dir / "verification-retries").glob("*/source-finish-summary.json"))
     assert len(archives) == 1 and archives[0].read_bytes() == old_finish
     child_state = json.loads((prepared.child_dir / "state.json").read_text(encoding="utf-8"))
     assert child_state["current_iteration"] == old_iteration
-    after_budget = change_budget_snapshot(result.run_dir, result.state, contract)
+    budget_state = result.state.model_copy(update={"current_work_item": blocked.state.current_work_item})
+    after_budget = change_budget_snapshot(result.run_dir, budget_state, contract)
     assert after_budget.verification_retries_used == before_budget.verification_retries_used
     assert after_budget.review_rounds_used == before_budget.review_rounds_used
+    assert after_budget == before_budget
     assert retry.recheck_core_if_eligible(blocked.run_dir.name) is None
+
+
+def test_recheck_after_repair_requires_final_integration_review(tmp_path: Path) -> None:
+    workspace, blocked, runner, _ = _blocked_change(tmp_path, first_failure=True)
+    checkpoint = load_agent_checkpoint(
+        blocked.run_dir / f"checkpoints/{blocked.state.latest_checkpoint_id}.json",
+    )
+    assert runner.worker_calls == 2 and len(checkpoint.failed_attempts) == 2
+    assert not list((blocked.run_dir / "integration-reviews").glob("*.json"))
+    # 同时保护父运行和两个 Core child，拒绝不得改写原 Finish 或发布恢复 operation。
+    directories = [blocked.run_dir, *(workspace / "runs" / child for child in checkpoint.failed_attempts)]
+    before = {path: path.read_bytes() for directory in directories
+              for path in directory.rglob("*") if path.is_file()}
+    calls_before = (runner.worker_calls, runner.review_calls)
+    with pytest.raises(ValueError, match="最终集成审查尚未形成受信证据"):
+        prepare_core_recheck(workspace, blocked.run_dir.name)
+    assert SupervisorAgentVerificationRetry(workspace).recheck_core_if_eligible(blocked.run_dir.name) is None
+    after = {path: path.read_bytes() for directory in directories
+             for path in directory.rglob("*") if path.is_file()}
+    assert after == before
+    assert (runner.worker_calls, runner.review_calls) == calls_before
 
 
 @pytest.mark.parametrize("damage", ["drift", "repeated", "untrusted", "old_protocol"])
