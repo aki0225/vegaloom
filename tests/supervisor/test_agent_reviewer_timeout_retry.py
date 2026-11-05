@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import vega.agent_reviewer_timeout_retry as reviewer_timeout_retry
+from vega.agent_change_control import change_budget_snapshot
 from vega.agent_change_contract import (
     ChangeAuthorityEnvelope,
     ChangeContract,
@@ -22,7 +23,7 @@ from vega.agent_contract import (
     AgentWorkItem,
     approve_plan,
 )
-from vega.agent_persistence import read_agent_trace
+from vega.agent_persistence import load_agent_checkpoint, read_agent_trace
 from vega.agent_provider_adapter import SupervisorAgentProviderAdapter
 from vega.agent_provider_factory import ensure_reviewer_runner
 from vega.agent_routing import decide_next_action
@@ -158,13 +159,27 @@ class _Reviewer:
         )
 
 
-@pytest.mark.parametrize("work_item_count", [1, 2])
+@pytest.mark.parametrize(
+    ("work_item_count", "first_failure"),
+    [(1, False), (2, False), pytest.param(1, True, id="repair-before-timeout")],
+)
 def test_timeout_retries_once(
     tmp_path: Path,
     work_item_count: int,
+    first_failure: bool,
 ) -> None:
-    workspace, approved = _approved_change(tmp_path, work_item_count=work_item_count)
-    reviewer = _Reviewer(["timed_out", "success", "success"])
+    # 读取源码而非导入，避免两次同长度写入命中 Python 字节码缓存。
+    verification = (
+        'python -c "from pathlib import Path; exec(Path(\'src/one.py\').read_text()); assert value == 2"'
+        if first_failure else "python -m compileall -q src"
+    )
+    workspace, approved = _approved_change(
+        tmp_path, work_item_count=work_item_count, verification=verification,
+    )
+    contract_before = (approved.run_dir / "change-contract.json").read_bytes()
+    reviewer = _Reviewer(
+        (["success"] if first_failure else []) + ["timed_out", "success", "success"]
+    )
     worker = _Worker()
     loop = LoopAutomationRuntime(workspace, reviewer_runner=reviewer)
 
@@ -177,8 +192,11 @@ def test_timeout_retries_once(
 
     assert result.state.phase == "completed"
     assert result.state.terminal_status == "ready_to_commit"
-    assert worker.calls == work_item_count
-    assert reviewer.calls == (2 if work_item_count == 1 else 4)
+    assert worker.calls == work_item_count + int(first_failure)
+    if first_failure:
+        assert reviewer.calls >= 3
+    else:
+        assert reviewer.calls == (2 if work_item_count == 1 else 4)
     assert all(item.status == "completed" for item in result.plan.work_items)
     trace = read_agent_trace(result.run_dir / "trace.jsonl")
     retry_events = [
@@ -195,6 +213,37 @@ def test_timeout_retries_once(
     )
     assert operation["reviewer_retry_attempt"] == 1
     assert result.state.active_candidate_sha is None
+    assert (result.run_dir / "change-contract.json").read_bytes() == contract_before
+    if first_failure:
+        dispatches = [row for row in trace if row["event"] == "worker_dispatch_committed"]
+        children = [row["child_run"] for row in dispatches]
+        assert len(children) == len(set(children)) == 2
+        assert operation["child_run"] == retry_events[0]["child_run"] == children[-1]
+        assert operation["source_operation_id"] == dispatches[-1]["operation_id"]
+        observations = [AgentObservation.model_validate_json(path.read_text(encoding="utf-8"))
+                        for path in (result.run_dir / "observations").glob("*.json")]
+        first = next(obs for obs in observations if obs.operation_id == dispatches[0]["operation_id"])
+        latest = next(obs for obs in observations if obs.operation_id == dispatches[-1]["operation_id"])
+        assert first.child_run == children[0] and first.verification == "failed"
+        assert latest.child_run == children[-1] and latest.verification == "passed"
+        assert latest.reviewer_runner_status == "timed_out"
+        candidate_refs = [ref for ref in latest.evidence_refs if ref.startswith("candidates/")]
+        assert len(candidate_refs) == 1
+        candidate = json.loads((result.run_dir / candidate_refs[0]).read_text(encoding="utf-8"))
+        assert candidate["candidate_sha"] == operation["candidate_sha"]
+        assert candidate["operation_id"] == dispatches[-1]["operation_id"]
+        checkpoint = load_agent_checkpoint(
+            result.run_dir / "checkpoints" / f"{result.state.latest_checkpoint_id}.json"
+        )
+        assert checkpoint.failed_attempts == children
+        contract = ChangeContract.model_validate_json(contract_before)
+        budget = change_budget_snapshot(result.run_dir, result.state, contract)
+        assert budget.worker_attempts_used == 2
+        assert budget.repair_rounds_used == 1
+        assert budget.verification_retries_used == 1
+        assert budget.auto_replans_used == 0
+        assert budget.max_repair_rounds == contract.authority_envelope.max_repair_rounds
+        assert budget.max_verification_retries == 1
 
 
 @pytest.mark.parametrize(

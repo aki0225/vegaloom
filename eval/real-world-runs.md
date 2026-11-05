@@ -1647,3 +1647,92 @@ Ruff、compileall、仓库卫生、计划状态、架构门禁通过，C901 31�
 日志为工具状态目录 `vega-delivery/autonomy-followup-validation.log`。
 此回归是模拟代理与真实机器门禁，不新增真实模型运行计数；连续多次失败后的验证专用恢复、
 Reviewer timeout retry 与 Core recheck 的累计历史兼容仍待单独实验，不从本轮结果推断通过。
+
+
+## 2026-11-05 REAL-AUTONOMY-05 返修后真实 Reviewer 超时预注册
+
+从 `67f778a5585d273805e4fe132d8fa8bd7009c391` 新建干净副本，逐字复用
+REAL-AUTONOMY-03 双工作项合同、计划和固定验证。本轮在第一次真实 Worker 返回后，
+按 REAL-AUTONOMY-04 的固定方法注入一次 RuntimeError，先由真实 pytest 失败触发返修。
+第二次 Worker 返回后，WI-01 的下一次真实 Reviewer 调用仅将进程时间上限缩为 8 秒，
+其余调用保留 300 秒；保留原 RunnerResult，由原进程控制器超时、清理及机器证据裁决。
+不修改 Observation、Decision、Finish 或超时状态，不执行 pause/resume。
+
+实验目录 `.tmp/real-agent-20261105-141921-timeout-before/`。期望第一次失败、第二次审查超时形成累计历史后，
+同一 Candidate 自动重试一次独立 Reviewer，保持原合同、预算与失败历史，完成后续工作项。
+运行前控制器仍保留超时恢复要求唯一失败 child 的实现，用于实际检验该阻断。
+若 Reviewer 在 8 秒内完成、未启动真实 Turn、进程终止未确认或任务在其他位置停下，
+如实记为未触发或对应失败，不冒充完成本实验。预设源码及时间上限干预分别记录；
+总上限 1800 秒，不手改失败现场，原记录保留。修复后的新运行另行预注册。
+
+
+## 2026-11-05 REAL-AUTONOMY-05 修复前结果
+
+父 run `20261105-141945-b1fa67649ac8-agent` 在 142.48 秒后停在
+`needs_human / workflow.needs_human`，不计成功。首次真实 Worker 的故障 Candidate 为
+`dbefdb62307cd51256fdb5749f5690f23ad96e86`，固定 pytest 为 9 failed；注入后文件摘要
+与 Git blob 一致，Ruff 通过。第二次真实 Worker 修复后 Candidate 为
+`19e2066bb3b862e0ae4ab769261cb11b9f242d8b`，固定 pytest 为 9 passed，Ruff 通过。
+
+第二次审查调用的真实新 Turn 已被服务接受，原进程控制器在 8 秒上限返回 `timed_out`，
+`termination_unconfirmed=false`，父与子运行均通过进程静止检查。该证明表示真实 Turn
+已启动，不据此声称超时前模型已经生成内容。预设源码故障和缩短审查时间各发生一次；
+Worker 派发 2 次、Repair 1 次、Reviewer 自动重试 0 次，第二个工作项没有开始。
+
+同一工作项 Checkpoint 累计两个失败 child；完整只读资格检查明确拒绝为
+`Reviewer timeout 没有匹配的 blocked Checkpoint`，对应源码中错误的单条历史限制。
+原合同与批准归档字节一致，运行期间控制器源码摘要保持不变；没有改写失败状态。
+本地证据为本轮实验目录的 `experiment.json` 及工具状态目录 `vega-timeout-recovery/`
+对应子目录中的 `result.json`、`timeout-injection.json`、`audit-summary.json`、
+`rejection-cause.log` 和原始机器产物。独立模拟代理回归也得到 1 failed in 13.16s；
+它使用真实固定验证和模拟 Reviewer 超时，不与上述真实调用混计。
+
+
+## 2026-11-05 REAL-AUTONOMY-05 修复后重跑预注册
+
+修复超时恢复的累计历史选择：要求历史非空，选择最后失败 child，并要求最近完整派发
+仍与原始 Worker 的 child/operation 一致；原合同、Candidate、来源证据、预算与静止检查保留。
+定向模拟回归及旧证据重放负向检查为 3 passed in 48.98s，不作为真实模型完成结论。
+
+新实验目录 `.tmp/real-agent-20261105-142451-timeout-after/`，逐字复制修复前的合同、计划及实验脚本，
+从同一干净目标基线重跑。两项预设干预、8 秒审查上限、其余 300 秒回合及总 1800 秒上限不变；
+控制器唯一源码差异为上述来源选择与绑定修复。仍须证明真实首次验证失败、返修验证通过、
+真实新 Reviewer Turn 超时且清理确认，然后在同一 Candidate 自动恢复一次并完成后续项。
+旧 run 保持失败，不从原现场人为继续；结果另行追加。
+
+
+## 2026-11-05 REAL-AUTONOMY-05 修复后真实重跑结果
+
+父 run `20261105-142452-ff3caa7b6815-agent` 在 318.98 秒后完成，终态为
+`completed / ready_to_commit`，最终 Candidate 为
+`925597d1849720fd090ffd0945d5c7e829bbcc6d`。合同、初始计划和实验脚本与修复前逐字一致；
+两个控制器快照之间仅 `agent_reviewer_timeout_retry.py` 变化，运行期间源码保持冻结。
+
+首次 child `20261105-142454-831161-bug-loop` 的固定 pytest 为 8 failed；源码故障
+注入摘要与失败 Candidate 的 Git blob 一致。真实 Worker 返修后的 child
+`20261105-142625-445880-bug-loop` 为 8 passed，随后 Reviewer 新 Turn 确实启动，
+8 秒上限触发 `timed_out`，终止已确认。该 Candidate 为
+`1155d1bdb26b29feccc2dfb55f391a7b78cc3339`，未因超时而重新运行 Worker 或替换候选。
+
+控制器自动发布一次 `reviewer_timeout` 恢复 operation，仍绑定该 child、Candidate 和
+原 Worker operation。原超时 Finish 以 SHA-256 绑定归档，失败 Checkpoint 的两个 child
+完整保留。重试完整运行 Verification、Risk 与新独立 Reviewer，pytest 再次为 8 passed，
+通过后自行进入 WI-02。最后 child `20261105-142741-737690-bug-loop` 为
+15 passed、51 deselected；各次 Ruff 均通过，最终集成审查 approve，Finish 完整且新鲜。
+
+总计 Worker 派发 3 次、Repair 1 次、自动 Replan 2 次、Reviewer 自动重试 1 次。
+Worker 复用同一 Thread 的 3 Turn；WI-01 原 Reviewer 为 2 Turn，重试 Reviewer 为新 Thread
+且 1 Turn，WI-02 与集成 Reviewer 各独立 Thread、各 1 Turn，Reviewer 均只读且无需批准。
+已批准合同与归档逐字节一致，源仓库保持原 HEAD 且干净，相关运行均已确认进程静止。
+
+本轮包含预设源码故障与缩短 Reviewer 时间上限两项脚本干预，不算普通无干预任务，也不把
+预设超时说成自然服务故障。修复前后的测试数量不同，来自两轮模型独立生成的候选；
+固定验证命令未更换。本次证明返修之后仍可在原预算内自动恢复一次真实审查超时，
+不外推为重复超时无限恢复、最终集成审查超时恢复或任意 Core 重算与补验组合。
+
+证据入口为 `.tmp/real-agent-20261105-142451-timeout-after/experiment.json`；
+同目录 `audit_experiment.py` 强断言上述机器关系，日志与 `audit-summary.json` 保存在
+工具状态目录 `vega-timeout-recovery/` 对应子目录。原模型正文不进入公开记录。
+开发验证由首次 1 failed 到定向 3 passed；完整受影响超时恢复与安全文件为
+40 passed in 197.34s。独立交付目录的 Ruff、compileall、仓库卫生、计划状态、架构门禁
+和 diff 检查通过，C901 31→31、模块 247→251。未运行本机全量 pytest，跨平台交给本次 PR CI。

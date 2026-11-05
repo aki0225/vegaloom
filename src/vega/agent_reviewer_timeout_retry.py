@@ -23,7 +23,7 @@ from .agent_git_candidate import CandidateCommit, validate_candidate_binding
 from .agent_operation import child_summary_ref
 from .agent_persistence import load_agent_checkpoint
 from .agent_run import AgentRun
-from .agent_run_status import latest_worker_dispatch_binding
+from .agent_run_status import latest_dispatch_binding, latest_worker_dispatch_binding
 from .agent_runtime_support import (
     bound_repo,
     capture_bound_workspace,
@@ -147,7 +147,7 @@ def prepare_reviewer_timeout_source(
     repo = bound_repo(run_dir)
     require_verification_commands_preflight(repo, work_item.verification)
     checkpoint = _reviewer_timeout_checkpoint(run_dir, state)
-    child_dir = resolve_run_dir(workspace, checkpoint.failed_attempts[0])
+    child_dir = resolve_run_dir(workspace, checkpoint.failed_attempts[-1])
     child_state = load_child_state(child_dir, repo)
     require_child_quiescent(child_dir)
     latest = child_state.iterations[-1] if child_state.iterations else None
@@ -264,7 +264,10 @@ def _source_operation_id(
     child_run: str,
 ) -> str:
     worker_binding = latest_worker_dispatch_binding(run_dir, state)
-    if worker_binding is None or worker_binding[0] != child_run:
+    if (
+        worker_binding is None or worker_binding[0] != child_run
+        or latest_dispatch_binding(run_dir, state) != worker_binding
+    ):
         raise ValueError("无法把失败 child 绑定到原始真实 Worker")
     return worker_binding[1]
 
@@ -294,7 +297,8 @@ def _reviewer_timeout_checkpoint(run_dir: Path, state: AgentState):
         or checkpoint.external_side_effects != "none"
         or checkpoint.state_version + 1 != state.state_version
         or checkpoint.pending_actions != ["human"]
-        or len(checkpoint.failed_attempts) != 1
+        # 同一工作项的返修历史保留；下游仍须绑定最后失败及最新原始 Worker。
+        or not checkpoint.failed_attempts
     ):
         raise ValueError("Reviewer timeout 没有匹配的 blocked Checkpoint")
     return checkpoint

@@ -70,8 +70,10 @@ def _files(run_dir: Path) -> dict[Path, bytes]:
             for path in run_dir.rglob("*") if path.is_file()}
 
 
-def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_path):
+@pytest.mark.parametrize("source_kind", ["repair", "reviewer_timeout"])
+def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_path, source_kind):
     from vega.agent_change_fix_packet import load_current_fix_packet
+    from vega.agent_reviewer_timeout_retry import prepare_reviewer_timeout_source
     from vega.execution_control import ExecutionController
     from vega.loop_runtime import LoopAutomationRuntime
     from vega.runner import RunnerResult
@@ -88,8 +90,9 @@ def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_pa
             controller = ExecutionController(execution_context)
             controller.prepare(["fixture-worker"], 60)
             (repo_path / "tests").mkdir(exist_ok=True)
+            expected = 0 if source_kind == "reviewer_timeout" and self.calls == 2 else self.calls
             (repo_path / "tests/test_new.py").write_text(
-                f"def test_value():\n    assert 0 == {self.calls}\n", encoding="utf-8",
+                f"def test_value():\n    assert 0 == {expected}\n", encoding="utf-8",
             )
             controller.finish("success", reason=None, returncode=0)
             return RunnerResult(status="success", command=["fixture-worker"], output=json.dumps({
@@ -98,10 +101,16 @@ def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_pa
             }))
 
     class Reviewer:
+        calls = 0
+
         def run(self, prompt, repo_path, *, sandbox, timeout_seconds, execution_context):
             assert sandbox == "read-only"
+            self.calls += 1
             controller = ExecutionController(execution_context)
             controller.prepare(["fixture-reviewer"], 60)
+            if source_kind == "reviewer_timeout" and self.calls == 2:
+                controller.finish("timed_out", reason="模拟审查超时", returncode=None)
+                return RunnerResult(status="timed_out", command=["fixture-reviewer"], output="")
             controller.finish("success", reason=None, returncode=0)
             return RunnerResult(status="success", command=["fixture-reviewer"], output=json.dumps({
                 "verdict": "approve", "summary": "测试仍由确定性验证裁决", "findings": [],
@@ -120,10 +129,19 @@ def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_pa
     second = adapter._run_once(first.run_dir.name, timeout_seconds=60)
     checkpoint_path = second.run_dir / f"checkpoints/{second.state.latest_checkpoint_id}.json"
     checkpoint = load_agent_checkpoint(checkpoint_path)
-    packet = load_current_fix_packet(workspace, second.run_dir, second.state)
-    assert worker.calls == 2 and packet.repair_round == 2
+    def load_source():
+        if source_kind == "repair":
+            return load_current_fix_packet(workspace, second.run_dir, second.state)
+        return prepare_reviewer_timeout_source(workspace, second.run_dir.name)
+
+    source = load_source()
+    assert worker.calls == 2
     assert len(checkpoint.failed_attempts) == 2
-    assert checkpoint.failed_attempts[-1] == packet.source_child_run
+    if source_kind == "repair":
+        assert source.repair_round == 2
+        assert checkpoint.failed_attempts[-1] == source.source_child_run
+    else:
+        assert checkpoint.failed_attempts[-1] == source.child_dir.name
     original = checkpoint_path.read_bytes()
     # 包内每条证据仍有效，旧整组证据也不能冒充本轮最新失败。
     for update in (
@@ -133,20 +151,27 @@ def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_pa
     ):
         save_agent_checkpoint(checkpoint_path, checkpoint.model_copy(update=update))
         before = _files(second.run_dir)
-        with pytest.raises(ValueError, match="repair 来源证据与 Checkpoint 不一致"):
-            load_current_fix_packet(workspace, second.run_dir, second.state)
+        with pytest.raises(ValueError):
+            load_source()
         assert _files(second.run_dir) == before
         checkpoint_path.write_bytes(original)
 
     trace_path = second.run_dir / "trace.jsonl"
     trace = [json.loads(line) for line in trace_path.read_text().splitlines()]
     latest = next(row for row in reversed(trace) if row["event"] == "worker_dispatch_committed")
-    latest["operation_id"] = "different-operation"
-    trace_path.write_text("".join(json.dumps(row) + "\n" for row in trace), encoding="utf-8")
-    before = _files(second.run_dir)
-    with pytest.raises(ValueError, match="repair 来源证据与 Checkpoint 不一致"):
-        load_current_fix_packet(workspace, second.run_dir, second.state)
-    assert _files(second.run_dir) == before
+    original_operation = latest["operation_id"]
+    for newer_retry in (False, True):
+        if newer_retry:
+            latest["operation_id"] = original_operation
+            trace.append({**latest, "event": "verification_retry_committed", "phase": "observing",
+                          "operation_id": "newer-retry-operation"})
+        else:
+            latest["operation_id"] = "different-operation"
+        trace_path.write_text("".join(json.dumps(row) + "\n" for row in trace), encoding="utf-8")
+        before = _files(second.run_dir)
+        with pytest.raises(ValueError):
+            load_source()
+        assert _files(second.run_dir) == before
 
 
 @pytest.mark.parametrize("blocker", ["symlink", "forbidden", "glob_authority", "risk", "file_budget"])

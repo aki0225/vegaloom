@@ -261,6 +261,8 @@ LLM 只返回结构化结果。代码选择下一动作：
 `needs_human`。Core Work Item Reviewer 明确 `timed_out` 且所有现场、Candidate、Verification、
 Risk、预算和副作用证据都可重新证明时，现有 `VerificationRetry` 最多自动恢复一次；恢复使用
 新的独立 Reviewer Session，复用原 Candidate 和 child，完整重跑 Verification、Risk 和 Reviewer。
+此前同一工作项的失败和返修历史继续保留；恢复绑定最后失败 child、当前 Candidate 和最新
+原始 Worker operation，不以历史条目数判断资格，也不能重放已经发生新恢复操作的旧来源。
 第二次超时、`error`、`stopped`、终止未确认或最终集成审查不会自动恢复。普通测试断言失败仍可按
 批准范围进入 Repair；基础设施或执行中断不会伪装成“修改范围不足”的 Replan。
 
