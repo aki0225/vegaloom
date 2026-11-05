@@ -12,10 +12,7 @@ import vega.review_evidence as review_evidence_module
 from vega.models import BriefState
 from vega.progress import ExecutionProgressAdapter
 from vega.reflect_runtime import ReflectRuntime
-from vega.review_runtime import (
-    ReviewPackRuntime,
-    ReviewRuntime,
-)
+from vega.review_runtime import ReviewRuntime
 from vega.runner import RunnerResult
 from vega.workspace_check import ReviewWorkspaceSnapshot
 
@@ -35,6 +32,7 @@ class RecordingRunner:
         timeout_seconds: int,
         execution_context=None,
     ) -> RunnerResult:
+        assert sandbox == "read-only"
         self.prompts.append(prompt)
         self.execution_contexts.append(execution_context)
         return RunnerResult(
@@ -81,6 +79,9 @@ def test_review_terminal_uses_checks_not_eval_wording(
     assert state["verdict"] == "approve"
     assert state["status"] == ("failed" if missing_artifact else "success")
     assert state["current_step"] == "done"
+    message = "检查说明已本地化" if missing_artifact else "FAIL: 仅为展示引用"
+    assert message in state["eval_results"]
+    assert message in (review_run / "eval.md").read_text(encoding="utf-8")
 
 
 def test_review_evidence_binds_all_reviewer_inputs(tmp_path: Path) -> None:
@@ -247,12 +248,10 @@ def test_review_rejects_tampered_or_missing_consumed_artifacts(
         ("review-evidence.json", "source_evidence_invalid"),
     ],
 )
-@pytest.mark.parametrize("runtime_kind", ["review", "review-pack"])
 def test_corrupt_source_json_finishes_new_review_run_with_diagnostics(
     tmp_path: Path,
     artifact_name: str,
     expected_issue: str,
-    runtime_kind: str,
 ) -> None:
     repo = tmp_path / "repo"
     _init_changed_repo(repo)
@@ -261,13 +260,7 @@ def test_corrupt_source_json_finishes_new_review_run_with_diagnostics(
     (reflect_run / artifact_name).write_text('{"broken":', encoding="utf-8")
     runner = RecordingRunner()
 
-    if runtime_kind == "review":
-        review_run = ReviewRuntime(tmp_path, runner=runner).run(
-            repo,
-            reflect_run.name,
-        )
-    else:
-        review_run = ReviewPackRuntime(tmp_path).run(repo, reflect_run.name)
+    review_run = ReviewRuntime(tmp_path, runner=runner).run(repo, reflect_run.name)
 
     state = _read_json(review_run / "state.json")
     context = _read_json(review_run / "review-context.json")
@@ -282,8 +275,7 @@ def test_corrupt_source_json_finishes_new_review_run_with_diagnostics(
     assert trace[-1]["event"] == "run_finished"
     assert trace[-1]["status"] == "needs_human"
     assert runner.prompts == []
-    if runtime_kind == "review":
-        assert _read_json(review_run / "review-verdict.json")["verdict"] == "needs_human"
+    assert _read_json(review_run / "review-verdict.json")["verdict"] == "needs_human"
 
 
 def test_changed_files_and_source_run_tampering_block_reviewer(
@@ -721,7 +713,8 @@ def test_review_evidence_snapshot_matches_persisted_redacted_payload(
     ).hexdigest()
 
     assert snapshot_id == expected_snapshot_id
-    review_pack = ReviewPackRuntime(tmp_path).run(repo, reflect_run.name)
+    runner = RecordingRunner(reviewed_files=[source.name])
+    review_pack = ReviewRuntime(tmp_path, runner=runner).run(repo, reflect_run.name)
     context = _read_json(review_pack / "review-context.json")
     assert "snapshot_metadata_invalid" not in context["evidence_issues"]
 
