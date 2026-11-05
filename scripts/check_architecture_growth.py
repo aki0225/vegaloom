@@ -18,6 +18,7 @@ REMOVED_INTERNAL_MODULE_NAMES = (
     "agent_graph",
     "adapter_runtime",
     "assurance",
+    "change_plan_runtime",
     "context_loader",
     "eval",
     "goal_evidence",

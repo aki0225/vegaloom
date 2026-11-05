@@ -156,9 +156,9 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
         return [f"把 `{run_dir / 'project-profile.md'}` 作为项目画像参考，继续生成 brief 或 loop。"]
     if run_kind == "change-plan":
         return [
-            f"人工审查 `{run_dir / 'change-plan.md'}` 和 `{run_dir / 'scope-profile.md'}`。",
-            f"如确认范围合理，记录决策：`vega decision approve --run {run_dir.name} --type custom --reason \"批准 scope\" --ref change-plan.md`。",
-            "之后按 phase 转成 ChangeRun 的有限 Work Item。",
+            "该 Change Plan 已退役，仅供只读检查；历史 success 只表示计划文件生成。",
+            f"读取 `{run_dir / 'change-plan.md'}` 和 `{run_dir / 'scope-profile.md'}` 作为历史参考。",
+            '需要继续开发时，在目标仓库运行 `vega change "<需求>"`，重新生成并批准 Change Contract。',
         ]
     if run_kind == "goal":
         return ["该 Goal run 已退役，仅供只读检查；需要继续开发时，请创建新的 ChangeRun。"]

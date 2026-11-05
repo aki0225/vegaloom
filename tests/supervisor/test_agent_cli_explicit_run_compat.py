@@ -4,6 +4,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from vega.agent_runtime import SupervisorAgentRuntime
@@ -69,6 +70,54 @@ def test_explicit_generic_run_keeps_legacy_workspace_resolution(
     assert payload["kind"] == "brief"
     assert payload["selected_run"]["selection_source"] == "explicit"
     assert payload["explanation"] is None
+
+
+@pytest.mark.parametrize("command", ["status", "watch", "explain"])
+def test_retired_change_plan_keeps_read_only_cli_contract(
+    tmp_path: Path,
+    monkeypatch,
+    command: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    run_dir = workspace / "runs" / "20260101-120000-000001-change-plan"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({
+            "run_id": run_dir.name,
+            "status": "success",
+            "repo_path": "<repo>",
+            "input_source": "inline",
+            "current_step": "done",
+        }),
+        encoding="utf-8",
+    )
+    for artifact in ("change-plan.md", "scope-profile.md"):
+        (run_dir / artifact).write_text("# 历史计划\n", encoding="utf-8")
+    original = {path.name: path.read_bytes() for path in run_dir.iterdir()}
+    monkeypatch.chdir(workspace)
+
+    result = CliRunner().invoke(app, [command, "--run", run_dir.name, "--json"])
+
+    assert result.exit_code == (2 if command == "explain" else 0), result.output
+    payload = json.loads(result.output)
+    if command == "explain":
+        assert "explain 只支持 ChangeRun" in payload["message"]
+    else:
+        assert payload["run_id"] == run_dir.name
+        assert payload["status"] == "success"
+        if command == "status":
+            assert payload["kind"] == "change-plan"
+            assert payload["explanation"] is None
+            assert payload["selected_run"]["selection_source"] == "explicit"
+            assert str(run_dir / "change-plan.md") in payload["key_artifacts"]
+            guidance = "\n".join(payload["next_steps"])
+            assert "仅供只读检查" in guidance
+            assert 'vega change "<需求>"' in guidance
+            assert "vega decision" not in guidance
+        else:
+            assert payload["current_step"] == "done"
+            assert payload["progress"] == []
+    assert {path.name: path.read_bytes() for path in run_dir.iterdir()} == original
 
 
 def _init_repo(path: Path) -> Path:

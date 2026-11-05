@@ -10,7 +10,7 @@ import pytest
 
 import vega.execution_feedback as execution_feedback
 import vega.review_runtime as review_runtime_module
-from vega.change_plan_runtime import ChangePlanRuntime
+from vega.agent_runtime import SupervisorAgentRuntime
 from vega.decision import DecisionStore
 from vega.execution_control import (
     ExecutionLease,
@@ -1614,11 +1614,13 @@ def test_human_control_and_planning_artifacts_redact_secrets(tmp_path: Path) -> 
     )
     assert FAKE_SECRET not in recovery_report
 
-    ChangePlanRuntime(workspace).run(
+    planning_run = SupervisorAgentRuntime(workspace).start_planning(
         repo,
-        f"修复问题，api_key={FAKE_SECRET}",
-        f"token={FAKE_SECRET}",
+        goal=f"修复问题，api_key={FAKE_SECRET} token={FAKE_SECRET}",
     )
+    assert planning_run.state.phase == "planning"
+    assert planning_run.state.active_child_run is None
+    assert "[REDACTED]" in _read_tree(planning_run.run_dir)
 
     goal_text = "\n".join(
         [
