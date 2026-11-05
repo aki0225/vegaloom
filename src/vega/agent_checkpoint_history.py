@@ -2,11 +2,50 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .agent_contract import AgentCheckpoint, AgentState
+from .agent_contract import AgentCheckpoint, AgentDecision, AgentObservation, AgentState
 from .agent_persistence import load_agent_checkpoint, read_agent_trace
 
 
 LOCAL_RESUME_SOURCE = "local_resume.source_preserved"
+
+
+def checkpoint_matches_state(checkpoint: AgentCheckpoint, state: AgentState) -> bool:
+    """只比较现场绑定；安全状态和允许动作的业务要求由调用方决定。"""
+    return (
+        checkpoint.run_id == state.run_id
+        and checkpoint.phase == state.phase
+        and checkpoint.pending_actions == state.allowed_actions
+        and checkpoint.current_work_item == state.current_work_item
+        and checkpoint.workspace_fingerprint == state.workspace_fingerprint
+        and checkpoint.state_version + 1 == state.state_version
+    )
+
+
+def load_checkpoint_source_pair(
+    run_dir: Path, checkpoint: AgentCheckpoint,
+) -> tuple[str, AgentObservation, str, AgentDecision]:
+    """读取唯一来源对并绑定身份，不决定该来源是否允许返修或恢复。"""
+    observation_refs = [ref for ref in checkpoint.evidence_refs if ref.startswith("observations/")]
+    decision_refs = [ref for ref in checkpoint.evidence_refs if ref.startswith("decisions/")]
+    if len(observation_refs) != 1 or len(decision_refs) != 1:
+        raise ValueError("Checkpoint 没有唯一 Observation 与 Decision 来源")
+    observation_ref, decision_ref = observation_refs[0], decision_refs[0]
+    try:
+        root = run_dir.resolve(strict=True)
+        paths = [(root / ref).resolve(strict=True) for ref in (observation_ref, decision_ref)]
+        if paths[0].parent != root / "observations" or paths[1].parent != root / "decisions":
+            raise ValueError("Checkpoint 来源引用越过证据目录边界")
+        observation = AgentObservation.model_validate_json(paths[0].read_text(encoding="utf-8"))
+        decision = AgentDecision.model_validate_json(paths[1].read_text(encoding="utf-8"))
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise ValueError("Checkpoint 来源证据无法解析或越过证据目录边界") from exc
+    if (
+        observation_ref != f"observations/{observation.observation_id}.json"
+        or decision_ref != f"decisions/{decision.decision_id}.json"
+        or decision.observation_id != observation.observation_id
+    ):
+        raise ValueError("Checkpoint 来源引用或 Observation/Decision 身份不一致")
+    return observation_ref, observation, decision_ref, decision
 
 
 def _checkpoint_ref(checkpoint: AgentCheckpoint) -> str:
@@ -25,11 +64,7 @@ def _read_source(run_dir: Path, ref: str) -> AgentCheckpoint:
 
 def _require_safe_checkpoint(checkpoint: AgentCheckpoint, state: AgentState) -> None:
     if (
-        checkpoint.run_id != state.run_id
-        or checkpoint.phase != state.phase or checkpoint.pending_actions != state.allowed_actions
-        or checkpoint.current_work_item != state.current_work_item
-        or checkpoint.workspace_fingerprint != state.workspace_fingerprint
-        or checkpoint.state_version + 1 != state.state_version
+        not checkpoint_matches_state(checkpoint, state)
         or checkpoint.status != "safe" or checkpoint.active_child_run is not None
         or checkpoint.operation_started or checkpoint.external_side_effects != "none"
     ):

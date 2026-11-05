@@ -175,6 +175,54 @@ def test_repeated_repair_rejects_wrong_latest_failure_and_replayed_packet(tmp_pa
         assert _files(second.run_dir) == before
         checkpoint_path.write_bytes(original)
 
+    if source_kind == "core_recheck":
+        # 三个入口共用来源对加载；在一个现有现场覆盖结构篡改，避免重复集成构建。
+        decision_ref = next(ref for ref in checkpoint.evidence_refs if ref.startswith("decisions/"))
+        decision_path = second.run_dir / decision_ref
+        decision_bytes = decision_path.read_bytes()
+        for field in ("decision_id", "observation_id"):
+            payload = json.loads(decision_bytes)
+            payload[field] = "mismatched-source"
+            decision_path.write_text(json.dumps(payload), encoding="utf-8")
+            before = _files(second.run_dir)
+            with pytest.raises(ValueError, match="来源引用或 Observation/Decision 身份不一致"):
+                load_source()
+            assert _files(second.run_dir) == before
+            decision_path.write_bytes(decision_bytes)
+        extra_ref = "decisions/extra-source.json"
+        save_agent_checkpoint(checkpoint_path, checkpoint.model_copy(update={
+            "evidence_refs": [*checkpoint.evidence_refs, extra_ref],
+        }))
+        before = _files(second.run_dir)
+        with pytest.raises(ValueError, match="没有唯一 Observation 与 Decision"):
+            load_source()
+        assert _files(second.run_dir) == before
+        checkpoint_path.write_bytes(original)
+        for target in (
+            tmp_path / "outside-decision.json",
+            second.run_dir / "other-evidence" / "decision.json",
+        ):
+            # 同 run 的其他目录也不能冒充直属 decisions 证据。
+            target.parent.mkdir(exist_ok=True)
+            target.write_bytes(decision_bytes)
+            decision_path.unlink()
+            try:
+                try:
+                    decision_path.symlink_to(target)
+                except OSError:
+                    # 无符号链接权限时仍继续检查后续派发重放，不跳过整个恢复场景。
+                    pass
+                else:
+                    before = _files(second.run_dir)
+                    with pytest.raises(ValueError, match="证据目录边界"):
+                        load_source()
+                    assert _files(second.run_dir) == before
+                    assert target.read_bytes() == decision_bytes
+            finally:
+                if decision_path.is_symlink():
+                    decision_path.unlink()
+                decision_path.write_bytes(decision_bytes)
+
     trace_path = second.run_dir / "trace.jsonl"
     trace = [json.loads(line) for line in trace_path.read_text().splitlines()]
     latest = next(row for row in reversed(trace) if row["event"] == "worker_dispatch_committed")

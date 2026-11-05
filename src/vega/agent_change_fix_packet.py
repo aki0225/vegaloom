@@ -15,7 +15,9 @@ from .agent_contract import (
     StrictAgentModel,
     utc_now,
 )
-from .agent_checkpoint_history import ready_checkpoint_origin
+from .agent_checkpoint_history import (
+    checkpoint_matches_state, load_checkpoint_source_pair, ready_checkpoint_origin,
+)
 from .agent_run_status import latest_dispatch_binding
 from .redaction import write_redacted_json_once
 from .review_contract import ReviewFinding
@@ -128,51 +130,27 @@ def load_current_fix_packet(
     if (
         state.phase != "ready"
         or "repair" not in state.allowed_actions
-        or checkpoint.run_id != state.run_id
-        or checkpoint.state_version + 1 != state.state_version
-        or checkpoint.phase != "ready"
+        or not checkpoint_matches_state(checkpoint, state)
         or checkpoint.status != "safe"
-        or checkpoint.current_work_item != state.current_work_item
         or checkpoint.active_child_run is not None
         or checkpoint.operation_started
-        or checkpoint.workspace_fingerprint != state.workspace_fingerprint
-        or checkpoint.pending_actions != state.allowed_actions
     ):
         raise ValueError("当前 repair State 与 Checkpoint 不一致")
     packet_refs = [
         ref for ref in checkpoint.evidence_refs if ref.startswith("fix-packets/")
     ]
-    observation_refs = [
-        ref for ref in checkpoint.evidence_refs if ref.startswith("observations/")
-    ]
-    decision_refs = [
-        ref for ref in checkpoint.evidence_refs if ref.startswith("decisions/")
-    ]
     if len(packet_refs) != 1:
         raise ValueError("当前 repair Checkpoint 没有唯一 Fix Packet")
-    if len(observation_refs) != 1 or len(decision_refs) != 1:
-        raise ValueError("当前 repair Checkpoint 没有唯一来源证据")
     packet_ref = packet_refs[0]
-    observation_ref = observation_refs[0]
-    decision_ref = decision_refs[0]
+    observation_ref, observation, decision_ref, decision = load_checkpoint_source_pair(run_dir, checkpoint)
     try:
         packet = ChangeFixPacket.model_validate_json(
             (run_dir / packet_ref).read_text(encoding="utf-8")
-        )
-        observation = AgentObservation.model_validate_json(
-            (run_dir / observation_ref).read_text(encoding="utf-8")
-        )
-        decision = AgentDecision.model_validate_json(
-            (run_dir / decision_ref).read_text(encoding="utf-8")
         )
     except (OSError, ValidationError) as exc:
         raise ValueError("当前 Fix Packet 或来源证据无法解析") from exc
     if (
         packet_ref != f"fix-packets/{packet.packet_id}.json"
-        or observation_ref
-        != f"observations/{observation.observation_id}.json"
-        or decision_ref != f"decisions/{decision.decision_id}.json"
-        or decision.observation_id != observation.observation_id
         or decision.selected_action != "repair"
         or decision.source != "deterministic"
         or decision.allowed_actions != checkpoint.pending_actions

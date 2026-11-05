@@ -13,7 +13,7 @@ from .agent_change_control import (
 )
 from .agent_change_run import load_candidate_artifact, load_change_run_context
 from .agent_contract import (
-    AgentDecision,
+    AgentCheckpoint,
     AgentObservation,
     AgentPlan,
     AgentState,
@@ -21,6 +21,7 @@ from .agent_contract import (
 )
 from .agent_git_candidate import CandidateCommit, validate_candidate_binding
 from .agent_operation import child_summary_ref
+from .agent_checkpoint_history import checkpoint_matches_state, load_checkpoint_source_pair
 from .agent_persistence import load_agent_checkpoint
 from .agent_run import AgentRun
 from .agent_run_status import latest_dispatch_binding, latest_worker_dispatch_binding
@@ -179,15 +180,7 @@ def prepare_reviewer_timeout_source(
         )
     source_operation_id = _source_operation_id(run_dir, state, child_dir.name)
     source_observation = _checkpoint_observation(
-        run_dir,
-        checkpoint.evidence_refs,
-        child_dir.name,
-        source_operation_id,
-    )
-    _require_timeout_decision(
-        run_dir,
-        checkpoint.evidence_refs,
-        source_observation, acceptance=acceptance,
+        run_dir, checkpoint, child_dir.name, source_operation_id, acceptance=acceptance,
     )
     if (
         source_observation.reviewer_runner_status != ("success" if acceptance else "timed_out")
@@ -289,13 +282,10 @@ def _reviewer_timeout_checkpoint(run_dir: Path, state: AgentState):
         run_dir / "checkpoints" / f"{state.latest_checkpoint_id}.json"
     )
     if (
-        checkpoint.run_id != state.run_id
+        not checkpoint_matches_state(checkpoint, state)
         or checkpoint.status != "blocked"
         or checkpoint.phase != "needs_human"
-        or checkpoint.current_work_item != state.current_work_item
-        or checkpoint.workspace_fingerprint != state.workspace_fingerprint
         or checkpoint.external_side_effects != "none"
-        or checkpoint.state_version + 1 != state.state_version
         or checkpoint.pending_actions != ["human"]
         # 同一工作项的返修历史保留；下游仍须绑定最后失败及最新原始 Worker。
         or not checkpoint.failed_attempts
@@ -306,50 +296,21 @@ def _reviewer_timeout_checkpoint(run_dir: Path, state: AgentState):
 
 def _checkpoint_observation(
     run_dir: Path,
-    refs: list[str],
+    checkpoint: AgentCheckpoint,
     child_run: str,
     operation_id: str,
+    *,
+    acceptance: bool,
 ) -> AgentObservation:
-    observation_refs = [ref for ref in refs if ref.startswith("observations/")]
-    if len(observation_refs) != 1:
-        raise ValueError("Reviewer timeout Checkpoint 没有唯一 Observation")
-    try:
-        observation = AgentObservation.model_validate_json(
-            (run_dir / observation_refs[0]).read_text(encoding="utf-8")
-        )
-    except (OSError, ValidationError) as exc:
-        raise ValueError("Reviewer timeout Observation 无法验证") from exc
-    if (
-        observation_refs[0]
-        != f"observations/{observation.observation_id}.json"
-        or observation.child_run != child_run
-        or observation.operation_id != operation_id
-    ):
+    _, observation, _, decision = load_checkpoint_source_pair(run_dir, checkpoint)
+    if observation.child_run != child_run or observation.operation_id != operation_id:
         raise ValueError("Reviewer timeout Observation 身份不一致")
-    return observation
-
-
-def _require_timeout_decision(
-    run_dir: Path,
-    refs: list[str],
-    observation: AgentObservation, *, acceptance: bool = False,
-) -> None:
-    decision_refs = [ref for ref in refs if ref.startswith("decisions/")]
-    if len(decision_refs) != 1:
-        raise ValueError("Reviewer timeout Checkpoint 没有唯一 Decision")
-    try:
-        decision = AgentDecision.model_validate_json(
-            (run_dir / decision_refs[0]).read_text(encoding="utf-8")
-        )
-    except (OSError, ValidationError) as exc:
-        raise ValueError("Reviewer timeout Decision 无法验证") from exc
     if (
-        decision_refs[0] != f"decisions/{decision.decision_id}.json"
-        or decision.observation_id != observation.observation_id
-        or decision.selected_action != "human"
+        decision.selected_action != "human"
         or decision.reason_code != ("gate.review.blocked" if acceptance else "review.runner_timed_out")
     ):
         raise ValueError("Reviewer timeout Decision 不允许自动恢复")
+    return observation
 
 
 def _bound_timeout_candidate(

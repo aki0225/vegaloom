@@ -190,7 +190,7 @@ def _finish_allows_recheck(state: LoopAutomationState, finish: dict[str, object]
 
 
 def _load_recheck_observation(run_dir: Path, state: AgentState) -> AgentObservation:
-    from .agent_contract import AgentDecision, AgentObservation
+    from .agent_checkpoint_history import checkpoint_matches_state, load_checkpoint_source_pair
     from .agent_persistence import load_agent_checkpoint
     from .agent_run_status import latest_dispatch_binding
     from .agent_worker_evidence import hash_evidence_refs
@@ -201,27 +201,16 @@ def _load_recheck_observation(run_dir: Path, state: AgentState) -> AgentObservat
     # Checkpoint 的 operation_started 记录历史尝试，不能当作当前活动进程；
     # 当前 State 的绑定与实际 execution quiescence 分别在入口和 Core 检查中验证。
     if (
-        checkpoint.run_id != state.run_id or checkpoint.status != "blocked"
+        not checkpoint_matches_state(checkpoint, state) or checkpoint.status != "blocked"
         or checkpoint.phase != "needs_human"
         or checkpoint.active_child_run is not None or checkpoint.pending_actions != ["human"]
-        or checkpoint.current_work_item != state.current_work_item
-        or checkpoint.state_version + 1 != state.state_version
-        or checkpoint.workspace_fingerprint != state.workspace_fingerprint
         or checkpoint.external_side_effects != "none"
         or not checkpoint.failed_attempts
     ):
         raise ValueError("核心证据重算缺少同现场的失败 Checkpoint")
-    observation_refs = [ref for ref in checkpoint.evidence_refs if ref.startswith("observations/")]
-    decision_refs = [ref for ref in checkpoint.evidence_refs if ref.startswith("decisions/")]
-    if len(observation_refs) != 1 or len(decision_refs) != 1:
-        raise ValueError("核心证据重算没有唯一 Observation 与 Decision")
-    observation = AgentObservation.model_validate(_read_ref(run_dir, observation_refs[0]))
-    decision = AgentDecision.model_validate(_read_ref(run_dir, decision_refs[0]))
+    _, observation, _, decision = load_checkpoint_source_pair(run_dir, checkpoint)
     if (
-        observation_refs[0] != f"observations/{observation.observation_id}.json"
-        or decision_refs[0] != f"decisions/{decision.decision_id}.json"
-        or decision.observation_id != observation.observation_id
-        or decision.selected_action != "human" or decision.reason_code != "evidence.core_untrusted"
+        decision.selected_action != "human" or decision.reason_code != "evidence.core_untrusted"
         or observation.core_evidence != "stale" or observation.authority != "machine_reconcile"
         or observation.worker_alive or not observation.operation_started
         or not observation.workspace_explained or observation.plan_contradicted
