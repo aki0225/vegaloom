@@ -40,7 +40,7 @@ def test_cli_bounded_mode_requires_explicit_opt_in_and_repository_policy(
         def __init__(self, workspace_path: Path, **_: object) -> None:
             self.workspace = workspace_path
 
-        def run(self, run: str, *, timeout_seconds: int) -> AgentRun:
+        def run_attempt(self, run: str, *, timeout_seconds: int) -> AgentRun:
             assert timeout_seconds == 60
             run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
             assert state.phase == "ready"
