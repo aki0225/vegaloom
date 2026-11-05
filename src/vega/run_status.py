@@ -153,7 +153,7 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
             "实现后运行：`vega reflect --repo <repo> --run <brief_run> --test-log <log>`。",
         ]
     if run_kind == "project-profile":
-        return [f"把 `{run_dir / 'project-profile.md'}` 作为项目画像参考，继续生成 brief 或 loop。"]
+        return [f'画像生成器已退役：`{run_dir / "project-profile.md"}` 仅供只读检查；继续开发请在目标仓库运行 `vega change "<需求>"`。']
     if run_kind == "change-plan":
         return [
             "该 Change Plan 已退役，仅供只读检查；历史 success 只表示计划文件生成。",

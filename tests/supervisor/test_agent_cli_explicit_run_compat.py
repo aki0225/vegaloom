@@ -73,13 +73,19 @@ def test_explicit_generic_run_keeps_legacy_workspace_resolution(
 
 
 @pytest.mark.parametrize("command", ["status", "watch", "explain"])
-def test_retired_change_plan_keeps_read_only_cli_contract(
+@pytest.mark.parametrize("kind,artifacts", [
+    ("project-profile", ("project-profile.json", "project-profile.md")),
+    ("change-plan", ("change-plan.md", "scope-profile.md")),
+])
+def test_retired_planning_artifacts_keep_read_only_cli_contract(
     tmp_path: Path,
     monkeypatch,
     command: str,
+    kind: str,
+    artifacts: tuple[str, ...],
 ) -> None:
     workspace = tmp_path / "workspace"
-    run_dir = workspace / "runs" / "20260101-120000-000001-change-plan"
+    run_dir = workspace / "runs" / f"20260101-120000-{kind}"
     run_dir.mkdir(parents=True)
     (run_dir / "state.json").write_text(
         json.dumps({
@@ -91,8 +97,10 @@ def test_retired_change_plan_keeps_read_only_cli_contract(
         }),
         encoding="utf-8",
     )
-    for artifact in ("change-plan.md", "scope-profile.md"):
-        (run_dir / artifact).write_text("# 历史计划\n", encoding="utf-8")
+    for artifact in artifacts:
+        content = (json.dumps({"repo_name": "repo", "repo_path": "<repo>"})
+                   if artifact.endswith(".json") else "# 历史规划材料\n")
+        (run_dir / artifact).write_text(content, encoding="utf-8")
     original = {path.name: path.read_bytes() for path in run_dir.iterdir()}
     monkeypatch.chdir(workspace)
 
@@ -106,14 +114,15 @@ def test_retired_change_plan_keeps_read_only_cli_contract(
         assert payload["run_id"] == run_dir.name
         assert payload["status"] == "success"
         if command == "status":
-            assert payload["kind"] == "change-plan"
+            assert payload["kind"] == kind
             assert payload["explanation"] is None
             assert payload["selected_run"]["selection_source"] == "explicit"
-            assert str(run_dir / "change-plan.md") in payload["key_artifacts"]
+            for artifact in artifacts:
+                assert str((run_dir / artifact).resolve()) in payload["key_artifacts"]
             guidance = "\n".join(payload["next_steps"])
             assert "仅供只读检查" in guidance
             assert 'vega change "<需求>"' in guidance
-            assert "vega decision" not in guidance
+            assert all(retired not in guidance for retired in ("vega decision", "brief", "loop"))
         else:
             assert payload["current_step"] == "done"
             assert payload["progress"] == []
