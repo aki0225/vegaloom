@@ -12,7 +12,7 @@ from .progress import PROGRESS_VERSION, RunProgressLog, safe_run_id
 from .run_utils import resolve_run_dir
 
 
-_PHASE_STATUS = {
+AGENT_PHASE_STATUS = {
     "planning": "created",
     "awaiting_approval": "paused",
     "ready": "paused",
@@ -105,17 +105,14 @@ def load_agent_status_state(
             "agent-state.json run_id 与 run 目录身份不一致；"
             "为避免展示错误证据链，已拒绝读取。"
         )
-    latest_child_run = (
-        latest_trusted_child_run(run_dir, state)
-        if include_child_projection
-        else state.active_child_run
-    )
+    # Trace 属于读取边界，即使实时 child 阶段交由共享快照采集也不能跳过。
+    latest_child_run = latest_trusted_child_run(run_dir, state)
     operation_kind = bound_operation_kind(run_dir, state) if state.active_operation_id else None
     payload = {
         "_run_kind": "agent",
         "automation_mode": None,
         "run_id": state.run_id,
-        "status": _PHASE_STATUS[state.phase],
+        "status": AGENT_PHASE_STATUS[state.phase],
         "current_step": state.phase,
         "agent_phase": state.phase,
         "agent_run_kind": state.run_kind,

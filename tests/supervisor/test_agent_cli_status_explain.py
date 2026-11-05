@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
+import vega.agent_child_status as child_status_module
 import vega.agent_cli_snapshot as cli_snapshot_module
 import vega.agent_status_projection as status_projection_module
 from vega.agent_cli_snapshot import (
@@ -25,7 +26,7 @@ from vega.agent_cli_status import (
 from vega.agent_explain import AgentExplanation
 from vega.agent_child_status import AgentChildStatusSnapshot
 from vega.agent_contract import AgentCheckpoint, canonical_digest
-from vega.agent_persistence import load_agent_state, save_agent_state
+from vega.agent_persistence import load_agent_state, save_agent_checkpoint, save_agent_state
 from vega.agent_runtime import SupervisorAgentRuntime
 from vega.agent_runtime_logic import update_state
 from vega.cli_entrypoint import app
@@ -34,6 +35,7 @@ from vega.provider_session import (
     load_provider_sessions,
     save_provider_sessions,
 )
+from vega.run_status import run_status_payload
 
 
 @pytest.mark.parametrize("phase", ["awaiting_approval", "completed", "needs_human"])
@@ -422,9 +424,11 @@ def test_status_snapshot_binds_provider_session_revision(
         assert "状态快照构建期间持续变化" in result.output
 
 
+@pytest.mark.parametrize("entrypoint", ["snapshot", "generic"])
 def test_status_snapshot_reuses_one_live_child_stage_capture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    entrypoint: str,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     run = SupervisorAgentRuntime(repo).start_planning(
@@ -449,17 +453,28 @@ def test_status_snapshot_reuses_one_live_child_stage_capture(
         "capture_trusted_child_status",
         next_stage,
     )
-
-    snapshot = build_agent_cli_snapshot(
-        resolve_agent_cli_run(repo, run.run_dir.name),
-        include_full=True,
+    monkeypatch.setattr(
+        child_status_module,
+        "capture_trusted_child_status",
+        next_stage,
     )
 
+    if entrypoint == "generic":
+        payload = run_status_payload(repo, run.run_dir.name)
+        snapshot = None
+    else:
+        snapshot = build_agent_cli_snapshot(
+            resolve_agent_cli_run(repo, run.run_dir.name),
+            include_full=True,
+        )
+        payload = snapshot.status
+
     assert calls == 1
-    assert snapshot.status["live_child_stage"] == "verify"
-    assert snapshot.full_status is not None
-    assert "Core 子流程：`verify`" in snapshot.full_status
-    assert "Core 子流程：`review`" not in snapshot.full_status
+    assert payload["live_child_stage"] == "verify"
+    if snapshot is not None:
+        assert snapshot.full_status is not None
+        assert "Core 子流程：`verify`" in snapshot.full_status
+        assert "Core 子流程：`review`" not in snapshot.full_status
 
 
 def test_status_snapshot_does_not_follow_unverified_decision_traversal(
@@ -526,6 +541,36 @@ def test_status_snapshot_does_not_follow_unverified_decision_traversal(
     assert snapshot.status["agent_phase"] == "needs_human"
     assert snapshot.explanation is not None
     assert snapshot.explanation.block_category == "evidence"
+
+
+def test_generic_status_rejects_corrupt_trace_with_blocked_checkpoint(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "repo")
+    run = SupervisorAgentRuntime(repo).start_planning(repo, goal="保留 Trace 读取边界")
+    state = update_state(
+        run.state,
+        state_version=run.state.state_version + 1,
+        latest_checkpoint_id="checkpoint-blocked",
+    )
+    checkpoint = AgentCheckpoint(
+        checkpoint_id=state.latest_checkpoint_id,
+        run_id=state.run_id,
+        state_version=state.state_version,
+        reason="Trace 已损坏，等待人工检查",
+        status="blocked",
+        phase=state.phase,
+        current_work_item=state.current_work_item,
+        workspace_fingerprint=state.workspace_fingerprint,
+        pending_actions=["human"],
+    )
+    save_agent_checkpoint(
+        run.run_dir / "checkpoints" / f"{checkpoint.checkpoint_id}.json",
+        checkpoint,
+    )
+    save_agent_state(run.run_dir / "agent-state.json", state)
+    (run.run_dir / "trace.jsonl").write_text('{"event":\n', encoding="utf-8", newline="\n")
+
+    with pytest.raises(ValueError, match="trace.jsonl"):
+        run_status_payload(repo, run.run_dir.name)
 
 
 def _repo(path: Path) -> Path:
