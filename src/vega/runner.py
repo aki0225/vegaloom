@@ -16,6 +16,7 @@ from .execution_control import (
 from .execution_output import MAX_JSONL_LINE_CHARS
 from .execution_paths import ExecutionPathGuard
 from .codex_mcp_isolation import (
+    ISOLATED_CODEX_FEATURE_ARGS,
     CodexMcpIsolationError,
     build_mcp_disable_overrides,
 )
@@ -292,12 +293,7 @@ class CodexExecRunner:
             sandbox,
             "--config",
             "notify=[]",
-            "--disable",
-            "hooks",
-            "--disable",
-            "memories",
-            "--disable",
-            "plugins",
+            *ISOLATED_CODEX_FEATURE_ARGS,
         ]
         mcp_overrides: tuple[str, ...] = ()
         if self.isolate_mcp:

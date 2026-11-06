@@ -11,6 +11,11 @@ from .execution_process import prepare_subprocess_command
 
 _MCP_SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _MAX_MCP_SERVER_COUNT = 128
+ISOLATED_CODEX_FEATURE_ARGS = (
+    "--disable", "hooks",
+    "--disable", "memories",
+    "--disable", "plugins",
+)
 
 
 class CodexMcpIsolationError(RuntimeError):
@@ -29,6 +34,8 @@ def build_mcp_disable_overrides(
     Codex 的配置层采用合并语义，传入空表不能可靠移除已经继承的 MCP。这里先让
     Codex 自己解析配置层，只提取服务器名称，再逐项禁用并复查结果。探针输出可能
     含有服务器启动参数，因此任何错误路径都不能回显 stdout 或 stderr。
+    调用方必须使用相同的隔离特性参数；插件 MCP 不属于顶层 mcp_servers，
+    枚举前先禁用插件，避免为插件名称生成缺少 transport 的无效顶层配置。
     """
 
     discovered = _list_mcp_servers(
@@ -70,7 +77,7 @@ def _list_mcp_servers(
     overrides: tuple[str, ...],
     timeout_seconds: float,
 ) -> tuple[tuple[str, bool], ...]:
-    command = [executable]
+    command = [executable, *ISOLATED_CODEX_FEATURE_ARGS]
     if profile:
         command.extend(["--profile", profile])
     command.extend(["mcp", "list", "--json"])
