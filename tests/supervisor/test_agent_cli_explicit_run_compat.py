@@ -76,8 +76,13 @@ def test_explicit_generic_run_keeps_legacy_workspace_resolution(
 @pytest.mark.parametrize("kind,artifacts", [
     ("project-profile", ("project-profile.json", "project-profile.md")),
     ("change-plan", ("change-plan.md", "scope-profile.md")),
+    ("brief", ("agent-brief.md",)),
+    ("reflect", ("reflection.md", "diff-summary.md", "test-summary.md")),
+    ("review-pack", ("review-pack.md", "review-prompt.md")),
+    ("gate", ("gate-result.json", "gate-report.md")),
+    ("engineering-change", ("report.md",)),
 ])
-def test_retired_planning_artifacts_keep_read_only_cli_contract(
+def test_retired_artifacts_keep_read_only_cli_contract(
     tmp_path: Path,
     monkeypatch,
     command: str,
@@ -93,6 +98,7 @@ def test_retired_planning_artifacts_keep_read_only_cli_contract(
             "status": "success",
             "repo_path": "<repo>",
             "input_source": "inline",
+            "source_run": "historical-brief",
             "current_step": "done",
         }),
         encoding="utf-8",
@@ -122,7 +128,9 @@ def test_retired_planning_artifacts_keep_read_only_cli_contract(
             guidance = "\n".join(payload["next_steps"])
             assert "仅供只读检查" in guidance
             assert 'vega change "<需求>"' in guidance
-            assert all(retired not in guidance for retired in ("vega decision", "brief", "loop"))
+            assert all(retired not in guidance for retired in (
+                "vega decision", "vega brief", "vega loop", "vega reflect", "vega review",
+            ))
         else:
             assert payload["current_step"] == "done"
             assert payload["progress"] == []

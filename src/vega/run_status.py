@@ -116,42 +116,14 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
     }.get(run_kind)
     if routed_next_steps is not None:
         return routed_next_steps(run_dir, state)
-    if run_kind == "reflect":
+    if run_kind == "review-pack" and state.get("current_step") == "context_budget":
         return [
-            f"生成隔离审查包：`vega review-pack --repo <repo> --run {run_dir.name}`",
-            f"直接调用 reviewer：`vega review --repo <repo> --run {run_dir.name} --runner codex-exec`",
-            "如果还没跑测试，先补测试日志后重新 reflect。",
-        ]
-    if run_kind == "review-pack":
-        if state.get("current_step") == "context_budget":
-            return [
-                f"读取 `{run_dir / 'review-prompt-metrics.md'}` 和 `{run_dir / 'review-context-budget-report.md'}`。",
-                "先缩小任务/diff/项目规则输入，或人工确认后调整 `.vega.yaml` 的 prompt_budget。",
-                "不要在未检查缺失证据的情况下直接扩大预算并自动重跑。",
-            ]
-        return [
-            f"调用隔离 reviewer：`vega review --repo <repo> --run {state.get('source_run', '<reflect_run>')} --runner codex-exec`",
-            f"或手动复制 `{run_dir / 'review-prompt.md'}` 给干净 reviewer 会话。",
+            f"读取 `{run_dir / 'review-prompt-metrics.md'}` 和 `{run_dir / 'review-context-budget-report.md'}`。",
+            "先缩小任务/diff/项目规则输入，或人工确认后调整 `.vega.yaml` 的 prompt_budget。",
+            "不要在未检查缺失证据的情况下直接扩大预算并自动重跑。",
         ]
     if run_kind == "review":
         return _review_next_steps(run_dir, state)
-    if run_kind == "gate":
-        recommendation = state.get("recommendation")
-        if recommendation == "self-check":
-            return ["风险较低，可以主会话自检后整理交付；需要时仍可运行隔离 review。"]
-        if recommendation == "isolated-review":
-            return [
-                f"建议运行隔离 reviewer：`vega review --repo <repo> --run {state.get('source_run', '<reflect_run>')} --runner codex-exec`。",
-            ]
-        return [
-            "风险较高，建议人工确认影响面，再决定是否继续 auto loop 或提交。",
-            f"如确认继续，请记录决策：`vega decision approve --run {run_dir.name} --type gate --reason \"...\" --ref gate-result.json`。",
-        ]
-    if run_kind == "brief":
-        return [
-            f"把 `{run_dir / 'agent-brief.md'}` 交给主会话 worker 实现。",
-            "实现后运行：`vega reflect --repo <repo> --run <brief_run> --test-log <log>`。",
-        ]
     if run_kind == "project-profile":
         return [f'画像生成器已退役：`{run_dir / "project-profile.md"}` 仅供只读检查；继续开发请在目标仓库运行 `vega change "<需求>"`。']
     if run_kind == "change-plan":
@@ -163,8 +135,9 @@ def next_steps_for_run(workspace: Path, run_dir: Path, state: dict[str, Any], ki
     if run_kind == "goal":
         return ["该 Goal run 已退役，仅供只读检查；需要继续开发时，请创建新的 ChangeRun。"]
     return [
-        "读取 report/review/eval 判断是否通过。",
-        "如发现跨任务可复用经验，可通过 `vega reflect --lesson \"...\"` 显式生成候选。",
+        f"该 {run_kind} 产物仅供只读检查；单独的 success 或风险建议不代表当前任务通过验证。",
+        "读取本次状态列出的关键材料，核对任务、改动和验证证据。",
+        '继续开发请回到所属 ChangeRun；若没有对应任务，在目标仓库运行 `vega change "<需求>"`，重新生成并批准 Change Contract。',
     ]
 
 
