@@ -9,6 +9,7 @@ from .agent_cli_snapshot_token import read_agent_snapshot_token
 from .agent_explain import AgentExplanation, build_agent_explanation
 from .agent_runtime_support import load_agent_bundle
 from .agent_run import AgentRun
+from .agent_run_status import AGENT_PHASE_STATUS
 from .agent_run_selection import (
     ACTIVE_CHANGE_PHASES,
     ChangeRunSelectionError,
@@ -23,19 +24,6 @@ from .agent_status_projection import (
 )
 from .run_status import run_status_payload
 from .run_utils import resolve_run_dir
-
-
-_PHASE_STATUS = {
-    "planning": "created",
-    "awaiting_approval": "paused",
-    "ready": "paused",
-    "acting": "running",
-    "observing": "running",
-    "needs_human": "needs_human",
-    "finalizing": "running",
-    "completed": "success",
-    "stopped": "stopped",
-}
 
 
 RunSelectionSource = Literal[
@@ -222,7 +210,7 @@ def _agent_status_payload(
     state = projection.state
     card = projection.card
     decisions = list(projection.decision_history)
-    run_status = _PHASE_STATUS[card.phase]
+    run_status = AGENT_PHASE_STATUS[card.phase]
     payload = dict(projection.payload)
     payload.update(
         {

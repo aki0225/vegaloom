@@ -48,7 +48,7 @@ def render_run_status(workspace: Path, run: str) -> str:
 
 def run_status_payload(workspace: Path, run: str) -> dict[str, Any]:
     run_dir = resolve_run_dir(workspace, run)
-    state = _read_state(run_dir)
+    state = _read_state(run_dir, include_agent_child_projection=False)
     kind = _infer_kind(run_dir, state)
     if kind == "agent":
         # Agent 与主 CLI 共用一次证据快照；仅 Core 保留原 next_steps 合同。

@@ -20,9 +20,9 @@ from .agent_child_status import (
     capture_trusted_child_status,
 )
 from .agent_run_status import (
+    AGENT_PHASE_STATUS,
     trusted_worker_status,
 )
-from .agent_runtime_support import load_agent_bundle
 from .agent_status_card import _build_status_card, render_status_card
 from .agent_status_guidance import agent_artifact_names
 from .agent_status_sources import (
@@ -43,19 +43,6 @@ from .provider_session import PendingInteraction, ProviderSessionState
 from .provider_session_projection import session_status_projection_from_state
 from .review_queue_contract import review_queue_status_payload
 from .workspace_snapshot import ReviewWorkspaceSnapshot
-
-
-_PHASE_STATUS = {
-    "planning": "created",
-    "awaiting_approval": "paused",
-    "ready": "paused",
-    "acting": "running",
-    "observing": "running",
-    "needs_human": "needs_human",
-    "finalizing": "running",
-    "completed": "success",
-    "stopped": "stopped",
-}
 
 
 @dataclass(frozen=True)
@@ -187,7 +174,7 @@ def build_agent_status_projection(
             })
     operation_kind = bound_operation_kind(run_dir, state) if state.active_operation_id else None
     execution, card = execution_for_display(
-        run_dir, state, child_status, operation_kind, card, _PHASE_STATUS[card.phase],
+        run_dir, state, child_status, operation_kind, card, AGENT_PHASE_STATUS[card.phase],
     )
     candidate_transition = bool(
         card.workspace_current is False and not (workspace_issue or checkpoint_issue or observation_issue or decision_issue)
@@ -326,84 +313,6 @@ def read_status_card(
     if projection.state != state or projection.plan != plan:
         raise ValueError("状态卡投影与 Agent State/Plan 身份不一致。")
     return render_status_card(projection.card, candidate_transition=projection.payload["candidate_transition"])
-
-
-def build_agent_status_payload(
-    run_dir: Path,
-    state: AgentState,
-    plan: AgentPlan,
-) -> dict[str, object]:
-    """生成文本与 JSON 共用的经验证状态投影。"""
-
-    return build_agent_status_projection(run_dir, state, plan).payload
-
-
-def apply_agent_projection(
-    workspace: Path,
-    run: str,
-    run_dir: Path,
-    state: dict[str, Any],
-    *,
-    projection: AgentStatusProjection | None = None,
-) -> AgentStatusProjection:
-    """把 Agent 的实时证据投影合并到通用 status payload。"""
-
-    if projection is None:
-        _, agent_state, agent_plan, metadata = load_agent_bundle(workspace, run)
-        projection = build_agent_status_projection(
-            run_dir,
-            agent_state,
-            agent_plan,
-            repo_path=(
-                metadata.get("repo_path")
-                if isinstance(metadata.get("repo_path"), str)
-                else None
-            ),
-        )
-    elif projection.state.run_id != run_dir.name:
-        raise ValueError("Agent 状态投影与 run 目录身份不一致。")
-    state["repo_path"] = projection.repo_path
-    state["persisted_agent_state"] = projection.state.model_dump(mode="json")
-    state.update(
-        {
-            "recorded_agent_phase": projection.payload["recorded_phase"],
-            "recorded_terminal_status": projection.payload[
-                "recorded_terminal_status"
-            ],
-            "agent_phase": projection.payload["effective_phase"],
-            "terminal_status": projection.payload["effective_terminal_status"],
-            "allowed_actions": projection.payload["allowed_actions"],
-            "verification": projection.payload["verification"],
-            "risk": projection.payload["risk"],
-            "review": projection.payload["review"],
-            "changed_files": projection.payload["changed_files"],
-            "unknown_file_count": projection.payload["unknown_file_count"],
-            "evidence_health": projection.payload["evidence_health"],
-            "workspace_current": projection.payload["workspace_current"],
-            "commit_recommended": projection.payload["commit_recommended"],
-            "supervisor_evidence": projection.payload["supervisor_evidence"],
-            "integrity_warning": projection.payload["integrity_warning"],
-            "history_note": projection.payload["history_note"],
-            "provider_sessions": projection.payload["provider_sessions"],
-            "provider_session_warning": projection.payload[
-                "provider_session_warning"
-            ],
-            "last_child_run": projection.last_child_run,
-            "active_operation_kind": projection.payload["active_operation_kind"],
-            "brief_run": projection.last_child_run,
-            "live_child_stage": projection.card.live_child_stage,
-            "execution": projection.execution,
-            "key_artifacts": list(projection.key_artifacts),
-            **projection.review_queue,
-        }
-    )
-    if (
-        projection.payload["effective_phase"]
-        != projection.payload["recorded_phase"]
-    ):
-        state["status"] = "needs_human"
-        state["current_step"] = "evidence_invalid"
-    return projection
 
 
 def combined_decisions(
