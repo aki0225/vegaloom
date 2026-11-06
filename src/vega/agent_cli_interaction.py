@@ -17,6 +17,7 @@ from .provider_session import (
     respond_to_interaction,
 )
 from .codex_approval_context import read_approval_context
+from .run_lock import RunMutationBusyError
 
 
 PumpStatus = Literal["idle", "waiting", "attention"]
@@ -89,6 +90,14 @@ class ProviderInteractionPump:
         if self.prompt is not None and interaction.method in {_COMMAND_APPROVAL, _FILE_APPROVAL}:
             try:
                 return self._respond_inline(interaction)
+            except RunMutationBusyError:
+                # 发布可先于解锁被观察到；不保留决定，下一轮重新展示并确认。
+                self.close()
+                return InteractionPumpUpdate(
+                    status="waiting", interaction_id=interaction.interaction_id,
+                    reason_code="provider.interaction_busy",
+                    message="会话正在更新，本次响应尚未提交；请在重新展示后再次确认。",
+                )
             except (OSError, ValueError):
                 self.close()
         return _attention(

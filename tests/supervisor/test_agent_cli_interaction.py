@@ -146,6 +146,67 @@ def test_terminal_approval_displays_bound_context_and_sends_once(
     assert "DO_NOT_PERSIST_APPROVAL" not in (run_dir / "provider-sessions.json").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("after_busy", ["unchanged", "context", "turn"])
+def test_approval_publication_lock_busy_requires_fresh_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, after_busy: str,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from vega import provider_session
+
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    published, release = threading.Event(), threading.Event()
+    original_save = provider_session.save_provider_sessions
+
+    def save_before_unlock(run_dir, state):
+        original_save(run_dir, state)
+        if any(item.context_ref and item.status == "pending" for item in state.interactions):
+            published.set()
+            assert release.wait(5), "测试未释放发布锁"
+
+    monkeypatch.setattr(provider_session, "save_provider_sessions", save_before_unlock)
+    monkeypatch.setattr("sys.stdin", Tty())
+    monkeypatch.setattr("sys.stderr", Tty())
+    monkeypatch.setattr(TerminalApprovalPrompt, "_discard_input", lambda self: None)
+    monkeypatch.setattr(TerminalApprovalPrompt, "_read_available", lambda self: "y\n")
+    run_dir = tmp_path / "runs" / "agent-run"
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_complete_request, tmp_path)
+        try:
+            assert published.wait(5)
+            pump = ProviderInteractionPump(run_dir, prompt=TerminalApprovalPrompt(lambda update: None))
+            assert pump.poll().status == "waiting"
+            update = pump.poll()
+            pending = load_provider_sessions(run_dir).interactions[0]
+            assert pending.status == "pending" and pending.response is None
+        finally:
+            release.set()
+        _, approvals = future.result(timeout=5)
+    try:
+        assert update.status == "waiting"
+        assert update.reason_code == "provider.interaction_busy"
+        if after_busy == "context":
+            (run_dir / ".provider-approvals" / pending.context_ref).write_text("{}", encoding="utf-8")
+        elif after_busy == "turn":
+            mutate_provider_sessions(run_dir, "agent.session", lambda state: setattr(
+                state.handles["worker"], "last_turn_id", "turn-new",
+            ))
+        # 锁忙时不保存决定；重新展示并重新确认，不能重放上次输入。
+        assert pump.poll().status == ("waiting" if after_busy == "unchanged" else "attention")
+        assert load_provider_sessions(run_dir).interactions[0].response is None
+        if after_busy == "unchanged":
+            assert pump.poll().status == "waiting"
+            sent = []
+            assert approvals.send_responses(lambda rpc, response: sent.append((rpc, response)))
+            assert sent == [(99, {"decision": "accept"})]
+        else:
+            assert not approvals.send_responses(lambda *args: pytest.fail("不得发送失效授权"))
+    finally:
+        approvals.close()
+
+
 @pytest.mark.parametrize("change", ["turn", "owner", "duplicate", "context", "display-turn", "native-resolved"])
 def test_approval_rechecks_binding_after_display_and_before_native_send(
     tmp_path: Path, change: str,

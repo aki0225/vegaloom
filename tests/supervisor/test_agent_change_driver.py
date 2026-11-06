@@ -666,11 +666,12 @@ def test_concurrent_new_text_creates_one_run_and_rechecks_active_state(
     assert len(list((repo / "runs").iterdir())) == 1
 
 
-@pytest.mark.parametrize("json_output", [False, True])
+@pytest.mark.parametrize("json_output,cleanup_failure", [(False, False), (True, False), (True, True)])
 def test_change_stops_for_codex_interaction_that_requires_full_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     json_output: bool,
+    cleanup_failure: bool,
 ) -> None:
     repo = _repo(tmp_path / "repo")
     runtime = SupervisorAgentRuntime(repo)
@@ -681,6 +682,36 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
     )
     runtime.approve(started.run_dir.name)
     stop_requested = threading.Event()
+    from vega import provider_session
+    from vega.run_lock import RunMutationBusyError
+
+    close_attempted = threading.Event()
+    original_save = provider_session.save_provider_sessions
+    original_close = execution_module.close_pending_interactions
+    close_results = []
+
+    def save_before_unlock(run_dir, sessions):
+        original_save(run_dir, sessions)
+        if json_output and any(item.context_ref and item.status == "pending" for item in sessions.interactions):
+            assert close_attempted.wait(5), "Driver 未在发布锁内尝试关闭请求"
+
+    def close_at_publication(*args, **kwargs):
+        try:
+            if cleanup_failure and close_results:
+                close_results.append("cleanup_failed")
+                raise ValueError(f"清理失败：{fake_path} token={fake_secret}")
+            result = original_close(*args, **kwargs)
+        except RunMutationBusyError:
+            close_results.append("busy")
+            raise
+        else:
+            close_results.append(result)
+            return result
+        finally:
+            close_attempted.set()
+
+    monkeypatch.setattr(provider_session, "save_provider_sessions", save_before_unlock)
+    monkeypatch.setattr(execution_module, "close_pending_interactions", close_at_publication)
     updates: list[InteractionPumpUpdate] = []
     events: list[str] = []
     fake_path = "Q:" + "\\Users\\example\\private\\config.json"  # repo-path-policy: allow-test-fixture
@@ -709,7 +740,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
                             last_turn_id="turn-1",
                         )
                     },
-                    interactions=[
+                    interactions=[] if json_output else [
                         PendingInteraction(
                             interaction_id="request-1",
                             role_key="worker",
@@ -729,9 +760,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
             approvals = AppServerApprovals(run_dir, "worker", str(repo), None)
             if json_output:
-                sessions = load_provider_sessions(run_dir)
-                sessions.interactions.clear()
-                save_provider_sessions(run_dir, sessions)
+                # JSON 分支仅发布最终请求，不能先让 Driver 看见临时请求再替换。
                 approvals.record({"id": 99, "method": "item/commandExecution/requestApproval", "params": {
                     "threadId": "thread-1", "turnId": "turn-1", "itemId": "item-1",
                     "command": "echo DO_NOT_PERSIST_APPROVAL", "cwd": str(repo),
@@ -791,7 +820,15 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
         assert "DO_NOT_PERSIST_APPROVAL" not in result.output
         assert fake_path not in result.output and fake_secret not in result.output
         pending = load_provider_sessions(started.run_dir).interactions[0]
-        assert pending.status == "closed" and pending.response is None
+        assert pending.response is None
+        if cleanup_failure:
+            assert pending.status == "pending"
+            assert close_results == ["busy", "cleanup_failed"]
+            assert "待响应请求关闭未确认" in payload["message"]
+        else:
+            assert pending.status == "closed"
+            assert close_results == ["busy", 1]
+        assert "停止请求未确认" in payload["message"]
         assert not list((started.run_dir / ".provider-approvals").glob("*.json"))
         return
 

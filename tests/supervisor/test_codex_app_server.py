@@ -6,7 +6,7 @@ import signal
 import subprocess
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -407,8 +407,18 @@ def test_app_server_waits_for_explicit_approval_response(
         )
         interaction_id = _wait_for_interaction(run_dir)
         terminal = LocalPrompt(lambda update: None)
-        assert ProviderInteractionPump(run_dir, prompt=terminal).poll().status == "waiting"
-        result = future.result(timeout=20)
+        pump = ProviderInteractionPump(run_dir, prompt=terminal)
+        assert pump.poll().status == "waiting"
+        deadline = time.monotonic() + 20
+        while True:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, "App Server 未消费明确响应"
+            try:
+                result = future.result(timeout=min(0.05, remaining))
+                break
+            except TimeoutError:
+                # 与 CLI 一样继续轮询；锁忙后必须重新确认，不能仅等 Provider 超时。
+                assert pump.poll().status in {"waiting", "idle"}
 
     assert result.status == "success"
     state = load_provider_sessions(run_dir)
