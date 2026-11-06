@@ -369,6 +369,89 @@ def test_driver_advances_more_than_twelve_contract_attempts(
     assert result.outcome == "completed" and calls == attempts > 12
 
 
+def test_driver_keeps_total_step_allowance_when_external_revision_shortens_plan(tmp_path, monkeypatch):
+    from vega.agent_change_control import change_budget_snapshot
+    from vega.agent_recovery import SupervisorAgentRecovery
+
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    contract = _contract()
+    contract.authority_envelope.max_auto_replans = 1
+    contract.authority_envelope.max_repair_rounds = 0
+    contract.authority_envelope.max_verification_retries = 0
+    plan = _execution_plan()
+    plan = ExecutionPlan.model_validate({
+        **plan.model_dump(),
+        "work_items": [plan.work_items[0].model_copy(update={"work_item_id": f"WI-{i:02d}"})
+                       for i in range(1, 9)],
+    })
+    started = runtime.start_change(repo, contract=contract, execution_plan=plan)
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    contract_bytes = (approved.run_dir / "change-contract.json").read_bytes()
+    approved_contract = ChangeContract.model_validate_json(contract_bytes)
+    recovery = SupervisorAgentRecovery(repo)
+    calls = 0
+    budgets = []
+
+    def ready_boundary(current, provider):
+        # 确定性调度接缝：真实暂停/恢复形成阶段推进，不声称运行过 Worker 或模型。
+        nonlocal calls
+        calls += 1
+        if calls == 17:
+            # 模拟另一个 CLI 在无活动 Writer 的明确同步点，使用公开修订 API。
+            revised = runtime.revise_change(current.run_dir.name,
+                proposed_contract=approved_contract,
+                proposed_execution_plan=ExecutionPlan.model_validate({
+                    **plan.model_dump(), "plan_revision": 2, "work_items": [plan.work_items[0]],
+                }))
+            budgets.append(change_budget_snapshot(revised.run_dir, revised.state, approved_contract))
+            return revised
+        if calls > 17:
+            return recovery.stop(current.run_dir.name, reason="调度夹具到达预定终点")
+        recovery.pause(current.run_dir.name, reason="调度同步点")
+        return recovery.resume_local(current.run_dir.name)
+
+    driver = AgentChangeDriver(repo, repo, provider="claude", timeout_seconds=60)
+    monkeypatch.setattr(driver, "_run_ready", ready_boundary)
+    result = driver.change(run=approved.run_dir.name)
+    assert result.reason_code == "workflow.stopped" and calls == 18
+    assert (approved.run_dir / "change-contract.json").read_bytes() == contract_bytes
+    after = change_budget_snapshot(result.run.run_dir, result.run.state, approved_contract)
+    assert after == budgets[0]
+    assert after.auto_replans_used == 1
+    assert after.worker_attempts_used == after.repair_rounds_used == after.verification_retries_used == 0
+
+
+@pytest.mark.parametrize("limit_change", ["stable", "shrinks", "grows"])
+def test_driver_stops_at_total_step_limit(tmp_path, monkeypatch, limit_change):
+    repo = _repo(tmp_path / "repo")
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(repo, contract=_contract(), execution_plan=_execution_plan())
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    driver = AgentChangeDriver(repo, repo, provider="claude", timeout_seconds=60)
+    calls = 0
+
+    def advance(current, provider):
+        nonlocal calls
+        calls += 1
+        return AgentRun(run_dir=current.run_dir, plan=current.plan, state=current.state.model_copy(update={
+            "state_version": current.state.state_version + 1,
+        }))
+
+    monkeypatch.setattr(driver, "_advance_phase", advance)
+    def limit(*_):
+        if limit_change == "shrinks" and calls >= 1:
+            return 1
+        if limit_change == "grows" and calls >= 3:
+            return 5
+        return 3
+
+    monkeypatch.setattr(driver_module, "change_phase_step_limit", limit)
+    with pytest.raises(ValueError, match="超过允许的阶段推进次数"):
+        driver._drive(approved)
+    assert calls == (5 if limit_change == "grows" else 3)
+
+
 def test_change_rejects_approval_when_prompted_revision_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

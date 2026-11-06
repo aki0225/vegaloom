@@ -175,9 +175,9 @@ class AgentChangeDriver:
             prepare_change_permissions(
                 current.run_dir, self.worker_permissions, selected_provider, self.persistent_sessions,
             )
-        steps, step_limit = 0, 12
-        while steps < step_limit:
-            step_limit = change_phase_step_limit(self.workspace, current)
+        steps, step_limit = 0, 0
+        # 本次调用保留最大已见阶段上限，修订不清零累计次数或改变真实预算。
+        while steps < (step_limit := max(step_limit, change_phase_step_limit(self.workspace, current))):
             steps += 1
             advanced = self._advance_phase(current, selected_provider)
             if isinstance(advanced, ChangeDriverResult):
@@ -186,8 +186,7 @@ class AgentChangeDriver:
                 return self._attention(
                     advanced, "workflow.no_progress", "当前阶段未产生可验证的状态推进，已停止自动循环。",
                 )
-            current = advanced
-            self.selected_run = current
+            current = self.selected_run = advanced
         raise ValueError("ChangeRun 主路径超过允许的阶段推进次数")
 
     def _advance_phase(
