@@ -709,7 +709,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
                             last_turn_id="turn-1",
                         )
                     },
-                    interactions=[
+                    interactions=[] if json_output else [
                         PendingInteraction(
                             interaction_id="request-1",
                             role_key="worker",
@@ -729,9 +729,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
 
             approvals = AppServerApprovals(run_dir, "worker", str(repo), None)
             if json_output:
-                sessions = load_provider_sessions(run_dir)
-                sessions.interactions.clear()
-                save_provider_sessions(run_dir, sessions)
+                # JSON 分支仅发布最终请求，不能先让 Driver 看见临时请求再替换。
                 approvals.record({"id": 99, "method": "item/commandExecution/requestApproval", "params": {
                     "threadId": "thread-1", "turnId": "turn-1", "itemId": "item-1",
                     "command": "echo DO_NOT_PERSIST_APPROVAL", "cwd": str(repo),
