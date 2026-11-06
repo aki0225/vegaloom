@@ -33,7 +33,7 @@ from vega.project_config import CodexExecOptions, check_project_config, load_pro
 from vega.project_profile import build_project_profile
 from vega.recovery_runtime import RecoveryRuntime
 from vega.reflect_runtime import ReflectRuntime
-from vega.review_runtime import ReviewPackRuntime, ReviewRuntime, parse_review_verdict
+from vega.review_runtime import ReviewRuntime, parse_review_verdict
 from vega.risk_review_reporting import build_finish_review_section
 from vega.run_status import run_status_payload
 from vega.run_utils import create_run_dir
@@ -315,7 +315,10 @@ def test_review_pack_generates_isolated_context_from_reflect_run(tmp_path) -> No
     test_log.write_text("pytest passed\n", encoding="utf-8")
     reflect_run = ReflectRuntime(tmp_path).run(repo_dir, source_run=brief_run.name, test_log=test_log)
 
-    run_dir = ReviewPackRuntime(tmp_path).run(repo_dir, reflect_run.name)
+    runner = StaticRunner([_review_json("approve")])
+    run_dir = ReviewRuntime(tmp_path, runner=runner).run(repo_dir, reflect_run.name)
+    assert len(runner.calls) == 1
+    assert runner.calls[0]["sandbox"] == "read-only"
 
     for artifact in [
         "state.json",

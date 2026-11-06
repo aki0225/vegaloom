@@ -10,7 +10,7 @@ import vega.review_runtime as review_runtime_module
 from vega.execution_control import RunnerExecutionContext
 from vega.reflect_runtime import ReflectRuntime
 from vega.review_contract import RequiredReviewHit
-from vega.review_runtime import ReviewPackRuntime, ReviewRuntime
+from vega.review_runtime import ReviewRuntime
 from vega.risk_review_reporting import verdict_output_schema
 from vega.risk_review_runtime import render_required_review_prompt_rules
 from vega.runner import RunnerResult
@@ -40,6 +40,7 @@ class StaticReviewer:
         timeout_seconds: int,
         execution_context: RunnerExecutionContext | None = None,
     ) -> RunnerResult:
+        assert sandbox == "read-only"
         self.prompts.append(prompt)
         return RunnerResult(
             status=self.status,
@@ -292,14 +293,20 @@ def test_review_pack_binds_required_risk_rules(tmp_path: Path) -> None:
     workspace.mkdir()
     reflect_run = ReflectRuntime(workspace).run(repo)
 
-    review_pack = ReviewPackRuntime(workspace).run(repo, reflect_run.name)
+    reviewer = StaticReviewer(_complete_risk_verdict())
+    review_pack = ReviewRuntime(workspace, runner=reviewer).run(repo, reflect_run.name)
+    assert len(reviewer.prompts) == 1
+    verdict = _read_json(review_pack / "review-verdict.json")
+    assert [item["risk_id"] for item in verdict["risk_disclosures"]] == ["payment", "database"]
 
     state = _read_json(review_pack / "state.json")
     context = _read_json(review_pack / "review-context.json")
     prompt = (review_pack / "review-prompt.md").read_text(encoding="utf-8")
     eval_text = (review_pack / "eval.md").read_text(encoding="utf-8")
 
-    assert state["status"] == "success"
+    # 材料生成成功不等于高风险修改通过；真实审查入口保留人工风险边界。
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "risk_gate_needs_human"
     assert context["risk_gate"]["status"] == "success"
     assert [
         item["id"]
@@ -313,7 +320,7 @@ def test_review_pack_binds_required_risk_rules(tmp_path: Path) -> None:
         '"risk_disclosures"',
     ):
         assert marker in prompt
-    assert "PASS: 必审高风险已写入 Review Pack，等待逐类披露" in eval_text
+    assert "PASS: 必审高风险披露结构完整且固定交由人工确认" in eval_text
 
 
 def test_review_pack_risk_gate_failure_needs_human(
@@ -344,7 +351,9 @@ def test_review_pack_risk_gate_failure_needs_human(
         },
     )
 
-    review_pack = ReviewPackRuntime(workspace).run(repo, reflect_run.name)
+    reviewer = StaticReviewer(_complete_risk_verdict())
+    review_pack = ReviewRuntime(workspace, runner=reviewer).run(repo, reflect_run.name)
+    assert reviewer.prompts == []
 
     state = _read_json(review_pack / "state.json")
     eval_text = (review_pack / "eval.md").read_text(encoding="utf-8")

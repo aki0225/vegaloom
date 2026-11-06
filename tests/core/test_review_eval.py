@@ -5,61 +5,9 @@ from pathlib import Path
 
 import pytest
 
-import vega.review_runtime as runtime
-from vega.models import GateResult
 from vega.prompt_metrics import measure_prompt
 from vega.review_checks import ReviewCheck, review_checks_failed
 from vega.review_eval import run_review_pack_eval
-
-
-@pytest.mark.parametrize(
-    ("status", "message", "expected"),
-    [
-        ("fail", "检查未通过（不含英文前缀）", "failed"),
-        ("pass", "FAIL: 仅为被引用的展示文字", "success"),
-    ],
-)
-def test_review_pack_terminal_uses_check_status_not_report_text(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    status: str,
-    message: str,
-    expected: str,
-) -> None:
-    # 受控检查事实与任意展示文字分开；不启动模型或真实 Git。
-    check = ReviewCheck(status, message)
-    monkeypatch.setattr(
-        runtime,
-        "collect_review_inputs",
-        lambda *args: {
-            "changed_files": [],
-            "evidence_consistent": True,
-            "evidence_issues": [],
-            "evidence_diagnostics": [],
-        },
-    )
-    gate = GateResult(risk="low", recommendation="self-check")
-    monkeypatch.setattr(
-        runtime,
-        "_review_risk_gate_payload",
-        lambda *args: {
-            "status": "success",
-            "result": gate.model_dump(),
-        },
-    )
-    monkeypatch.setattr(
-        runtime,
-        "_write_review_pack_artifacts",
-        lambda *args: measure_prompt("", role="reviewer", max_chars=100),
-    )
-    monkeypatch.setattr(runtime, "run_review_pack_eval", lambda *args: [check])
-
-    run = runtime.ReviewPackRuntime(tmp_path).run(tmp_path, "controlled-reflect")
-
-    state = json.loads((run / "state.json").read_text(encoding="utf-8"))
-    assert state["status"] == expected
-    assert state["eval_results"] == [message]
-    assert message in (run / "eval.md").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
