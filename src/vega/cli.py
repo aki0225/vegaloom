@@ -26,7 +26,7 @@ from .progress import (
     safe_run_step,
 )
 from .project_config import check_project_config, render_project_config_check
-from .run_progress import progress_items_for_run
+from .run_progress import ProgressCursor, progress_items_for_run
 from .run_status import latest_run_dir, render_run_status, run_status_payload
 from .run_utils import resolve_run_dir
 from .redaction import redact_text
@@ -230,7 +230,7 @@ def watch(
         run_dir = resolve_run_dir(Path.cwd(), run)
     except (FileNotFoundError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    printed = 0
+    cursor = ProgressCursor()
     first = True
     while True:
         was_first = first
@@ -254,16 +254,15 @@ def watch(
                     ensure_ascii=False,
                 )
             )
-        elif first:
-            typer.echo(
-                f"run={run_id_value} status={status_value} step={step_value}"
-            )
-            typer.echo(render_progress_items(items, limit=limit))
         else:
-            new_items = items[printed:]
-            if new_items:
-                typer.echo(render_progress_items(new_items, limit=limit))
-        printed = len(items)
+            new_items = cursor.advance(items)
+            if first:
+                typer.echo(
+                    f"run={run_id_value} status={status_value} step={step_value}"
+                )
+                typer.echo(render_progress_items(items, limit=limit))
+            elif new_items:
+                typer.echo(render_progress_items(new_items, limit=len(new_items)))
         first = False
         is_terminal = status_value not in {"created", "running"}
         if follow and not json_output and not was_first and is_terminal:
