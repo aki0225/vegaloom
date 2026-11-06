@@ -278,12 +278,13 @@ def test_change_continues_unique_run_through_existing_approval_path(
         def __init__(self, workspace: Path, **_: object) -> None:
             self.workspace = workspace
 
-        def run(self, run: str, *, timeout_seconds: int) -> AgentRun:
+        def run_attempt(self, run: str, *, timeout_seconds: int) -> AgentRun:
             assert timeout_seconds == 60
             run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
             adapter_calls.append(run)
             state = AgentState.model_validate({
                 **state.model_dump(mode="json"),
+                "state_version": state.state_version + 1,
                 "phase": "needs_human", "allowed_actions": ["human"],
             })
             save_agent_state(run_dir / "agent-state.json", state)
@@ -325,6 +326,47 @@ def test_change_continues_unique_run_through_existing_approval_path(
             (started.run_dir / "change-contract.json").read_text(encoding="utf-8")
         )
         assert contract["approval_source"] == "bounded"
+
+
+@pytest.mark.parametrize("work_item_count,repair_rounds", [(7, 1), (1, 12)])
+def test_driver_advances_more_than_twelve_contract_attempts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, work_item_count: int, repair_rounds: int,
+) -> None:
+    """调度夹具只验证阶段循环容量，不把模拟阶段结果作为 Core 成功证据。"""
+    repo = _repo(tmp_path / "repo")
+    contract = _contract()
+    contract.authority_envelope.max_repair_rounds = repair_rounds
+    contract.authority_envelope.max_auto_replans = 0
+    contract.authority_envelope.max_review_rounds = repair_rounds + 2
+    plan = _execution_plan()
+    template = plan.work_items[0]
+    plan = plan.model_validate({
+        **plan.model_dump(),
+        "work_items": [template.model_copy(update={"work_item_id": f"WI-{index + 1:02d}"})
+                       for index in range(work_item_count)],
+    })
+    runtime = SupervisorAgentRuntime(repo)
+    started = runtime.start_change(repo, contract=contract, execution_plan=plan)
+    approved = runtime.approve(started.run_dir.name, actor="user")
+    driver = AgentChangeDriver(repo, repo, provider="claude", timeout_seconds=60)
+    calls = 0
+    attempts = work_item_count * (1 + repair_rounds)
+
+    def advance(current, provider):
+        nonlocal calls
+        assert provider == "claude"
+        if calls == attempts:
+            return ChangeDriverResult(run=current, outcome="completed", reason_code="workflow.completed",
+                                      message="模拟阶段序列结束", safe_actions=())
+        calls += 1
+        return AgentRun(run_dir=current.run_dir, plan=current.plan, state=current.state.model_copy(update={
+            "state_version": current.state.state_version + 1,
+            "current_work_item": plan.work_items[(calls - 1) // (1 + repair_rounds)].work_item_id,
+        }))
+
+    monkeypatch.setattr(driver, "_advance_phase", advance)
+    result = driver._drive(approved)
+    assert result.outcome == "completed" and calls == attempts > 12
 
 
 def test_change_rejects_approval_when_prompted_revision_changes(
@@ -648,7 +690,7 @@ def test_change_stops_for_codex_interaction_that_requires_full_context(
         def __init__(self, workspace: Path, **_: object) -> None:
             self.workspace = workspace
 
-        def run(self, run: str, *, timeout_seconds: int) -> AgentRun:
+        def run_attempt(self, run: str, *, timeout_seconds: int) -> AgentRun:
             run_dir, state, plan, _ = load_agent_bundle(self.workspace, run)
             save_provider_sessions(
                 run_dir,

@@ -6,6 +6,7 @@ from typing import Literal
 
 from .agent_change_execution import ProviderOperationBoundary, ensure_change_provider_ready
 from .agent_change_execution import run_provider_operation, run_change_worker
+from .agent_change_execution import change_phase_step_limit
 from .agent_change_task_card import confirm_task_card_selection
 from .agent_change_task_card import select_unique_task_card
 from .agent_change_presentation import (
@@ -174,10 +175,17 @@ class AgentChangeDriver:
             prepare_change_permissions(
                 current.run_dir, self.worker_permissions, selected_provider, self.persistent_sessions,
             )
-        for _ in range(12):
+        steps, step_limit = 0, 12
+        while steps < step_limit:
+            step_limit = change_phase_step_limit(self.workspace, current)
+            steps += 1
             advanced = self._advance_phase(current, selected_provider)
             if isinstance(advanced, ChangeDriverResult):
                 return advanced
+            if advanced.state.state_version <= current.state.state_version:
+                return self._attention(
+                    advanced, "workflow.no_progress", "当前阶段未产生可验证的状态推进，已停止自动循环。",
+                )
             current = advanced
             self.selected_run = current
         raise ValueError("ChangeRun 主路径超过允许的阶段推进次数")
@@ -225,7 +233,10 @@ class AgentChangeDriver:
         self, current: AgentRun, provider: AgentProvider
     ) -> AgentRun | ChangeDriverResult:
         if current.state.contract_revision is not None:
-            # 已编译合同的 replan 必须经过 revision 裁决，不能重用初始调查绕过批准和预算。
+            revised = self.runtime.replan_scope_if_eligible(current.run_dir.name)
+            if revised is not None:
+                self._event("已在原合同与预算内补全当前工作项文件清单，继续执行")
+                return revised
             return self._attention(
                 current,
                 "workflow.replan_required",

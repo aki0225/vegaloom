@@ -25,6 +25,18 @@ class ChangeRevisionRuntimeMixin:
     workspace: Path
 
     @agent_mutation("agent.replan")
+    def complete_verification_scope_if_eligible(self: _ChangeRuntimeHost, run: str) -> AgentRun | None:
+        from .agent_verification_scope_replan import complete_verification_scope_if_eligible
+
+        return complete_verification_scope_if_eligible(self.workspace, *self._load_run(run))
+
+    @agent_mutation("agent.replan")
+    def replan_scope_if_eligible(self: _ChangeRuntimeHost, run: str) -> AgentRun | None:
+        from .agent_scope_replan import replan_scope_if_eligible
+
+        return replan_scope_if_eligible(self.workspace, *self._load_run(run))
+
+    @agent_mutation("agent.replan")
     def revise_change(
         self: _ChangeRuntimeHost,
         run: str,

@@ -45,10 +45,11 @@ def prepare_core_recheck(workspace: Path, run: str) -> PreparedVerificationRetry
     from .agent_git_candidate import validate_candidate_binding
     from .agent_operation import child_summary_ref
     from .agent_runtime_support import bound_repo, capture_bound_workspace, load_agent_bundle
+    from .agent_runtime_logic import reactivate_current_work_item
     from .agent_status_evidence import build_supervisor_evidence
     from .agent_verification_retry_evidence import load_bound_source_finish
     from .agent_verification_retry_preparation import (
-        build_prepared_verification_retry, reactivate_current_work_item,
+        build_prepared_verification_retry,
     )
     from .agent_worker_evidence import (
         WorkerClaim,
@@ -189,8 +190,9 @@ def _finish_allows_recheck(state: LoopAutomationState, finish: dict[str, object]
 
 
 def _load_recheck_observation(run_dir: Path, state: AgentState) -> AgentObservation:
-    from .agent_contract import AgentDecision, AgentObservation
+    from .agent_checkpoint_history import checkpoint_matches_state, load_checkpoint_source_pair
     from .agent_persistence import load_agent_checkpoint
+    from .agent_run_status import latest_dispatch_binding
     from .agent_worker_evidence import hash_evidence_refs
 
     checkpoint = load_agent_checkpoint(
@@ -199,33 +201,23 @@ def _load_recheck_observation(run_dir: Path, state: AgentState) -> AgentObservat
     # Checkpoint 的 operation_started 记录历史尝试，不能当作当前活动进程；
     # 当前 State 的绑定与实际 execution quiescence 分别在入口和 Core 检查中验证。
     if (
-        checkpoint.run_id != state.run_id or checkpoint.status != "blocked"
+        not checkpoint_matches_state(checkpoint, state) or checkpoint.status != "blocked"
         or checkpoint.phase != "needs_human"
         or checkpoint.active_child_run is not None or checkpoint.pending_actions != ["human"]
-        or checkpoint.current_work_item != state.current_work_item
-        or checkpoint.state_version + 1 != state.state_version
-        or checkpoint.workspace_fingerprint != state.workspace_fingerprint
         or checkpoint.external_side_effects != "none"
-        or len(checkpoint.failed_attempts) != 1
+        or not checkpoint.failed_attempts
     ):
         raise ValueError("核心证据重算缺少同现场的失败 Checkpoint")
-    observation_refs = [ref for ref in checkpoint.evidence_refs if ref.startswith("observations/")]
-    decision_refs = [ref for ref in checkpoint.evidence_refs if ref.startswith("decisions/")]
-    if len(observation_refs) != 1 or len(decision_refs) != 1:
-        raise ValueError("核心证据重算没有唯一 Observation 与 Decision")
-    observation = AgentObservation.model_validate(_read_ref(run_dir, observation_refs[0]))
-    decision = AgentDecision.model_validate(_read_ref(run_dir, decision_refs[0]))
+    _, observation, _, decision = load_checkpoint_source_pair(run_dir, checkpoint)
     if (
-        observation_refs[0] != f"observations/{observation.observation_id}.json"
-        or decision_refs[0] != f"decisions/{decision.decision_id}.json"
-        or decision.observation_id != observation.observation_id
-        or decision.selected_action != "human" or decision.reason_code != "evidence.core_untrusted"
+        decision.selected_action != "human" or decision.reason_code != "evidence.core_untrusted"
         or observation.core_evidence != "stale" or observation.authority != "machine_reconcile"
         or observation.worker_alive or not observation.operation_started
         or not observation.workspace_explained or observation.plan_contradicted
         or observation.external_side_effects != "none"
-        or observation.child_run != checkpoint.failed_attempts[0]
+        or observation.child_run != checkpoint.failed_attempts[-1]
         or observation.work_item_id != state.current_work_item or observation.operation_id is None
+        or latest_dispatch_binding(run_dir, state) != (observation.child_run, observation.operation_id)
         or hash_evidence_refs(run_dir, observation.evidence_refs) != observation.evidence_sha256
     ):
         raise ValueError("原始 Observation 不是可重算的核心证据失败")

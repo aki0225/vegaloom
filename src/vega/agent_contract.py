@@ -323,6 +323,7 @@ class AgentCheckpoint(StrictAgentModel):
     failed_attempts: list[NonEmptyText] = Field(default_factory=list)
     pending_actions: list[AgentAction] = Field(default_factory=list)
     evidence_refs: list[RelativePathText] = Field(default_factory=list)
+    resume_source_checkpoint: RelativePathText | None = None
     created_at: str = Field(default_factory=utc_now)
 
     @field_validator("changed_files", "evidence_refs")

@@ -604,6 +604,38 @@ def test_plan_revision_cannot_replace_bounded_approval_record(
         )
 
 
+@pytest.mark.parametrize("run_kind", ["change", "legacy"])
+def test_recovery_item_selection_preserves_dependencies_and_legacy_limit(run_kind: str):
+    from vega.agent_runtime_logic import reactivate_current_work_item
+    from vega.agent_worker_evidence import require_executable_work_item
+
+    contract = approve_change_contract(_contract(), actor="user")
+    execution = _execution_plan()
+    execution.work_items.append(ExecutionWorkItem(
+        work_item_id="WI-02", objective="后续工作", likely_files=["src/two.py"],
+        depends_on=["WI-01"], verification=["python -m compileall -q src"],
+    ))
+    plan = project_agent_plan(contract, execution)
+    plan.work_items[0].status = "blocked"
+    state = AgentState(
+        run_id="recovery", task_id=contract.task_id, repository_id="repo",
+        current_work_item="WI-01", run_kind="change" if run_kind == "change" else "legacy",
+        accepted_checkpoint_sha="a" * 40 if run_kind == "change" else None,
+    )
+    before = plan.model_dump(mode="json")
+    active = reactivate_current_work_item(plan, state.current_work_item)
+    if run_kind == "legacy":
+        with pytest.raises(ValueError, match="只接受一个未完成"):
+            require_executable_work_item(active, state)
+    else:
+        assert require_executable_work_item(active, state).work_item_id == "WI-01"
+        # 仅换当前项不能绕过尚未完成的前置依赖。
+        state.current_work_item = "WI-02"
+        with pytest.raises(ValueError, match="仍有未完成依赖"):
+            require_executable_work_item(active, state)
+    assert plan.model_dump(mode="json") == before
+
+
 def test_change_run_verification_retry_respects_contract_budget(
     tmp_path: Path,
 ) -> None:

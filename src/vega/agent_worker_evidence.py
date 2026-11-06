@@ -18,7 +18,7 @@ from .agent_core_observation import (
     verification_status as _verification_status,
 )
 from .agent_change_run import ChangeRunContext, current_change_work_item
-from .agent_change_fix_packet import ChangeFixPacket, render_fix_packet
+from .agent_change_fix_packet import ChangeFixPacket, load_current_fix_packet, render_fix_packet
 from .agent_contract import (
     AgentObservation,
     AgentPlan,
@@ -209,10 +209,15 @@ def require_repair_child(
     if (
         checkpoint.run_id != state.run_id
         or checkpoint.current_work_item != state.current_work_item
-        or len(checkpoint.failed_attempts) != 1
+        or not checkpoint.failed_attempts
+        or (state.run_kind != "change" and len(checkpoint.failed_attempts) != 1)
     ):
         raise ValueError("最近 Checkpoint 没有唯一失败 child，拒绝猜测 repair 来源")
-    child_dir = resolve_run_dir(workspace, checkpoint.failed_attempts[0])
+    if state.run_kind == "change":
+        child_run = load_current_fix_packet(workspace, run_dir, state).source_child_run
+    else:
+        child_run = checkpoint.failed_attempts[0]
+    child_dir = resolve_run_dir(workspace, child_run)
     child_state = load_child_state(child_dir, repo)
     if (
         child_state.status != "needs_human"

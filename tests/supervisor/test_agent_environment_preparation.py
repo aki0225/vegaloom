@@ -223,6 +223,8 @@ def test_preparation_can_be_observed_and_stopped_without_worker(tmp_path: Path) 
 def test_preparation_progress_uses_cli_stderr_and_respects_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, json_output: bool,
 ) -> None:
+    workspace, run_dir = _approved_run(tmp_path)
+
     def preparation(workspace, run, *, progress_reporter):
         ticker = ExecutionProgressTicker("environment_prepare", progress_reporter)
         ticker.started()
@@ -231,15 +233,15 @@ def test_preparation_progress_uses_cli_stderr_and_respects_json(
 
     def change(driver, **kwargs):
         adapter = SupervisorAgentProviderAdapter(
-            tmp_path, progress_reporter=driver.progress_reporter,
+            workspace, progress_reporter=driver.progress_reporter,
             event_reporter=driver.event_reporter,
         )
-        adapter._run_once("test-run", timeout_seconds=60)
+        adapter._run_once(run_dir.name, timeout_seconds=60)
         return ChangeDriverResult(None, "attention_required", "test.prepared", "等待人工")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("vega.agent_change_cli.resolve_repository_root", lambda path: path)
-    monkeypatch.setattr("vega.agent_provider_adapter.prepare_change_environment", preparation)
+    monkeypatch.setattr("vega.agent_verification_scope_replan.prepare_change_environment", preparation)
     monkeypatch.setattr(AgentChangeDriver, "change", change)
     result = CliRunner().invoke(app, ["change", *(["--json"] if json_output else [])])
     assert result.exit_code == 2

@@ -117,6 +117,7 @@ def write_checkpoint(
     operation_started: bool | None = None,
     external_side_effects: Literal["none", "known", "unknown"] | None = None,
     allow_work_item_advance: bool = False,
+    resume_source_checkpoint: str | None = None,
 ) -> AgentCheckpoint:
     checkpoint_numbers = [
         int(path.stem.removeprefix("checkpoint-"))
@@ -150,6 +151,7 @@ def write_checkpoint(
         failed_attempts=cumulative_failed_attempts,
         pending_actions=pending_actions,
         evidence_refs=evidence_refs or [],
+        resume_source_checkpoint=resume_source_checkpoint,
     )
     save_agent_checkpoint(
         run_dir / "checkpoints" / f"{checkpoint_id}.json",

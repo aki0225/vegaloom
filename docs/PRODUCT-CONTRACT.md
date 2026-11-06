@@ -105,6 +105,21 @@ Execution Plan 记录 Agent 可以调整的实现安排：
 合同不变时，Agent 可以拆分 Work Item、调整顺序、换实现方案或增加测试。Reviewer 发现原假设
 错误时返回 `replan`，由新的计划 revision 承接；Reviewer 本身不批准自己提出的新合同。
 
+日常 `change` 在当前工作项首次派发前，可以补齐固定 pytest 验证明确引用、尚不存在、且合同
+逐字允许的新文件。只识别 `pytest`、`python -m pytest` 或 `python3 -m pytest` 的具体
+`.py` / `.py::node` 参数和受支持选项；变量、shell 组合、glob、未知选项和不兼容引号不作推断。
+已有回归文件不会仅因被验证引用就加入写范围。属于其他工作项、禁止或符号链接路径、未授权风险、
+预算不足及不可信现场均不补齐。需要环境准备时，先完成原批准的准备并核对机器终态。
+该修订绑定原 safe Checkpoint 和归档计划，派发前重新计算；只增加当前项 `likely_files` 并递增
+Plan revision，不修改合同、固定验证或其他工作项。已经执行并停止的旧 run 不适用这条预检。
+
+`change` 也承接 Worker 执行后的确定性修订：Worker 已正常结束，Core 尚未启动，且机器范围证据
+仅表明当前工作项漏列了合同内的文件。控制器可补全该项 `likely_files`，经现有 revision 裁决
+继续执行。原合同、工作项身份、依赖和固定验证保持不变；属于其他工作项的路径、合同越界、
+未授权风险、未知副作用、活动进程、现场漂移或证据缺失均不适用。原失败证据继续保留，
+这两类修订都消耗自动 Replan 预算，且不重置 Worker 尝试预算。进入 Core 后的返修仍须原
+Fix Packet 和可信失败证据，不能拿执行前补齐记录替代。其他方案调整仍需显式 `revise`。
+
 显式 `revise --request-approval` 可将合同内的 Plan-only 修订交人工批准：合同版本和原批准
 保持不变，Plan 版本递增并进入 `awaiting_approval`，经 `approve` 才能执行，不能由 bounded
 策略自动批准。此路径不消耗自动 Replan 次数，但仍检查真实 Diff、风险、证据和 Review
@@ -137,7 +152,8 @@ JSON 绑定 `run_id`、完整 `candidate_sha`，`records` 为1..4条；每条 `c
 来源性质不是工具执行认证；脱敏后的记录只进入编译后的独立审查数据，复用 Review 输入完整性，
 不参与规则发现。坏材料或保存失败不消耗新 operation，不改变旧状态。仅实际绑定且完整的
 `acceptance_missing` 允许在同一 Candidate 追加审查，复用验证重试与 Review 预算、Verification、
-Risk、独立 Reviewer 和 Finish；保留旧审查，不启动 Worker，也不以旧 approve 或材料自述成功。
+Risk、独立 Reviewer 和 Finish；保留旧审查，补验阶段不重跑原 Worker，也不以旧 approve 或材料自述成功。
+补验允许继续后，日常驱动器自动推进原合同已授权的后续工作项或返修，不要求宿主再次调用 `change`。
 未分类或真正人工阻断、活动进程、漂移、授权/策略变化、未知副作用仍拒绝。当前补验入口仅承接
 原始 Worker 后的首次验收阻断；已恢复过的来源不自动连续补验，新拒绝如实交回主会话。
 
@@ -223,6 +239,10 @@ Risk 的 blocked/human-review 保持原值；Reviewer approve 后仍交人工，
 人工完成必要的验证修订并批准后，`change` 复用原验证恢复流程。预算、Workspace、
 原 Worker 证据或范围不满足时拒绝，不能回退为启动新的 Worker；风险待确认不会被重试解除。
 Core 证据不可信属于运行问题，保留业务合同并交还人工，不据此要求业务 Replan。
+原 Finish 不可信、但既有底层证据可重新证明完整且新鲜时，允许同一 Candidate 重算一次；
+必须绑定最后失败 child 和最近派发 operation，并逐项确认底层 iteration、验证、风险与审查
+内容未变。返修历史不阻止重算，旧失败证据与原预算完整保留；不重跑 Worker、验证或 Reviewer，
+也不借重算采用新的执行结果。最终项缺失必需的集成审查时仍交人工，不能仅靠重算宣告成功。
 
 Windows 新建 Worktree 使用短目录名，完整 Run ID 和任务分支名不变，旧目录不自动移动。
 验证临时路径过长时也会在原受控根内使用短目录名，仍按任务、轮次和命令隔离，
@@ -245,6 +265,8 @@ LLM 只返回结构化结果。代码选择下一动作：
 `needs_human`。Core Work Item Reviewer 明确 `timed_out` 且所有现场、Candidate、Verification、
 Risk、预算和副作用证据都可重新证明时，现有 `VerificationRetry` 最多自动恢复一次；恢复使用
 新的独立 Reviewer Session，复用原 Candidate 和 child，完整重跑 Verification、Risk 和 Reviewer。
+此前同一工作项的失败和返修历史继续保留；恢复绑定最后失败 child、当前 Candidate 和最新
+原始 Worker operation，不以历史条目数判断资格，也不能重放已经发生新恢复操作的旧来源。
 第二次超时、`error`、`stopped`、终止未确认或最终集成审查不会自动恢复。普通测试断言失败仍可按
 批准范围进入 Repair；基础设施或执行中断不会伪装成“修改范围不足”的 Replan。
 
@@ -310,6 +332,12 @@ Claude Code V1 不伪造压缩计数；每次 Turn 仍重新发送当前 Task Br
 
 本机恢复优先复用 Provider Thread。Thread 不可用时，Vega 从当前 Git、Agent State 和最近
 Checkpoint 重新建立会话。
+
+在无活动 Writer 的安全 ready 边界执行 `pause` 或 `stop` 时，新 Checkpoint 绑定被暂停的
+原可执行 Checkpoint；`resume` 逐级核对连续版本、事件、工作项、指纹和失败历史，恢复原
+`next` 或 `repair`，不重新批准、不重置尝试预算。执行前范围补齐仍从原修订来源重算，
+返修仍使用原 Fix Packet 和 Core 失败证据。来源缺失、现场变化或副作用不明时拒绝恢复；
+旧 run 未保存这条来源链时，不以默认值推断它已经支持补齐或返修恢复。
 
 换机器前运行 Handoff，人工把 WIP 和 Task Card 提交到任务分支并 push。新机器只需要拉取该
 分支；Task Card 保存目标、批准边界、当前 Work Item、Candidate 与下一步，不携带旧聊天、

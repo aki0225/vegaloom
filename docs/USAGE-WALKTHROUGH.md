@@ -64,6 +64,11 @@ Reviewer 和 Finish。省略文本时，它继续当前仓库唯一未完成的 
 并列出实际存在的记录/日志路径（相对该 Run 目录）。日志位置不代表内容已验证；请先查记录
 核对环境，再由人工决定后续。准备失败不启动 Worker、不自动重试，也不保证再次 `change` 可重跑。
 
+执行中，当前工作项漏列合同内文件时，`change` 可依据机器范围证据自动补全文件清单并继续，
+同时保留失败历史、原合同和尝试预算。涉及其他工作项、授权扩张或证据不可信时仍停止。
+明确的 `acceptance_missing` 可用 `change --run <run-id> --acceptance-file acceptance/checks.json`
+补交验收材料；补验阶段只重跑原 Candidate 的门禁，通过后自动推进已授权的后续工作。
+
 在 Codex 主会话中调用 `$vega-agent`，或从 Codex、Claude Code、普通终端直接使用 CLI。
 只要根因、范围或验收仍有一项不明确，就先建立只读 Planning ChangeRun：
 

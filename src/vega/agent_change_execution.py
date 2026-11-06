@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .agent_cli_interaction import InteractionPumpUpdate, ProviderInteractionPump, TerminalApprovalPrompt
 from .agent_change_presentation import redact_change_message
+from .agent_change_run import load_change_run_context
 from .agent_provider import AgentProvider
 from .agent_provider_adapter import SupervisorAgentProviderAdapter
 from .agent_recovery import SupervisorAgentRecovery
@@ -21,6 +22,19 @@ from .run_utils import resolve_run_dir
 
 InteractionReporter = Callable[[InteractionPumpUpdate], None]
 EventReporter = Callable[[str], None]
+
+
+def change_phase_step_limit(workspace: Path, current: AgentRun) -> int:
+    """阶段保险上限覆盖逐次派发和恢复，不替代各入口的真实合同预算。"""
+    if current.state.contract_revision is None:
+        return 12
+    context = load_change_run_context(*load_agent_bundle(workspace, current.run_dir.name))
+    assert context is not None
+    envelope = context.contract.authority_envelope
+    # 使用完整批准计划，避免随着工作项完成而缩小当前循环的上限。
+    items = len(context.execution_plan.work_items)
+    attempts = items * (1 + envelope.max_repair_rounds)
+    return 12 + 2 * (attempts + envelope.max_auto_replans) + items * envelope.max_verification_retries
 
 
 @dataclass(frozen=True)
@@ -50,7 +64,7 @@ def run_change_worker(
     )
     return run_provider_operation(
         workspace, current, provider,
-        lambda: adapter.run(current.run_dir.name, timeout_seconds=timeout_seconds),
+        lambda: adapter.run_attempt(current.run_dir.name, timeout_seconds=timeout_seconds),
         interaction_reporter=interaction_reporter, event_reporter=event_reporter,
     )
 

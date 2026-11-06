@@ -1356,3 +1356,413 @@ Candidate 绑定的机器 Gate 状态，并把 Work Item 路径缩小到自身 `
 结果支持准备 `v0.4.0` 候选，但不证明 Claude Code Adapter、生产数据库写入、未知外部副作用
 重放或通用任务成功率。完成事件仍须随同一提交通过完整基线、包安装 Smoke 和 PR CI 后进入
 `main`。
+
+
+## 2026-11-04 REAL-AUTONOMY-01 真实 Worker 闭环预注册
+
+目标是在 Vega 自身的隔离 Git 副本中修复已有 `watch --follow` 子运行切换漏事件问题，
+使用真实 Codex Worker 与独立只读 Reviewer，不使用 Fake Runner，不人为植入缺陷。
+目标源码基线为 `67f778a5585d273805e4fe132d8fa8bd7009c391`；控制器使用本轮尚未提交的
+自主恢复与范围修订开发源码，开发差异和新增模块摘要保存在本地实验记录中。
+
+合同限定 `src/vega/cli.py`、`src/vega/run_progress.py`、`src/vega/progress.py` 和
+`tests/core/test_watch_follow.py`，1 个 Work Item，最多 2 轮 Repair、1 次自动 Replan、
+4 轮 Review。固定验证为 watch/progress 定向 pytest 和四文件 Ruff；每个测试限时 60 秒，
+每个模型回合限时 300 秒，实验外层限时 1800 秒。使用本机已有 GPT-6-Astra 配置，
+Worker 使用 `auto-review` 的受控写入，Reviewer 只读且保持独立会话。
+
+用户已授权自主实验与修复；本次由宿主代理代表该授权批准上述实验合同。批准后不手改候选，
+如需补验、修改合同或人为恢复，单独计为宿主介入；拒绝、超时和失败全部保留。
+验收只按实际 Candidate、固定验证、独立 Reviewer 和 Finish 记录，不把模型自述当成功。
+本条为运行前登记，尚无通过结论；结果以之后追加条目为准。
+
+## 2026-11-04 REAL-AUTONOMY-01 首轮失败与第二轮预注册
+
+首轮父 run 为 `20261104-200603-39b2a7da77e9-agent`，child 为
+`20261104-200605-395593-bug-loop`。真实 Worker 形成 Candidate
+`b9f3de5171a195459478edf466a375693e75d5d3`，修改 `cli.py`、`run_progress.py` 和
+`tests/core/test_watch_follow.py`；固定 pytest 为 8 passed、51 deselected，Ruff 通过。
+独立 Reviewer 在启动准备阶段失败，未执行模型审查；约 92 秒后父 run 停在
+`needs_human / workflow.needs_human`。本轮不计成功，不用宿主或 Herdr 审查替代 Core Reviewer。
+
+现场 Codex CLI 为 `0.163.0`。普通 MCP 枚举返回 8 项，对全部名称生成顶层禁用配置时，
+第二次探针返回 `invalid transport`；与隔离 Reviewer 一样先禁用 plugins、hooks、memories
+后，枚举返回 5 项且复查全部关闭。原因是探针与启动方使用不同特性配置，插件 MCP 被错误地
+投影为顶层配置；官方文档也区分了
+[插件级 MCP 配置](https://developers.openai.com/plugins/build/plugins#configure-installed-server-policy)。
+宿主修复为共享同一隔离特性参数，保留服务器集合一致性、全禁用复查和敏感输出不回显。
+新增插件兼容与负向回归，相关定向检查为 54 passed、62 deselected，Ruff 通过。
+
+第二轮继续使用原基线、合同、固定验证和预算，在新的干净副本中重新执行真实 Worker，
+不复制首轮候选、不更改原 run 状态。唯一控制器差异是上述 MCP 接入修复；没有修改全局
+Codex 配置或降低 Reviewer 权限。跨轮宿主介入为 1 次故障修复及重启；每轮批准后是否
+介入另行记录。第二轮尚未开始，本条不作通过结论。
+
+## 2026-11-04 REAL-AUTONOMY-01 第二轮结果与范围修订压力实验预注册
+
+第二轮父 run `20261104-201035-21c2b767441c-agent`，child
+`20261104-201037-238354-bug-loop`，约 114.6 秒完成，终态
+`completed / ready_to_commit`，Accepted Checkpoint 为
+`f33b015626d58810705f2065a962d478058d8ad1`。真实 Worker 1 Turn、独立 Reviewer 1 Turn，
+Thread 不同，服务端确认 Worker 为 `workspace-write / on-request`，Reviewer 为
+`read-only / never`。固定验证为 6 passed、51 deselected及 Ruff 通过，Reviewer 为
+`approve` 且覆盖三个变更文件，Finish 的完整性和新鲜度均通过。批准后宿主介入 0 次，
+没有 Repair、Replan 或验证重试；目标候选不是宿主手工修改所得。
+
+首轮新增回归另放入未修复基线，得到 3 failed、3 passed，证明能捕获原有漏事件及重复输出；
+这是宿主事后反向检查，不是第二轮固定验证，也不改变首轮失败结论。
+
+第三轮复用相同真实缺陷、干净目标基线、合同、验证和预算，仅让执行计划 `likely_files`
+漏列合同已允许的 `tests/core/test_watch_follow.py`；其余三个源码路径仍列出。该缺口是
+预注册的计划压力条件，没有向目标代码植入缺陷。预期真实 Worker 仍满足合同验收，Vega
+在计划范围检查后自行补全该路径，保持已批准合同和验证不变，并最终独立审查完成。
+若 Worker 拒绝、请求人工、未触发修订或预算耗尽，按真实结果登记，不冒充自动修订成功。
+批准后不手改候选、计划或状态，也不代答模型提问。本条为第三轮运行前登记。
+
+## 2026-11-04 REAL-AUTONOMY-01 范围修订压力实验结果
+
+第三轮父 run `20261104-201331-4d7d7d4696fb-agent`，child
+`20261104-201333-685869-bug-loop`，约 22.1 秒后终态为
+`needs_human / workflow.needs_human`。真实 Worker 1 Turn 后报告任务范围与验收冲突，
+没有修改文件；未创建 Candidate，也未进入 Verification 或 Reviewer。
+机器范围检查通过（空 diff），Observation 为 `external_side_effects=unknown`、
+`plan_contradicted=false`，Supervisor 以 `side_effects.unknown` 停止，自动 Replan 0 次。
+批准后宿主介入 0 次，没有为取得成功结果而改写失败状态或补改计划。
+
+这说明当前自动范围修订只处理已有可信范围失败证据的路径：遵守 Work Item 范围的真实
+Worker 可能先拒绝矛盾任务，控制器因而没有范围违规证据。本实验未证明自动 Replan 能完成
+该场景；不能用之前 Fake Runner 的定向通过代替这条真实结果。
+下一优化方向是让 Worker 在执行前提交结构化计划修订请求，并由控制器根据合同、工作项归属、
+无活动 Writer 和副作用证据裁决，不能仅凭模型文字声称无修改就扩大范围或继续。
+
+本组结果是 3 次真实尝试：1 次普通闭环完成、1 次 Reviewer 接入失败、1 次计划压力场景交还人工。
+两次普通闭环之间有 1 次宿主 MCP 兼容修复；第三轮是独立压力条件，不能把三轮合并成通用
+成功率。第二轮三个文件已按 Candidate 原样整合回开发工作区；MCP 接入修复由宿主实现并
+经 Herdr 只读复核，后续集成检查另记。未提交、推送、合并或修改计划完成状态。
+
+边界：本组未验证多 Work Item 的真实超时恢复、补验继续或自动 Repair；未覆盖 Claude、
+Windows、Linux 和生产仓库。`watch` 仍读取当前 child 的安全快照，轮询间隙内旧 child 的
+最后几条事件可能不可见；此次修复解决快照重组后的漏读和重播，不构成完整审计流。
+
+## 2026-11-04 REAL-AUTONOMY-01 集成验证与证据边界
+
+整合后的本地定向集合最终为 65 passed、110 deselected，覆盖 watch/progress、CLI 帮助、
+MCP 隔离、App Server 和相关执行安全分支；单用例 60 秒、集合 240 秒上限。
+首次集成命令使用相对 `PYTHONPATH=src`，子进程切换目录后启动失败，结果为
+18 failed、47 passed、110 deselected；仅将验证环境改为绝对源码路径后，同一集合全部通过。
+新增 Reviewer 隔离负向用例首次因夹具未创建 run 目录而失败，补齐夹具后通过；上述失败日志保留。
+Ruff、compileall、仓库卫生、计划状态、架构增长和 `git diff --check` 均通过，
+C901 为 31→31，源码模块为 247→249；未运行全量 pytest，也未把本机结果称为跨平台验证。
+
+完成后对第二轮候选补做一次模块来源核验：相同 watch/progress 选择得到
+6 passed、51 deselected，并确认导入的是候选内的 `src/vega/cli.py` 和
+`src/vega/run_progress.py`，不是宿主控制器源码。这是事后核验，不参与原运行完成裁决。
+整合的三个文件逐字节匹配已审 Candidate，原仓库 HEAD 保持预注册基线；所有已登记实验
+执行进程均已退出，`eval/real-world-runs.md` 的原有内容前缀保持完整。
+
+本地证据索引（相对实验目录，不含认证配置或原始模型正文）：
+
+- `.tmp/real-agent-20261104-200408/experiment.json`：首轮身份及产物位置。
+- `.tmp/real-agent-20261104-201025/experiment.json`：通过轮身份及产物位置。
+- `.tmp/real-agent-20261104-201331-replan/experiment.json`：压力轮身份及产物位置。
+- 各 workspace 的 `runs/<run-id>/` 保存状态、计划、合同、Checkpoint 和追加 trace；
+  child 的 `iterations/01/` 保存固定验证、Reviewer verdict 和门禁证据。
+- 本地验证日志另存于工具状态目录 `vega-real-agent/`；不会作为未经审查的原始 Artifact 提交。
+
+## 2026-11-05 REAL-AUTONOMY-02 执行前范围补齐实验预注册
+
+延续 REAL-AUTONOMY-01 第三轮的真实 watch 缺陷与计划压力条件。本轮从
+`67f778a5585d273805e4fe132d8fa8bd7009c391` 新建干净目标副本，逐字复用原合同、
+执行计划与固定验证；计划仍漏列合同精确允许的 `tests/core/test_watch_follow.py`。
+宿主控制器新增首次派发前的确定性补齐：仅处理固定 pytest 明确引用、尚不存在、原合同
+逐字允许的新文件，复用现有修订、预算、批准与来源核验；不是依据旧 Worker 的文字解禁。
+旧第三轮 `needs_human` 现场保持原样。
+
+预期 Plan revision 1→2，仅增补当前工作项的测试路径，自动 Replan 消耗 1 次，Worker
+首次 attempt 仍为 1；随后真实 Codex Worker、固定 pytest/Ruff、独立只读 Reviewer 和
+最终集成审查按原门禁执行。验收包含合同字节不变、修订来源可重算、审批后宿主介入 0 次，
+以及最终可信 Finish。若模型拒绝、验证失败、审查拒绝、超时或证据缺失，按实际结果登记。
+
+实验目录 `.tmp/real-agent-20261105-002955-preflight/`；控制器 Diff 和源码摘要存放本地
+工具状态目录 `vega-verification-scope/`。模型单次上限 300 秒，总运行上限 1800 秒；
+Repair 2、自动 Replan 1、Review 4、验证重试 1，均与上一压力轮相同。用户已授权本地
+真实实验，控制器代表该授权批准；批准后不手改候选、计划或状态，不代答模型提问。
+本条写入时真实运行尚未开始，不作通过结论。
+
+## 2026-11-05 REAL-AUTONOMY-02 结果与本轮验证
+
+父 run `20261105-003216-27bcbf5d3d5c-agent`，child
+`20261105-003218-953478-bug-loop`，约 200.68 秒完成，终态
+`completed / ready_to_commit`。Accepted Checkpoint 为
+`348a229162e8dd847e2bbf3b2385eb60a24fa01d`，修改 `src/vega/cli.py`、
+`src/vega/run_progress.py` 和 `tests/core/test_watch_follow.py` 三个文件。
+本次 Candidate 保存在实验隔离 Worktree；不覆盖开发工作区中上一轮已整合的 watch 修复。
+
+机器证据核验：
+
+- 原批准合同归档与当前合同逐字节一致，SHA-256 为
+  `9162d344c92f468a7b80e9e920f3d23bd0f83731692fb75acd772463a7cb239a`。
+- Plan 仅将 revision 从 1 升至 2，并在 WI-01 的 `likely_files` 增加
+  `tests/core/test_watch_follow.py`；其他字段保持不变。
+- 父 trace 第 3 行记录 `verification.scope_completed` 自动修订，第 4 行才首次派发
+  Worker。预算投影为 Worker attempt 1、自动 Replan 1、Repair 0、验证重试 0；
+  没有重置 attempt、重新批准或修改固定验证。
+- 真实 Worker 1 Turn；固定 pytest 为 6 passed、51 deselected，Ruff 通过。
+  工作项 Reviewer 与最终集成 Reviewer 各 1 Turn，均 approve，覆盖全部三个变更文件。
+- 三个角色使用三个独立 Thread；服务端确认 Worker 为 `workspace-write / on-request`，
+  两个 Reviewer 均为 `read-only / never`。Reviewer 上下文不包含 Worker 完整对话。
+- Core Finish 的 Artifact 完整性为 valid、新鲜度为 fresh，最终集成审查也绑定同一
+  Candidate；Supervisor 采用原可信 Finish 终态，没有新增成功旁路。
+- 批准后宿主介入 0 次。运行期间宿主控制器源码摘要保持不变；原仓库与实验 source repo 的
+  HEAD 均保持预注册基线，实验 source repo 保持干净。未提交或推送开发工作区改动。
+
+运行使用 Codex CLI `0.163.0` 和本机既有默认模型配置，没有在请求中单独固定模型或推理参数。
+上述事实证明上一轮漏项压力场景可以在原合同内首次派发前自动补齐，并完成后续真实闭环；
+这是一次代表性成功，不构成通用成功率。实验中的 watch 回归使用模拟进度快照，不是生产
+长任务的业务监测实验。多工作项、环境准备后自动 Repair、真实超时恢复及更复杂方案调整，
+仍不能由本次单工作项、无 Repair 的运行推出；Windows、Linux 和 Claude 尚未实测。
+
+本轮开发验证与失败记录：最初新增集合为 6 failed / 14 passed，修正副作用判定误计
+`schema_version` 后为 1 failed / 19 passed；再修正第二工作项将累计已提交 diff 当作脏现场后，
+23 项通过。独立 Herdr 复核另外发现来源字段删除、准备阶段替换检查点及旧预检记录阻断
+Core Repair 的边界，已补来源重算、准备顺序和可信 Fix Packet 分支及负向回归。
+既有回归第一次为 2 failed / 51 passed，两项失败来自准备函数收敛后的旧 monkeypatch 位点；
+更新测试接入位置后，最终集成集合 87 passed。审查补充集合另为 7 passed（与前集合重叠
+4 项，不相加作为唯一用例数），包含真实准备命令＋模拟代理＋真实 pytest 失败后自动 Repair，
+以及单引号、Windows 变量语法不作推断。此类模拟代理测试不计真实模型运行。
+
+Ruff、compileall、仓库卫生、计划状态、架构增长与 `git diff --check` 通过；
+C901 为 31→31，源码模块为 247→250。未运行全量 pytest，未修改 DAILY-03 的完成状态。
+事后模块来源核验另得到 6 passed、51 deselected，确认导入候选自身的 `cli.py` 与
+`run_progress.py`；该复核不参与原运行完成裁决，不和固定验证混计。
+
+本地证据入口为 `.tmp/real-agent-20261105-002955-preflight/experiment.json`；父 run 下
+`agent-final-report.json`、`trace.jsonl`、`contracts/`、`execution-plans/`、`revisions/`、
+`provider-sessions.json` 及 child 的 `finish-summary.json`、固定验证产物保存完整机器证据。
+工具状态目录 `vega-verification-scope/` 保存开发失败与通过日志，实验子目录另保存
+`driver.log`、`result.json`、`audit-summary.json`、`budget-summary.json`、
+`controller-source-sha256.json` 和 `candidate-provenance.log`；原始模型正文与本机路径不复制到公开记录。
+
+## 2026-11-05 REAL-AUTONOMY-03 双工作项实验预注册
+
+从 `67f778a5585d273805e4fe132d8fa8bd7009c391` 创建新的干净副本，将同一 watch 缺陷拆为顺序两个工作项：
+WI-01 实现 `ProgressCursor.advance` 与独立游标测试；WI-02 接入 CLI 并补公开回归。
+两个初始工作项分别漏列合同精确允许的新测试文件；预期各自首次派发前补齐，Plan 1→2→3，
+消耗自动 Replan 2 次，Worker Thread 连续执行两个 Turn，每项均经过固定验证和独立 Reviewer，
+最终再通过累计验证与集成审查。合同精确允许四个文件，max_changed_files=4，Repair 2、
+Review 4、验证重试 1，模型单次 300 秒、整体 1800 秒。
+
+实验目录 `.tmp/real-agent-20261105-013300-multi`。授权批准后不手改代码、候选或状态；失败、返修或
+人工阻断按实际记录。本轮真实模型尚未开始，不据模拟代理的多项成功推断本轮结果。
+
+## 2026-11-05 REAL-AUTONOMY-03 双工作项结果
+
+父 run `20261105-013317-b5f4e515a181-agent`，约 268.35 秒后完成，终态为
+`completed / ready_to_commit`，Accepted Checkpoint 为
+`13d38eb8ca16ea42299006266b06cac33c8f878d`。两个工作项分别在首次派发前自动补齐
+测试路径，Plan 1→2→3，自动修订 2 次、Worker 派发 2 次，批准合同逐字节不变。
+
+WI-01 child `20261105-013319-919556-bug-loop` 的固定 pytest 为 15 passed；
+WI-02 child `20261105-013453-376132-bug-loop` 为 21 passed、51 deselected；两项 Ruff
+均通过。同一 Worker Thread 累计执行 2 Turn，两个工作项 Reviewer 与最终集成 Reviewer
+各使用独立只读 Thread，各 1 Turn，均 approve；集成审查绑定最终 Candidate。
+最终四个变更文件均在合同精确范围内，实验 source repo 保持预注册 HEAD 且干净。
+批准后宿主人工介入 0 次，没有 Repair 或超时恢复。记录与脱敏摘要位于实验目录的
+`experiment.json` 及工具状态目录 `vega-autonomy-next/` 对应实验子目录。
+
+这次将连续多工作项、逐项补齐与持久 Worker 的证据从模拟代理扩展到真实模型；不据此
+声称自动返修、中断或跨平台已真实覆盖。实验结束后，Herdr 复核发现范围补齐后的
+pause/resume 丢失修订来源，Core repair 暂停后也被误恢复为 next；两个新增定向测试均
+实际失败。后续恢复修复与故障注入另行登记，不回写本次无中断运行的结果。
+
+## 2026-11-05 REAL-AUTONOMY-04 真实模型返修与暂停恢复故障注入预注册
+
+复用 REAL-AUTONOMY-03 的干净基线、双工作项合同、计划和固定验证，使用真实 Codex Worker
+与独立 Reviewer。实验目录 `.tmp/real-agent-20261105-014630-repair-resume`。
+为确定触发返修，实验脚本仅在第一轮真实 Worker 返回后、Candidate 冻结前，在其
+`ProgressCursor.advance` 首个语句前注入一次显式 RuntimeError，记录修改前后 SHA-256。
+不篡改 RunnerResult、Observation、Verification、Reviewer 或 Finish；由真实固定 pytest
+失败生成 Core 失败证据和 FixPacket。若未找到预注册方法，实验停止并记录，不任意改其他位置。
+
+进入 WI-01 的 ready/repair 后，脚本通过公开 Recovery API 执行一次预设 pause/resume，
+核对恢复仍引用同一 FixPacket，再交回原驱动器。预期第二次真实 Worker 修复代码、完成
+WI-01 并继续 WI-02，通过全部固定验证、独立审查与最终集成审查。合同和预算保持不变。
+所有预设干预均明确记为故障注入，不称为自然出现的模型错误，也不计作无干预普通任务。
+人工不临时修补候选或状态；总上限 1800 秒，单模型 Turn 300 秒，失败现场完整保留。
+
+
+## 2026-11-05 REAL-AUTONOMY-04 故障注入与暂停恢复结果
+
+父 run `20261105-014829-1c83404b2646-agent`，326.71 秒后完成，终态为
+`completed / ready_to_commit`，最终 Candidate 为
+`74e3395dcf23199d5fa312149a4f68525480ef76`。控制器源码摘要在运行前后保持一致，
+批准合同逐字节不变，自动 Replan 2 次、Worker 派发 3 次、Repair 1 次。
+
+预注册的 RuntimeError 注入实际发生，修改后文件摘要与失败 Candidate
+`b4e609f646ecccb23e45c59117b9ac75e9c53bc6` 中 Git blob 一致。首 child
+`20261105-014832-275767-bug-loop` 的真实 pytest 为 8 failed，失败包含该注入异常；
+Ruff 通过。该失败保留为真实门禁结果，未以 Reviewer approve 覆盖。
+
+WI-01 进入 ready/repair 后，脚本执行一次公开 pause/resume，恢复动作仍为 repair，
+FixPacket 与暂停前相同，随后才再次派发 Worker。第二 child
+`20261105-015011-774019-bug-loop` 由真实 Worker 修复后为 8 passed；后续 WI-02 child
+`20261105-015116-434418-bug-loop` 为 15 passed、51 deselected，两项 Ruff 均通过。
+同一 Worker Thread 累计 3 Turn；WI-01 Reviewer 为 2 Turn，WI-02 Reviewer 与最终
+集成 Reviewer 各 1 Turn，均使用独立只读 Thread。最终 Artifact 完整且新鲜，集成审查 approve。
+
+本轮属于真实模型下的预设故障注入恢复：一次脚本改动和一次脚本暂停恢复已明确计入，
+不能称作模型自然犯错或无干预任务。没有运行中临时手改候选、状态或合同；事后审计核对了
+注入位置、失败 Candidate、失败验证、暂停恢复事件顺序、原修复包及后续真实派发。
+这证明该条件下可自动返修并推进后续工作项，不代表任意中断、真实 Reviewer 超时、
+Claude 或跨平台模型运行均已覆盖。
+
+本地完整证据入口为 `.tmp/real-agent-20261105-014630-repair-resume/experiment.json`。
+工具状态目录 `vega-autonomy-next/` 对应实验子目录保存 `driver.log`、`result.json`、
+`fault-injection.json`、`pause-injection.json`、`audit-summary.json`、
+`controller-source-sha256.json` 和控制器差异；公开记录不包含原始模型正文或认证配置。
+
+暂停恢复开发验证先得到 2 failed，修复后定向集合 3 passed、28 deselected；
+恢复相关完整文件集合 78 passed，repair/contract 选择 69 passed、46 deselected，
+独立交付工作区范围与恢复集合 33 passed。集合有重叠，不相加作为唯一用例数。
+Ruff、compileall、仓库卫生、计划状态、架构与 diff 检查均通过；完整职责分片交由 PR CI。
+本实验完成后另发现连续两次 Core 失败的修复包加载与 child 选择误要求仅一条失败历史，
+新增模拟代理加真实 pytest 回归分别在两道校验实际失败；此后续问题不改变本轮一次 Repair 的结论。
+
+
+## 2026-11-05 连续两次 Core 失败的返修回归
+
+新增模拟 Worker、真实 pytest 的回归先在 FixPacket 加载得到 1 failed、18 deselected；
+修复该处后又在 repair child 选择得到相同失败计数。两处都误把累计失败历史限制为单项。
+修复后 ChangeRun 从绑定最后失败及最新 child/operation 的 FixPacket 选择当前子运行，
+累计历史保留；legacy 仍要求唯一失败 child，Core 状态、仓库身份与进程静止检查不变。
+
+两次失败后第三次 Worker 完成，attempt=3、repair=2、replan=1，原合同保持不变。
+安全回归拒绝倒置最后失败、旧整组修复证据重放以及同 child 的 operation 错绑；
+拒绝过程中没有发布新状态。新增安全夹具首次因空测试目录未进入 Git 而失败，
+补齐夹具目录创建后通过，该夹具失败不算产品故障。
+
+独立交付工作区完整范围/恢复文件及既有 ChangeRun、legacy repair 节点为
+41 passed in 167.55s，单用例限时 60 秒、集合限时 300 秒。
+Ruff、compileall、仓库卫生、计划状态、架构门禁通过，C901 31→31、模块 247→251。
+日志为工具状态目录 `vega-delivery/autonomy-followup-validation.log`。
+此回归是模拟代理与真实机器门禁，不新增真实模型运行计数；连续多次失败后的验证专用恢复、
+Reviewer timeout retry 与 Core recheck 的累计历史兼容仍待单独实验，不从本轮结果推断通过。
+
+
+## 2026-11-05 REAL-AUTONOMY-05 返修后真实 Reviewer 超时预注册
+
+从 `67f778a5585d273805e4fe132d8fa8bd7009c391` 新建干净副本，逐字复用
+REAL-AUTONOMY-03 双工作项合同、计划和固定验证。本轮在第一次真实 Worker 返回后，
+按 REAL-AUTONOMY-04 的固定方法注入一次 RuntimeError，先由真实 pytest 失败触发返修。
+第二次 Worker 返回后，WI-01 的下一次真实 Reviewer 调用仅将进程时间上限缩为 8 秒，
+其余调用保留 300 秒；保留原 RunnerResult，由原进程控制器超时、清理及机器证据裁决。
+不修改 Observation、Decision、Finish 或超时状态，不执行 pause/resume。
+
+实验目录 `.tmp/real-agent-20261105-141921-timeout-before/`。期望第一次失败、第二次审查超时形成累计历史后，
+同一 Candidate 自动重试一次独立 Reviewer，保持原合同、预算与失败历史，完成后续工作项。
+运行前控制器仍保留超时恢复要求唯一失败 child 的实现，用于实际检验该阻断。
+若 Reviewer 在 8 秒内完成、未启动真实 Turn、进程终止未确认或任务在其他位置停下，
+如实记为未触发或对应失败，不冒充完成本实验。预设源码及时间上限干预分别记录；
+总上限 1800 秒，不手改失败现场，原记录保留。修复后的新运行另行预注册。
+
+
+## 2026-11-05 REAL-AUTONOMY-05 修复前结果
+
+父 run `20261105-141945-b1fa67649ac8-agent` 在 142.48 秒后停在
+`needs_human / workflow.needs_human`，不计成功。首次真实 Worker 的故障 Candidate 为
+`dbefdb62307cd51256fdb5749f5690f23ad96e86`，固定 pytest 为 9 failed；注入后文件摘要
+与 Git blob 一致，Ruff 通过。第二次真实 Worker 修复后 Candidate 为
+`19e2066bb3b862e0ae4ab769261cb11b9f242d8b`，固定 pytest 为 9 passed，Ruff 通过。
+
+第二次审查调用的真实新 Turn 已被服务接受，原进程控制器在 8 秒上限返回 `timed_out`，
+`termination_unconfirmed=false`，父与子运行均通过进程静止检查。该证明表示真实 Turn
+已启动，不据此声称超时前模型已经生成内容。预设源码故障和缩短审查时间各发生一次；
+Worker 派发 2 次、Repair 1 次、Reviewer 自动重试 0 次，第二个工作项没有开始。
+
+同一工作项 Checkpoint 累计两个失败 child；完整只读资格检查明确拒绝为
+`Reviewer timeout 没有匹配的 blocked Checkpoint`，对应源码中错误的单条历史限制。
+原合同与批准归档字节一致，运行期间控制器源码摘要保持不变；没有改写失败状态。
+本地证据为本轮实验目录的 `experiment.json` 及工具状态目录 `vega-timeout-recovery/`
+对应子目录中的 `result.json`、`timeout-injection.json`、`audit-summary.json`、
+`rejection-cause.log` 和原始机器产物。独立模拟代理回归也得到 1 failed in 13.16s；
+它使用真实固定验证和模拟 Reviewer 超时，不与上述真实调用混计。
+
+
+## 2026-11-05 REAL-AUTONOMY-05 修复后重跑预注册
+
+修复超时恢复的累计历史选择：要求历史非空，选择最后失败 child，并要求最近完整派发
+仍与原始 Worker 的 child/operation 一致；原合同、Candidate、来源证据、预算与静止检查保留。
+定向模拟回归及旧证据重放负向检查为 3 passed in 48.98s，不作为真实模型完成结论。
+
+新实验目录 `.tmp/real-agent-20261105-142451-timeout-after/`，逐字复制修复前的合同、计划及实验脚本，
+从同一干净目标基线重跑。两项预设干预、8 秒审查上限、其余 300 秒回合及总 1800 秒上限不变；
+控制器唯一源码差异为上述来源选择与绑定修复。仍须证明真实首次验证失败、返修验证通过、
+真实新 Reviewer Turn 超时且清理确认，然后在同一 Candidate 自动恢复一次并完成后续项。
+旧 run 保持失败，不从原现场人为继续；结果另行追加。
+
+
+## 2026-11-05 REAL-AUTONOMY-05 修复后真实重跑结果
+
+父 run `20261105-142452-ff3caa7b6815-agent` 在 318.98 秒后完成，终态为
+`completed / ready_to_commit`，最终 Candidate 为
+`925597d1849720fd090ffd0945d5c7e829bbcc6d`。合同、初始计划和实验脚本与修复前逐字一致；
+两个控制器快照之间仅 `agent_reviewer_timeout_retry.py` 变化，运行期间源码保持冻结。
+
+首次 child `20261105-142454-831161-bug-loop` 的固定 pytest 为 8 failed；源码故障
+注入摘要与失败 Candidate 的 Git blob 一致。真实 Worker 返修后的 child
+`20261105-142625-445880-bug-loop` 为 8 passed，随后 Reviewer 新 Turn 确实启动，
+8 秒上限触发 `timed_out`，终止已确认。该 Candidate 为
+`1155d1bdb26b29feccc2dfb55f391a7b78cc3339`，未因超时而重新运行 Worker 或替换候选。
+
+控制器自动发布一次 `reviewer_timeout` 恢复 operation，仍绑定该 child、Candidate 和
+原 Worker operation。原超时 Finish 以 SHA-256 绑定归档，失败 Checkpoint 的两个 child
+完整保留。重试完整运行 Verification、Risk 与新独立 Reviewer，pytest 再次为 8 passed，
+通过后自行进入 WI-02。最后 child `20261105-142741-737690-bug-loop` 为
+15 passed、51 deselected；各次 Ruff 均通过，最终集成审查 approve，Finish 完整且新鲜。
+
+总计 Worker 派发 3 次、Repair 1 次、自动 Replan 2 次、Reviewer 自动重试 1 次。
+Worker 复用同一 Thread 的 3 Turn；WI-01 原 Reviewer 为 2 Turn，重试 Reviewer 为新 Thread
+且 1 Turn，WI-02 与集成 Reviewer 各独立 Thread、各 1 Turn，Reviewer 均只读且无需批准。
+已批准合同与归档逐字节一致，源仓库保持原 HEAD 且干净，相关运行均已确认进程静止。
+
+本轮包含预设源码故障与缩短 Reviewer 时间上限两项脚本干预，不算普通无干预任务，也不把
+预设超时说成自然服务故障。修复前后的测试数量不同，来自两轮模型独立生成的候选；
+固定验证命令未更换。本次证明返修之后仍可在原预算内自动恢复一次真实审查超时，
+不外推为重复超时无限恢复、最终集成审查超时恢复或任意 Core 重算与补验组合。
+
+证据入口为 `.tmp/real-agent-20261105-142451-timeout-after/experiment.json`；
+同目录 `audit_experiment.py` 强断言上述机器关系，日志与 `audit-summary.json` 保存在
+工具状态目录 `vega-timeout-recovery/` 对应子目录。原模型正文不进入公开记录。
+开发验证由首次 1 failed 到定向 3 passed；完整受影响超时恢复与安全文件为
+40 passed in 197.34s。独立交付目录的 Ruff、compileall、仓库卫生、计划状态、架构门禁
+和 diff 检查通过，C901 31→31、模块 247→251。未运行本机全量 pytest，跨平台交给本次 PR CI。
+
+
+## 2026-11-05 CORE-RECHECK-01 返修后核心重算回归
+
+本轮为模拟代理集成回归，执行真实固定验证，并人为将通过后的 Finish 新鲜度标记设为 false；
+不修改底层验证、风险或审查 Artifact，不计作真实模型实验或自然证据故障。
+首次单项回归实际得到 1 failed in 12.95s，累计两个失败 child 时被
+`核心证据重算缺少同现场的失败 Checkpoint` 拒绝。修复移除错误的单条历史要求，
+改为绑定最后失败 child 和最近完整派发的精确 child/operation；原证据内容、Candidate、
+工作区、静止、合同与集成审查门禁保持有效。
+
+随后将中间项恢复与最终项拒绝分开验证：预先批准两个工作项，WI-01 首次固定验证失败，
+返修后验证和模拟审查通过、Finish 标记不新鲜。重算使 WI-01 完成并进入待执行 WI-02，
+没有新增 Worker、Reviewer、验证或 iteration；按 WI-01 身份比较的完整预算快照不变，
+原失败 Finish、Checkpoint、Observation 和底层证据逐字保留，旧 Finish 按摘要归档。
+单工作项返修后的最终项没有集成审查时，明确拒绝为
+`最终集成审查尚未形成受信证据`，拒绝前后父子运行产物不变。两节点为 2 passed in 34.79s。
+
+安全回归覆盖失败历史倒序、旧整组来源重放、operation 错绑以及同 child 新恢复操作后
+重放旧来源，拒绝时不写产物，定向节点为 1 passed in 15.36s。
+独立交付目录运行完整 Core recheck 与相关 Security 文件：29 passed in 161.75s；
+各用例限时 60 秒，集合限时 300 秒。Ruff、compileall、计划与架构门禁通过，
+C901 31→31、模块 247→251。Herdr 完成独立只读源码复核，未发现本批阻断问题；
+该复核不替代测试。日志为工具状态目录 `vega-timeout-recovery/core-recheck-*.log`。
+
+普通验证专用恢复仍要求原受信 Finish、审查快照与工作区连续性，尚无累计失败后该入口的
+正向真实证据，本批未放宽。最终集成审查缺失、损坏或新证据替换也不会通过核心重算。
+上一批真实 Reviewer 超时修复的远端提交 `6c593e38a3090e6f445e1bef4499c49c9dd3c235`
+已通过 CI #508，包含 Core、Core Heavy、Supervisor、Security、实验历史、Windows、
+POSIX、Python 3.11 兼容性及 wheel/sdist 安装；本批跨平台结果以新提交 CI 为准。
