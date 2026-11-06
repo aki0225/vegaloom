@@ -115,7 +115,7 @@ def _run_codex_operation(
             if completed is not None:
                 result, error = completed
                 if boundary is not None:
-                    return _boundary(workspace, current, boundary)
+                    return _boundary(workspace, current, boundary, operation_completed=True)
                 if error is not None:
                     raise error
                 assert result is not None
@@ -226,7 +226,17 @@ def _boundary(
     update: InteractionPumpUpdate,
     *,
     stop_unconfirmed: bool = False,
+    operation_completed: bool = False,
 ) -> ProviderOperationBoundary:
+    # 发布者已退出操作才补关原请求；清理完成不代表进程停止已确认。
+    if operation_completed and update.interaction_id is not None:
+        try:
+            close_pending_interactions(current.run_dir, interaction_id=update.interaction_id)
+        except (OSError, ValueError) as exc:
+            update = replace(update, message=(
+                f"{update.message or 'Provider 交互需要人工处理'} "
+                f"待响应请求关闭未确认：{redact_change_message(str(exc))}"
+            ))
     run_dir, state, plan, _ = load_agent_bundle(
         workspace,
         current.run_dir.name,
