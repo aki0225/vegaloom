@@ -53,7 +53,6 @@ from .loop_prompts import (
 from .loop_project_policy import (
     apply_runner_defaults,
     load_stable_start_policy,
-    project_policy_changed,
     project_policy_snapshot_text,
     write_project_policy_change_report,
     write_project_policy_snapshot,
@@ -577,13 +576,14 @@ class LoopAutomationRuntime:
         has_test_log: bool,
         has_note: bool,
     ) -> Path | None:
-        if project_policy_changed(repo, state.project_policy_snapshot):
+        current_policy = project_policy_snapshot(repo)
+        if current_policy != state.project_policy_snapshot:
             iteration_number = next_iteration_number(run_dir, state)
             iteration_dir = _iteration_dir(run_dir, iteration_number)
             write_project_policy_change_report(
                 iteration_dir,
                 state.project_policy_snapshot,
-                project_policy_snapshot(repo),
+                current_policy,
             )
             state.current_iteration = iteration_number
             state.iterations.append(
@@ -959,7 +959,7 @@ class LoopAutomationRuntime:
                 worker_status="success",
             )
             current_policy = project_policy_snapshot(repo_path)
-            if project_policy_changed(repo_path, state.project_policy_snapshot):
+            if current_policy != state.project_policy_snapshot:
                 write_project_policy_change_report(
                     iteration_dir,
                     state.project_policy_snapshot,
@@ -1344,7 +1344,7 @@ class LoopAutomationRuntime:
         ):
             return True
         current_policy = project_policy_snapshot(repo_path)
-        if not project_policy_changed(repo_path, state.project_policy_snapshot):
+        if current_policy == state.project_policy_snapshot:
             return False
         _copy_verification_summary_if_available(
             context.verification_status,

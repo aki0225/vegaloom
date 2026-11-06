@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -16,7 +17,7 @@ from vega.finish_runtime import FinishRuntime
 from vega.gate_runtime import GateRuntime
 from vega.loop_runtime import LoopAutomationRuntime, run_loop_eval
 from vega.models import BriefInput, LoopIterationState
-from vega.project_config import ScopeConfig
+from vega.project_config import ScopeConfig, project_policy_snapshot
 from vega.progress import RunProgressLog
 from vega.reflect_runtime import ReflectRuntime
 from vega.review_runtime import ReviewRuntime
@@ -1304,6 +1305,91 @@ def test_scope_gate_rechecks_changes_introduced_by_verification(
     assert not (run_dir / "iterations" / "01" / "review-verdict.json").exists()
 
 
+@pytest.mark.parametrize("boundary", ["continue", "worker", "verification"])
+def test_project_policy_change_decision_and_report_use_same_observation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    boundary: str,
+) -> None:
+    config = "\n".join(
+        [
+            "version: 1",
+            "verification:",
+            "  commands:",
+            "    - python mutate_policy.py",
+            "  max_commands: 1",
+            "scope:",
+            "  allowed_paths:",
+            "    - README.md",
+        ]
+    ) + "\n"
+    changed_policy = b"version: 1\n"
+    workspace, repo = _init_repo(
+        tmp_path,
+        config=config,
+        files={
+            "mutate_policy.py": (
+                "from pathlib import Path\n"
+                f"Path('.vega.yaml').write_bytes({changed_policy!r})\n"
+            ),
+        },
+    )
+    policy_path = repo / ".vega.yaml"
+    original_policy = policy_path.read_bytes()
+    initial_snapshot = project_policy_snapshot(repo)
+
+    def snapshot_then_restore_policy(repo_path: Path) -> dict[str, str | None]:
+        snapshot = project_policy_snapshot(repo_path)
+        if snapshot != initial_snapshot:
+            # 模拟外部写入者在采样后恢复策略；裁决和报告仍须保留已观测的变化。
+            policy_path.write_bytes(original_policy)
+        return snapshot
+
+    monkeypatch.setattr("vega.loop_runtime.project_policy_snapshot", snapshot_then_restore_policy)
+    monkeypatch.setattr(
+        "vega.loop_project_policy.project_policy_snapshot", snapshot_then_restore_policy
+    )
+    worker = CountingWorker("worker change")
+    if boundary == "worker":
+        original_worker_run = worker.run
+
+        def worker_then_mutate_policy(*args: object, **kwargs: object) -> RunnerResult:
+            result = original_worker_run(*args, **kwargs)
+            policy_path.write_bytes(changed_policy)
+            return result
+
+        monkeypatch.setattr(worker, "run", worker_then_mutate_policy)
+    reviewer = CountingReviewer()
+    runtime = LoopAutomationRuntime(
+        workspace,
+        worker_runner=worker,
+        reviewer_runner=reviewer,
+    )
+    if boundary == "continue":
+        run_dir = runtime.start(_brief(repo), "assist", verify=False)
+        policy_path.write_bytes(changed_policy)
+        runtime.continue_assist(run_dir.name, repo, verify=False)
+    else:
+        run_dir = runtime.start(
+            _brief(repo), "auto", max_iterations=1, verify=boundary == "verification"
+        )
+
+    state = _read_json(run_dir / "state.json")
+    iteration_dir = run_dir / "iterations" / "01"
+    assert policy_path.read_bytes() == original_policy
+    assert state["status"] == "needs_human"
+    assert state["current_step"] == "project_policy_changed"
+    assert state["project_policy_snapshot"] == initial_snapshot
+    assert state["iterations"][0]["verification_status"] == (
+        "passed" if boundary == "verification" else "skipped"
+    )
+    assert worker.calls == (0 if boundary == "continue" else 1)
+    assert reviewer.calls == 0
+    assert not (iteration_dir / "reflect-run.txt").exists()
+    report = (iteration_dir / "project-policy-change-report.md").read_text(encoding="utf-8")
+    assert hashlib.sha256(changed_policy).hexdigest() in report
+
+
 def test_verification_project_policy_mutation_stops_before_reflect_and_reviewer(
     tmp_path: Path,
 ) -> None:
@@ -1604,7 +1690,8 @@ def test_auto_scope_glob_uses_host_semantics_not_git_core_ignorecase(
     ).start(_brief(repo), "auto", max_iterations=1, verify=False)
 
     result = _read_json(run_dir / "iterations" / "01" / "scope-gate-result.json")
-    if os.path.normcase("A") == os.path.normcase("a"):
+    # macOS 的 normcase 不折叠大小写；以本夹具所在文件系统的实际别名语义为准。
+    if (repo / "docs" / "leak.md").exists():
         state = _read_json(run_dir / "state.json")
         assert state["status"] == "needs_human"
         assert state["current_step"] == "scope_gate_failed"
