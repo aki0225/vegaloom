@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from typer.testing import CliRunner
 
 from vega import git_read, project_config, project_config_preflight
+from vega.cli_entrypoint import app
 from vega.gate_runtime import GATE_ARTIFACTS, GateRuntime
 from vega.project_config import check_project_config, render_project_config_check
-from vega.project_profile import ProjectProfileRuntime
 from vega.reflect_runtime import ReflectRuntime
 
 
@@ -302,6 +303,18 @@ def test_config_check_redacts_sensitive_command_and_evidence(tmp_path: Path) -> 
     assert "[REDACTED]" in rendered
     assert "[REDACTED]" in dumped
 
+    for options in ([], ["--json"]):
+        cli_result = CliRunner().invoke(
+            app,
+            ["config", "check", "--repo", str(repo), *options],
+        )
+        assert cli_result.exit_code == 1, cli_result.output
+        assert "multiline_verification_command" in cli_result.output
+        assert fake_secret not in cli_result.output
+        assert "[REDACTED]" in cli_result.output
+        if options:
+            assert json.loads(cli_result.output)["status"] == "failed"
+
 
 def test_config_check_warns_when_project_config_is_not_tracked(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
@@ -558,58 +571,6 @@ def test_config_check_rejects_unsafe_scope_patterns(tmp_path: Path, pattern: str
     assert result.status == "failed"
     assert [issue.code for issue in result.issues] == ["invalid_project_config"]
     assert "allowed_paths" in result.issues[0].evidence
-
-
-def test_project_profile_invalid_config_writes_failed_terminal_run(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    fake_secret = "sk-profile-fake-secret-123456"
-    repo.joinpath(".vega.yaml").write_text(
-        "\n".join(
-            [
-                "version: 1",
-                "verification:",
-                "  commands:",
-                "    - |",
-                f"      python -c \"print('{fake_secret}')\"",
-                "      python -m pytest",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    run_dir = ProjectProfileRuntime(tmp_path).run(repo)
-
-    state = json.loads(run_dir.joinpath("state.json").read_text(encoding="utf-8"))
-    trace_events = [
-        json.loads(line)
-        for line in run_dir.joinpath("trace.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    combined_artifacts = "\n".join(
-        run_dir.joinpath(name).read_text(encoding="utf-8")
-        for name in [
-            "state.json",
-            "trace.jsonl",
-            "project-profile.json",
-            "project-profile.md",
-            "eval.md",
-        ]
-    )
-
-    assert state["status"] == "failed"
-    assert state["current_step"] == "project_config_invalid_failed"
-    assert trace_events[-1]["event"] == "run_finished"
-    assert trace_events[-1]["status"] == "failed"
-    assert "multiline_verification_command" in run_dir.joinpath("eval.md").read_text(
-        encoding="utf-8"
-    )
-    assert "Vega Config Check" in run_dir.joinpath("project-profile.md").read_text(
-        encoding="utf-8"
-    )
-    assert fake_secret not in combined_artifacts
-    assert "[REDACTED]" in combined_artifacts
 
 
 def test_gate_invalid_config_writes_redacted_failed_terminal_run(tmp_path: Path) -> None:

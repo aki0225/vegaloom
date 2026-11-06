@@ -3,26 +3,17 @@ from __future__ import annotations
 import json
 import subprocess
 import tomllib
-from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from .extensions import search_memory
 from .git_read import coerce_git_output_bytes, run_git_capture
-from .models import ProfileState, ProjectProfile
-from .project_config import (
-    ProjectConfigCheckResult,
-    check_project_config,
-    load_project_config,
-    render_project_config_check,
-)
+from .models import ProjectProfile
+from .project_config import load_project_config
 from .project_knowledge import list_agents_instruction_paths
-from .redaction import filter_sensitive_memory_entries, redact_text, redact_value
+from .redaction import filter_sensitive_memory_entries, redact_text
 from .repository_identity import ResolvedGitRevision, repository_scope, resolve_git_revision
-from .run_utils import create_run_dir
-from .trace import TraceWriter
 
-PROFILE_ARTIFACTS = ["state.json", "trace.jsonl", "project-profile.json", "project-profile.md", "eval.md"]
 CONFIG_CANDIDATES = [
     "pyproject.toml",
     "requirements.txt",
@@ -66,61 +57,6 @@ NODE_LINT_COMMANDS: dict[NodePackageManager, str] = {
     "pnpm": "pnpm run lint",
     "yarn": "yarn lint",
 }
-
-
-class ProjectProfileRuntime:
-    def __init__(self, workspace: Path) -> None:
-        self.workspace = workspace
-
-    def run(self, repo_path: Path) -> Path:
-        base_run_id = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-project-profile"
-        run_id, run_dir = create_run_dir(self.workspace, base_run_id)
-        trace = TraceWriter(run_dir / "trace.jsonl")
-        state = ProfileState(run_id=run_id, repo_path=str(repo_path.resolve()), status="running")
-        state.current_step = "detect"
-        state.save(run_dir / "state.json")
-        trace.write("profile_started", repo_path=str(repo_path.resolve()))
-
-        config_check = check_project_config(repo_path)
-        if config_check.has_errors:
-            return _finish_profile_config_failure(run_dir, trace, state, config_check)
-
-        try:
-            profile = build_project_profile(self.workspace, repo_path)
-        except Exception as exc:  # noqa: BLE001 - profile run must close with failed state/artifacts
-            return _finish_profile_failure(
-                run_dir,
-                trace,
-                state,
-                code="profile_build_failed",
-                message="项目画像构建失败，已保留失败诊断供人工处理。",
-                diagnostic=str(exc),
-            )
-
-        run_dir.joinpath("project-profile.json").write_text(
-            json.dumps(
-                redact_value(profile.model_dump(mode="json")),
-                ensure_ascii=False,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        run_dir.joinpath("project-profile.md").write_text(render_project_profile(profile), encoding="utf-8")
-        trace.write("profile_written", tech_stack=profile.tech_stack, test_commands=profile.test_commands)
-
-        state.current_step = "eval"
-        run_dir.joinpath("eval.md").write_text("# Eval\n\n(pending)\n", encoding="utf-8")
-        eval_results = _run_profile_eval(run_dir, profile)
-        run_dir.joinpath("eval.md").write_text(_render_eval(eval_results), encoding="utf-8")
-        state.eval_results = eval_results
-        state.artifacts = PROFILE_ARTIFACTS
-        state.status = "failed" if any(item.startswith("FAIL:") for item in eval_results) else "success"
-        state.current_step = "done"
-        state.save(run_dir / "state.json")
-        trace.write("eval_written", file="eval.md", results=eval_results)
-        trace.write("run_finished", status=state.status)
-        return run_dir
 
 
 def build_project_profile(
@@ -194,55 +130,6 @@ def build_project_profile(
         agents_files=agents_files,
         memory_hit_count=len(memory_hits),
     )
-
-
-def render_project_profile(profile: ProjectProfile) -> str:
-    lines = [
-        "# Project Profile",
-        "",
-        f"- 项目：`{profile.repo_name}`",
-        "",
-        "## 技术栈",
-        "",
-        *_list_or_none(profile.tech_stack),
-        "",
-        "## 包管理器 / 构建工具",
-        "",
-        *_list_or_none(profile.package_managers),
-        "",
-        "## 推荐测试命令",
-        "",
-        *_list_or_none(profile.test_commands),
-        "",
-        "## 推荐静态检查命令",
-        "",
-        *_list_or_none(profile.lint_commands),
-        "",
-        "## 入口文件",
-        "",
-        *_list_or_none(profile.entrypoints),
-        "",
-        "## CLI / Script 入口",
-        "",
-        *_list_or_none(profile.script_entrypoints),
-        "",
-        "## 关键目录",
-        "",
-        *_list_or_none(profile.key_directories),
-        "",
-        "## 配置文件",
-        "",
-        *_list_or_none(profile.config_files),
-        "",
-        "## AGENTS.md",
-        "",
-        *_list_or_none(profile.agents_files),
-        "",
-        "## Memory",
-        "",
-        f"- 已接受 memory 命中数：{profile.memory_hit_count}",
-    ]
-    return redact_text("\n".join(lines).rstrip() + "\n")
 
 
 def _detect_tech_stack(
@@ -544,106 +431,6 @@ def _tracked_files(repo: Path, revision: str | None) -> set[str]:
         for item in coerce_git_output_bytes(result.stdout).split(b"\0")
         if item
     }
-
-
-def _run_profile_eval(run_dir: Path, profile: ProjectProfile) -> list[str]:
-    results = [
-        f"{'PASS' if (run_dir / artifact).exists() else 'FAIL'}: artifact 存在：{artifact}"
-        for artifact in PROFILE_ARTIFACTS
-    ]
-    results.append("PASS: 已识别技术栈" if profile.tech_stack else "FAIL: 未识别技术栈")
-    results.append("PASS: 已识别验证命令" if profile.test_commands else "FAIL: 未识别验证命令")
-    return results
-
-
-def _render_eval(results: list[str]) -> str:
-    return redact_text("# Eval\n\n" + "\n".join(f"- {item}" for item in results) + "\n")
-
-
-def _finish_profile_config_failure(
-    run_dir: Path,
-    trace: TraceWriter,
-    state: ProfileState,
-    config_check: ProjectConfigCheckResult,
-) -> Path:
-    return _finish_profile_failure(
-        run_dir,
-        trace,
-        state,
-        code="project_config_invalid",
-        message="项目配置预检失败，Project Profile 未继续读取该配置。",
-        diagnostic=render_project_config_check(config_check),
-        config_check=config_check,
-    )
-
-
-def _finish_profile_failure(
-    run_dir: Path,
-    trace: TraceWriter,
-    state: ProfileState,
-    *,
-    code: str,
-    message: str,
-    diagnostic: str,
-    config_check: ProjectConfigCheckResult | None = None,
-) -> Path:
-    safe_message = redact_text(message)
-    safe_diagnostic = redact_text(diagnostic)
-    payload: dict[str, object] = {
-        "status": "failed",
-        "code": redact_text(code),
-        "message": safe_message,
-        "diagnostic": safe_diagnostic,
-    }
-    if config_check is not None:
-        payload["config_check"] = config_check.model_dump(mode="json")
-
-    run_dir.joinpath("project-profile.json").write_text(
-        json.dumps(redact_value(payload), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    run_dir.joinpath("project-profile.md").write_text(
-        redact_text(
-            "\n".join(
-                [
-                    "# Project Profile",
-                    "",
-                    safe_message,
-                    "",
-                    "## Diagnostic",
-                    "",
-                    safe_diagnostic,
-                ]
-            ).rstrip()
-            + "\n"
-        ),
-        encoding="utf-8",
-    )
-    eval_results = [f"FAIL: {safe_message}"]
-    if config_check is not None:
-        eval_results.extend(
-            f"FAIL: {issue.code}：{issue.message}"
-            for issue in config_check.issues
-            if issue.severity == "error"
-        )
-    else:
-        eval_results.append(f"FAIL: {code}：{safe_diagnostic[:500]}")
-    run_dir.joinpath("eval.md").write_text(_render_eval(eval_results), encoding="utf-8")
-    state.eval_results = eval_results
-    state.artifacts = PROFILE_ARTIFACTS
-    state.status = "failed"
-    state.current_step = f"{code}_failed"
-    state.save(run_dir / "state.json")
-    trace.write("profile_failed", code=code, diagnostic=safe_diagnostic)
-    trace.write("eval_written", file="eval.md", results=eval_results)
-    trace.write("run_finished", status=state.status)
-    return run_dir
-
-
-def _list_or_none(items: list[str]) -> list[str]:
-    if not items:
-        return ["- 未识别"]
-    return [f"- `{item}`" for item in items]
 
 
 def _dedupe(items: list[str]) -> list[str]:

@@ -273,19 +273,6 @@ class ProjectProfile(BaseModel):
     memory_hit_count: int = 0
 
 
-class ProfileState(BaseModel):
-    run_id: str
-    status: Literal["created", "running", "success", "failed"] = "created"
-    repo_path: str
-    current_step: str = "created"
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
-    artifacts: list[str] = Field(default_factory=list)
-    eval_results: list[str] = Field(default_factory=list)
-
-    def save(self, path: Path) -> None:
-        _save_model(path, self)
-
-
 class ReflectState(BaseModel):
     run_id: str
     status: Literal["created", "running", "success", "failed"] = "created"
@@ -483,18 +470,3 @@ class DecisionEntry(BaseModel):
     actor: str = "human"
     references: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
-
-
-class ChangePlanState(BaseModel):
-    run_id: str
-    status: Literal["created", "running", "success", "failed"] = "created"
-    repo_path: str
-    input_source: str
-    scope_profile: str | None = None
-    current_step: str = "created"
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
-    artifacts: list[str] = Field(default_factory=list)
-    eval_results: list[str] = Field(default_factory=list)
-
-    def save(self, path: Path) -> None:
-        _save_model(path, self)
